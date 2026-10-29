@@ -62,9 +62,9 @@ fn invalid_or_credential_bearing_settings_are_refused_without_echoing_contents()
         );
     }
     cli.base_url = Some("http://localhost/v1".into());
-    cli.session = "../other".into();
+    cli.session = Some("../other".into());
     assert!(Settings::load(&cli).is_err());
-    cli.session = "main".into();
+    cli.session = Some("main".into());
     let config = root.path().join("config.toml");
     std::fs::write(&config, "[provider]\napi_key = 'private-value'\n").unwrap();
     cli.config = Some(config);

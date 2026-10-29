@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Start a fresh conversation on normal launch; retain explicit `--session NAME`
+  behavior and access to existing histories, including `main`.
+- Add `/new` and a filterable `/resume` selector scoped to the project, showing
+  first-message previews, dates and identifiers without invoking the model.
+- Preserve current history on failed or busy switches and deduplicate retried
+  `/new` operations, including after restart.
+- Adopt the framed four-tile RoomKit terminal logo.
+
 - Hide unnecessary detail links on empty or fully visible filesystem results.
 
 - Add a clickable Back to bottom control and Ctrl+End history navigation.

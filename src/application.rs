@@ -2,8 +2,8 @@
 
 use std::num::NonZeroUsize;
 
-use roomkit::model::{ChannelId, RoomId};
-use roomkit::{CreateRoomOptions, GetRoomOptions, RoomKit, RoomKitOptions};
+use roomkit::model::ChannelId;
+use roomkit::{RoomKit, RoomKitOptions};
 use roomkit_cli_roomkit::{ConversationChannel, LocalSession, SessionConfig};
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui::{connection, protocol::ModelInfo};
@@ -29,23 +29,12 @@ impl Application {
             let channel = ConversationChannel::new(ChannelId::new("terminal")?);
             kit.register_channel(agent)?;
             kit.register_channel(channel.clone())?;
-            let room = RoomId::new(&settings.session)?;
-            match kit.get_room(&room, GetRoomOptions::default()).await {
-                Ok(_) => {}
-                Err(roomkit::KitError::Store(roomkit::StoreError::RoomNotFound(_))) => {
-                    kit.create_room(CreateRoomOptions {
-                        room_id: Some(room.clone()),
-                        ..Default::default()
-                    })
+            let room =
+                crate::sessions::create(&kit, channel.id(), &agent_id, settings.session.as_deref())
                     .await?;
-                    for id in [channel.id(), &agent_id] {
-                        kit.attach_channel(&room, id, Default::default()).await?;
-                    }
-                }
-                Err(error) => return Err(error.into()),
-            }
             let mut view = SessionConfig::new(room, agent_id, "local-user");
-            view.title = format!("{} · {}", settings.workspace.display(), settings.session);
+            view.title = crate::sessions::title(&settings.workspace, &view.room);
+            view.commands = crate::sessions::commands();
             view.model = Some(ModelInfo {
                 provider: "openai-compatible".into(),
                 model: settings.model.clone(),
@@ -82,7 +71,12 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
         return Err(error.into());
     }
     let (client, host) = connection(NonZeroUsize::new(256).ok_or("Invalid queue capacity")?);
-    let adapter = tokio::spawn(app.session().run(host));
+    let handler = crate::sessions::Sessions {
+        kit: app.kit.clone(),
+        workspace: settings.workspace.clone(),
+        channel: app.channel.id().clone(),
+    };
+    let adapter = tokio::spawn(app.session().run_with_commands(host, handler));
     let renderers = crate::tool_views::renderers(&settings.workspace);
     let terminal = tokio::task::spawn_blocking(move || {
         roomkit_tui::run_with_options(client, renderers, settings.ui)

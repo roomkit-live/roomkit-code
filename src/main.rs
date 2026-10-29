@@ -3,6 +3,7 @@
 mod agent;
 mod application;
 mod config;
+mod sessions;
 mod storage;
 mod tool_views;
 

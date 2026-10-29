@@ -59,6 +59,8 @@ def scenario(project, state, base_url, resume=False, color="never"):
             "--model", "fixture-model", "--color", color, "--no-animations"]
     if resume:
         args += ["--native-selection", "--no-logo"]
+    else:
+        args += ["--session", "fixture"]
     process = subprocess.Popen(args, stdin=slave, stdout=slave, stderr=slave, env=env)
     captured = bytearray()
 
@@ -74,8 +76,25 @@ def scenario(project, state, base_url, resume=False, color="never"):
         wait_for(b"fixture-model")
         wait_for(b"RoomKit Code")
         wait_for("› Ask about this project…".encode())
+        wait_for(b"Start a conversation")
+        assert b"Fixture inspection complete." not in captured, "Launch unexpectedly resumed the previous session"
         if not resume:
             os.write(master, b"Read fixture.txt\r")
+        else:
+            offset = len(captured)
+            os.write(master, b"/resume\r")
+            wait_for(b"Resume session", offset)
+            # Filtering is local; an unmatched query and Escape never call the model.
+            os.write(master, b"no-such-session")
+            wait_for(b"No matching choices", offset)
+            offset = len(captured)
+            os.write(master, b"\x1b")
+            wait_for(b"Enter send", offset)
+            os.write(master, b"/resume\r")
+            wait_for(b"Resume session", offset)
+            os.write(master, b"fixture")
+            wait_for(b"Filter: fixture", offset)
+            os.write(master, b"\r")
         wait_for(b"Fixture inspection complete.")
         wait_for(b"Read-only")
         # The longer answer can push the compact tool's summary off screen.
@@ -119,6 +138,17 @@ def scenario(project, state, base_url, resume=False, color="never"):
         offset = len(captured)
         os.write(master, b"!")
         wait_for(b"Unsent draft!", offset)
+        if not resume:
+            offset = len(captured)
+            os.write(master, b"\x7f" * len("Unsent draft!") + b"/new\r")
+            wait_for(b"Start a conversation", offset)
+            os.write(master, b"/resume\r")
+            wait_for(b"Resume session", offset)
+            os.write(master, b"fixture")
+            wait_for(b"Filter: fixture", offset)
+            offset = len(captured)
+            os.write(master, b"\r")
+            wait_for(b"Latest answer marker.", offset)
         os.write(master, b"\x04")
         code = process.wait(timeout=10)
         while select.select([master], [], [], 0)[0]:
@@ -164,4 +194,4 @@ finally:
     server.server_close()
     thread.join(timeout=5)
 
-print("PTY checks passed: file tool, Markdown, filled composer, return-to-bottom click/keyboard, preserved draft, color/monochrome, restart and terminal restoration.")
+print("PTY checks passed: tools, Markdown, composer, history navigation, fresh launch, new/resume/filter/cancel, preserved draft, colors, restart and terminal restoration.")

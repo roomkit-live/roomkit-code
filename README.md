@@ -38,6 +38,18 @@ cargo run --locked -- /path/to/project --session investigation --theme light
 cargo run --locked -- /path/to/project --check-config
 ```
 
+Each normal launch starts a new conversation. Use **/resume** to list earlier
+sessions for this project, filter by their first message, date or identifier,
+then press Enter to continue one. Escape cancels without switching. **/new**
+starts another conversation without leaving the application. These commands
+are local navigation and never call the model; wait for an active response to
+finish before switching.
+
+`--session NAME` explicitly opens or creates a named session. Existing sessions,
+including the former default `main`, remain available through `/resume` or
+`--session main`. The picker shows up to 200 recent sessions, with timestamps in
+UTC; an older known identifier can be opened with `/resume ID`.
+
 `--check-config` validates configuration and the workspace without contacting
 the provider or creating state. `--help` lists all options. Terminal controls
 are provided by `roomkit-tui`: F2 expands tool details, clicking a tool's
@@ -80,8 +92,7 @@ History lives in the platform's per-user application data directory, under
 `projects/<workspace-path-hash>/history.sqlite3`. `--state-dir` or
 `ROOMKIT_CODE_STATE_DIR` overrides that location. The canonical workspace path
 determines the project identity: symlink aliases share history, moving a project
-starts a separate history. Choose the same `--session` name (default `main`) to
-resume, or a different name to start a conversation. Each project storage has an
+starts a separate history. Each project storage has an
 exclusive process lock; simultaneous local instances for that project are
 refused. Files are created with private permissions on Linux and macOS.
 
@@ -89,7 +100,7 @@ The engine owns persistence and bounded context restoration. The terminal
 adapter displays up to 500 stored events; the current provider uses the engine's
 bounded message/tool history, not the entire on-screen conversation. Model
 changes on restart apply to future turns. Effort selection, context percentage,
-application slash commands, interactive tool approvals and a remote-engine
+interactive tool approvals and a remote-engine
 transport are not implemented in this version.
 
 ## Boundaries
@@ -104,6 +115,7 @@ transport are not implemented in this version.
 `src/agent.rs` selects capabilities; `src/coding-agent.txt` supplies development
 instructions. `src/application.rs` assembles and closes the engine.
 `src/config.rs` and `src/storage.rs` own application settings and project state.
+`src/sessions.rs` owns new/resume commands and the project session catalogue.
 The TUI receives only its generic client connection, preserving the boundary
 needed for a future remote host.
 

@@ -14,8 +14,8 @@ include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
 roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "526078ccf6908bd3135c3d9dc299cdca465469f3" }
 roomkit-openai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "526078ccf6908bd3135c3d9dc299cdca465469f3" }
 roomkit-sqlite = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "526078ccf6908bd3135c3d9dc299cdca465469f3" }
-roomkit-cli-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "dbda2e02e67c70427201afb85c05fdb8b9718cd6" }
-roomkit-tui = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "dbda2e02e67c70427201afb85c05fdb8b9718cd6" }
+roomkit-cli-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "841f3976cd9cb13ad245b9aca3cb00f8f8860b54" }
+roomkit-tui = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "841f3976cd9cb13ad245b9aca3cb00f8f8860b54" }
 roomkit-tools-fs = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "7106d17e2d62b3a7e1de7055aeda297bd32bfa2e" }
 roomkit-tools-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "7106d17e2d62b3a7e1de7055aeda297bd32bfa2e" }
 clap = { version = "4", features = ["derive", "env"] }

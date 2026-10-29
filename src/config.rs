@@ -23,9 +23,9 @@ pub(crate) struct Cli {
     /// Model identifier served by the configured endpoint.
     #[arg(long, env = "ROOMKIT_MODEL", hide_env_values = true)]
     pub model: Option<String>,
-    /// Conversation name within this project; reuse it to resume.
-    #[arg(long, default_value = "main")]
-    pub session: String,
+    /// Open or create a named conversation; without this, start a new session.
+    #[arg(long)]
+    pub session: Option<String>,
     /// Storage directory; defaults to the user's application data directory.
     #[arg(long, env = "ROOMKIT_CODE_STATE_DIR", hide_env_values = true)]
     pub state_dir: Option<PathBuf>,
@@ -122,7 +122,7 @@ impl Default for Appearance {
 pub(crate) struct Settings {
     pub workspace: PathBuf,
     pub state_dir: PathBuf,
-    pub session: String,
+    pub session: Option<String>,
     pub base_url: String,
     pub model: String,
     pub ui: UiOptions,
@@ -162,12 +162,10 @@ impl Settings {
             .or(file.provider.model)
             .filter(|value| !value.trim().is_empty())
             .ok_or("Set --model, ROOMKIT_MODEL or provider.model in --config")?;
-        if cli.session.is_empty()
-            || cli.session.len() > 64
-            || !cli
-                .session
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
+        if cli
+            .session
+            .as_deref()
+            .is_some_and(|session| !valid_session_name(session))
         {
             return Err(
                 "Session names use 1–64 ASCII letters, digits, hyphens or underscores".into(),
@@ -234,6 +232,14 @@ impl Settings {
             ui,
         })
     }
+}
+
+pub(crate) fn valid_session_name(session: &str) -> bool {
+    !session.is_empty()
+        && session.len() <= 64
+        && session
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
 }
 
 fn default_state_dir() -> Option<PathBuf> {
