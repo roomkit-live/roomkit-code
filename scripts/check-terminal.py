@@ -38,7 +38,7 @@ class Model(BaseHTTPRequestHandler):
             }}]}
             reason = "tool_calls"
         else:
-            delta, reason = {"content": '\n\n## Inspection\n\nFixture **inspection** complete.\n\n- Read `fixture.txt`\n- Read-only\n\n```json\n{"ok": true, "count": 1}\n```\n\n'}, "stop"
+            delta, reason = {"content": '\n\n## Inspection\n\nFixture **inspection** complete.\n\n- Read `fixture.txt`\n- Read-only\n\n```json\n{"ok": true, "count": 1}\n```\n\nLatest answer marker.\n'}, "stop"
         body = ("data: " + json.dumps({"choices": [{"index": 0, "delta": delta}]}) + "\n\n"
                 + "data: " + json.dumps({"choices": [{"index": 0, "delta": {}, "finish_reason": reason}]})
                 + "\n\ndata: [DONE]\n\n").encode()
@@ -73,11 +73,16 @@ def scenario(project, state, base_url, resume=False, color="never"):
     try:
         wait_for(b"fixture-model")
         wait_for(b"RoomKit Code")
+        assert b"Write a message" not in captured, "Empty composer still shows a placeholder"
         if not resume:
             os.write(master, b"Read fixture.txt\r")
         wait_for(b"Fixture inspection complete.")
         wait_for(b"Read-only")
+        # The longer answer can push the compact tool's summary off screen.
+        # Inspect it through actual history navigation, not transient streaming.
+        os.write(master, b"\x1b[5~")
         wait_for('fixture.txt · lines 1–4'.encode())
+        os.write(master, b"\x1b[1;5F")
         assert b'"data":' not in captured, "The file card leaked its raw JSON envelope"
         assert b"**inspection**" not in captured, "Markdown was displayed as raw syntax"
         if not resume:
@@ -87,6 +92,33 @@ def scenario(project, state, base_url, resume=False, color="never"):
             os.write(master, b"\x1bOQ")  # F2: the generic UI expands the real tool.
             wait_for(b"F2 collapse", offset)
             wait_for(b"Expanded fixture line", offset)
+        # A partially entered draft survives returning from history. Ctrl+End
+        # works even when native selection leaves mouse events to the terminal.
+        os.write(master, b"Unsent draft\x1b[1;5F")
+        wait_for(b"Latest answer marker.")
+        offset = len(captured)
+        os.write(master, b"\x1b[5~") # PageUp
+        wait_for(b"Back to bottom", offset)
+        offset = len(captured)
+        os.write(master, b"\x1b[1;5F") # Ctrl+End
+        wait_for(b"Latest answer marker.", offset)
+        if not resume:
+            offset = len(captured)
+            os.write(master, b"\x1b[<64;30;10M") # Wheel up
+            wait_for(b"Back to bottom", offset)
+            marker = captured.rfind(b"Back to bottom")
+            positions = re.findall(rb"\x1b\[(\d+);(\d+)H", captured[:marker])
+            assert positions, "Return-to-bottom control was not positioned"
+            row = positions[-1][0]
+            offset = len(captured)
+            # The badge reaches the right edge of the 120-column frame.
+            os.write(master, b"\x1b[<0;115;" + row + b"M\x1b[<0;115;" + row + b"m")
+            wait_for(b"Latest answer marker.", offset)
+            assert b"\x1b]52;c;" not in captured, "Navigation unexpectedly requested a clipboard write"
+        # Trigger an editor redraw so a lost or submitted draft is detectable.
+        offset = len(captured)
+        os.write(master, b"!")
+        wait_for(b"Unsent draft!", offset)
         os.write(master, b"\x04")
         code = process.wait(timeout=10)
         while select.select([master], [], [], 0)[0]:
@@ -132,4 +164,4 @@ finally:
     server.server_close()
     thread.join(timeout=5)
 
-print("PTY checks passed: formatted file tool, Markdown, color/monochrome, details, restart and terminal restoration.")
+print("PTY checks passed: file tool, Markdown, filled composer, return-to-bottom click/keyboard, preserved draft, color/monochrome, restart and terminal restoration.")

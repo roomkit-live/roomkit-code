@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add a clickable Back to bottom control and Ctrl+End history navigation.
+- Use a filled composer without placeholder text, with configurable minimum
+  editable rows and vertical padding through explicit TOML configuration.
+
 - Present file listings, reads and search matches with compact summaries,
   paths, source line numbers and colored code, with F2/click details.
 - Render model Markdown and configure transcript spacing and preview height

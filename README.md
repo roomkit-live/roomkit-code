@@ -47,6 +47,13 @@ to the terminal and disables application mouse interactions. Ctrl+D detaches;
 this local application then closes its owned engine. Per-run interruption is
 not yet available in the local adapter.
 
+Scrolling above the latest activity reveals a **Back to bottom** control.
+Click it or press **Ctrl+End** to return without losing the current draft.
+The filled input area has no title or placeholder; `ui.input_min_lines` and
+`ui.input_padding` configure its editable height and vertical padding.
+The selected theme supplies its background and text colors; monochrome mode
+uses reverse video to keep the area visible.
+
 ## Tools and persistence
 
 The selected agent has `list`, `glob`, `grep` and `read`, implemented by

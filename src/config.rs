@@ -93,6 +93,8 @@ struct Appearance {
     markdown: bool,
     message_gap: u16,
     tool_preview_lines: usize,
+    input_min_lines: u16,
+    input_padding: u16,
 }
 
 impl Default for Appearance {
@@ -107,6 +109,8 @@ impl Default for Appearance {
             markdown: true,
             message_gap: 1,
             tool_preview_lines: 4,
+            input_min_lines: 2,
+            input_padding: 1,
         }
     }
 }
@@ -206,6 +210,8 @@ impl Settings {
             markdown: appearance.markdown,
             message_gap: appearance.message_gap,
             tool_preview_lines: appearance.tool_preview_lines,
+            input_min_lines: appearance.input_min_lines,
+            input_padding: appearance.input_padding,
             selection: if cli.native_selection || appearance.native_selection {
                 SelectionMode::Native
             } else {
