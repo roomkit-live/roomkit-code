@@ -1,6 +1,7 @@
 //! The product's development instructions and selected tools.
 
 use roomkit::model::ChannelId;
+use roomkit_ai::{ToolDefinition, Toolset};
 use roomkit_openai::{OpenAiAgent, OpenAiConfig};
 use roomkit_tools_fs::{
     DiffTool, EditTool, GlobTool, GrepTool, ListTool, MutationWorkspace, PatchTool, ReadTool,
@@ -16,24 +17,36 @@ use crate::{Result, config::Settings};
 
 const INSTRUCTIONS: &str = include_str!("coding-agent.txt");
 
-pub(crate) async fn create(settings: &Settings, api_key: String) -> Result<OpenAiAgent> {
-    let provider = OpenAiConfig::new(&settings.base_url, api_key, &settings.model)
-        .with_system_prompt(INSTRUCTIONS);
+/// Inventory and registration are derived from the same selected toolsets.
+macro_rules! assemble {
+    ($provider:expr; $($binding:ident = $tool:expr),+ $(,)?) => {{
+        $(let $binding = $tool;)+
+        let tools = [$($binding.tools()),+].concat();
+        let inventory = tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>().join(", ");
+        let prompt = format!("{INSTRUCTIONS}\nCurrent capability inventory (provided by the application for this run):\n{inventory}\n");
+        let agent = OpenAiAgent::new(ChannelId::new("code")?, $provider.with_system_prompt(prompt))?
+            $(.with_tools($binding)?)+
+            .with_tool_timeout(Some(std::time::Duration::from_secs(130)));
+        Ok((agent, tools))
+    }};
+}
+
+pub(crate) async fn create(
+    settings: &Settings,
+    api_key: String,
+) -> Result<(OpenAiAgent, Vec<ToolDefinition>)> {
+    let provider = OpenAiConfig::new(&settings.base_url, api_key, &settings.model);
     let root = &settings.workspace;
     let mutations = MutationWorkspace::new(root).await?;
-    Ok(OpenAiAgent::new(ChannelId::new("code")?, provider)?
-        .with_tools(ListToolset::new(ListTool::new(root).await?))?
-        .with_tools(GlobToolset::new(GlobTool::new(root).await?))?
-        .with_tools(GrepToolset::new(GrepTool::new(root).await?))?
-        .with_tools(ReadToolset::new(ReadTool::new(root).await?))?
-        .with_tools(DiffToolset::new(DiffTool::new(root).await?))?
-        .with_tools(WriteToolset::new(WriteTool::from_workspace(
-            mutations.clone(),
-        )))?
-        .with_tools(EditToolset::new(EditTool::from_workspace(
-            mutations.clone(),
-        )))?
-        .with_tools(PatchToolset::new(PatchTool::from_workspace(mutations)))?
-        .with_tools(ShellToolset::new(ShellTool::new(root).await?))?
-        .with_tool_timeout(Some(std::time::Duration::from_secs(130))))
+    assemble!(provider;
+        list = ListToolset::new(ListTool::new(root).await?),
+        glob = GlobToolset::new(GlobTool::new(root).await?),
+        grep = GrepToolset::new(GrepTool::new(root).await?),
+        read = ReadToolset::new(ReadTool::new(root).await?),
+        diff = DiffToolset::new(DiffTool::new(root).await?),
+        write = WriteToolset::new(WriteTool::from_workspace(mutations.clone())),
+        edit = EditToolset::new(EditTool::from_workspace(mutations.clone())),
+        patch = PatchToolset::new(PatchTool::from_workspace(mutations)),
+        shell = ShellToolset::new(ShellTool::new(root).await?),
+    )
 }

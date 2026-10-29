@@ -72,6 +72,13 @@ uses reverse video to keep the area visible.
 
 ## Tools and persistence
 
+Use **/tools** to browse the capabilities actually registered by the application,
+with filtering and their tool descriptions. Selecting an entry only reports its
+availability; it never invokes the tool or contacts the model. This catalogue
+and the model's current capability inventory are derived from the same selected
+toolsets. Resuming keeps conversation history, but older assistant claims about
+missing tools do not change the currently registered capabilities.
+
 The selected agent has `list`, `glob`, `grep`, `read`, `diff`, `write`, `edit`,
 `patch` and `shell`, implemented by `roomkit-tools-fs` and `roomkit-tools-process`
 and registered through their existing RoomKit adapters. Persistent process and
@@ -144,7 +151,7 @@ and a remote-engine transport are not implemented in this version.
 `src/agent.rs` selects capabilities; `src/coding-agent.txt` supplies development
 instructions. `src/application.rs` assembles and closes the engine.
 `src/config.rs` and `src/storage.rs` own application settings and project state.
-`src/sessions.rs` owns new/resume/mode commands and the project session catalogue.
+`src/sessions.rs` owns new/resume/mode/tools commands and the project session catalogue.
 `src/permissions.rs` owns the tool policy and hooks that await actual approval.
 The TUI receives only its generic client connection, preserving the boundary
 needed for a future remote host.

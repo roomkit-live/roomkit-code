@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Derive the model's current capability inventory and a filterable `/tools`
+  catalogue from the toolsets actually registered by the application.
+- Clarify that resumed assistant claims do not override current capabilities,
+  and require actual tool results before reporting attempts or failures.
+
 - Add write, edit, diff, structured patch and foreground shell tools, reusing the
   existing RoomKit adapters and a shared mutation workspace.
 - Default to Ask for each mutation and shell call, with explicit allow/deny,

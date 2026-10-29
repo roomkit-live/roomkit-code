@@ -1509,6 +1509,7 @@ dependencies = [
  "clap",
  "fs2",
  "roomkit",
+ "roomkit-ai",
  "roomkit-cli-roomkit",
  "roomkit-openai",
  "roomkit-sqlite",

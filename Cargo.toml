@@ -12,6 +12,7 @@ include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
 [dependencies]
 # Keep the engine source identical to the CLI and tools adapters.
 roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "526078ccf6908bd3135c3d9dc299cdca465469f3" }
+roomkit-ai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "526078ccf6908bd3135c3d9dc299cdca465469f3" }
 roomkit-openai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "526078ccf6908bd3135c3d9dc299cdca465469f3" }
 roomkit-sqlite = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "526078ccf6908bd3135c3d9dc299cdca465469f3" }
 roomkit-cli-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "83d6b28aa6137fa1ec21a8dbfab9b5d97c347023" }

@@ -31,18 +31,24 @@ struct Mock {
 
 #[derive(Clone)]
 struct Fixture {
+    answer: String,
     calls: Vec<(&'static str, Value)>,
     requests: Arc<Mutex<Vec<Value>>>,
 }
 
 impl Mock {
     async fn start(calls: Vec<(&'static str, Value)>) -> Self {
+        Self::with_answer(calls, "Project inspection complete.").await
+    }
+
+    async fn with_answer(calls: Vec<(&'static str, Value)>, answer_text: &str) -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
         let router = Router::new()
             .route("/v1/chat/completions", post(answer))
             .with_state(Fixture {
+                answer: answer_text.into(),
                 calls,
                 requests: requests.clone(),
             });
@@ -78,7 +84,7 @@ async fn answer(
             json!({"tool_calls":[{"index":0,"id":format!("call-{index}"),"type":"function","function":{"name":name,"arguments":args.to_string()}}]}),
             "tool_calls",
         ),
-        None => (json!({"content":"Project inspection complete."}), "stop"),
+        None => (json!({"content":fixture.answer}), "stop"),
     };
     let body = format!(
         "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
@@ -106,6 +112,10 @@ fn settings(workspace: &std::path::Path, state: &std::path::Path, base: &str) ->
 }
 
 async fn turn(app: &Application) -> Session {
+    turn_operation(app, "inspect-project").await
+}
+
+async fn turn_operation(app: &Application, operation: &str) -> Session {
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run(host));
     let session = tokio::time::timeout(Duration::from_secs(15), async {
@@ -125,7 +135,7 @@ async fn turn(app: &Application) -> Session {
                         client
                             .try_send(Request {
                                 id: RequestId(1),
-                                operation: "inspect-project".into(),
+                                operation: operation.into(),
                                 conversation: snapshot.conversation.clone(),
                                 command: Command::Submit {
                                     agent: "code".into(),
@@ -194,7 +204,7 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
         })
         .unwrap();
     assert!(!session.can_interrupt);
-    assert_eq!(session.commands.len(), 3);
+    assert_eq!(session.commands.len(), 4);
     app.kit.close().await.unwrap();
     drop(app);
     let app = Application::open(&settings, String::new()).await.unwrap();
@@ -242,6 +252,83 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
                     .as_str()
                     .is_some_and(|text| text.contains("pub fn forty_two()")))
     );
+}
+
+#[tokio::test]
+async fn resumed_history_cannot_replace_the_current_wire_inventory_or_host_catalogue() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let stale = "I only have read-only tools. Shell is unavailable and all attempts failed.";
+    let old = Mock::with_answer(vec![], stale).await;
+    let mut settings = settings(project.path(), state.path(), &old.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    turn(&app).await;
+    app.kit.close().await.unwrap();
+    drop(app);
+
+    let current = Mock::start(vec![]).await;
+    settings.base_url = current.base_url.clone();
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    turn_operation(&app, "check-current-capabilities").await;
+    let wire = current.requests.lock().unwrap()[0].clone();
+    let expected: BTreeSet<_> = app.tools.iter().map(|tool| tool.name.as_str()).collect();
+    assert_eq!(expected.len(), 9);
+    let declared: BTreeSet<_> = wire["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["function"]["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(declared, expected);
+    let messages = wire["messages"].as_array().unwrap();
+    assert_eq!(messages[0]["role"], "system");
+    let prompt = messages[0]["content"].as_str().unwrap();
+    assert!(prompt.contains("Earlier assistant statements"));
+    let inventory = prompt.split("Current capability inventory").nth(1).unwrap();
+    for name in &expected {
+        assert!(inventory.contains(name));
+    }
+    assert!(
+        messages.iter().any(|message| message["role"] == "assistant"
+            && message["content"]
+                .as_str()
+                .is_some_and(|text| text.contains(stale))),
+        "Preserve the user's history while supplying current capabilities separately"
+    );
+
+    let handler = crate::sessions::Sessions {
+        kit: app.kit.clone(),
+        workspace: settings.workspace.clone(),
+        channel: app.channel.id().clone(),
+        policy: app.policy.clone(),
+        tools: app.tools.clone(),
+    };
+    let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+    let task = tokio::spawn(app.session().run_with_commands(host, handler));
+    assert!(matches!(event(&client).await, Event::Snapshot(_)));
+    let Event::Choices { choices, .. } = command_event(&client, "main", "tools", "", 20).await
+    else {
+        panic!("Expected tool catalogue");
+    };
+    assert_eq!(
+        choices
+            .iter()
+            .map(|choice| choice.value.as_str())
+            .collect::<BTreeSet<_>>(),
+        expected
+    );
+    assert!(choices.iter().all(|choice| !choice.description.is_empty()));
+    assert!(
+        matches!(command_event(&client, "main", "tools", "shell", 21).await, Event::Notice { text } if text.contains("no tool executed"))
+    );
+    assert_eq!(
+        current.requests.lock().unwrap().len(),
+        1,
+        "/tools never asks the model or executes a tool"
+    );
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.kit.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -337,6 +424,7 @@ async fn ask_gates_real_changes_and_yolo_never_auto_approves_an_existing_request
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
+        tools: app.tools.clone(),
     };
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run_with_commands(host, handler));
@@ -591,6 +679,7 @@ async fn histories_are_scoped_to_project_and_session_and_storage_has_one_owner()
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
+        tools: app.tools.clone(),
     };
     let request = Request {
         id: RequestId(1),
@@ -647,6 +736,7 @@ async fn command_event(
                 Ok(
                     event @ (Event::Snapshot(_)
                     | Event::Choices { .. }
+                    | Event::Notice { .. }
                     | Event::Reply { error: Some(_), .. }),
                 ) => return event,
                 Ok(_) => {}
@@ -677,6 +767,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
+        tools: app.tools.clone(),
     };
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run_with_commands(host, handler));
@@ -777,6 +868,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
+        tools: app.tools.clone(),
     };
     let request = Request {
         id: RequestId(1),

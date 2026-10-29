@@ -17,6 +17,12 @@ use crate::{Result, config::valid_session_name};
 pub(crate) fn commands() -> Vec<CommandSpec> {
     vec![
         CommandSpec {
+            name: "tools".into(),
+            description: "Inspect tools actually registered by the application".into(),
+            arguments: "[tool]".into(),
+            choices: Vec::new(),
+        },
+        CommandSpec {
             name: "mode".into(),
             description: "Change permissions (also Shift+Tab)".into(),
             arguments: "[ask|yolo]".into(),
@@ -78,6 +84,7 @@ pub(crate) struct Sessions {
     pub workspace: PathBuf,
     pub channel: roomkit::model::ChannelId,
     pub policy: crate::permissions::Policy,
+    pub tools: Vec<roomkit_ai::ToolDefinition>,
 }
 
 impl Sessions {
@@ -176,7 +183,7 @@ impl Sessions {
 
 impl CommandHandler for Sessions {
     fn allow_while_busy(&self, name: &str) -> bool {
-        name == "mode"
+        matches!(name, "mode" | "tools")
     }
 
     async fn handle(
@@ -189,6 +196,41 @@ impl CommandHandler for Sessions {
         };
         let arguments = arguments.trim();
         match name.as_str() {
+            "tools" if arguments.is_empty() => Ok(CommandResult::Events(vec![Event::Choices {
+                conversation: current.room.as_str().into(),
+                command: "tools".into(),
+                title: format!(
+                    "Tools available to {} · {} registered",
+                    current.agent,
+                    self.tools.len()
+                ),
+                choices: self
+                    .tools
+                    .iter()
+                    .map(|tool| Choice {
+                        value: tool.name.clone(),
+                        label: tool.name.clone(),
+                        description: tool.description.clone(),
+                    })
+                    .collect(),
+            }])),
+            "tools" => {
+                let tool = self
+                    .tools
+                    .iter()
+                    .find(|tool| tool.name == arguments)
+                    .ok_or_else(|| {
+                        "Unknown tool; use /tools to inspect registered capabilities".to_string()
+                    })?;
+                let mode = self.policy.state(current.room.as_str()).selected;
+                Ok(CommandResult::Events(vec![Event::Notice {
+                    text: format!(
+                        "{} is registered · mode {mode} · inspection only; no tool executed",
+                        tool.name
+                    ),
+                }]))
+            }
+
             "mode" if arguments.is_empty() => Ok(CommandResult::Events(vec![Event::Choices {
                 conversation: current.room.as_str().into(),
                 command: "mode".into(),

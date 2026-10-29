@@ -15,13 +15,14 @@ pub(crate) struct Application {
     pub channel: ConversationChannel,
     pub view: SessionConfig,
     pub policy: crate::permissions::Policy,
+    pub tools: Vec<roomkit_ai::ToolDefinition>,
     _storage: Storage,
 }
 
 impl Application {
     pub async fn open(settings: &Settings, api_key: String) -> Result<Self> {
         // Validate and assemble the agent before creating durable state.
-        let agent = agent::create(settings, api_key).await?;
+        let (agent, tools) = agent::create(settings, api_key).await?;
         let storage = Storage::open(&settings.state_dir, &settings.workspace)?;
         let store = SqliteStore::open(&storage.database).await?;
         let kit = RoomKit::new(RoomKitOptions::with_store(store));
@@ -63,6 +64,7 @@ impl Application {
                 channel,
                 view,
                 policy,
+                tools,
                 _storage: storage,
             }),
             Err(error) => {
@@ -91,6 +93,7 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
+        tools: app.tools.clone(),
     };
     let adapter = tokio::spawn(app.session().run_with_commands(host, handler));
     let renderers = crate::tool_views::renderers(&settings.workspace);

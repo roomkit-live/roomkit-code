@@ -79,6 +79,15 @@ def scenario(project, state, base_url, resume=False, color="never"):
         wait_for(b"Start a conversation")
         assert b"Fixture inspection complete." not in captured, "Launch unexpectedly resumed the previous session"
         if not resume:
+            offset = len(captured)
+            os.write(master, b"/tools\r")
+            wait_for(b"Tools available to code", offset)
+            wait_for(b"9 registered", offset)
+            os.write(master, b"shell")
+            wait_for(b"Filter: shell", offset)
+            os.write(master, b"\r")
+            wait_for(b"shell is registered", offset)
+            assert not requests, "Tool inspection must not contact the model"
             os.write(master, b"Read fixture.txt\r")
         else:
             offset = len(captured)
