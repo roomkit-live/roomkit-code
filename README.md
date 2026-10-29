@@ -49,8 +49,11 @@ not yet available in the local adapter.
 
 Scrolling above the latest activity reveals a **Back to bottom** control.
 Click it or press **Ctrl+End** to return without losing the current draft.
-The filled input area has no title or placeholder; `ui.input_min_lines` and
-`ui.input_padding` configure its editable height and vertical padding.
+The filled input area starts at three rows, centers the draft vertically and
+grows with newlines and soft wrapping. `ui.input_min_lines` and `ui.input_padding`
+configure its editable height and vertical padding. `ui.input_placeholder` sets
+the hint shown while empty, and `ui.input_prompt` sets its small marker; an empty
+string hides either. Neither is included in messages sent to the model.
 The selected theme supplies its background and text colors; monochrome mode
 uses reverse video to keep the area visible.
 

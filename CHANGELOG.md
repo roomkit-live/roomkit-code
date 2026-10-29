@@ -2,9 +2,11 @@
 
 ## Unreleased
 
+- Hide unnecessary detail links on empty or fully visible filesystem results.
+
 - Add a clickable Back to bottom control and Ctrl+End history navigation.
-- Use a filled composer without placeholder text, with configurable minimum
-  editable rows and vertical padding through explicit TOML configuration.
+- Use a filled three-row composer that grows with the draft, with configurable
+  height, padding, optional placeholder and prompt marker through explicit TOML.
 
 - Present file listings, reads and search matches with compact summaries,
   paths, source line numbers and colored code, with F2/click details.

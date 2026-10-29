@@ -64,6 +64,20 @@ fn output<T: DeserializeOwned>(call: &ToolCall) -> Option<T> {
 }
 
 impl ToolRenderer for Files {
+    fn has_expanded_details(&self, call: &ToolCall) -> bool {
+        match call.name.as_str() {
+            "list" | "glob" => output::<PathPage>(call).is_some_and(|page| page.entries.len() > 2),
+            "read" => output::<ReadPage>(call).is_some_and(|page| page.lines.len() > 2),
+            "grep" => output::<GrepPage>(call).is_some_and(|page| {
+                page.matches.len() > 2
+                    || page.matches.iter().any(|found| {
+                        !found.context_before.is_empty() || !found.context_after.is_empty()
+                    })
+            }),
+            _ => false,
+        }
+    }
+
     fn render(&self, call: &ToolCall) -> Vec<String> {
         self.render_styled(call, false)
             .into_iter()
@@ -300,6 +314,48 @@ mod tests {
     }
 
     #[test]
+    fn empty_or_fully_visible_results_have_no_additional_details() {
+        let files = Files::default();
+        for (name, data) in [
+            (
+                "glob",
+                json!({"path":".","entries":[],"truncated":false,"next_offset":null}),
+            ),
+            (
+                "list",
+                json!({"path":".","entries":[{"name":"a","path":"a","kind":"file"}],"truncated":true,"next_offset":1}),
+            ),
+            (
+                "read",
+                json!({"path":"empty.txt","lines":[],"truncated":false,"next_offset":null,"revision":"fixture"}),
+            ),
+            (
+                "read",
+                json!({"path":"short.txt","lines":[{"number":1,"text":"small"}],"truncated":false,"next_offset":null,"revision":"fixture"}),
+            ),
+            (
+                "grep",
+                json!({"path":".","matches":[],"truncated":false,"next_offset":null,"skipped_files":0}),
+            ),
+        ] {
+            let call = call(name, data);
+            assert!(
+                !files.has_expanded_details(&call),
+                "{name} has nothing more to show"
+            );
+            assert_eq!(
+                files.render_styled(&call, false),
+                files.render_styled(&call, true)
+            );
+        }
+        let found = call(
+            "grep",
+            json!({"path":".","matches":[{"path":"file","line":2,"text":"match","context_before":[{"number":1,"text":"context"}]}],"truncated":false,"next_offset":null,"skipped_files":0}),
+        );
+        assert!(files.has_expanded_details(&found));
+    }
+
+    #[test]
     fn directory_presentations_are_compact_and_expansion_shows_the_full_page() {
         let call = call(
             "list",
@@ -310,6 +366,7 @@ mod tests {
         ],"truncated":true,"next_offset":4}),
         );
         let source = call.text.clone();
+        assert!(Files::default().has_expanded_details(&call));
         let short = Files::default().render_styled(&call, false);
         assert!(plain(&short).contains("3 entries") && plain(&short).contains("▸ src/"));
         assert!(!plain(&short).contains("README.md"));

@@ -73,7 +73,7 @@ def scenario(project, state, base_url, resume=False, color="never"):
     try:
         wait_for(b"fixture-model")
         wait_for(b"RoomKit Code")
-        assert b"Write a message" not in captured, "Empty composer still shows a placeholder"
+        wait_for("› Ask about this project…".encode())
         if not resume:
             os.write(master, b"Read fixture.txt\r")
         wait_for(b"Fixture inspection complete.")

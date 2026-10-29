@@ -95,6 +95,8 @@ struct Appearance {
     tool_preview_lines: usize,
     input_min_lines: u16,
     input_padding: u16,
+    input_placeholder: String,
+    input_prompt: String,
 }
 
 impl Default for Appearance {
@@ -109,8 +111,10 @@ impl Default for Appearance {
             markdown: true,
             message_gap: 1,
             tool_preview_lines: 4,
-            input_min_lines: 2,
+            input_min_lines: 1,
             input_padding: 1,
+            input_placeholder: "Ask about this project…".into(),
+            input_prompt: "›".into(),
         }
     }
 }
@@ -212,6 +216,8 @@ impl Settings {
             tool_preview_lines: appearance.tool_preview_lines,
             input_min_lines: appearance.input_min_lines,
             input_padding: appearance.input_padding,
+            input_placeholder: appearance.input_placeholder,
+            input_prompt: appearance.input_prompt,
             selection: if cli.native_selection || appearance.native_selection {
                 SelectionMode::Native
             } else {
