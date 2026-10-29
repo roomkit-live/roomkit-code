@@ -1,0 +1,18 @@
+# Local plans, agent instructions and credentials.
+/docs/
+/AGENTS.md
+/.agents/
+/.codex/
+/.roomkit-code/
+.env
+.env.*
+*.local.toml
+
+# Builds and conversations.
+/target/
+/dist/
+*.sqlite*
+*.db
+*.db-wal
+*.db-shm
+.DS_Store

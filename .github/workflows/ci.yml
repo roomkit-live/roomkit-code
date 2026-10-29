@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Configure private dependency access
+        env:
+          ROOMKIT_DEPS_READ_CI: ${{ secrets.ROOMKIT_DEPS_READ_CI }}
+        run: bash scripts/ci-dependency-access.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain
+      - run: make check
+      - name: Install minimum supported Rust
+        run: rustup toolchain install 1.92.0 --profile minimal
+      - run: make msrv
+      - name: Remove temporary credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/roomkit-code-dependency-access/credentials"
+
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+        with:
+          credentials: https://x-access-token:${{ secrets.ROOMKIT_DEPS_READ_CI }}@github.com

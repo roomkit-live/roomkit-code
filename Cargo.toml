@@ -1,0 +1,51 @@
+[package]
+name = "roomkit-code"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "A coding assistant assembled from the RoomKit conversation framework"
+license = "MIT"
+repository = "https://github.com/roomkit-live/roomkit-code"
+publish = false
+include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
+
+[dependencies]
+# Keep the engine source identical to the CLI and tools adapters.
+roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "526078ccf6908bd3135c3d9dc299cdca465469f3" }
+roomkit-openai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "526078ccf6908bd3135c3d9dc299cdca465469f3" }
+roomkit-sqlite = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "526078ccf6908bd3135c3d9dc299cdca465469f3" }
+roomkit-cli-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "5d6a57c2cb208a2ec67c3a92ac3b5bfcc8b4add7" }
+roomkit-tui = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "5d6a57c2cb208a2ec67c3a92ac3b5bfcc8b4add7" }
+roomkit-tools-fs = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "7106d17e2d62b3a7e1de7055aeda297bd32bfa2e" }
+roomkit-tools-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "7106d17e2d62b3a7e1de7055aeda297bd32bfa2e" }
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+fs2 = "0.4"
+sha2 = "0.10"
+url = "2"
+
+[dev-dependencies]
+axum = "0.8"
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["net"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+dbg_macro = "warn"
+
+[lints.rustdoc]
+broken_intra_doc_links = "warn"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"

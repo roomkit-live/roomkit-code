@@ -1,0 +1,15 @@
+# Explicitly select with: roomkit-code --config roomkit-code.local.toml
+# Keep personal configuration in an ignored *.local.toml file.
+[provider]
+base_url = "http://localhost:8000/v1"
+model = "your-model"
+# API keys are read only from ROOMKIT_API_KEY, never from this file.
+
+[ui]
+theme = "dark" # dark, light, terminal
+color = "auto" # auto, always, never
+animations = true
+native_selection = false
+name = "RoomKit Code"
+# logo = ["RK", "CODE"]
+# logo = [] # hide the logo
