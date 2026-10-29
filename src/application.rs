@@ -6,7 +6,7 @@ use roomkit::model::{ChannelId, RoomId};
 use roomkit::{CreateRoomOptions, GetRoomOptions, RoomKit, RoomKitOptions};
 use roomkit_cli_roomkit::{ConversationChannel, LocalSession, SessionConfig};
 use roomkit_sqlite::SqliteStore;
-use roomkit_tui::{connection, protocol::ModelInfo, render::Renderers};
+use roomkit_tui::{connection, protocol::ModelInfo};
 
 use crate::{Result, agent, config::Settings, storage::Storage};
 
@@ -83,8 +83,9 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
     }
     let (client, host) = connection(NonZeroUsize::new(256).ok_or("Invalid queue capacity")?);
     let adapter = tokio::spawn(app.session().run(host));
+    let renderers = crate::tool_views::renderers(&settings.workspace);
     let terminal = tokio::task::spawn_blocking(move || {
-        roomkit_tui::run_with_options(client, Renderers::default(), settings.ui)
+        roomkit_tui::run_with_options(client, renderers, settings.ui)
     })
     .await;
     let attached = adapter.await;

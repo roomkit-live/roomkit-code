@@ -38,7 +38,7 @@ class Model(BaseHTTPRequestHandler):
             }}]}
             reason = "tool_calls"
         else:
-            delta, reason = {"content": "Fixture inspection complete."}, "stop"
+            delta, reason = {"content": '\n\n## Inspection\n\nFixture **inspection** complete.\n\n- Read `fixture.txt`\n- Read-only\n\n```json\n{"ok": true, "count": 1}\n```\n\n'}, "stop"
         body = ("data: " + json.dumps({"choices": [{"index": 0, "delta": delta}]}) + "\n\n"
                 + "data: " + json.dumps({"choices": [{"index": 0, "delta": {}, "finish_reason": reason}]})
                 + "\n\ndata: [DONE]\n\n").encode()
@@ -49,13 +49,14 @@ class Model(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def scenario(project, state, base_url, resume=False):
+def scenario(project, state, base_url, resume=False, color="never"):
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 120, 0, 0))
     original = termios.tcgetattr(slave)
     env = {k: v for k, v in os.environ.items() if not k.startswith("ROOMKIT_")}
+    env["NO_COLOR"] = "1" # Explicit always must override this; auto/never must not.
     args = [str(binary), str(project), "--state-dir", str(state), "--base-url", base_url,
-            "--model", "fixture-model", "--color", "never", "--no-animations"]
+            "--model", "fixture-model", "--color", color, "--no-animations"]
     if resume:
         args += ["--native-selection", "--no-logo"]
     process = subprocess.Popen(args, stdin=slave, stdout=slave, stderr=slave, env=env)
@@ -63,7 +64,7 @@ def scenario(project, state, base_url, resume=False):
 
     def wait_for(marker, after=0):
         deadline = time.monotonic() + 15
-        while marker not in captured[after:]:
+        while marker not in re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", captured[after:]):
             if time.monotonic() >= deadline or process.poll() is not None:
                 raise RuntimeError(f"Missing {marker!r}; terminal output: {bytes(captured[-3000:])!r}")
             if select.select([master], [], [], min(0.2, max(0, deadline - time.monotonic())))[0]:
@@ -75,12 +76,17 @@ def scenario(project, state, base_url, resume=False):
         if not resume:
             os.write(master, b"Read fixture.txt\r")
         wait_for(b"Fixture inspection complete.")
+        wait_for(b"Read-only")
+        wait_for('fixture.txt · lines 1–4'.encode())
+        assert b'"data":' not in captured, "The file card leaked its raw JSON envelope"
+        assert b"**inspection**" not in captured, "Markdown was displayed as raw syntax"
         if not resume:
             wait_for(b"Execution Completed")
+            assert b"Expanded fixture line" not in captured
             offset = len(captured)
             os.write(master, b"\x1bOQ")  # F2: the generic UI expands the real tool.
             wait_for(b"F2 collapse", offset)
-            wait_for(b"fixture.txt", offset)
+            wait_for(b"Expanded fixture line", offset)
         os.write(master, b"\x04")
         code = process.wait(timeout=10)
         while select.select([master], [], [], 0)[0]:
@@ -89,7 +95,8 @@ def scenario(project, state, base_url, resume=False):
         assert termios.tcgetattr(slave) == original, "Terminal modes not restored"
         assert b"\x1b[?1049l" in captured, "Alternate screen not restored"
         assert b"\x1b[?2004l" in captured, "Bracketed paste not restored"
-        assert not re.search(rb"\x1b\[(?:38|48);", captured), "Monochrome mode emitted colors"
+        has_colors = re.search(rb"\x1b\[(?:38|48);", captured) is not None
+        assert has_colors == (color == "always"), "Color policy was not respected"
         if resume:
             assert b"\x1b[?1006h" not in captured
         else:
@@ -110,10 +117,12 @@ try:
         root = Path(directory)
         project, state = root / "project", root / "state"
         project.mkdir()
-        (project / "fixture.txt").write_text("A fictional project fixture.\n")
+        (project / "fixture.txt").write_text("A fictional project fixture.\nSecond line.\nExpanded fixture line.\nFinal line.\n")
         base_url = f"http://127.0.0.1:{server.server_port}/v1"
         scenario(project, state, base_url)
         scenario(project, state, base_url, resume=True)
+        scenario(project, state, base_url, resume=True, color="always")
+        scenario(project, state, base_url, resume=True, color="auto")
         assert len(requests) == 2, "Resume reexecuted a model turn"
         assert any(m.get("role") == "tool" and "fictional project fixture" in m.get("content", "")
                    for m in requests[-1]["messages"]), "The model did not receive the actual file"
@@ -123,4 +132,4 @@ finally:
     server.server_close()
     thread.join(timeout=5)
 
-print("PTY checks passed: real file tool, streamed answer, details, restart, appearance and terminal restoration.")
+print("PTY checks passed: formatted file tool, Markdown, color/monochrome, details, restart and terminal restoration.")

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Present file listings, reads and search matches with compact summaries,
+  paths, source line numbers and colored code, with F2/click details.
+- Render model Markdown and configure transcript spacing and preview height
+  through the reusable terminal interface.
+
 - Assemble a development agent from RoomKit's engine, tool adapters and TUI.
 - Explore a selected project with read-only listing, globbing, search and reads.
 - Configure an OpenAI-compatible endpoint and appearance explicitly.

@@ -56,6 +56,16 @@ the tools' defaults. Hidden files are included and ignore files are not applied;
 choose a workspace appropriate to share with the configured model. Root checks
 are filesystem boundaries, not an OS sandbox.
 
+Tool cards show paths, line numbers, entry/match counts and a short preview;
+F2 or clicking their disclosure reveals more detail. The product decodes the
+known tools' JSON envelopes only for presentation, using their Rust output
+types. Failed, unsupported or truncated envelopes fall back to literal/JSON
+display; presentation never changes the host's confirmed execution state.
+Model messages use the CLI's Markdown renderer, including colored code blocks.
+Set `ui.markdown`, `ui.message_gap` and `ui.tool_preview_lines` in explicit TOML
+configuration to control formatting and density. Message source and stored
+tool results remain unchanged.
+
 History lives in the platform's per-user application data directory, under
 `projects/<workspace-path-hash>/history.sqlite3`. `--state-dir` or
 `ROOMKIT_CODE_STATE_DIR` overrides that location. The canonical workspace path

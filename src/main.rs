@@ -4,6 +4,7 @@ mod agent;
 mod application;
 mod config;
 mod storage;
+mod tool_views;
 
 use clap::Parser;
 use std::{error::Error, io::IsTerminal, process::ExitCode};

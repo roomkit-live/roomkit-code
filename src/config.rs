@@ -90,6 +90,9 @@ struct Appearance {
     native_selection: bool,
     name: String,
     logo: Option<Vec<String>>,
+    markdown: bool,
+    message_gap: u16,
+    tool_preview_lines: usize,
 }
 
 impl Default for Appearance {
@@ -101,6 +104,9 @@ impl Default for Appearance {
             native_selection: false,
             name: "RoomKit Code".into(),
             logo: None,
+            markdown: true,
+            message_gap: 1,
+            tool_preview_lines: 4,
         }
     }
 }
@@ -197,6 +203,9 @@ impl Settings {
                 Color::Never => ColorMode::Never,
             },
             animations: appearance.animations && !cli.no_animations,
+            markdown: appearance.markdown,
+            message_gap: appearance.message_gap,
+            tool_preview_lines: appearance.tool_preview_lines,
             selection: if cli.native_selection || appearance.native_selection {
                 SelectionMode::Native
             } else {
