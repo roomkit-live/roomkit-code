@@ -17,6 +17,12 @@ use crate::{Result, config::valid_session_name};
 pub(crate) fn commands() -> Vec<CommandSpec> {
     vec![
         CommandSpec {
+            name: "mode".into(),
+            description: "Change permissions (also Shift+Tab)".into(),
+            arguments: "[ask|yolo]".into(),
+            choices: vec!["ask".into(), "yolo".into()],
+        },
+        CommandSpec {
             name: "new".into(),
             description: "Start a new conversation in this project".into(),
             arguments: String::new(),
@@ -71,13 +77,15 @@ pub(crate) struct Sessions {
     pub kit: RoomKit<SqliteStore>,
     pub workspace: PathBuf,
     pub channel: roomkit::model::ChannelId,
+    pub policy: crate::permissions::Policy,
 }
 
 impl Sessions {
     fn switched(&self, mut config: SessionConfig, room: RoomId) -> CommandResult {
         config.title = title(&self.workspace, &room);
+        config.mode = Some(self.policy.state(room.as_str()));
         config.room = room;
-        CommandResult::Switch(config)
+        CommandResult::Switch(Box::new(config))
     }
 
     async fn choices(&self, current: &SessionConfig) -> Result<Vec<Choice>> {
@@ -167,6 +175,10 @@ impl Sessions {
 }
 
 impl CommandHandler for Sessions {
+    fn allow_while_busy(&self, name: &str) -> bool {
+        name == "mode"
+    }
+
     async fn handle(
         &self,
         request: Request,
@@ -177,6 +189,19 @@ impl CommandHandler for Sessions {
         };
         let arguments = arguments.trim();
         match name.as_str() {
+            "mode" if arguments.is_empty() => Ok(CommandResult::Events(vec![Event::Choices {
+                conversation: current.room.as_str().into(),
+                command: "mode".into(),
+                title: "Permission mode".into(),
+                choices: self.policy.state(current.room.as_str()).choices,
+            }])),
+            "mode" => {
+                let mode = self.policy.set(current.room.as_str(), arguments)?;
+                Ok(CommandResult::Events(vec![Event::ModeChanged {
+                    conversation: current.room.as_str().into(),
+                    mode,
+                }]))
+            }
             "new" if arguments.is_empty() => {
                 // A retried operation from the same source session reuses its
                 // destination, including after the application restarts.

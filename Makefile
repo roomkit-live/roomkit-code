@@ -23,6 +23,7 @@ package-check:
 terminal-check:
 	cargo build --locked
 	python3 scripts/check-terminal.py
+	python3 scripts/check-permissions.py
 
 msrv:
 	cargo +1.92.0 test --locked

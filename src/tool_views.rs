@@ -1,5 +1,7 @@
 //! Development-tool presentation belongs to the product, not the generic TUI.
 
+mod changes;
+
 use roomkit_tools_fs::{GrepPage, PathKind, PathPage, ReadPage};
 use roomkit_tui::{
     content,
@@ -17,6 +19,9 @@ pub(crate) fn renderers(workspace: &std::path::Path) -> Renderers {
                 workspace: workspace.to_owned(),
             },
         );
+    }
+    for name in ["write", "edit", "diff", "patch", "shell"] {
+        renderers.register(name, changes::Changes);
     }
     renderers
 }
@@ -422,5 +427,42 @@ mod tests {
         );
         assert!(!plain(&Files::default().render_styled(&call, false)).contains("entries"));
         assert_eq!(call.state, ToolState::Denied);
+    }
+
+    #[test]
+    fn shell_failures_and_partial_patches_remain_explicit_after_tool_completion() {
+        let shell = call(
+            "shell",
+            json!({
+                "cwd":".","exit_code":2,"signal":null,"timed_out":false,"timeout_ms":10000,
+                "output_complete":true,
+                "stdout":{"text":"","truncated":false,"omitted_bytes":0,"total_bytes":0},
+                "stderr":{"text":"test failed","truncated":false,"omitted_bytes":0,"total_bytes":11}
+            }),
+        );
+        let lines = changes::Changes.render_styled(&shell, false);
+        assert!(plain(&lines).contains("exit 2") && plain(&lines).contains("test failed"));
+        assert!(
+            lines
+                .iter()
+                .flatten()
+                .any(|span| span.text == "exit 2" && span.tone == Tone::Warning)
+        );
+        let preview = call(
+            "patch",
+            json!({"dry_run":true,"completed":true,"previews":[],"applied":[],"failure":null}),
+        );
+        assert!(
+            plain(&changes::Changes.render_styled(&preview, false))
+                .contains("Preview only · no files changed")
+        );
+        let partial = call(
+            "patch",
+            json!({"dry_run":false,"completed":false,"previews":[],"applied":[{"index":1,"operation":"add","path":"created.txt"}],"failure":{"index":2,"cancelled":false,"message":"Source changed"}}),
+        );
+        let lines = changes::Changes.render_styled(&partial, true);
+        assert!(plain(&lines).contains("partially applied"));
+        assert!(plain(&lines).contains("Committed: Add created.txt"));
+        assert!(plain(&lines).contains("Source changed"));
     }
 }

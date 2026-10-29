@@ -5,6 +5,9 @@ base_url = "http://localhost:8000/v1"
 model = "your-model"
 # API keys are read only from ROOMKIT_API_KEY, never from this file.
 
+[permissions]
+mode = "ask" # ask, yolo; --mode overrides this explicit configuration
+
 [ui]
 theme = "dark" # dark, light, terminal
 color = "auto" # auto, always, never

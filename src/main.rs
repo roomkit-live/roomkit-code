@@ -3,6 +3,7 @@
 mod agent;
 mod application;
 mod config;
+mod permissions;
 mod sessions;
 mod storage;
 mod tool_views;
@@ -27,7 +28,9 @@ async fn launch() -> Result<()> {
     let cli = config::Cli::parse();
     let settings = config::Settings::load(&cli)?;
     if cli.check_config {
-        println!("Configuration valid. Workspace exists; read-only tools selected.");
+        println!(
+            "Configuration valid. Workspace exists; coding tools and permission mode selected."
+        );
         return Ok(());
     }
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {

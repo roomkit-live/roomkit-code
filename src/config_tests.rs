@@ -89,6 +89,21 @@ fn project_configuration_is_not_implicitly_trusted() {
     assert!(Settings::load(&cli).is_err());
 }
 
+#[test]
+fn permission_mode_defaults_to_ask_and_only_explicit_settings_enable_yolo() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("roomkit-code.toml");
+    std::fs::write(&path, "[permissions]\nmode = 'yolo'\n").unwrap();
+    let mut cli = cli(root.path());
+    assert_eq!(Settings::load(&cli).unwrap().mode, Mode::Ask);
+    cli.config = Some(path.clone());
+    assert_eq!(Settings::load(&cli).unwrap().mode, Mode::Yolo);
+    cli.mode = Some(Mode::Ask);
+    assert_eq!(Settings::load(&cli).unwrap().mode, Mode::Ask);
+    std::fs::write(&path, "[permissions]\nmode = 'unknown'\n").unwrap();
+    assert!(Settings::load(&cli).is_err());
+}
+
 #[cfg(unix)]
 #[test]
 fn symlink_aliases_resolve_to_one_project() {

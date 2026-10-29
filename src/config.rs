@@ -6,12 +6,12 @@ use clap::{Parser, ValueEnum};
 use roomkit_tui::{Branding, ColorMode, SelectionMode, Theme, UiOptions};
 use serde::Deserialize;
 
-use crate::Result;
+use crate::{Result, permissions::Mode};
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Explore a project with a RoomKit coding assistant")]
 pub(crate) struct Cli {
-    /// Project directory granted to the read-only tools.
+    /// Project directory used by the coding tools.
     #[arg(default_value = ".")]
     pub workspace: PathBuf,
     /// Explicit TOML configuration file (never loaded from the project implicitly).
@@ -26,6 +26,9 @@ pub(crate) struct Cli {
     /// Open or create a named conversation; without this, start a new session.
     #[arg(long)]
     pub session: Option<String>,
+    /// Permission mode; ask approves each mutation/command, yolo runs directly.
+    #[arg(long, value_enum)]
+    pub mode: Option<Mode>,
     /// Storage directory; defaults to the user's application data directory.
     #[arg(long, env = "ROOMKIT_CODE_STATE_DIR", hide_env_values = true)]
     pub state_dir: Option<PathBuf>,
@@ -72,6 +75,13 @@ pub(crate) enum Color {
 struct FileConfig {
     provider: Provider,
     ui: Appearance,
+    permissions: Permissions,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct Permissions {
+    mode: Mode,
 }
 
 #[derive(Default, Deserialize)]
@@ -126,6 +136,7 @@ pub(crate) struct Settings {
     pub base_url: String,
     pub model: String,
     pub ui: UiOptions,
+    pub mode: Mode,
 }
 
 impl Settings {
@@ -187,7 +198,7 @@ impl Settings {
         let appearance = file.ui;
         let mut branding = Branding {
             name: appearance.name,
-            subtitle: "Read-only project exploration".into(),
+            subtitle: "Explore, edit and test your project".into(),
             ..Branding::default()
         };
         if let Some(logo) = appearance.logo {
@@ -227,6 +238,7 @@ impl Settings {
             workspace,
             state_dir,
             session: cli.session.clone(),
+            mode: cli.mode.unwrap_or(file.permissions.mode),
             base_url,
             model,
             ui,

@@ -5,7 +5,8 @@ owns development behavior, configuration and workspace choices. The reusable
 terminal interface, conversation engine and tool implementations live in their
 own repositories.
 
-This first version explores projects with **read-only tools**. It supports an
+This version can **explore, edit and test projects**, with Ask/Yolo permissions.
+It supports an
 OpenAI-compatible Chat Completions endpoint, streamed answers, tool details,
 activity timing, mouse selection, configurable appearance and SQLite history.
 Linux and macOS are the supported platforms. The repositories are currently
@@ -71,18 +72,47 @@ uses reverse video to keep the area visible.
 
 ## Tools and persistence
 
-The selected agent has `list`, `glob`, `grep` and `read`, implemented by
-`roomkit-tools-fs` and registered through its existing RoomKit adapters. It has
-no write, shell, process or web tools. Returned pages and scans are bounded by
-the tools' defaults. Hidden files are included and ignore files are not applied;
-choose a workspace appropriate to share with the configured model. Root checks
-are filesystem boundaries, not an OS sandbox.
+The selected agent has `list`, `glob`, `grep`, `read`, `diff`, `write`, `edit`,
+`patch` and `shell`, implemented by `roomkit-tools-fs` and `roomkit-tools-process`
+and registered through their existing RoomKit adapters. Persistent process and
+web tools are not selected. Returned pages and scans are bounded by the tools' defaults. Hidden files are included and ignore files are not applied;
+choose a workspace appropriate to share with the configured model. Filesystem tools check paths under the configured root. Shell uses `/bin/sh -c`
+with your user permissions and environment; its initial workspace directory is
+**not a sandbox**. It has closed stdin, bounded output, a default 10-second
+runtime and a maximum requested runtime of 120 seconds.
+
+**Ask is the default.** Each `write`, `edit`, applied `patch` and `shell` call
+waits for an explicit decision. The panel shows exact arguments; use PgUp/PgDn
+to read longer details, **Ctrl+Y** to allow once or **Ctrl+N** to refuse.
+Read tools, `diff` and patch previews do not need approval. Requests expire after
+five minutes; disconnecting refuses pending actions. Actions too large to show
+in full (64 KiB of approval detail) are refused and must be split.
+
+Press **Shift+Tab** to cycle between **Ask** and **Yolo**, including while an
+agent is working. The status line shows the host-confirmed mode. `/mode ask` and
+`/mode yolo` select directly; `/mode` offers choices. Changing modes preserves
+the draft and does not settle an already pending request or stop an action that
+was already authorized. Yolo permits subsequent selected tool calls without
+asking; tool path, revision, timeout and size checks still apply.
+
+Modes are kept per conversation for this process. Restart defaults to Ask;
+`--mode yolo` or `[permissions] mode = "yolo"` in an explicitly loaded TOML file
+can select a different starting mode. Project files never implicitly select it.
+
+`write`, `edit` and `patch` share a mutation lock. The agent is instructed to
+read before modifying and pass content revisions to write/edit. Patch previews
+do not modify files; applying requires `dry_run: false` and exact source text.
+Multi-file patches can partially apply; their result lists committed effects.
+These checks coordinate the selected tools, not external editors.
 
 Tool cards show paths, line numbers, entry/match counts and a short preview;
 F2 or clicking their disclosure reveals more detail. The product decodes the
 known tools' JSON envelopes only for presentation, using their Rust output
 types. Failed, unsupported or truncated envelopes fall back to literal/JSON
 display; presentation never changes the host's confirmed execution state.
+Changes use green/red excerpts and diffs; patch previews are labeled separately
+from applied changes. Shell cards show exit status, timeouts, stdout and stderr.
+A completed shell tool does not imply a successful command.
 Model messages use the CLI's Markdown renderer, including colored code blocks.
 Set `ui.markdown`, `ui.message_gap` and `ui.tool_preview_lines` in explicit TOML
 configuration to control formatting and density. Message source and stored
@@ -100,8 +130,7 @@ The engine owns persistence and bounded context restoration. The terminal
 adapter displays up to 500 stored events; the current provider uses the engine's
 bounded message/tool history, not the entire on-screen conversation. Model
 changes on restart apply to future turns. Effort selection, context percentage,
-interactive tool approvals and a remote-engine
-transport are not implemented in this version.
+and a remote-engine transport are not implemented in this version.
 
 ## Boundaries
 
@@ -115,7 +144,8 @@ transport are not implemented in this version.
 `src/agent.rs` selects capabilities; `src/coding-agent.txt` supplies development
 instructions. `src/application.rs` assembles and closes the engine.
 `src/config.rs` and `src/storage.rs` own application settings and project state.
-`src/sessions.rs` owns new/resume commands and the project session catalogue.
+`src/sessions.rs` owns new/resume/mode commands and the project session catalogue.
+`src/permissions.rs` owns the tool policy and hooks that await actual approval.
 The TUI receives only its generic client connection, preserving the boundary
 needed for a future remote host.
 

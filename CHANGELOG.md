@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add write, edit, diff, structured patch and foreground shell tools, reusing the
+  existing RoomKit adapters and a shared mutation workspace.
+- Default to Ask for each mutation and shell call, with explicit allow/deny,
+  scoped one-time approvals and refusal on timeout or terminal disconnect.
+- Add host-confirmed Ask/Yolo modes, Shift+Tab cycling, `/mode`, `--mode` and
+  explicit TOML configuration; pending approvals remain explicit across changes.
+- Present edits/diffs, patch previews and applied effects, and shell exit/output
+  separately from tool-call completion.
+
 - Start a fresh conversation on normal launch; retain explicit `--session NAME`
   behavior and access to existing histories, including `main`.
 - Add `/new` and a filterable `/resume` selector scoped to the project, showing

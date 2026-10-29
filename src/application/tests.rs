@@ -194,7 +194,7 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
         })
         .unwrap();
     assert!(!session.can_interrupt);
-    assert_eq!(session.commands.len(), 2);
+    assert_eq!(session.commands.len(), 3);
     app.kit.close().await.unwrap();
     drop(app);
     let app = Application::open(&settings, String::new()).await.unwrap();
@@ -226,7 +226,12 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
         .iter()
         .map(|tool| tool["function"]["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, BTreeSet::from(["list", "glob", "grep", "read"]));
+    assert_eq!(
+        names,
+        BTreeSet::from([
+            "list", "glob", "grep", "read", "write", "edit", "diff", "patch", "shell"
+        ])
+    );
     assert!(
         requests[4]["messages"]
             .as_array()
@@ -240,14 +245,17 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
 }
 
 #[tokio::test]
-async fn unregistered_writes_and_outside_reads_have_no_effect_or_disclosure() {
+async fn unregistered_tools_and_outside_reads_have_no_effect_or_disclosure() {
     let fixture = tempfile::tempdir().unwrap();
     let root = fixture.path().join("project");
     std::fs::create_dir(&root).unwrap();
     std::fs::write(fixture.path().join("outside"), "outside-private-fixture").unwrap();
     let state = tempfile::tempdir().unwrap();
     let mock = Mock::start(vec![
-        ("write", json!({"path":"marker", "content":"unexpected"})),
+        (
+            "unregistered_tool",
+            json!({"path":"marker", "content":"unexpected"}),
+        ),
         ("read", json!({"path":"../outside"})),
     ])
     .await;
@@ -270,6 +278,290 @@ async fn unregistered_writes_and_outside_reads_have_no_effect_or_disclosure() {
             .unwrap()
             .contains("outside-private-fixture")
     );
+}
+
+async fn event(client: &roomkit_tui::Client) -> Event {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match client.try_recv() {
+                Ok(event) => return event,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    tokio::time::sleep(Duration::from_millis(1)).await
+                }
+                Err(error) => panic!("Unexpected disconnection: {error}"),
+            }
+        }
+    })
+    .await
+    .unwrap()
+}
+
+fn command(client: &roomkit_tui::Client, id: u64, room: &str, command: Command) {
+    client
+        .try_send(Request {
+            id: RequestId(id),
+            operation: format!("operation-{id}").as_str().into(),
+            conversation: room.into(),
+            command,
+        })
+        .unwrap();
+}
+
+async fn approval(client: &roomkit_tui::Client) -> roomkit_tui::protocol::Permission {
+    loop {
+        if let Event::PermissionRequested { permission, .. } = event(client).await {
+            return permission;
+        }
+    }
+}
+
+#[tokio::test]
+async fn ask_gates_real_changes_and_yolo_never_auto_approves_an_existing_request() {
+    use roomkit_tui::protocol::Decision;
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let source = project.path().join("source.txt");
+    std::fs::write(&source, "before\n").unwrap();
+    let mock = Mock::start(vec![
+        ("write", json!({"path":"denied.txt", "content":"never"})),
+        ("edit", json!({"path":"source.txt", "old_text":"before", "new_text":"after"})),
+        ("patch", json!({"changes":[{"op":"add", "path":"preview.txt", "content":"preview"}]})),
+        ("patch", json!({"dry_run":false, "changes":[{"op":"add", "path":"applied.txt", "content":"applied"}]})),
+        ("write", json!({"path":"yolo.txt", "content":"automatic"})),
+        ("shell", json!({"command":"printf 'tested' > shell.txt; printf 'test output'"})),
+    ]).await;
+    let settings = settings(project.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let handler = crate::sessions::Sessions {
+        kit: app.kit.clone(),
+        workspace: settings.workspace.clone(),
+        channel: app.channel.id().clone(),
+        policy: app.policy.clone(),
+    };
+    let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+    let task = tokio::spawn(app.session().run_with_commands(host, handler));
+    let Event::Snapshot(initial) = event(&client).await else {
+        panic!("Expected snapshot");
+    };
+    assert_eq!(initial.mode.unwrap().selected, "ask");
+    command(
+        &client,
+        1,
+        "main",
+        Command::Submit {
+            agent: "code".into(),
+            text: "Change the fixture".into(),
+        },
+    );
+    let denied = approval(&client).await;
+    assert!(denied.detail.contains("denied.txt") && denied.detail.contains("never"));
+    assert!(!project.path().join("denied.txt").exists());
+    // Incorrect room identity cannot approve an otherwise valid request.
+    command(
+        &client,
+        2,
+        "another-room",
+        Command::Decide {
+            permission: denied.id.clone(),
+            decision: Decision::Allow,
+        },
+    );
+    assert!(matches!(
+        event(&client).await,
+        Event::Reply { error: Some(_), .. }
+    ));
+    assert!(!project.path().join("denied.txt").exists());
+    command(
+        &client,
+        3,
+        "main",
+        Command::Decide {
+            permission: denied.id.clone(),
+            decision: Decision::Deny,
+        },
+    );
+    let edit = approval(&client).await;
+    assert!(edit.detail.contains("before") && edit.detail.contains("after"));
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), "before\n");
+    command(
+        &client,
+        4,
+        "main",
+        Command::Invoke {
+            name: "mode".into(),
+            arguments: "yolo".into(),
+        },
+    );
+    loop {
+        if let Event::ModeChanged { mode, .. } = event(&client).await {
+            assert_eq!(mode.selected, "yolo");
+            break;
+        }
+    }
+    assert_eq!(
+        std::fs::read_to_string(&source).unwrap(),
+        "before\n",
+        "Mode changes do not resolve existing approvals"
+    );
+    assert_eq!(mock.requests.lock().unwrap().len(), 2);
+    // A previous answer cannot be replayed against a new action.
+    command(
+        &client,
+        5,
+        "main",
+        Command::Decide {
+            permission: denied.id,
+            decision: Decision::Allow,
+        },
+    );
+    assert!(matches!(
+        event(&client).await,
+        Event::Reply { error: Some(_), .. }
+    ));
+    command(
+        &client,
+        6,
+        "main",
+        Command::Decide {
+            permission: edit.id,
+            decision: Decision::Allow,
+        },
+    );
+    loop {
+        match event(&client).await {
+            Event::PermissionRequested { .. } => panic!("Yolo must not ask for subsequent calls"),
+            Event::RunFinished { outcome, .. } => {
+                assert_eq!(outcome, RunOutcome::Completed);
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(!project.path().join("denied.txt").exists());
+    assert!(!project.path().join("preview.txt").exists());
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), "after\n");
+    assert_eq!(
+        std::fs::read_to_string(project.path().join("applied.txt")).unwrap(),
+        "applied"
+    );
+    assert_eq!(
+        std::fs::read_to_string(project.path().join("yolo.txt")).unwrap(),
+        "automatic"
+    );
+    assert_eq!(
+        std::fs::read_to_string(project.path().join("shell.txt")).unwrap(),
+        "tested"
+    );
+    command(
+        &client,
+        7,
+        "main",
+        Command::Invoke {
+            name: "mode".into(),
+            arguments: "ask".into(),
+        },
+    );
+    loop {
+        if let Event::ModeChanged { mode, .. } = event(&client).await {
+            assert_eq!(mode.selected, "ask");
+            break;
+        }
+    }
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.kit.close().await.unwrap();
+    drop(app);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let snapshot = app.session().snapshot().await.unwrap();
+    assert_eq!(snapshot.mode.unwrap().selected, "ask");
+    assert!(snapshot.items.iter().any(|item| matches!(item, Item::Tool {call, ..} if call.name == "write" && call.state == ToolState::Denied)));
+    assert_eq!(
+        mock.requests.lock().unwrap().len(),
+        7,
+        "Restoration never reexecutes the changes"
+    );
+    app.kit.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn ask_shell_and_patch_require_approval_but_patch_preview_does_not() {
+    use roomkit_tui::protocol::Decision;
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![
+        (
+            "patch",
+            json!({"changes":[{"op":"add", "path":"file", "content":"new"}]}),
+        ),
+        (
+            "patch",
+            json!({"dry_run":false, "changes":[{"op":"add", "path":"file", "content":"new"}]}),
+        ),
+        ("shell", json!({"command":"printf 'approved' > shell.txt"})),
+    ])
+    .await;
+    let app = Application::open(
+        &settings(project.path(), state.path(), &mock.base_url),
+        String::new(),
+    )
+    .await
+    .unwrap();
+    let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+    let task = tokio::spawn(app.session().run(host));
+    event(&client).await;
+    command(
+        &client,
+        1,
+        "main",
+        Command::Submit {
+            agent: "code".into(),
+            text: "Test changes".into(),
+        },
+    );
+    let patch = approval(&client).await;
+    assert_eq!(patch.title, "Allow patch?");
+    assert!(patch.detail.contains("\"dry_run\": false"));
+    assert_eq!(
+        mock.requests.lock().unwrap().len(),
+        2,
+        "Preview did not wait for approval"
+    );
+    assert!(!project.path().join("file").exists());
+    command(
+        &client,
+        2,
+        "main",
+        Command::Decide {
+            permission: patch.id,
+            decision: Decision::Deny,
+        },
+    );
+    let shell = approval(&client).await;
+    assert_eq!(shell.title, "Allow shell?");
+    assert!(shell.detail.contains("printf") && shell.detail.contains("not sandboxed"));
+    assert!(!project.path().join("shell.txt").exists());
+    command(
+        &client,
+        3,
+        "main",
+        Command::Decide {
+            permission: shell.id,
+            decision: Decision::Allow,
+        },
+    );
+    loop {
+        if matches!(event(&client).await, Event::RunFinished { .. }) {
+            break;
+        }
+    }
+    assert!(!project.path().join("file").exists());
+    assert_eq!(
+        std::fs::read_to_string(project.path().join("shell.txt")).unwrap(),
+        "approved"
+    );
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.kit.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -298,6 +590,7 @@ async fn histories_are_scoped_to_project_and_session_and_storage_has_one_owner()
         kit: app.kit.clone(),
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
+        policy: app.policy.clone(),
     };
     let request = Request {
         id: RequestId(1),
@@ -383,6 +676,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
         kit: app.kit.clone(),
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
+        policy: app.policy.clone(),
     };
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run_with_commands(host, handler));
@@ -482,6 +776,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
         kit: app.kit.clone(),
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
+        policy: app.policy.clone(),
     };
     let request = Request {
         id: RequestId(1),
