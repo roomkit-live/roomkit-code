@@ -1,7 +1,7 @@
 //! The product's development instructions and selected tools.
 
 use roomkit::model::ChannelId;
-use roomkit_ai::{ToolDefinition, Toolset};
+use roomkit_ai::{SkillRegistry, ToolDefinition, Toolset};
 use roomkit_openai::{OpenAiAgent, OpenAiConfig};
 use roomkit_tools_code::CodeOutlineTool;
 use roomkit_tools_fs::{
@@ -75,12 +75,17 @@ impl Resources {
 
 /// Inventory and registration are derived from the same selected toolsets.
 macro_rules! assemble {
-    ($id:expr, $profile:expr, $provider:expr; $($binding:ident = $tool:expr),+ $(,)?) => {{
+    ($id:expr, $profile:expr, $provider:expr, $skills:expr; $($binding:ident = $tool:expr),+ $(,)?) => {{
         $(let $binding = $tool;)+
-        let tools = [$($binding.tools()),+].concat().into_iter().filter(|tool| $profile.tools.contains(&tool.name)).collect::<Vec<_>>();
+        let mut tools = [$($binding.tools()),+].concat().into_iter().filter(|tool| $profile.tools.contains(&tool.name)).collect::<Vec<_>>();
+        tools.extend($skills.tool_definitions());
         let inventory = tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>().join(", ");
         let prompt = format!("{INSTRUCTIONS}\nCurrent agent: {} (ID: {}). Answer as this selected participant. Other participants may have different tools and providers.\nAgent instructions:\n{}\nCurrent capability inventory (provided by the application for this run):\n{inventory}\nOnly tools in this inventory are available to you. Apply tool-specific guidance only when that tool is present.\n", $profile.label, $profile.id, $profile.instructions);
-        let mut agent = OpenAiAgent::new($id, $provider.with_system_prompt(prompt))?;
+        let locations = $skills.skills().iter().map(|skill| format!("{}: {}", skill.name(), skill.path().display())).collect::<Vec<_>>().join("\n");
+        let prompt = if $skills.is_empty() { prompt } else {
+            format!("{prompt}\nSkill package directories (relative paths in skill instructions are resolved from these directories):\n{locations}\nUse activate_skill to load enabled skills before applying them. Bundled scripts are ordinary code; run them only with an available execution tool and the host's permission.\n")
+        };
+        let mut agent = OpenAiAgent::new($id, $provider.with_system_prompt(prompt))?.with_skills($skills)?;
         $(if $binding.tools().iter().any(|tool| $profile.tools.contains(&tool.name)) { agent = agent.with_tools($binding)?; })+
         let agent = agent.with_tool_timeout(Some(std::time::Duration::from_secs(130)));
         Ok((agent, tools))
@@ -92,12 +97,13 @@ pub(crate) async fn create(
     resources: &Resources,
     profile: &Agent,
     provider: OpenAiConfig,
+    skills: SkillRegistry,
 ) -> Result<(OpenAiAgent, Vec<ToolDefinition>)> {
     profile.validate()?;
     let mutations = resources.mutations.clone();
     let mut shell_limits = ShellLimits::default();
     shell_limits.max_output_bytes = 8192;
-    assemble!(ChannelId::new(&profile.id)?, profile, provider;
+    assemble!(ChannelId::new(&profile.id)?, profile, provider, skills;
         outline = CodeOutlineToolset::new(CodeOutlineTool::new(root).await?),
         list = ListToolset::new(ListTool::new(root).await?),
         glob = GlobToolset::new(GlobTool::new(root).await?),

@@ -71,6 +71,8 @@ pub(crate) struct Agent {
     pub reasoning_effort: Option<String>,
     #[serde(default)]
     pub vision: bool,
+    #[serde(default)]
+    pub skills: Vec<String>,
     pub context_window: Option<u64>,
     pub instructions: String,
     pub tools: Vec<String>,
@@ -195,6 +197,17 @@ impl Provider {
 
 impl Agent {
     pub fn validate(&self) -> Result<(), String> {
+        if self.skills.len() > 128
+            || self.skills.iter().any(|name| {
+                name.is_empty()
+                    || name.len() > 64
+                    || !name
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            })
+        {
+            return Err("Skills must contain at most 128 valid skill names".into());
+        }
         if self
             .reasoning_effort
             .as_deref()

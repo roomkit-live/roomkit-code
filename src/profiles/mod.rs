@@ -1,6 +1,7 @@
 //! User connections and project agent composition, independent of terminal widgets.
 mod deletion;
 pub(crate) mod model;
+mod skills;
 mod slot;
 mod store;
 mod ui;
@@ -30,6 +31,7 @@ pub(crate) struct Profiles {
     pub(crate) processes: Arc<crate::processes::Processes>,
     pub(crate) shell: Arc<crate::shell::Shell>,
     pub(crate) images: Arc<crate::images::Images>,
+    skill_catalogue: tokio::sync::RwLock<skills::Catalogue>,
     state: Mutex<State>,
 }
 
@@ -115,6 +117,7 @@ impl Profiles {
                 model: settings.model.clone(),
                 reasoning_effort: None,
                 vision: false,
+                skills: Vec::new(),
                 context_window: settings.context_window,
                 instructions: String::new(),
                 tools: TOOLS.iter().map(|s| (*s).into()).collect(),
@@ -143,7 +146,10 @@ impl Profiles {
             .await
             .map_err(|_| "Could not initialize workspace tools")?,
         };
+        let skill_catalogue =
+            skills::Catalogue::load(settings.workspace.clone(), settings.state_dir.clone()).await?;
         Ok(Arc::new(Self {
+            skill_catalogue: tokio::sync::RwLock::new(skill_catalogue),
             images: crate::images::Images::new(storage.database.with_file_name("attachments")),
             shell: crate::shell::Shell::new(resources.processes.clone(), diagnostics.clone()),
             diagnostics,
@@ -251,13 +257,19 @@ impl Profiles {
             Some(effort) => config.with_reasoning_effort(effort),
             None => config,
         };
-        crate::agent::create(&self.workspace, &self.resources, profile, config)
-            .await
-            .map_err(
-                |_| "Could not configure this agent; verify its provider, credential and workspace",
-            )
-            .map_err(String::from)
-            .map(|(agent, tools)| (agent.with_image_resolver(self.images.clone()), tools))
+        crate::agent::create(
+            &self.workspace,
+            &self.resources,
+            profile,
+            config,
+            self.skill_catalogue.read().await.selected(&profile.skills),
+        )
+        .await
+        .map_err(
+            |_| "Could not configure this agent; verify its provider, credential and workspace",
+        )
+        .map_err(String::from)
+        .map(|(agent, tools)| (agent.with_image_resolver(self.images.clone()), tools))
     }
 
     pub async fn configure_view(&self, view: &mut SessionConfig) {
