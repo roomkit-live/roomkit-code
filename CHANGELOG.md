@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Avoid duplicating agent/model/effort in the footer while the sidebar displays
+  them; keep the mode below the composer and restore full status when hidden.
+
 - Show a configurable session sidebar with agent/model, provider connection,
   live context usage, MCP connection/tool status and active processes. F7 toggles
   visibility, F8 navigates actions, and narrow terminals retain the full-width
