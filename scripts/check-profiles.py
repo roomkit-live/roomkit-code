@@ -121,6 +121,15 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
     try:
         wait_for(b"RoomKit Code")
         command("/providers", b"Providers")
+        # Account discovery is a local menu, not an implicit network login.
+        send("Sign in with ChatGPT")
+        offset = send(b"\r")
+        wait_for(b"ChatGPT accounts", offset)
+        wait_for(b"Connect a ChatGPT account", offset)
+        assert not (state / "auth" / "accounts.json").exists()
+        offset = send(b"\x1b")
+        wait_for(b"Enter send", offset)
+        command("/providers", b"Providers")
         offset = send(b"\r")
         wait_for(b"Provider connection", offset)
         fields(["fixture", "Fixture provider", f"http://127.0.0.1:{server.server_port}/v1", "<right>", secret, "", "30"])
@@ -202,4 +211,4 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         server.shutdown()
         server.server_close()
 
-print("Profile PTY checks passed: bootstrap, masked credentials, persistent forms, two agents, shared history, discovery and cancellation.")
+print("Profile PTY checks passed: account menus, bootstrap, masked credentials, persistent forms, two agents, shared history, discovery and cancellation.")

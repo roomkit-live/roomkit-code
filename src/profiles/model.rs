@@ -29,11 +29,15 @@ pub(crate) enum Authentication {
     None,
     Stored { key: String },
     Environment { variable: String },
+    ChatGpt { account: String },
 }
 
 impl Authentication {
     pub fn key(&self) -> Result<String, String> {
         match self {
+            Self::ChatGpt { .. } => {
+                Err("ChatGPT credentials must be resolved through the account manager".into())
+            }
             Self::None => Ok(String::new()),
             Self::Stored { key } => Ok(key.clone()),
             Self::Environment { variable } => std::env::var(variable)
@@ -156,6 +160,15 @@ impl Provider {
         }
         if !(1..=86_400).contains(&self.timeout_seconds) {
             return Err("Timeout must be between 1 and 86400 seconds".into());
+        }
+        if let Authentication::ChatGpt { account } = &self.authentication
+            && (self.base_url != roomkit_auth::CHATGPT_API_ROOT
+                || uuid::Uuid::parse_str(account).is_err())
+        {
+            return Err(
+                "ChatGPT accounts require the trusted public OpenAI API and a valid account ID"
+                    .into(),
+            );
         }
         match &self.authentication {
             Authentication::Stored { key } if !text(key, 8192) => {

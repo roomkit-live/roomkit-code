@@ -274,11 +274,32 @@ impl CommandHandler for Sessions {
         &self,
         current: SessionConfig,
     ) -> Option<tokio::sync::watch::Receiver<Vec<Event>>> {
-        Some(
-            self.profiles
-                .processes
-                .subscribe(self.kit.clone(), self.channel.clone(), current),
-        )
+        let mut processes = self.profiles.processes.subscribe(
+            self.kit.clone(),
+            self.channel.clone(),
+            current.clone(),
+        );
+        let mut accounts = self.profiles.accounts.subscribe();
+        let (tx, rx) = tokio::sync::watch::channel(Vec::new());
+        tokio::spawn(async move {
+            loop {
+                let mut events = processes.borrow_and_update().clone();
+                if let Some(event) = accounts.borrow_and_update().clone() {
+                    // Panels carry their conversation and opaque instance ID;
+                    // the UI ignores updates to a dismissed or different view.
+                    events.push(event);
+                }
+                if tx.send(events).is_err() {
+                    break;
+                }
+                tokio::select! {
+                    () = tx.closed() => break,
+                    changed = processes.changed() => if changed.is_err() { break; },
+                    changed = accounts.changed() => if changed.is_err() { break; },
+                }
+            }
+        });
+        Some(rx)
     }
 
     fn allow_while_busy(&self, name: &str) -> bool {

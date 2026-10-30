@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add Sign in with ChatGPT through reusable `roomkit-auth`: browser consent,
+  separate accounts, automatic credential refresh, account-specific models and
+  sign-out. Agents use stateless Responses with namespaced function tools.
+
+
 - Expand the coding catalogue to 19 tools, adding anonymous Exa search, public
   page fetching, persistent processes and paged ephemeral output archives.
 - Apply Ask/Yolo to web requests and process start/input, with explicit action

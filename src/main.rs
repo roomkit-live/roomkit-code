@@ -1,5 +1,6 @@
 //! RoomKit's development application: configuration and assembly live here.
 
+mod accounts;
 mod agent;
 mod application;
 mod config;

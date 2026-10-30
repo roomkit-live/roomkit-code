@@ -22,6 +22,7 @@ use store::Document;
 
 pub(crate) struct Profiles {
     workspace: PathBuf,
+    pub(crate) accounts: Arc<crate::accounts::Accounts>,
     pub(crate) resources: crate::agent::Resources,
     pub(crate) processes: Arc<crate::processes::Processes>,
     state: Mutex<State>,
@@ -126,6 +127,7 @@ impl Profiles {
         };
         Ok(Arc::new(Self {
             workspace: settings.workspace.clone(),
+            accounts: crate::accounts::Accounts::new(&settings.state_dir.join("auth"))?,
             processes: crate::processes::Processes::new(resources.processes.clone()),
             resources,
             state: Mutex::new(State {
@@ -186,8 +188,42 @@ impl Profiles {
     ) -> Result<(OpenAiAgent, Vec<ToolDefinition>), String> {
         profile.validate()?;
         provider.validate()?;
-        provider.authentication.key()?;
-        crate::agent::create(&self.workspace, &self.resources, profile, provider)
+        let config = match &provider.authentication {
+            Authentication::ChatGpt { account } => {
+                let connected = self
+                    .accounts
+                    .auth
+                    .accounts()
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .find(|a| &a.id == account)
+                    .ok_or("ChatGPT account not found; open /providers")?;
+                if !connected.connected {
+                    return Err("Sign in to this ChatGPT account with /providers".into());
+                }
+                if !connected.plan_usage {
+                    return Err("Authorize ChatGPT plan usage with /providers".into());
+                }
+                roomkit_openai::OpenAiConfig::new(
+                    roomkit_auth::CHATGPT_API_ROOT,
+                    "",
+                    &profile.model,
+                )
+                .with_api(roomkit_openai::OpenAiApi::Responses)
+                .with_tool_namespace("functions", "Tools available to this assistant")
+                .with_token_source(Arc::new(crate::accounts::Credential {
+                    auth: self.accounts.auth.clone(),
+                    account: account.clone(),
+                }))
+            }
+            _ => roomkit_openai::OpenAiConfig::new(
+                &provider.base_url,
+                provider.authentication.key()?,
+                &profile.model,
+            ),
+        }
+        .with_timeout(std::time::Duration::from_secs(provider.timeout_seconds));
+        crate::agent::create(&self.workspace, &self.resources, profile, config)
             .await
             .map_err(
                 |_| "Could not configure this agent; verify its provider, credential and workspace",
@@ -250,7 +286,18 @@ impl State {
             .collect();
         if let Some(profile) = self.project.value.agents.get(view.agent.as_str()) {
             view.model = Some(ModelInfo {
-                provider: "openai".into(),
+                provider: if self
+                    .providers
+                    .value
+                    .profiles
+                    .get(&profile.provider)
+                    .is_some_and(|p| matches!(p.authentication, Authentication::ChatGpt { .. }))
+                {
+                    "chatgpt"
+                } else {
+                    "openai"
+                }
+                .into(),
                 model: profile.model.clone(),
                 effort: None,
             });

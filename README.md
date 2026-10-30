@@ -2,15 +2,15 @@
 
 A Rust coding assistant assembled from the RoomKit ecosystem. This application
 owns development behavior, configuration and workspace choices. The reusable
-terminal interface, conversation engine and tool implementations live in their
+terminal interface, conversation engine, authentication and tool implementations live in their
 own repositories.
 
 This version can **explore, edit and test projects**, with Ask/Yolo permissions.
-It supports an
-OpenAI-compatible Chat Completions endpoint, streamed answers, tool details,
+It supports OpenAI-compatible Chat Completions endpoints and Sign in with
+ChatGPT through Responses, with streamed answers, tool details,
 activity timing, mouse selection, configurable appearance and SQLite history.
 Linux and macOS are the supported platforms. The repositories are currently
-private; building requires Git read access to all three dependencies.
+private; building requires Git read access to all four dependencies.
 
 ## Run
 
@@ -27,7 +27,7 @@ cargo run --locked -- /path/to/project
 You can also launch without a URL/model and configure everything using
 **/providers**, then **/agents**. Messages are disabled until an agent is ready.
 
-The model needs to support function calling and streamed Chat Completions.
+The selected model must support function calling and the provider's streaming protocol.
 API requests go to the selected endpoint. File contents returned by tools can
 be included in those requests.
 
@@ -285,11 +285,14 @@ remain in the project and conversation.
 | [roomkit-cli](https://github.com/roomkit-live/roomkit-cli) | Generic terminal interface, client protocol, local engine adapter |
 | [roomkit-rs](https://github.com/roomkit-live/roomkit-rs) | Conversation engine, agents, providers, policies, persistence |
 | [roomkit-tools](https://github.com/roomkit-live/roomkit-tools) | Independently reusable tools and their RoomKit adapters |
+| [roomkit-auth](https://github.com/roomkit-live/roomkit-auth) | OAuth, account identity, credential storage and renewal |
 
 `src/agent.rs` selects capabilities; `src/coding-agent.txt` supplies development
 instructions. `src/application.rs` assembles and closes the engine.
 `src/config.rs` and `src/storage.rs` own application settings and project state.
 `src/processes.rs` owns scoped process monitoring and human controls.
+`src/accounts.rs` owns account menus and browser launching; `src/profiles/` links
+accounts, providers and agents without exposing credentials to the UI.
 `src/sessions.rs` owns new/resume/mode/tools/processes commands and the project session catalogue.
 `src/permissions.rs` owns the tool policy and hooks that await actual approval.
 The TUI receives only its generic client connection, preserving the boundary
@@ -308,3 +311,30 @@ credentials. They exercise real file tools, streaming, persistence and terminal
 cleanup. See [CONTRIBUTING.md](CONTRIBUTING.md) for dependency and CI setup.
 
 MIT licensed. This is an initial development version, not a published release.
+
+## Sign in with ChatGPT
+
+Open `/providers`, choose **Sign in with ChatGPT**, then **Connect a ChatGPT
+account**. Complete the browser consent and return to the terminal. If the
+browser does not open, copy the local URL shown in the panel. Esc cancels the
+pending sign-in. Choose a model offered by the connected account, save the
+agent, and use `/agents` to switch interlocutors.
+
+Each account has its own registration and credentials. Several agents can use
+one account, or different accounts and providers. `/providers` also offers
+reauthorization and sign-out. Existing OpenAI-compatible connections continue
+to use their configured endpoint and API key.
+
+Authentication is implemented by `roomkit-auth`; RoomKit Code owns the menus
+and account-to-agent association. ChatGPT credentials are resolved before each
+model request and used only with the public OpenAI Responses API. The model
+catalogue comes from the selected account, not a hard-coded list. Eligibility,
+limits and model availability depend on the account and its granted scopes.
+
+Tokens stay in `auth/accounts.json` under the configured application state
+directory, separate from project profiles. These files are **unencrypted**, with
+owner-only permissions and atomic writes. They must not be committed or shared.
+Provider profiles contain only an opaque account reference. If remote revocation
+cannot be confirmed, sign-out clears local tokens and reports that distinction.
+The OAuth callback uses a local browser on the same machine; remote browser
+forwarding and device-code sign-in are not implemented in this first version.

@@ -65,6 +65,12 @@ impl Profiles {
         request: Request,
         current: SessionConfig,
     ) -> Result<CommandResult, String> {
+        if let Command::Invoke { name, arguments } = &request.command
+            && name == "providers"
+            && let Some(action) = arguments.strip_prefix("chatgpt:")
+        {
+            return self.accounts.handle(current.room.as_str(), action).await;
+        }
         let mut state = self.state.lock().await;
         match request.command {
             Command::Invoke { name, arguments } => {
@@ -82,6 +88,63 @@ impl Profiles {
                 let model = parts.next().unwrap_or_default();
                 match (name.as_str(), action) {
                     ("providers", "") => Ok(provider_choices(&state, &current)),
+                    ("providers", "chatgpt-use") => {
+                        let account = self
+                            .accounts
+                            .auth
+                            .accounts()
+                            .map_err(|e| e.to_string())?
+                            .into_iter()
+                            .find(|a| a.id == id)
+                            .ok_or("Unknown ChatGPT account")?;
+                        let models = self
+                            .accounts
+                            .auth
+                            .models(id)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        if models.is_empty() {
+                            return Err("This ChatGPT account returned no available models".into());
+                        }
+                        let provider_id = format!("chatgpt-{id}");
+                        let provider = Provider {
+                            id: provider_id.clone(),
+                            label: format!(
+                                "ChatGPT · {}",
+                                account
+                                    .email
+                                    .as_deref()
+                                    .unwrap_or("Account")
+                                    .chars()
+                                    .take(80)
+                                    .collect::<String>()
+                            ),
+                            base_url: roomkit_auth::CHATGPT_API_ROOT.into(),
+                            authentication: Authentication::ChatGpt { account: id.into() },
+                            timeout_seconds: 600,
+                        };
+                        provider.validate()?;
+                        if !state.providers.value.profiles.contains_key(&provider_id)
+                            && state.providers.value.profiles.len() >= 128
+                        {
+                            return Err("Maximum of 128 providers reached".into());
+                        }
+                        let mut providers = state.providers.value.clone();
+                        providers.profiles.insert(provider_id.clone(), provider);
+                        state.providers.save(providers)?;
+                        self.accounts.close().await;
+                        Ok(choices(
+                            &current,
+                            "providers",
+                            "ChatGPT models · choose one to create an agent",
+                            models
+                                .into_iter()
+                                .map(|m| {
+                                    choice(format!("model:{provider_id}:{}", m.id), m.name, m.id)
+                                })
+                                .collect(),
+                        ))
+                    }
                     ("providers", "open") => {
                         let p = state
                             .providers
@@ -89,6 +152,12 @@ impl Profiles {
                             .profiles
                             .get(id)
                             .ok_or("Unknown provider")?;
+                        if let Authentication::ChatGpt { account } = &p.authentication {
+                            return self
+                                .accounts
+                                .handle(current.room.as_str(), &format!("account:{account}"))
+                                .await;
+                        }
                         Ok(choices(
                             &current,
                             "providers",
@@ -122,6 +191,14 @@ impl Profiles {
                         };
                         if existing.is_none() && state.providers.value.profiles.len() >= 128 {
                             return Err("Maximum of 128 provider profiles reached".into());
+                        }
+                        if existing.is_some_and(|p| {
+                            matches!(p.authentication, Authentication::ChatGpt { .. })
+                        }) {
+                            return Err(
+                                "Manage ChatGPT connections through the ChatGPT account menu"
+                                    .into(),
+                            );
                         }
                         let target = Target::Provider(existing.map(|p| p.id.clone()));
                         let form =
@@ -303,11 +380,14 @@ fn open_form(
 }
 
 fn provider_choices(state: &State, current: &SessionConfig) -> CommandResult {
-    let mut entries = vec![choice(
-        "add",
-        "+ Add provider",
-        "OpenAI-compatible connection",
-    )];
+    let mut entries = vec![
+        choice("add", "+ Add provider", "OpenAI-compatible connection"),
+        choice(
+            "chatgpt:menu",
+            "Sign in with ChatGPT",
+            "Use your ChatGPT account and manage connected accounts",
+        ),
+    ];
     entries.extend(state.providers.value.profiles.values().map(|p| {
         choice(
             format!("open:{}", p.id),
@@ -375,6 +455,7 @@ fn provider_form(existing: Option<&Provider>, state: &State, id: String) -> Form
     };
     let p = existing.unwrap_or(&default);
     let (auth, variable) = match &p.authentication {
+        Authentication::ChatGpt { .. } => ("none", ""),
         Authentication::None => ("none", ""),
         Authentication::Stored { .. } => ("stored", ""),
         Authentication::Environment { variable } => ("environment", variable.as_str()),
@@ -568,6 +649,12 @@ fn parse_provider(
         original,
         state.providers.value.profiles.contains_key(id),
     )?;
+    if original
+        .and_then(|id| state.providers.value.profiles.get(id))
+        .is_some_and(|p| matches!(p.authentication, Authentication::ChatGpt { .. }))
+    {
+        return Err("Manage ChatGPT connections through the ChatGPT account menu".into());
+    }
     let authentication = match value(values, "auth") {
         "none" => Authentication::None,
         "environment" => Authentication::Environment {

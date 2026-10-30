@@ -21,10 +21,7 @@ use roomkit_tools_search::{ExaSearch, SearchHttpConfig, SearchLimits, WebSearchT
 use roomkit_tools_web::{WebFetchLimits, WebFetchTool};
 use std::{path::Path, sync::Arc};
 
-use crate::{
-    Result,
-    profiles::model::{Agent, Provider},
-};
+use crate::{Result, profiles::model::Agent};
 
 const INSTRUCTIONS: &str = include_str!("coding-agent.txt");
 
@@ -94,16 +91,9 @@ pub(crate) async fn create(
     root: &std::path::Path,
     resources: &Resources,
     profile: &Agent,
-    connection: &Provider,
+    provider: OpenAiConfig,
 ) -> Result<(OpenAiAgent, Vec<ToolDefinition>)> {
     profile.validate()?;
-    connection.validate()?;
-    let provider = OpenAiConfig::new(
-        &connection.base_url,
-        connection.authentication.key()?,
-        &profile.model,
-    )
-    .with_timeout(std::time::Duration::from_secs(connection.timeout_seconds));
     let mutations = resources.mutations.clone();
     let mut shell_limits = ShellLimits::default();
     shell_limits.max_output_bytes = 8192;

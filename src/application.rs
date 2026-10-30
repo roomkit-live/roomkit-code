@@ -84,6 +84,7 @@ impl Application {
     }
 
     pub async fn close(&self) -> Result<()> {
+        self.profiles.accounts.close().await;
         let engine = self.kit.close().await;
         let tools = self.profiles.resources.close().await;
         engine?;

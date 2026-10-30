@@ -1629,3 +1629,5 @@ async fn stale_or_conflicting_forms_cannot_replace_a_working_agent() {
 mod catalogue;
 
 mod processes;
+
+mod accounts;
