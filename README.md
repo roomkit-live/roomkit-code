@@ -191,8 +191,8 @@ expansion reveals more symbols only when that result contains them.
 
 ## Context, consumption and request failures
 
-The dedicated context footer line shows the last completed generation's
-measured context: input tokens
+Context shares the model footer when it fits, and uses a separate row in narrow
+windows. It shows the last completed generation's measured context: input tokens
 (including cached input) plus output tokens. Set the agent's **Context capacity** in `/agents` to the actual server capacity to see used and remaining
 percentages. Without capacity the token count remains visible; without reported
 counts the context stays unknown unless an earlier measurement is available.
