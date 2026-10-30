@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Align engine, CLI and tools dependencies on the consolidated RoomKit main API.
+  Raise the minimum Rust version to 1.94 to match the current tools library.
+
+- Simplify welcome to one footer with mode, agent, model, effort and command help.
+  Generate the terminal symbol and wordmark from the RoomKit SVG and website font.
+
 - Make human approvals selectable by keyboard or mouse, with readable command
   details and one-time decision receipts retained when the turn settles.
 - Remove the technical provider protocol from the sidebar agent/model section.

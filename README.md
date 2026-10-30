@@ -666,6 +666,9 @@ to the host's existing busy-state rules.
 ## Welcome screen
 
 New empty conversations open with a centered RoomKit wordmark and composer.
+One compact footer shows the mode, agent, model, effort and command shortcut.
+It omits the technical provider protocol, project path and session identifier;
+menus and command input replace it with contextual keyboard help.
 Typing `/` still opens commands; multiline input, image attachments and Ask/Yolo
 keep their normal behavior. The first exchange displays the conversation and
 sidebar. `/new` restores welcome; `/resume` opens the selected history. Forms,
@@ -677,3 +680,17 @@ explicit TOML configuration with `[ui] welcome = false`, `welcome_width = 88`,
 `--no-logo` hides both welcome graphics and the compact header mark. Custom
 application names fall back to plain lettering unless a wordmark is supplied.
 Small windows use the regular conversation layout without discarding input.
+
+The default terminal artwork is generated from `assets/roomkit-mark.svg` and
+the website's Space Grotesk 600 font. It uses Unicode quadrant blocks, inherits
+the terminal theme and requires no image protocol or runtime font dependency.
+To regenerate it during development, install CairoSVG and Pillow in a local
+Python environment, then run:
+
+```sh
+python scripts/generate-branding.py --font /path/to/space-grotesk-600-latin.woff2
+cargo fmt --all
+```
+
+The generated Rust strings live in `src/branding.rs`; Python is not required to
+build or run the application.

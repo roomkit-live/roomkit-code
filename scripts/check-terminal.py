@@ -117,7 +117,7 @@ def scenario(project, state, base_url, resume=False, color="never"):
             wait_for(b"No matching choices", offset)
             offset = len(captured)
             os.write(master, b"\x1b")
-            wait_for(b"Enter send", offset)
+            wait_for(b"Tab commands", offset)
             os.write(master, b"/resume\r")
             wait_for(b"Resume session", offset)
             os.write(master, b"fixture")

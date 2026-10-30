@@ -108,7 +108,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
 
     def save():
         offset = send(b"\x13")  # Ctrl+S, with terminal flow control disabled.
-        wait_for(b"Enter send", offset)
+        wait_for(b"Tab commands", offset)
 
     def add_agent(identifier, label, model):
         command("/agents", b"Project agents")
@@ -128,7 +128,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         wait_for(b"Connect a ChatGPT account", offset)
         assert not (state / "auth" / "accounts.json").exists()
         offset = send(b"\x1b")
-        wait_for(b"Enter send", offset)
+        wait_for(b"Tab commands", offset)
         command("/providers", b"Providers")
         offset = send(b"\r")
         wait_for(b"Provider connection", offset)

@@ -32,7 +32,7 @@ terminal-check:
 	python3 scripts/check-mcp.py
 
 msrv:
-	cargo +1.92.0 test --locked
+	cargo +1.94.0 test --locked
 
 audit:
 	cargo deny $(DENY_FLAGS) check

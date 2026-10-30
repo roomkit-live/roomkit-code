@@ -1,6 +1,6 @@
 //! Private, room-scoped author attachments. No workspace paths enter the protocol.
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use roomkit::model::{CompositeContent, EventContent, MediaContent, RoomId};
+use roomkit::model::{CompositeContent, EventContent, MediaContent, RoomId, TextContent};
 use roomkit::transcript::Image;
 use roomkit_ai::ImageResolver;
 use roomkit_tui::protocol::{ImageUpload, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_IMAGES};
@@ -55,7 +55,7 @@ impl Images {
             .map_err(|_| "Cannot open this session's attachment storage")?;
         let mut parts = Vec::new();
         if !text.is_empty() {
-            parts.push(EventContent::text(text));
+            parts.push(TextContent::new(text).into());
         }
         for (index, (image, bytes)) in images.iter().zip(decoded).enumerate() {
             let digest = format!("{:x}", Sha256::digest(&bytes));
@@ -75,7 +75,8 @@ impl Images {
                 }
                 _ => return Err("Attachment storage contains an invalid file".into()),
             }
-            let mut media = MediaContent::new(format!("attachment://{digest}"), "image/png");
+            let mut media = MediaContent::new(format!("attachment://{digest}"), "image/png")
+                .map_err(|_| "Cannot compose image attachment")?;
             media.filename = Some(image.name.clone());
             media.caption = Some(format!(
                 "Image {} · {}×{}",

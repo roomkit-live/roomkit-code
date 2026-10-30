@@ -1,6 +1,6 @@
 # Contributing
 
-Use the toolchain pinned in `rust-toolchain.toml`. Rust 1.92 is the minimum
+Use the toolchain pinned in `rust-toolchain.toml`. Rust 1.94 is the minimum
 supported version. Run `make check`, `make msrv` and `make audit` before delivery.
 Install cargo-deny with `cargo install cargo-deny --locked` for the audit gate.
 CI runs on Linux and macOS; tests must not require a real model or credentials.

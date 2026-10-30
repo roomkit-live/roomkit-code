@@ -131,7 +131,7 @@ pub(crate) async fn create(
     if let Some(id) = &id {
         match kit.get_room(id, GetRoomOptions::default()).await {
             Ok(_) => return Ok(id.clone()),
-            Err(roomkit::KitError::Store(roomkit::StoreError::RoomNotFound(_))) => {}
+            Err(roomkit::RoomKitError::RoomNotFound(_)) => {}
             Err(error) => return Err(error.into()),
         }
     } else if draft {

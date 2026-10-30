@@ -30,7 +30,7 @@ jobs:
         run: rustup show active-toolchain
       - run: make check
       - name: Install minimum supported Rust
-        run: rustup toolchain install 1.92.0 --profile minimal
+        run: rustup toolchain install 1.94.0 --profile minimal
       - run: make msrv
       - name: Remove temporary credentials
         if: always()

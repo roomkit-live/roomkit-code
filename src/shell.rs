@@ -7,8 +7,8 @@ use std::{
 };
 
 use roomkit::model::{
-    Access, ChannelId, ChannelType, EventContent, EventDirection, EventId, EventSource, EventType,
-    ParticipantId, RoomEvent, Timestamp,
+    Access, ChannelId, ChannelType, EventId, EventSource, ParticipantId, RoomEvent, TextContent,
+    Timestamp,
 };
 use roomkit::{
     CommitEventOptions, ConversationStore, ListBindingsOptions, RoomKit, UpdateEventOptions,
@@ -119,11 +119,7 @@ impl Shell {
             .clone()
             .try_acquire_owned()
             .map_err(|_| "A shell command is already running")?;
-        let mut source = EventSource::new(
-            channel.clone(),
-            ChannelType::WEBSOCKET,
-            EventDirection::Inbound,
-        );
+        let mut source = EventSource::new(channel.clone(), ChannelType::WEBSOCKET);
         source.participant_id =
             Some(ParticipantId::new(&view.sender).map_err(|_| "Invalid sender")?);
         let millis = SystemTime::now()
@@ -134,16 +130,15 @@ impl Shell {
             Timestamp::from_unix_millis(i64::try_from(millis).map_err(|_| "Invalid clock")?)
                 .map_err(|_| "Invalid clock")?;
         let mut row = RoomEvent::new(
-            id,
             view.room.clone(),
-            EventType::Message,
             source,
-            EventContent::text(format!(
+            TextContent::new(format!(
                 "User shell command\n\n{}\nExecution requested; no final result recorded. Do not assume success or rerun automatically.",
                 fenced(&command, "sh")
             )),
-            timestamp,
         );
+        row.id = id;
+        row.created_at = timestamp;
         row.metadata.insert("shell_command".into(), json!(command));
         row.metadata.insert("shell_state".into(), json!("pending"));
         let row = kit
@@ -204,7 +199,7 @@ impl Shell {
                 RunOutcome::Failed,
             ),
         };
-        row.content = EventContent::text(text);
+        row.content = TextContent::new(text).into();
         row.metadata.insert("shell_state".into(), json!(outcome));
         let updated = kit
             .update_event(
@@ -327,7 +322,7 @@ impl Shell {
             let text = format_output(command, &read, started.elapsed());
             if text != last {
                 let mut live = row.clone();
-                live.content = EventContent::text(text.clone());
+                live.content = TextContent::new(text.clone()).into();
                 context.publish(item(&live));
                 last = text;
             }
