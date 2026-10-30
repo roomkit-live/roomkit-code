@@ -116,6 +116,25 @@ async fn monitor_observes_actual_lifecycle_filters_owners_and_rejects_old_action
         badge(&mut updates, "running").await.label,
         "Processes: 1 running"
     );
+    let sidebar = app.profiles.sidebar(&app.view).await.0;
+    let processes = sidebar
+        .sections
+        .iter()
+        .find(|s| s.title == "Processes")
+        .unwrap();
+    let roomkit_tui::protocol::SidebarContent::Entries(entries) = &processes.content else {
+        panic!("Expected process entries");
+    };
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].action.as_ref().unwrap().arguments,
+        process.process_id
+    );
+    assert!(
+        !serde_json::to_string(&sidebar)
+            .unwrap()
+            .contains(&hidden.process_id)
+    );
     let list = panel(&app, "").await.unwrap();
     assert_eq!(list.actions.len(), 1);
     assert!(list.body.contains(app.view.room.as_str()));
@@ -142,6 +161,10 @@ async fn monitor_observes_actual_lifecycle_filters_owners_and_rejects_old_action
     assert!(stopped.title.contains("stopped"));
     assert!(stopped.body.contains("stdout marker") && stopped.body.contains("stderr marker"));
     no_badge(&mut updates).await;
+    let sidebar = app.profiles.sidebar(&app.view).await.0;
+    let serialized = serde_json::to_string(&sidebar).unwrap();
+    assert!(serialized.contains("No running processes"));
+    assert!(!serialized.contains(&process.process_id));
     let jobs = manager.observe().await;
     assert_eq!(
         jobs.iter()

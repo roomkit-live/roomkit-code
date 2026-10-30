@@ -182,3 +182,16 @@ fn provider_limits_are_explicit_and_cli_values_override_the_file() {
     cli.provider_timeout_seconds = Some(0);
     assert!(Settings::load(&cli).is_err());
 }
+
+#[test]
+fn sidebar_appearance_is_configurable_without_changing_agent_settings() {
+    let root = tempfile::tempdir().unwrap();
+    let mut cli = cli(root.path());
+    assert!(Settings::load(&cli).unwrap().ui.sidebar_visible);
+    let config = root.path().join("appearance.toml");
+    std::fs::write(&config, "[ui]\nsidebar = false\nsidebar_width = 42\n").unwrap();
+    cli.config = Some(config);
+    let settings = Settings::load(&cli).unwrap();
+    assert!(!settings.ui.sidebar_visible);
+    assert_eq!(settings.ui.sidebar_width, 42);
+}

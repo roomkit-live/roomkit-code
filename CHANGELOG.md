@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Show a configurable session sidebar with agent/model, provider connection,
+  live context usage, MCP connection/tool status and active processes. F7 toggles
+  visibility, F8 navigates actions, and narrow terminals retain the full-width
+  conversation. Process details and MCP configuration reuse existing controls.
+
 - Saving an MCP server now connects it and enables tools for the current agent
   automatically. Connected servers can be edited directly and reconnect on save.
   Existing selections and explicit disabling are preserved, with bounded default

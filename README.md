@@ -625,3 +625,26 @@ Legacy HTTP+SSE transport, MCP OAuth, prompts/resources browsing,
 subscription-based catalogue refresh and
 MCP-hosted skills are not yet exposed. Non-text tool content follows the current
 engine adapter's text/placeholder behavior.
+
+## Session sidebar
+
+On wide terminals, a right sidebar displays the selected agent/model and provider
+connection, context occupancy with remaining percentage, configured MCP servers
+and running processes. It uses the reusable sidebar protocol from roomkit-cli;
+this application supplies its MCP and process sections. Provider credentials and
+endpoint settings are never included in the sidebar.
+
+F7 hides/shows it; F8 focuses its actions. Up/Down or Tab chooses an action,
+Enter opens the existing detail/configuration view, and Escape returns to the
+composer. Click an MCP server to inspect its tools, or a process to inspect its
+output and stop it through the existing controls. Process exits remove entries
+automatically. Scrolling over the sidebar leaves conversation history in place.
+
+Configure `[ui] sidebar = false` or `sidebar_width = 34` in the explicit local
+TOML file. Below 112 columns (or when fewer than 72 columns would remain for the
+conversation), the sidebar hides and usage returns to the footer. Forms, menus
+that require focus, and approval views retain their normal interactions.
+No background refresh redraws an unchanged screen. MCP liveness is checked
+every two seconds while servers are configured; process changes use the existing
+lifecycle observer. Clicking configuration during a running turn remains subject
+to the host's existing busy-state rules.

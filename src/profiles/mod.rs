@@ -2,6 +2,7 @@
 mod deletion;
 mod mcp;
 pub(crate) mod model;
+pub(crate) mod sidebar;
 mod skills;
 mod slot;
 mod store;
@@ -34,6 +35,7 @@ pub(crate) struct Profiles {
     pub(crate) images: Arc<crate::images::Images>,
     skill_catalogue: tokio::sync::RwLock<skills::Catalogue>,
     pub(crate) mcp_runtime: mcp::Runtime,
+    pub(crate) sidebar_changes: tokio::sync::watch::Sender<()>,
     state: Mutex<State>,
 }
 
@@ -166,6 +168,7 @@ impl Profiles {
             processes: crate::processes::Processes::new(resources.processes.clone()),
             resources,
             mcp_runtime: mcp::Runtime::default(),
+            sidebar_changes: tokio::sync::watch::channel(()).0,
             state: Mutex::new(State {
                 mcp,
                 pending_mcp: None,

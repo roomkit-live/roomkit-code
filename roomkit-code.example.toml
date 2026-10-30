@@ -11,6 +11,8 @@ timeout_seconds = 600 # total deadline per model request, including streaming
 mode = "ask" # ask, yolo; --mode overrides this explicit configuration
 
 [ui]
+sidebar = true # F7 toggles locally; narrow terminals hide it automatically
+sidebar_width = 34 # display columns, clamped to 28–48
 theme = "dark" # dark, light, terminal
 color = "auto" # auto, always, never
 animations = true

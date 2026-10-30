@@ -339,6 +339,8 @@ impl CommandHandler for Sessions {
             current.clone(),
         );
         let mut accounts = self.profiles.accounts.subscribe();
+        let profiles = self.profiles.clone();
+        let mut sidebar_changes = profiles.sidebar_changes.subscribe();
         let (tx, rx) = tokio::sync::watch::channel(Vec::new());
         tokio::spawn(async move {
             loop {
@@ -348,13 +350,23 @@ impl CommandHandler for Sessions {
                     // the UI ignores updates to a dismissed or different view.
                     events.push(event);
                 }
-                if tx.send(events).is_err() {
+                let (sidebar, poll_connections) = profiles.sidebar(&current).await;
+                events.push(Event::SidebarChanged {
+                    conversation: current.room.as_str().into(),
+                    sidebar: Some(sidebar),
+                });
+                let changed = *tx.borrow() != events;
+                if changed && tx.send(events).is_err() {
                     break;
                 }
                 tokio::select! {
                     () = tx.closed() => break,
                     changed = processes.changed() => if changed.is_err() { break; },
                     changed = accounts.changed() => if changed.is_err() { break; },
+                    changed = sidebar_changes.changed() => if changed.is_err() { break; },
+                    // MCP exposes connection liveness, but no disconnect stream.
+                    // Only inspect configured connections; unchanged state never redraws the TUI.
+                    () = tokio::time::sleep(std::time::Duration::from_secs(2)), if poll_connections => {},
                 }
             }
         });
@@ -372,7 +384,9 @@ impl CommandHandler for Sessions {
     ) -> std::result::Result<CommandResult, String> {
         if matches!(&request.command, Command::Invoke { name, .. } | Command::SubmitForm { name, .. } if name == "mcp")
         {
-            return self.profiles.mcp(&self.kit, request, current).await;
+            let result = self.profiles.mcp(&self.kit, request, current).await;
+            self.profiles.sidebar_changes.send_replace(());
+            return result;
         }
         if let Command::Invoke { name, arguments } = &request.command
             && name == "skills"

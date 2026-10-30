@@ -124,6 +124,8 @@ struct Provider {
 #[derive(Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Appearance {
+    sidebar: bool,
+    sidebar_width: u16,
     terminal_status: bool,
     theme: Palette,
     color: Color,
@@ -143,6 +145,8 @@ struct Appearance {
 impl Default for Appearance {
     fn default() -> Self {
         Self {
+            sidebar: true,
+            sidebar_width: 34,
             terminal_status: true,
             theme: Palette::default(),
             color: Color::default(),
@@ -264,6 +268,8 @@ impl Settings {
             branding.logo.clear();
         }
         let ui = UiOptions {
+            sidebar_visible: appearance.sidebar,
+            sidebar_width: appearance.sidebar_width,
             terminal_status: (appearance.terminal_status && !cli.no_terminal_status)
                 .then(|| TerminalStatus::new("roomkit-code"))
                 .transpose()?,

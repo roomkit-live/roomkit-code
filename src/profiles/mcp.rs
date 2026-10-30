@@ -8,6 +8,7 @@ mod ui;
 use super::*;
 pub(super) use config::Servers;
 pub(crate) use config::valid_id;
+use roomkit_ai::Toolset;
 use roomkit_cli_roomkit::CommandResult;
 use roomkit_tui::protocol::{Command, Request};
 pub(super) use runtime::Runtime;
@@ -199,5 +200,56 @@ impl Profiles {
                 Err("Use /mcp to configure servers, connect and select tools for this agent".into())
             }
         }
+    }
+}
+
+pub(super) async fn sidebar(
+    state: &State,
+    current: &SessionConfig,
+    runtime: &Runtime,
+) -> roomkit_tui::protocol::SidebarSection {
+    use roomkit_tui::protocol::{SidebarContent, SidebarEntry, SidebarSection, SidebarTone};
+    let connections = runtime.connections.lock().await;
+    let agent = state.project.value.agents.get(current.agent.as_str());
+    let mut entries = Vec::new();
+    for id in state.mcp.value.servers.keys() {
+        let connection = connections.get(id);
+        let live = connection
+            .and_then(|c| c.server.as_ref())
+            .filter(|s| s.is_connected());
+        let names = agent
+            .and_then(|a| a.mcp.get(id))
+            .map_or(&[][..], Vec::as_slice);
+        let available = live.map(|s| s.tools()).unwrap_or_default();
+        let enabled = names
+            .iter()
+            .filter(|name| available.iter().any(|tool| &tool.name == *name))
+            .count();
+        entries.push(SidebarEntry {
+            label: format!("{} {id}", if live.is_some() { "●" } else { "○" }),
+            detail: format!(
+                "{} · {enabled} active tools",
+                connection.map_or("Disconnected", |c| c.status())
+            ),
+            tone: if live.is_some() {
+                SidebarTone::Success
+            } else {
+                SidebarTone::Warning
+            },
+            action: super::sidebar::action("mcp", format!("show:{id}")),
+        });
+    }
+    if entries.is_empty() {
+        entries.push(SidebarEntry {
+            label: "No servers configured".into(),
+            detail: String::new(),
+            tone: SidebarTone::Muted,
+            action: None,
+        });
+    }
+    SidebarSection {
+        title: "MCP servers".into(),
+        action: super::sidebar::action("mcp", ""),
+        content: SidebarContent::Entries(entries),
     }
 }

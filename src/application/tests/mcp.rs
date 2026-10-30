@@ -183,6 +183,21 @@ async fn saving_mcp_connects_and_enables_tools_with_permissions_and_durable_sele
     let app = Application::open(&settings, String::new()).await.unwrap();
     configure(&app, root.path(), "demo", "normal", "5").await;
     assert!(alive(root.path(), "demo"));
+    let sidebar = app.profiles.sidebar(&app.view).await.0;
+    let encoded = serde_json::to_string(&sidebar).unwrap();
+    assert!(encoded.contains("Connected") && encoded.contains("active tools"));
+    assert!(encoded.contains("show:demo"));
+    assert!(!encoded.contains("fake_mcp.py"));
+    let mut ui = roomkit_tui::Session::default();
+    ui.apply(Event::Snapshot(app.session().snapshot().await.unwrap()));
+    ui.apply(Event::SidebarChanged {
+        conversation: app.view.room.as_str().into(),
+        sidebar: Some(sidebar),
+    });
+    assert!(
+        ui.sidebar.is_some(),
+        "Application sidebar must satisfy the generic protocol"
+    );
     assert!(mock.requests.lock().unwrap().is_empty());
     assert!(
         app.profiles
@@ -282,6 +297,8 @@ async fn saving_mcp_connects_and_enables_tools_with_permissions_and_durable_sele
         RunOutcome::Completed
     );
     assert!(!alive(root.path(), "demo"));
+    let encoded = serde_json::to_string(&app.profiles.sidebar(&app.view).await.0).unwrap();
+    assert!(encoded.contains("Disconnected") && encoded.contains("0 active tools"));
     app.close().await.unwrap();
 }
 

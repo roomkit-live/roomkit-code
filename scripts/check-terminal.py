@@ -95,6 +95,13 @@ def scenario(project, state, base_url, resume=False, color="never"):
         wait_for(b"RoomKit Code")
         wait_for("› Ask about this project…".encode())
         wait_for(b"Start a conversation")
+        wait_for(b"F7 hide")
+        wait_for(b"No servers configured")
+        # Exercise the app's default sidebar, then keep the existing full-width
+        # history/footer checks. This preference must survive session switches.
+        offset = len(captured)
+        os.write(master, b"\x1b[18~")
+        wait_for(b"F7 sidebar", offset)
         assert b"Fixture inspection complete." not in captured, "Launch unexpectedly resumed the previous session"
         if not resume:
             offset = len(captured)
@@ -149,6 +156,13 @@ def scenario(project, state, base_url, resume=False, color="never"):
         os.write(master, b"Unsent draft\x1b[1;5F")
         wait_for(b"Latest answer marker.")
         wait_for(b"context 2050/32768")
+        offset = len(captured)
+        os.write(master, b"\x1b[18~")
+        wait_for(b"2050 / 32768 tokens", offset)
+        wait_for(b"6.3% used", offset)
+        offset = len(captured)
+        os.write(master, b"\x1b[18~")
+        wait_for(b"context 2050/32768", offset)
         offset = len(captured)
         os.write(master, b"\x1b[5~") # PageUp
         wait_for(b"Back to bottom", offset)

@@ -8,7 +8,10 @@ use roomkit_sqlite::SqliteStore;
 use roomkit_tools_process::{
     ObservedProcess, ProcessChunk, ProcessManager, ProcessReadInput, ProcessState, ProcessStopInput,
 };
-use roomkit_tui::protocol::{BackgroundStatus, Choice, Event, PanelSpec};
+use roomkit_tui::protocol::{
+    BackgroundStatus, Choice, Event, PanelSpec, SidebarContent, SidebarEntry, SidebarSection,
+    SidebarTone,
+};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
@@ -26,6 +29,7 @@ struct Panel {
 pub(crate) struct Processes {
     manager: ProcessManager,
     panel: watch::Sender<Option<Panel>>,
+    sidebar: watch::Sender<(uuid::Uuid, SidebarSection)>,
 }
 
 struct Job {
@@ -40,7 +44,12 @@ impl Processes {
         Arc::new(Self {
             manager,
             panel: watch::channel(None).0,
+            sidebar: watch::channel((uuid::Uuid::nil(), sidebar(&[]))).0,
         })
+    }
+
+    pub fn sidebar(&self) -> SidebarSection {
+        self.sidebar.borrow().1.clone()
     }
 
     /// The UI owns observation lifetime. No periodic work while panels are closed.
@@ -51,6 +60,8 @@ impl Processes {
         current: SessionConfig,
     ) -> watch::Receiver<Vec<Event>> {
         self.panel.send_replace(None);
+        let observation = uuid::Uuid::new_v4();
+        self.sidebar.send_replace((observation, sidebar(&[])));
         let (tx, rx) = watch::channel(Vec::new());
         let this = self.clone();
         let mut lifecycle = this.manager.subscribe();
@@ -79,7 +90,17 @@ impl Processes {
                         panel: this.render(panel, &jobs).await,
                     });
                 }
-                let changed = *tx.borrow() != events;
+                let section = sidebar(&jobs);
+                // A cancelled observer can finish its in-flight read after a
+                // view switch. It must not overwrite the new observer's section.
+                let section_changed = this.sidebar.send_if_modified(|(current, previous)| {
+                    if *current != observation || *previous == section {
+                        return false;
+                    }
+                    *previous = section;
+                    true
+                });
+                let changed = *tx.borrow() != events || section_changed;
                 if changed && tx.send(events).is_err() {
                     break;
                 }
@@ -479,5 +500,47 @@ fn chunk(body: &mut String, name: &str, chunk: &ProcessChunk) {
     });
     if !body.ends_with('\n') {
         body.push('\n');
+    }
+}
+
+// Only running jobs already authorized by jobs() reach the sidebar. Commands
+// and owners are clipped before crossing the bounded UI protocol.
+fn sidebar(jobs: &[Job]) -> SidebarSection {
+    let mut entries = jobs
+        .iter()
+        .filter(|j| j.process.status.state == ProcessState::Running)
+        .take(128)
+        .map(|job| SidebarEntry {
+            label: format!(
+                "● {}",
+                job.process
+                    .command
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .chars()
+                    .take(60)
+                    .collect::<String>()
+            ),
+            detail: format!(
+                "Running · {}",
+                job.agent.chars().take(64).collect::<String>()
+            ),
+            tone: SidebarTone::Accent,
+            action: crate::profiles::sidebar::action("processes", &job.process.status.process_id),
+        })
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        entries.push(SidebarEntry {
+            label: "No running processes".into(),
+            detail: String::new(),
+            tone: SidebarTone::Muted,
+            action: None,
+        });
+    }
+    SidebarSection {
+        title: "Processes".into(),
+        action: crate::profiles::sidebar::action("processes", ""),
+        content: SidebarContent::Entries(entries),
     }
 }
