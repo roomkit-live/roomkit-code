@@ -257,12 +257,20 @@ impl Profiles {
             Some(effort) => config.with_reasoning_effort(effort),
             None => config,
         };
+        let (skills, skill_roots) = {
+            let catalogue = self.skill_catalogue.read().await;
+            (
+                catalogue.selected(&profile.skills),
+                catalogue.roots().to_vec(),
+            )
+        };
         crate::agent::create(
             &self.workspace,
             &self.resources,
             profile,
             config,
-            self.skill_catalogue.read().await.selected(&profile.skills),
+            skills,
+            &skill_roots,
         )
         .await
         .map_err(

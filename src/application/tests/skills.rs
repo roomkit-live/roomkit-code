@@ -34,6 +34,72 @@ fn system(request: &Value) -> String {
 }
 
 #[tokio::test]
+async fn first_skill_creation_has_host_locations_before_discovery_and_enablement() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let state_dir = state.path().join("custom state");
+    let path = ".agents/skills/project-review/SKILL.md";
+    let body = "---\nname: project-review\ndescription: Review project structure\n---\nNEW-SKILL-INSTRUCTIONS\n";
+    let mock = Mock::start(vec![("write", json!({"path":path,"content":body}))]).await;
+    let mut settings = settings(root.path(), &state_dir, &mock.base_url);
+    settings.mode = crate::permissions::Mode::Yolo;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    turn_operation(&app, "create-first-skill").await;
+    let first = mock.requests.lock().unwrap().first().unwrap().clone();
+    let prompt = system(&first);
+    let roots = [
+        state_dir.join("skills"),
+        root.path().join(".agents/skills"),
+        root.path().join(".roomkit/skills"),
+    ];
+    let CommandResult::Events(events) = command(&app, "locations").await.unwrap() else {
+        panic!("Expected discovery information")
+    };
+    let panel = events
+        .iter()
+        .find_map(|event| match event {
+            Event::Panel { panel, .. } => Some(panel),
+            _ => None,
+        })
+        .unwrap();
+    // The model and UI see the actual configured roots, even with an empty catalogue.
+    for directory in roots {
+        assert!(prompt.contains(&json!(directory.to_string_lossy()).to_string()));
+        assert!(panel.body.contains(directory.to_str().unwrap()));
+    }
+    assert!(prompt.contains(".agents/skills/<name>/SKILL.md"));
+    assert!(prompt.contains("/skills reload"));
+    assert!(!prompt.contains("NEW-SKILL-INSTRUCTIONS"));
+    assert!(
+        !first["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["function"]["name"] == "activate_skill")
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join(path)).unwrap(),
+        body
+    );
+    // Creating the file neither refreshes the catalogue nor grants availability.
+    assert!(!format!("{:?}", command(&app, "list").await.unwrap()).contains("project-review"));
+    command(&app, "reload").await.unwrap();
+    assert!(
+        format!("{:?}", command(&app, "list").await.unwrap()).contains("project-review · disabled")
+    );
+    assert!(command(&app, "use project-review").await.is_err());
+    command(&app, "enable project-review").await.unwrap();
+    assert!(
+        app.profiles
+            .tools("code")
+            .await
+            .iter()
+            .any(|tool| tool.name == "activate_skill")
+    );
+    app.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn skills_are_opt_in_progressive_and_resume_for_the_same_agent() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();

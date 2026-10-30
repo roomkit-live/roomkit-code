@@ -25,6 +25,10 @@ pub(super) struct Catalogue {
 }
 
 impl Catalogue {
+    pub fn roots(&self) -> &[PathBuf] {
+        &self.roots
+    }
+
     pub async fn load(workspace: PathBuf, state: PathBuf) -> Result<Self, String> {
         tokio::task::spawn_blocking(move || {
             let mut catalogue = Self::default();

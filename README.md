@@ -474,6 +474,12 @@ commands cannot be submitted with images attached.
 
 ## Skills
 
+Agents receive this application's skill conventions even before any skill is
+enabled. When asked to create a project skill, their default destination is
+`.agents/skills/<name>/SKILL.md`. Creating the file does not automatically load
+or enable it: run `/skills reload`, then enable it for the selected agent.
+The model receives the actual discovery roots from the same catalogue as the UI.
+
 Use **/skills** to inspect the catalogue, source paths and loading errors for the
 selected agent. Skills start **disabled**. Open one, inspect its instructions,
 then choose **Enable for this agent**. The choice persists with that agent's

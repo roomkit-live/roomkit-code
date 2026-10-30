@@ -75,21 +75,51 @@ impl Resources {
 
 /// Inventory and registration are derived from the same selected toolsets.
 macro_rules! assemble {
-    ($id:expr, $profile:expr, $provider:expr, $skills:expr; $($binding:ident = $tool:expr),+ $(,)?) => {{
+    ($id:expr, $profile:expr, $provider:expr, $skills:expr, $skill_roots:expr; $($binding:ident = $tool:expr),+ $(,)?) => {{
         $(let $binding = $tool;)+
         let mut tools = [$($binding.tools()),+].concat().into_iter().filter(|tool| $profile.tools.contains(&tool.name)).collect::<Vec<_>>();
         tools.extend($skills.tool_definitions());
         let inventory = tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>().join(", ");
         let prompt = format!("{INSTRUCTIONS}\nCurrent agent: {} (ID: {}). Answer as this selected participant. Other participants may have different tools and providers.\nAgent instructions:\n{}\nCurrent capability inventory (provided by the application for this run):\n{inventory}\nOnly tools in this inventory are available to you. Apply tool-specific guidance only when that tool is present.\n", $profile.label, $profile.id, $profile.instructions);
-        let locations = $skills.skills().iter().map(|skill| format!("{}: {}", skill.name(), skill.path().display())).collect::<Vec<_>>().join("\n");
-        let prompt = if $skills.is_empty() { prompt } else {
-            format!("{prompt}\nSkill package directories (relative paths in skill instructions are resolved from these directories):\n{locations}\nUse activate_skill to load enabled skills before applying them. Bundled scripts are ordinary code; run them only with an available execution tool and the host's permission.\n")
-        };
+        let prompt = format!("{prompt}\n{}", skill_context(&$skills, $skill_roots));
         let mut agent = OpenAiAgent::new($id, $provider.with_system_prompt(prompt))?.with_skills($skills)?;
         $(if $binding.tools().iter().any(|tool| $profile.tools.contains(&tool.name)) { agent = agent.with_tools($binding)?; })+
         let agent = agent.with_tool_timeout(Some(std::time::Duration::from_secs(130)));
         Ok((agent, tools))
     }};
+}
+
+/// Installation facts remain available before the first skill is enabled.
+/// Only the selected packages' names and paths accompany the engine's metadata;
+/// their instructions still load through activate_skill.
+fn skill_context(skills: &SkillRegistry, roots: &[std::path::PathBuf]) -> String {
+    let roots = roots
+        .iter()
+        .map(|path| format!("- {}", serde_json::json!(path.to_string_lossy())))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let available = if skills.is_empty() {
+        "No skills are currently available to this agent. Creation with available file tools and user configuration through /skills are still supported.".into()
+    } else {
+        let locations = skills
+            .skills()
+            .iter()
+            .map(|skill| {
+                format!(
+                    "- {}: {}",
+                    skill.name(),
+                    serde_json::json!(skill.path().to_string_lossy())
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "Available skill package directories (resolve relative paths in their instructions from these directories):\n{locations}"
+        )
+    };
+    format!(
+        "Skill discovery roots for this application instance (lowest to highest precedence; later sources override duplicate names; paths are JSON-quoted):\n{roots}\n\n{available}\n"
+    )
 }
 
 pub(crate) async fn create(
@@ -98,12 +128,13 @@ pub(crate) async fn create(
     profile: &Agent,
     provider: OpenAiConfig,
     skills: SkillRegistry,
+    skill_roots: &[std::path::PathBuf],
 ) -> Result<(OpenAiAgent, Vec<ToolDefinition>)> {
     profile.validate()?;
     let mutations = resources.mutations.clone();
     let mut shell_limits = ShellLimits::default();
     shell_limits.max_output_bytes = 8192;
-    assemble!(ChannelId::new(&profile.id)?, profile, provider, skills;
+    assemble!(ChannelId::new(&profile.id)?, profile, provider, skills, skill_roots;
         outline = CodeOutlineToolset::new(CodeOutlineTool::new(root).await?),
         list = ListToolset::new(ListTool::new(root).await?),
         glob = GlobToolset::new(GlobTool::new(root).await?),

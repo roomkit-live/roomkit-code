@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Explain project skill creation, actual discovery roots and reload/enable/use
+  commands to every agent, including before its first skill is available.
+
 - Add per-agent skills with `/skills`: inspect provenance and loading failures,
   enable/disable packages, request their use, and reload local changes.
 - Reuse RoomKit's progressive activation, reference reads and session recovery;
