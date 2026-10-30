@@ -240,7 +240,7 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
         .unwrap();
     assert!(!session.can_interrupt);
     assert_eq!(session.commands.len(), 6);
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
     drop(app);
     let app = Application::open(&settings, String::new()).await.unwrap();
     let restored = app.session().snapshot().await.unwrap();
@@ -258,7 +258,7 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
             .count(),
         4
     );
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
     let requests = mock.requests.lock().unwrap();
     assert_eq!(
         requests.len(),
@@ -273,18 +273,7 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
         .collect();
     assert_eq!(
         names,
-        BTreeSet::from([
-            "code_outline",
-            "list",
-            "glob",
-            "grep",
-            "read",
-            "write",
-            "edit",
-            "diff",
-            "patch",
-            "shell"
-        ])
+        crate::profiles::model::TOOLS.iter().copied().collect()
     );
     assert!(
         requests[4]["messages"]
@@ -307,7 +296,7 @@ async fn resumed_history_cannot_replace_the_current_wire_inventory_or_host_catal
     let settings = settings(project.path(), state.path(), &old.base_url);
     let app = Application::open(&settings, String::new()).await.unwrap();
     turn(&app).await;
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
     drop(app);
 
     let current = Mock::start(vec![]).await;
@@ -324,7 +313,7 @@ async fn resumed_history_cannot_replace_the_current_wire_inventory_or_host_catal
     let wire = current.requests.lock().unwrap()[0].clone();
     let inventory = app.profiles.tools(app.view.agent.as_str()).await;
     let expected: BTreeSet<_> = inventory.iter().map(|tool| tool.name.as_str()).collect();
-    assert_eq!(expected.len(), 10);
+    assert_eq!(expected.len(), 19);
     let declared: BTreeSet<_> = wire["tools"]
         .as_array()
         .unwrap()
@@ -380,7 +369,7 @@ async fn resumed_history_cannot_replace_the_current_wire_inventory_or_host_catal
     );
     drop(client);
     task.await.unwrap().unwrap();
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -409,7 +398,7 @@ async fn unregistered_tools_and_outside_reads_have_no_effect_or_disclosure() {
     assert!(session.items.iter().all(
         |item| !matches!(item, Item::Tool { call, .. } if call.state == ToolState::Succeeded)
     ));
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
     let requests = mock.requests.lock().unwrap();
     assert_eq!(requests.len(), 3);
     assert!(
@@ -609,7 +598,7 @@ async fn ask_gates_real_changes_and_yolo_never_auto_approves_an_existing_request
     }
     drop(client);
     task.await.unwrap().unwrap();
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
     drop(app);
     let app = Application::open(&settings, String::new()).await.unwrap();
     let snapshot = app.session().snapshot().await.unwrap();
@@ -620,7 +609,7 @@ async fn ask_gates_real_changes_and_yolo_never_auto_approves_an_existing_request
         7,
         "Restoration never reexecutes the changes"
     );
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -701,7 +690,7 @@ async fn ask_shell_and_patch_require_approval_but_patch_preview_does_not() {
     );
     drop(client);
     task.await.unwrap().unwrap();
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -714,12 +703,12 @@ async fn histories_are_scoped_to_project_and_session_and_storage_has_one_owner()
     let app = Application::open(&settings, String::new()).await.unwrap();
     turn(&app).await;
     assert!(Application::open(&settings, String::new()).await.is_err());
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
     drop(app);
     settings.session = Some("separate".into());
     let app = Application::open(&settings, String::new()).await.unwrap();
     assert!(app.session().snapshot().await.unwrap().items.is_empty());
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
     drop(app);
     settings.workspace = second.path().canonicalize().unwrap();
     settings.session = Some("main".into());
@@ -761,7 +750,7 @@ async fn histories_are_scoped_to_project_and_session_and_storage_has_one_owner()
         ..request
     };
     assert!(handler.handle(request, app.view.clone()).await.is_err());
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
 }
 
 async fn command_event(
@@ -897,7 +886,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
     );
     drop(client);
     task.await.unwrap().unwrap();
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
     drop(app);
     let app = Application::open(&settings, String::new()).await.unwrap();
     assert_ne!(app.view.room.as_str(), first);
@@ -912,7 +901,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
         1,
         "Navigation must not invoke the model"
     );
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
     drop(app);
     settings.session = Some(first.clone());
     let app = Application::open(&settings, String::new()).await.unwrap();
@@ -941,7 +930,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
         panic!("Expected retry destination after restart");
     };
     assert_eq!(destination.room.as_str(), second);
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -1001,7 +990,7 @@ async fn outline_and_targeted_read_report_context_separately_from_consumption() 
         .unwrap();
     assert!(result.contains("pub fn second()"));
     assert!(!result.contains("pub fn first()") && !result.contains("pub fn third()"));
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
     drop(app);
     let resumed = Application::open(&settings, String::new()).await.unwrap();
     let restored = resumed.session().snapshot().await.unwrap();
@@ -1031,7 +1020,7 @@ async fn missing_last_usage_is_unknown_and_previous_round_totals_are_partial() {
     let usage = session.usage.unwrap();
     assert_eq!(usage.input_tokens, Some(100));
     assert!(!usage.complete);
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -1121,7 +1110,7 @@ async fn provider_timeouts_and_refusals_have_actionable_private_diagnostics() {
         );
         drop(client);
         task.await.unwrap().unwrap();
-        app.kit.close().await.unwrap();
+        app.close().await.unwrap();
         server.abort();
     }
 }
@@ -1146,7 +1135,7 @@ async fn unused_automatic_drafts_are_reused_without_adopting_named_sessions() {
     )
     .await
     .unwrap();
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
     drop(app);
     for launch in 0..3 {
         let app = Application::open(&settings, String::new()).await.unwrap();
@@ -1197,7 +1186,7 @@ async fn unused_automatic_drafts_are_reused_without_adopting_named_sessions() {
                 "A delayed no-op retry must stay a no-op after a message"
             );
         }
-        app.kit.close().await.unwrap();
+        app.close().await.unwrap();
     }
     assert_eq!(mock.requests.lock().unwrap().len(), 1);
     let app = Application::open(&settings, String::new()).await.unwrap();
@@ -1207,7 +1196,7 @@ async fn unused_automatic_drafts_are_reused_without_adopting_named_sessions() {
     );
     assert_ne!(app.view.room.as_str(), "named-empty");
     assert!(app.session().snapshot().await.unwrap().items.is_empty());
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -1258,7 +1247,7 @@ async fn resume_skips_legacy_empty_sessions_before_applying_the_catalogue_limit(
     assert_eq!(choices[0].value, used.as_str());
     assert_eq!(choices[0].label, "Inspect the project.");
     assert_eq!(mock.requests.lock().unwrap().len(), 1);
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
 }
 
 fn saved_provider_id(settings: &Settings) -> String {
@@ -1467,7 +1456,7 @@ async fn profiles_select_independent_providers_tools_and_auth_in_one_durable_con
         &[("label", "Renamed connection")],
     )
     .await;
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
     drop(app);
     settings.base_url.clear();
     settings.model.clear();
@@ -1482,7 +1471,7 @@ async fn profiles_select_independent_providers_tools_and_auth_in_one_durable_con
         second.headers.lock().unwrap().last().unwrap(),
         "Bearer fixture-private-key"
     );
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -1529,7 +1518,7 @@ async fn unconfigured_start_can_create_profiles_without_a_dummy_model_or_endpoin
     assert_eq!(app.view.model.as_ref().unwrap().model, "discovered-model");
     turn_operation(&app, "first-configured-turn").await;
     assert_eq!(provider.requests.lock().unwrap().len(), 1);
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -1634,5 +1623,7 @@ async fn stale_or_conflicting_forms_cannot_replace_a_working_agent() {
             .value,
         "External edit"
     );
-    app.kit.close().await.unwrap();
+    app.close().await.unwrap();
 }
+
+mod catalogue;

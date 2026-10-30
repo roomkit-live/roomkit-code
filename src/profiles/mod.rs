@@ -22,6 +22,7 @@ use store::Document;
 
 pub(crate) struct Profiles {
     workspace: PathBuf,
+    pub(crate) resources: crate::agent::Resources,
     state: Mutex<State>,
 }
 
@@ -35,16 +36,17 @@ struct State {
 }
 
 impl Profiles {
-    pub fn load(
+    pub async fn load(
         settings: &Settings,
         storage: &Storage,
         api_key: String,
+        resources: Option<crate::agent::Resources>,
     ) -> Result<Arc<Self>, String> {
         let mut providers =
             Document::<Providers>::load(settings.state_dir.join("connections.json"))?;
         let mut project =
             Document::<Project>::load(storage.database.with_file_name("agents.json"))?;
-        if providers.value.schema != 1 || project.value.schema != 1 {
+        if providers.value.schema != 1 {
             return Err("Unsupported profile file version".into());
         }
         if providers.value.profiles.len() > 128 || project.value.agents.len() > 64 {
@@ -61,6 +63,10 @@ impl Profiles {
             if id != &agent.id {
                 return Err("Invalid agent identity".into());
             }
+        }
+        let mut migrated = project.value.clone();
+        if migrated.migrate()? {
+            project.save(migrated)?;
         }
         if project.value.agents.is_empty() && !settings.base_url.is_empty() {
             let digest = format!(
@@ -110,6 +116,15 @@ impl Profiles {
         }
         Ok(Arc::new(Self {
             workspace: settings.workspace.clone(),
+            resources: match resources {
+                Some(resources) => resources,
+                None => crate::agent::Resources::new(
+                    &settings.workspace,
+                    storage.database.parent().ok_or("Missing state directory")?,
+                )
+                .await
+                .map_err(|_| "Could not initialize workspace tools")?,
+            },
             state: Mutex::new(State {
                 providers,
                 project,
@@ -169,7 +184,7 @@ impl Profiles {
         profile.validate()?;
         provider.validate()?;
         provider.authentication.key()?;
-        crate::agent::create(&self.workspace, profile, provider)
+        crate::agent::create(&self.workspace, &self.resources, profile, provider)
             .await
             .map_err(
                 |_| "Could not configure this agent; verify its provider, credential and workspace",

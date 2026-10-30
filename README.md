@@ -124,21 +124,62 @@ and the model's current capability inventory are derived from the same selected
 toolsets. Resuming keeps conversation history, but older assistant claims about
 missing tools do not change the currently registered capabilities.
 
-New agents initially select `code_outline`, `list`, `glob`, `grep`, `read`, `diff`, `write`, `edit`,
-`patch` and `shell`, implemented by `roomkit-tools-code`, `roomkit-tools-fs` and `roomkit-tools-process`
-and registered through their existing RoomKit adapters. Persistent process and
-web tools are not selected. Returned pages and scans are bounded by the tools' defaults. Hidden files are included and ignore files are not applied;
-choose a workspace appropriate to share with the configured model. Filesystem tools check paths under the configured root. Shell uses `/bin/sh -c`
-with your user permissions and environment; its initial workspace directory is
-**not a sandbox**. It has closed stdin, bounded output, a default 10-second
-runtime and a maximum requested runtime of 120 seconds.
+New agents initially select all 19 native coding tools:
 
-**Ask is the default.** Each `write`, `edit`, applied `patch` and `shell` call
-waits for an explicit decision. The panel shows exact arguments; use PgUp/PgDn
-to read longer details, **Ctrl+Y** to allow once or **Ctrl+N** to refuse.
-Read tools, `diff` and patch previews do not need approval. Requests expire after
-five minutes; disconnecting refuses pending actions. Actions too large to show
-in full (64 KiB of approval detail) are refused and must be split.
+| Purpose | Tools |
+| --- | --- |
+| Explore and understand | `code_outline`, `list`, `glob`, `grep`, `read` |
+| Compare and change files | `diff`, `write`, `edit`, `patch` |
+| Run commands and tests | `shell` |
+| Public web sources | `web_search`, `web_fetch` |
+| Persistent commands and stdin | `process_start`, `process_status`, `process_read`, `process_write`, `process_stop` |
+| Recover long output | `output_read`, `output_forget` |
+
+These reuse the native `roomkit-tools` implementations and their RoomKit adapters.
+`/agents` can restrict each participant's comma-separated selection. On the first
+upgrade, profiles with exactly the original ten-tool catalogue receive the new
+catalogue; existing subsets stay restricted. This migration is saved once in
+project schema 2. Later explicit selections, including the original ten tools,
+are preserved unchanged. Older application versions cannot read schema 2.
+
+`web_search` uses **Exa's anonymous service**, independently of the model's
+provider; no API key or model credential is sent to Exa. Availability and rate
+limits belong to that service, with no silent fallback. `web_fetch` retrieves
+bounded public HTTP(S) pages as Markdown/text without JavaScript (8 KiB content previews). Private
+network destinations are refused by default, including redirects. Search queries
+are sent to Exa; keep project secrets and private source out of queries. Retrieved
+content is untrusted data. Web-service configuration in the UI is not yet exposed.
+
+Returned pages and scans are bounded by the tools' defaults. Hidden files are
+included and ignore files are not applied; choose a workspace appropriate to
+share with the configured model. Filesystem tools check paths under the configured
+root. Shell uses `/bin/sh -c` with your user permissions and environment; its
+initial workspace directory is **not a sandbox**. It has closed stdin, bounded
+output (8 KiB per stream in the immediate result), a default 10-second runtime and a maximum requested runtime of 120 seconds.
+
+Persistent processes use pipes, not a PTY, and survive tool calls and profile
+changes while the app runs. They default to a five-minute lifetime (up to one
+hour), with eight retained jobs per session/agent and 32 total. Read stdout and
+stderr with independent byte cursors (4 KiB pages per stream); `process_write` sends exact stdin text,
+including any explicitly supplied newline, and can deliver EOF. Inspect partial
+writes before deciding what to do next. Stop unneeded jobs and set `forget` to
+release their retained records. The application closes remaining processes on exit.
+
+Shell and process tools share private temporary output archives, capped at 8 MiB
+per stream and 64 MiB overall, with 4 KiB read pages. `output_read` pages an owned archive using byte
+cursors; `output_forget` releases it. Check completeness and omitted bytes: these
+are bounded copies, not a guarantee of lossless capture. Process and archive IDs
+are scoped to the originating session and agent, survive reconfiguration, and
+**do not survive restarting the app**, even when present in saved history.
+
+**Ask is the default.** Each `write`, `edit`, applied `patch`, `shell`,
+`process_start`, `process_write`, `web_search` and `web_fetch` call waits for an
+explicit decision. The panel shows exact arguments and the kind of action;
+use PgUp/PgDn for longer details, **Ctrl+Y** to allow once or **Ctrl+N** to refuse.
+Read tools, `diff`, patch previews, process status/output, stopping owned jobs and
+releasing owned archives do not need approval. Requests expire after five minutes;
+disconnecting refuses pending actions. Actions too large to show in full
+(64 KiB of approval detail) are refused and must be split.
 
 Press **Shift+Tab** to cycle between **Ask** and **Yolo**, including while an
 agent is working. The status line shows the host-confirmed mode. `/mode ask` and
@@ -154,7 +195,9 @@ can select a different starting mode. Project files never implicitly select it.
 `write`, `edit` and `patch` share a mutation lock. The agent is instructed to
 read before modifying and pass content revisions to write/edit. Patch previews
 do not modify files; applying requires `dry_run: false` and exact source text.
-Multi-file patches can partially apply; their result lists committed effects.
+`write` creates missing parent directories. `patch` uses structured JSON
+add/update/delete/move operations, rather than a unified-diff string; it requires
+existing parent directories. Multi-file patches can partially apply; their result lists committed effects.
 These checks coordinate the selected tools, not external editors.
 
 Tool cards show paths, line numbers, entry/match counts and a short preview;
@@ -164,7 +207,13 @@ types. Failed, unsupported or truncated envelopes fall back to literal/JSON
 display; presentation never changes the host's confirmed execution state.
 Changes use green/red excerpts and diffs; patch previews are labeled separately
 from applied changes. Shell cards show exit status, timeouts, stdout and stderr.
+Web cards show source titles, URLs and excerpts; process cards show lifecycle,
+exit status, output cursors and archive completeness without raw byte arrays.
 A completed shell tool does not imply a successful command.
+
+Sub-agent delegation, inter-agent messaging, a Python execution interpreter and
+plugin/MCP discovery are not selected. The available agent-tool facade still needs
+a native Rust backend and application orchestration before it can be enabled.
 Model messages use the CLI's Markdown renderer, including colored code blocks.
 Set `ui.markdown`, `ui.message_gap` and `ui.tool_preview_lines` in explicit TOML
 configuration to control formatting and density. Message source and stored

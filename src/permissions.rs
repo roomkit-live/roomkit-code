@@ -58,7 +58,7 @@ impl Policy {
                 Choice {
                     value: "ask".into(),
                     label: "Ask".into(),
-                    description: "Approve each file change and shell command".into(),
+                    description: "Approve changes, commands, process input and web requests".into(),
                 },
                 Choice {
                     value: "yolo".into(),
@@ -84,7 +84,10 @@ impl Policy {
 
     pub async fn gate(&self, channel: &ConversationChannel, event: ToolCallEvent) -> ToolUse {
         match event.call.name.as_str() {
-            "list" | "glob" | "grep" | "read" | "diff" | "code_outline" => return ToolUse::Allow,
+            "list" | "glob" | "grep" | "read" | "diff" | "code_outline" | "process_status"
+            | "process_read" | "process_stop" | "output_read" | "output_forget" => {
+                return ToolUse::Allow;
+            }
             // The tool's schema defines an omitted dry_run as true.
             "patch"
                 if event
@@ -95,7 +98,8 @@ impl Policy {
             {
                 return ToolUse::Allow;
             }
-            "write" | "edit" | "patch" | "shell" => {}
+            "write" | "edit" | "patch" | "shell" | "process_start" | "process_write"
+            | "web_fetch" | "web_search" => {}
             _ => return ToolUse::block("This tool has no application permission policy."),
         }
         // Decide once for this call. Changing modes never auto-accepts an
@@ -106,11 +110,16 @@ impl Policy {
         let Ok(arguments) = serde_json::to_string_pretty(&event.call.arguments) else {
             return ToolUse::block("Could not present the action for approval.");
         };
-        let detail = if event.call.name == "shell" {
-            format!("Shell command · runs with your user permissions (not sandboxed).\n{arguments}")
-        } else {
-            format!("Proposed workspace change · exact tool arguments:\n{arguments}")
+        let label = match event.call.name.as_str() {
+            "shell" | "process_start" => {
+                "Command · runs with your user permissions (not sandboxed)"
+            }
+            "process_write" => "Process input · may trigger further actions in the running command",
+            "web_fetch" => "Web request · retrieves this public URL",
+            "web_search" => "Web search · sends this query to Exa's anonymous service",
+            _ => "Proposed workspace change · exact tool arguments",
         };
+        let detail = format!("{label}:\n{arguments}");
         if detail.len() > 65_536 {
             return ToolUse::block(
                 "The action is too large to review; split it into smaller calls.",

@@ -8,11 +8,18 @@ use roomkit_tools_fs::{
     DiffTool, EditTool, GlobTool, GrepTool, ListTool, MutationWorkspace, PatchTool, ReadTool,
     WriteTool,
 };
-use roomkit_tools_process::ShellTool;
+use roomkit_tools_process::{
+    OutputLimits, OutputStore, ProcessLimits, ProcessManager, ShellLimits, ShellTool,
+};
 use roomkit_tools_roomkit::{
     CodeOutlineToolset, DiffToolset, EditToolset, GlobToolset, GrepToolset, ListToolset,
-    PatchToolset, ReadToolset, ShellToolset, WriteToolset,
+    OutputForgetToolset, OutputReadToolset, PatchToolset, ProcessReadToolset, ProcessStartToolset,
+    ProcessStatusToolset, ProcessStopToolset, ProcessWriteToolset, ReadToolset, ShellToolset,
+    WebFetchToolset, WebSearchToolset, WriteToolset,
 };
+use roomkit_tools_search::{ExaSearch, SearchHttpConfig, SearchLimits, WebSearchTool};
+use roomkit_tools_web::{WebFetchLimits, WebFetchTool};
+use std::{path::Path, sync::Arc};
 
 use crate::{
     Result,
@@ -20,6 +27,54 @@ use crate::{
 };
 
 const INSTRUCTIONS: &str = include_str!("coding-agent.txt");
+
+/// Application-scoped resources survive turn, agent and connection changes.
+/// Tool adapters derive archive/process ownership from the room and agent IDs.
+pub(crate) struct Resources {
+    pub mutations: MutationWorkspace,
+    pub processes: ProcessManager,
+    pub outputs: OutputStore,
+    pub search: WebSearchTool,
+    pub fetch: WebFetchTool,
+}
+
+impl Resources {
+    pub async fn new(root: &Path, state: &Path) -> Result<Self> {
+        let mutations = MutationWorkspace::new(root).await?;
+        // Small immediate pages leave room for the JSON envelope in the bounded
+        // terminal projection. Large captures remain in separately paged archives.
+        let mut output_limits = OutputLimits::default();
+        output_limits.max_read_bytes = 4096;
+        let outputs = OutputStore::new(state, output_limits).await?;
+        let mut process_limits = ProcessLimits::default();
+        process_limits.max_read_bytes = 4096;
+        let processes = ProcessManager::new(root)
+            .await?
+            .with_limits(process_limits)?
+            .with_output_store(outputs.clone())?;
+        let mut search_limits = SearchLimits::default();
+        search_limits.max_output_bytes = 48 * 1024;
+        let mut fetch_limits = WebFetchLimits::default();
+        fetch_limits.max_output_bytes = 8192;
+        Ok(Self {
+            mutations,
+            processes,
+            outputs,
+            search: WebSearchTool::new(Arc::new(ExaSearch::new(
+                None,
+                SearchHttpConfig::default(),
+            )?))
+            .with_limits(search_limits)?,
+            fetch: WebFetchTool::new().with_limits(fetch_limits)?,
+        })
+    }
+
+    pub async fn close(&self) -> bool {
+        let processes = self.processes.close().await;
+        let outputs = self.outputs.close().await;
+        processes && outputs
+    }
+}
 
 /// Inventory and registration are derived from the same selected toolsets.
 macro_rules! assemble {
@@ -37,6 +92,7 @@ macro_rules! assemble {
 
 pub(crate) async fn create(
     root: &std::path::Path,
+    resources: &Resources,
     profile: &Agent,
     connection: &Provider,
 ) -> Result<(OpenAiAgent, Vec<ToolDefinition>)> {
@@ -48,7 +104,9 @@ pub(crate) async fn create(
         &profile.model,
     )
     .with_timeout(std::time::Duration::from_secs(connection.timeout_seconds));
-    let mutations = MutationWorkspace::new(root).await?;
+    let mutations = resources.mutations.clone();
+    let mut shell_limits = ShellLimits::default();
+    shell_limits.max_output_bytes = 8192;
     assemble!(ChannelId::new(&profile.id)?, profile, provider;
         outline = CodeOutlineToolset::new(CodeOutlineTool::new(root).await?),
         list = ListToolset::new(ListTool::new(root).await?),
@@ -59,6 +117,15 @@ pub(crate) async fn create(
         write = WriteToolset::new(WriteTool::from_workspace(mutations.clone())),
         edit = EditToolset::new(EditTool::from_workspace(mutations.clone())),
         patch = PatchToolset::new(PatchTool::from_workspace(mutations)),
-        shell = ShellToolset::new(ShellTool::new(root).await?),
+        shell = ShellToolset::new(ShellTool::new(root).await?.with_limits(shell_limits)?.with_output_store(resources.outputs.clone())),
+        fetch = WebFetchToolset::new(resources.fetch.clone()),
+        search = WebSearchToolset::new(resources.search.clone()),
+        start = ProcessStartToolset::new(resources.processes.clone()),
+        status = ProcessStatusToolset::new(resources.processes.clone()),
+        process_read = ProcessReadToolset::new(resources.processes.clone()),
+        process_write = ProcessWriteToolset::new(resources.processes.clone()),
+        stop = ProcessStopToolset::new(resources.processes.clone()),
+        output_read = OutputReadToolset::new(resources.outputs.clone()),
+        forget = OutputForgetToolset::new(resources.outputs.clone()),
     )
 }

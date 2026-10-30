@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Expand the coding catalogue to 19 tools, adding anonymous Exa search, public
+  page fetching, persistent processes and paged ephemeral output archives.
+- Apply Ask/Yolo to web requests and process start/input, with explicit action
+  details; keep owned reads, stops and archive cleanup available directly.
+- Preserve scoped process/output resources across agent and provider changes,
+  share file mutation locking across agents, and clean up resources on exit.
+- Show sources, process states, stream cursors and archive completeness in tool cards.
+- Release project/profile file locks explicitly so concurrent process spawning
+  cannot delay reopening a closed session.
+- Upgrade legacy complete ten-tool profiles once while preserving custom subsets
+  and subsequent selections; retain explicit `patch` in the registered inventory.
+- Update tools to support writing files in newly created parent directories and
+  retain presentation of historical write results.
+
 - Configure reusable OpenAI-compatible connections with `/providers`, including
   local or environment credentials, timeouts, testing and model discovery.
 - Configure project agents with `/agents`: select their provider, model, context

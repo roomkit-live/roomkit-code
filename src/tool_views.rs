@@ -1,6 +1,8 @@
 //! Development-tool presentation belongs to the product, not the generic TUI.
 
 mod changes;
+mod processes;
+mod web;
 
 use roomkit_tools_code::{CodeLanguage, CodeOutlinePage};
 use roomkit_tools_fs::{GrepPage, PathKind, PathPage, ReadPage};
@@ -23,6 +25,20 @@ pub(crate) fn renderers(workspace: &std::path::Path) -> Renderers {
     }
     for name in ["write", "edit", "diff", "patch", "shell"] {
         renderers.register(name, changes::Changes);
+    }
+    for name in ["web_fetch", "web_search"] {
+        renderers.register(name, web::Web);
+    }
+    for name in [
+        "process_start",
+        "process_status",
+        "process_read",
+        "process_write",
+        "process_stop",
+        "output_read",
+        "output_forget",
+    ] {
+        renderers.register(name, processes::Processes);
     }
     renderers
 }

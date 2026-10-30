@@ -1,6 +1,6 @@
 //! Versioned local profile files. No values are copied into conversation storage.
 
-use fs2::FileExt;
+use crate::storage::FileLease;
 use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use std::{
@@ -77,7 +77,7 @@ impl<T: Serialize + DeserializeOwned + Default> Document<T> {
         let lock = options
             .open(lock_path)
             .map_err(|_| "Cannot open profile lock")?;
-        FileExt::try_lock_exclusive(&lock)
+        let _lease = FileLease::exclusive(lock)
             .map_err(|_| "Profiles are being edited elsewhere; retry shortly")?;
         if read(&self.path)?.map(|b| Sha256::digest(b).to_vec()) != self.revision {
             return Err("Profiles changed in another instance; cancel and reopen the form".into());

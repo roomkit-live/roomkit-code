@@ -21,8 +21,16 @@ pub(crate) struct Application {
 
 impl Application {
     pub async fn open(settings: &Settings, api_key: String) -> Result<Self> {
+        Self::open_with_tools(settings, api_key, None).await
+    }
+
+    async fn open_with_tools(
+        settings: &Settings,
+        api_key: String,
+        resources: Option<crate::agent::Resources>,
+    ) -> Result<Self> {
         let storage = Storage::open(&settings.state_dir, &settings.workspace)?;
-        let profiles = Profiles::load(settings, &storage, api_key)?;
+        let profiles = Profiles::load(settings, &storage, api_key, resources).await?;
         let store = SqliteStore::open(&storage.database).await?;
         let kit = RoomKit::new(RoomKitOptions::with_store(store));
         let policy = crate::permissions::Policy::new(settings.mode);
@@ -69,9 +77,20 @@ impl Application {
             }),
             Err(error) => {
                 let _ = kit.close().await;
+                let _ = profiles.resources.close().await;
                 Err(error)
             }
         }
+    }
+
+    pub async fn close(&self) -> Result<()> {
+        let engine = self.kit.close().await;
+        let tools = self.profiles.resources.close().await;
+        engine?;
+        if !tools {
+            return Err("Workspace tool cleanup is still pending".into());
+        }
+        Ok(())
     }
 
     pub fn session(&self) -> LocalSession<SqliteStore> {
@@ -84,7 +103,7 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
     let app = Application::open(&settings, api_key).await?;
     // Refuse an invalid attachment before entering alternate-screen mode.
     if let Err(error) = app.session().snapshot().await {
-        let _ = app.kit.close().await;
+        let _ = app.close().await;
         return Err(error.into());
     }
     let (client, host) = connection(NonZeroUsize::new(256).ok_or("Invalid queue capacity")?);
@@ -102,7 +121,7 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
     })
     .await;
     let attached = adapter.await;
-    let closed = app.kit.close().await;
+    let closed = app.close().await;
     terminal??;
     attached??;
     closed?;

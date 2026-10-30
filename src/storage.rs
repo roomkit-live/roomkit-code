@@ -12,7 +12,24 @@ use crate::Result;
 
 pub(crate) struct Storage {
     pub database: PathBuf,
-    _lease: File,
+    _lease: FileLease,
+}
+
+/// Release the lock explicitly: a concurrently spawned child's transient
+/// pre-exec duplicate must not keep the parent's open-file-description locked.
+pub(crate) struct FileLease(File);
+
+impl FileLease {
+    pub fn exclusive(file: File) -> std::io::Result<Self> {
+        FileExt::try_lock_exclusive(&file)?;
+        Ok(Self(file))
+    }
+}
+
+impl Drop for FileLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.0);
+    }
 }
 
 impl Storage {
@@ -31,7 +48,7 @@ impl Storage {
         }
         builder.create(&directory)?;
         let lease = private_file(&directory.join("session.lock"))?;
-        FileExt::try_lock_exclusive(&lease).map_err(
+        let lease = FileLease::exclusive(lease).map_err(
             |_| "This project's storage is in use; close its other RoomKit Code instance",
         )?;
         let database = directory.join("history.sqlite3");
@@ -76,8 +93,11 @@ mod tests {
             0o700
         );
         assert!(Storage::open(state.path(), root.path()).is_err());
+        // Model the shared open-file-description inherited during process spawn.
+        let transient_duplicate = storage._lease.0.try_clone()?;
         drop(storage);
         Storage::open(state.path(), root.path())?;
+        drop(transient_duplicate);
         Ok(())
     }
 }

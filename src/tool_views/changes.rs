@@ -1,6 +1,6 @@
 //! Concrete outcomes stay distinct from tool-call completion.
 
-use roomkit_tools_fs::{DiffLineKind, DiffResult, EditResult, PatchResult, WriteResult};
+use roomkit_tools_fs::{DiffLineKind, DiffResult, EditResult, PatchResult};
 use roomkit_tools_process::ShellResult;
 use roomkit_tui::{
     content,
@@ -9,6 +9,17 @@ use roomkit_tui::{
 };
 
 use super::output;
+
+// Display projection accepts historical writes predating directory reporting.
+#[derive(serde::Deserialize)]
+struct WriteResult {
+    path: String,
+    created: bool,
+    changed: bool,
+    bytes_written: usize,
+    #[serde(default)]
+    created_directories: Vec<String>,
+}
 
 pub(super) struct Changes;
 
@@ -43,6 +54,15 @@ impl ToolRenderer for Changes {
                     Tone::Success,
                 ),
             ]);
+            if !result.created_directories.is_empty() {
+                lines.push(vec![Span::new(
+                    format!(
+                        "Created directories: {}",
+                        result.created_directories.join(", ")
+                    ),
+                    Tone::Muted,
+                )]);
+            }
             excerpt(
                 &mut lines,
                 argument(call, "content"),
@@ -177,6 +197,12 @@ impl ToolRenderer for Changes {
                     Tone::Warning
                 },
             )]);
+            // Keep recovery handles in the preview before potentially long output.
+            for (name, captured) in [("stdout", &result.stdout), ("stderr", &result.stderr)] {
+                if let Some(archive) = &captured.archive {
+                    super::processes::archive(&mut lines, name, archive);
+                }
+            }
             for (name, captured, tone) in [
                 ("stdout", &result.stdout, Tone::Text),
                 ("stderr", &result.stderr, Tone::Warning),
@@ -214,7 +240,7 @@ fn argument<'a>(call: &'a ToolCall, name: &str) -> &'a str {
         .unwrap_or("")
 }
 
-fn excerpt(lines: &mut Vec<Line>, text: &str, prefix: &str, tone: Tone, limit: usize) {
+pub(super) fn excerpt(lines: &mut Vec<Line>, text: &str, prefix: &str, tone: Tone, limit: usize) {
     for line in text.lines().take(limit) {
         lines.push(vec![Span::new(format!("{prefix}{line}"), tone)]);
     }
