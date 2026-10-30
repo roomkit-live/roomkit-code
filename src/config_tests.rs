@@ -195,3 +195,36 @@ fn sidebar_appearance_is_configurable_without_changing_agent_settings() {
     assert!(!settings.ui.sidebar_visible);
     assert_eq!(settings.ui.sidebar_width, 42);
 }
+
+#[test]
+fn welcome_artwork_and_bottom_spacing_follow_host_configuration() {
+    let root = tempfile::tempdir().unwrap();
+    let mut cli = cli(root.path());
+    let settings = Settings::load(&cli).unwrap();
+    assert_eq!(settings.ui.bottom_margin, 1);
+    assert!(!settings.ui.welcome.as_ref().unwrap().wordmark.is_empty());
+    cli.no_logo = true;
+    let settings = Settings::load(&cli).unwrap();
+    let home = settings.ui.welcome.unwrap();
+    assert!(home.logo.is_empty() && home.wordmark.is_empty());
+    cli.no_logo = false;
+    let config = root.path().join("appearance.toml");
+    std::fs::write(
+        &config,
+        "[ui]\nname = 'Example App'\nlogo = ['custom']\nbottom_margin = 2\n",
+    )
+    .unwrap();
+    cli.config = Some(config.clone());
+    let settings = Settings::load(&cli).unwrap();
+    let home = settings.ui.welcome.unwrap();
+    assert_eq!(home.logo, ["custom"]);
+    assert!(
+        home.wordmark.is_empty(),
+        "Custom brands must not inherit RoomKit lettering"
+    );
+    assert_eq!(settings.ui.bottom_margin, 2);
+    std::fs::write(&config, "[ui]\nwelcome = false\nbottom_margin = 0\n").unwrap();
+    let settings = Settings::load(&cli).unwrap();
+    assert!(settings.ui.welcome.is_none());
+    assert_eq!(settings.ui.bottom_margin, 0);
+}

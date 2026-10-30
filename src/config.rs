@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
-use roomkit_tui::{Branding, ColorMode, SelectionMode, TerminalStatus, Theme, UiOptions};
+use roomkit_tui::{
+    Branding, ColorMode, SelectionMode, TerminalStatus, Theme, UiOptions, WelcomeScreen,
+};
 use serde::Deserialize;
 
 use crate::{Result, permissions::Mode};
@@ -124,6 +126,11 @@ struct Provider {
 #[derive(Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Appearance {
+    welcome: bool,
+    welcome_width: u16,
+    welcome_logo: Option<Vec<String>>,
+    welcome_wordmark: Option<Vec<String>>,
+    bottom_margin: u16,
     sidebar: bool,
     sidebar_width: u16,
     terminal_status: bool,
@@ -145,6 +152,11 @@ struct Appearance {
 impl Default for Appearance {
     fn default() -> Self {
         Self {
+            welcome: true,
+            welcome_width: 88,
+            welcome_logo: None,
+            welcome_wordmark: None,
+            bottom_margin: 1,
             sidebar: true,
             sidebar_width: 34,
             terminal_status: true,
@@ -256,6 +268,7 @@ impl Settings {
             .ok_or("Cannot locate application storage; supply --state-dir")?;
         let state_dir = std::path::absolute(state_dir)?;
         let appearance = file.ui;
+        let custom_logo = appearance.logo.is_some();
         let mut branding = Branding {
             name: appearance.name,
             subtitle: "Explore, edit and test your project".into(),
@@ -267,7 +280,34 @@ impl Settings {
         if cli.no_logo {
             branding.logo.clear();
         }
+        let welcome = appearance.welcome.then(|| WelcomeScreen {
+            width: appearance.welcome_width,
+            logo: if cli.no_logo {
+                Vec::new()
+            } else {
+                appearance.welcome_logo.unwrap_or_else(|| {
+                    if custom_logo {
+                        branding.logo.clone()
+                    } else {
+                        crate::branding::welcome_logo()
+                    }
+                })
+            },
+            wordmark: if cli.no_logo {
+                Vec::new()
+            } else {
+                appearance.welcome_wordmark.unwrap_or_else(|| {
+                    if branding.name == "RoomKit Code" {
+                        crate::branding::welcome_wordmark()
+                    } else {
+                        Vec::new()
+                    }
+                })
+            },
+        });
         let ui = UiOptions {
+            welcome,
+            bottom_margin: appearance.bottom_margin,
             sidebar_visible: appearance.sidebar,
             sidebar_width: appearance.sidebar_width,
             terminal_status: (appearance.terminal_status && !cli.no_terminal_status)

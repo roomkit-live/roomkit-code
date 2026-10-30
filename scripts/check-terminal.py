@@ -95,13 +95,6 @@ def scenario(project, state, base_url, resume=False, color="never"):
         wait_for(b"RoomKit Code")
         wait_for("› Ask about this project…".encode())
         wait_for(b"Start a conversation")
-        wait_for(b"F7 hide")
-        wait_for(b"No servers configured")
-        # Exercise the app's default sidebar, then keep the existing full-width
-        # history/footer checks. This preference must survive session switches.
-        offset = len(captured)
-        os.write(master, b"\x1b[18~")
-        wait_for(b"F7 sidebar", offset)
         assert b"Fixture inspection complete." not in captured, "Launch unexpectedly resumed the previous session"
         if not resume:
             offset = len(captured)
@@ -131,6 +124,14 @@ def scenario(project, state, base_url, resume=False, color="never"):
             wait_for(b"Filter: fixture", offset)
             os.write(master, b"\r")
         wait_for(b"Fixture inspection complete.")
+        # The first exchange leaves welcome and exposes the sidebar. Hide it
+        # for the existing full-width history/footer checks; keep that preference
+        # through /new and /resume.
+        wait_for(b"F7 hide")
+        wait_for(b"No servers configured")
+        offset = len(captured)
+        os.write(master, b"\x1b[18~")
+        wait_for(b"F7 sidebar", offset)
         wait_for(b"Read-only")
         # The longer answer can push the compact tool's summary off screen.
         # Inspect it through actual history navigation, not transient streaming.

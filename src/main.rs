@@ -3,6 +3,7 @@
 mod accounts;
 mod agent;
 mod application;
+mod branding;
 mod config;
 mod diagnostics;
 mod herdr;

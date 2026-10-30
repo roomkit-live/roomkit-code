@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Open empty conversations with a centered RoomKit symbol, wordmark and composer.
+  Restore the conversation/sidebar on the first exchange, preserve commands and
+  image input, and add a configurable blank row below the interface.
+
 - Combine Ask/Yolo and keyboard hints on one line with the sidebar open; remove
   the permanent Shift+Tab label while preserving mode cycling.
 

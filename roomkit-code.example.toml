@@ -11,6 +11,11 @@ timeout_seconds = 600 # total deadline per model request, including streaming
 mode = "ask" # ask, yolo; --mode overrides this explicit configuration
 
 [ui]
+welcome = true # centered composer for empty conversations
+welcome_width = 88 # columns, clamped to 48–100
+bottom_margin = 1 # blank rows below the UI, 0 to 3
+# welcome_logo = ["Your terminal symbol"]
+# welcome_wordmark = ["Your application"]
 sidebar = true # F7 toggles locally; narrow terminals hide it automatically
 sidebar_width = 34 # display columns, clamped to 28–48
 theme = "dark" # dark, light, terminal

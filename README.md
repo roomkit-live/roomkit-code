@@ -651,3 +651,18 @@ No background refresh redraws an unchanged screen. MCP liveness is checked
 every two seconds while servers are configured; process changes use the existing
 lifecycle observer. Clicking configuration during a running turn remains subject
 to the host's existing busy-state rules.
+
+## Welcome screen
+
+New empty conversations open with a centered RoomKit wordmark and composer.
+Typing `/` still opens commands; multiline input, image attachments and Ask/Yolo
+keep their normal behavior. The first exchange displays the conversation and
+sidebar. `/new` restores welcome; `/resume` opens the selected history. Forms,
+approvals and errors remain visible in their usual views.
+
+The interface leaves one blank line at the bottom by default. Customize the
+explicit TOML configuration with `[ui] welcome = false`, `welcome_width = 88`,
+`bottom_margin = 1`, `welcome_logo = [...]` and `welcome_wordmark = [...]`.
+`--no-logo` hides both welcome graphics and the compact header mark. Custom
+application names fall back to plain lettering unless a wordmark is supplied.
+Small windows use the regular conversation layout without discarding input.
