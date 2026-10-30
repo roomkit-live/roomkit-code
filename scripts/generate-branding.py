@@ -44,14 +44,20 @@ def main():
             element.set("opacity", "1")
     png = cairosvg.svg2png(bytestring=ET.tostring(root), output_width=256, output_height=256)
     symbol = Image.open(io.BytesIO(png)).convert("RGBA").getchannel("A")
+    # Hint the thin outline for the compact grid so it survives downsampling.
+    # The SVG still owns all geometry; the welcome artwork keeps its full detail.
+    for element in root.iter():
+        if "stroke-width" in element.attrib:
+            element.set("stroke-width", str(float(element.get("stroke-width")) * 1.5))
+    png = cairosvg.svg2png(bytestring=ET.tostring(root), output_width=256, output_height=256)
+    compact = Image.open(io.BytesIO(png)).convert("RGBA").getchannel("A")
     font = ImageFont.truetype(str(args.font), 256)
     left, top, right, bottom = font.getbbox("roomkit.")
     lettering = Image.new("L", (right - left, bottom - top))
     ImageDraw.Draw(lettering).text((-left, -top), "roomkit.", font=font, fill=255)
     text = "//! Generated from the RoomKit SVG and Space Grotesk 600.\n//! Regenerate with scripts/generate-branding.py; layout belongs to roomkit-tui.\n"
-    # Both symbol sizes come from this SVG. The compact grid needs five rows to
-    # retain the gap between its four cells instead of merging them into bars.
-    for name, rows in [("header_logo", blocks(symbol, 9, 120)),
+    # Seven vertical samples retain a gap between the four cells in four rows.
+    for name, rows in [("header_logo", blocks(compact, 7, 140)),
                        ("welcome_logo", blocks(symbol, 14, 128)),
                        ("welcome_wordmark", blocks(lettering, 52, 110))]:
         text += f"\npub(crate) fn {name}() -> Vec<String> {{\n    [\n"

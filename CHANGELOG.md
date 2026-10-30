@@ -3,7 +3,8 @@
 ## Unreleased
 
 - Generate both header and welcome symbols from the same RoomKit SVG, using a
-  compact five-row mark in conversation headers instead of the library default.
+  compact seven-column, four-row mark in conversation headers instead of the
+  library default. Preserve the four cells while reducing the header's footprint.
 
 - Align engine, CLI and tools dependencies on the consolidated RoomKit main API.
   Raise the minimum Rust version to 1.94 to match the current tools library.
