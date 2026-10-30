@@ -23,6 +23,12 @@ pub(crate) struct Cli {
     /// Model identifier served by the configured endpoint.
     #[arg(long, env = "ROOMKIT_MODEL", hide_env_values = true)]
     pub model: Option<String>,
+    /// Maximum duration of one model request, including its streamed response.
+    #[arg(long)]
+    pub provider_timeout_seconds: Option<u64>,
+    /// Effective model context capacity in tokens, as configured on the server.
+    #[arg(long)]
+    pub context_window: Option<u64>,
     /// Open or create a named conversation; without this, start a new session.
     #[arg(long)]
     pub session: Option<String>,
@@ -89,6 +95,8 @@ struct Permissions {
 struct Provider {
     base_url: Option<String>,
     model: Option<String>,
+    timeout_seconds: Option<u64>,
+    context_window: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -135,6 +143,8 @@ pub(crate) struct Settings {
     pub session: Option<String>,
     pub base_url: String,
     pub model: String,
+    pub provider_timeout_seconds: u64,
+    pub context_window: Option<u64>,
     pub ui: UiOptions,
     pub mode: Mode,
 }
@@ -181,6 +191,17 @@ impl Settings {
             return Err(
                 "Session names use 1–64 ASCII letters, digits, hyphens or underscores".into(),
             );
+        }
+        let provider_timeout_seconds = cli
+            .provider_timeout_seconds
+            .or(file.provider.timeout_seconds)
+            .unwrap_or(600);
+        if !(1..=86_400).contains(&provider_timeout_seconds) {
+            return Err("provider timeout must be between 1 and 86400 seconds".into());
+        }
+        let context_window = cli.context_window.or(file.provider.context_window);
+        if context_window == Some(0) {
+            return Err("context window must be a positive token count".into());
         }
         let workspace = cli
             .workspace
@@ -241,6 +262,8 @@ impl Settings {
             mode: cli.mode.unwrap_or(file.permissions.mode),
             base_url,
             model,
+            provider_timeout_seconds,
+            context_window,
             ui,
         })
     }

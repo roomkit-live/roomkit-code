@@ -115,3 +115,35 @@ fn symlink_aliases_resolve_to_one_project() {
         Settings::load(&cli(&link)).unwrap().workspace
     );
 }
+
+#[test]
+fn provider_limits_are_explicit_and_cli_values_override_the_file() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("settings.toml");
+    std::fs::write(
+        &path,
+        "[provider]\ntimeout_seconds = 240\ncontext_window = 32768\n",
+    )
+    .unwrap();
+    let mut cli = cli(root.path());
+    assert_eq!(Settings::load(&cli).unwrap().provider_timeout_seconds, 600);
+    assert_eq!(Settings::load(&cli).unwrap().context_window, None);
+    cli.config = Some(path);
+    let file = Settings::load(&cli).unwrap();
+    assert_eq!(
+        (file.provider_timeout_seconds, file.context_window),
+        (240, Some(32768))
+    );
+    cli.provider_timeout_seconds = Some(900);
+    cli.context_window = Some(65536);
+    let flags = Settings::load(&cli).unwrap();
+    assert_eq!(
+        (flags.provider_timeout_seconds, flags.context_window),
+        (900, Some(65536))
+    );
+    cli.context_window = Some(0);
+    assert!(Settings::load(&cli).is_err());
+    cli.context_window = None;
+    cli.provider_timeout_seconds = Some(0);
+    assert!(Settings::load(&cli).is_err());
+}

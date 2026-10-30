@@ -3,14 +3,15 @@
 use roomkit::model::ChannelId;
 use roomkit_ai::{ToolDefinition, Toolset};
 use roomkit_openai::{OpenAiAgent, OpenAiConfig};
+use roomkit_tools_code::CodeOutlineTool;
 use roomkit_tools_fs::{
     DiffTool, EditTool, GlobTool, GrepTool, ListTool, MutationWorkspace, PatchTool, ReadTool,
     WriteTool,
 };
 use roomkit_tools_process::ShellTool;
 use roomkit_tools_roomkit::{
-    DiffToolset, EditToolset, GlobToolset, GrepToolset, ListToolset, PatchToolset, ReadToolset,
-    ShellToolset, WriteToolset,
+    CodeOutlineToolset, DiffToolset, EditToolset, GlobToolset, GrepToolset, ListToolset,
+    PatchToolset, ReadToolset, ShellToolset, WriteToolset,
 };
 
 use crate::{Result, config::Settings};
@@ -35,10 +36,13 @@ pub(crate) async fn create(
     settings: &Settings,
     api_key: String,
 ) -> Result<(OpenAiAgent, Vec<ToolDefinition>)> {
-    let provider = OpenAiConfig::new(&settings.base_url, api_key, &settings.model);
+    let provider = OpenAiConfig::new(&settings.base_url, api_key, &settings.model).with_timeout(
+        std::time::Duration::from_secs(settings.provider_timeout_seconds),
+    );
     let root = &settings.workspace;
     let mutations = MutationWorkspace::new(root).await?;
     assemble!(provider;
+        outline = CodeOutlineToolset::new(CodeOutlineTool::new(root).await?),
         list = ListToolset::new(ListTool::new(root).await?),
         glob = GlobToolset::new(GlobTool::new(root).await?),
         grep = GrepToolset::new(GrepTool::new(root).await?),

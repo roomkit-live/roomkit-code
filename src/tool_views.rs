@@ -2,6 +2,7 @@
 
 mod changes;
 
+use roomkit_tools_code::{CodeLanguage, CodeOutlinePage};
 use roomkit_tools_fs::{GrepPage, PathKind, PathPage, ReadPage};
 use roomkit_tui::{
     content,
@@ -12,7 +13,7 @@ use serde::{Deserialize, de::DeserializeOwned};
 
 pub(crate) fn renderers(workspace: &std::path::Path) -> Renderers {
     let mut renderers = Renderers::default();
-    for name in ["list", "glob", "grep", "read"] {
+    for name in ["list", "glob", "grep", "read", "code_outline"] {
         renderers.register(
             name,
             Files {
@@ -72,6 +73,9 @@ impl ToolRenderer for Files {
     fn has_expanded_details(&self, call: &ToolCall) -> bool {
         match call.name.as_str() {
             "list" | "glob" => output::<PathPage>(call).is_some_and(|page| page.entries.len() > 2),
+            "code_outline" => {
+                output::<CodeOutlinePage>(call).is_some_and(|page| page.symbols.len() > 2)
+            }
             "read" => output::<ReadPage>(call).is_some_and(|page| page.lines.len() > 2),
             "grep" => output::<GrepPage>(call).is_some_and(|page| {
                 page.matches.len() > 2
@@ -95,6 +99,10 @@ impl ToolRenderer for Files {
             "list" | "glob" => output::<PathPage>(call).map(|mut page| {
                 page.path = self.path(&page.path);
                 paths(page, expanded)
+            }),
+            "code_outline" => output::<CodeOutlinePage>(call).map(|mut page| {
+                page.path = self.path(&page.path);
+                outline(page, expanded)
             }),
             "read" => output::<ReadPage>(call).map(|mut page| {
                 page.path = self.path(&page.path);
@@ -286,6 +294,60 @@ fn grep(page: GrepPage, call: &ToolCall, expanded: bool) -> Vec<Line> {
         )]);
     }
     continuation(&mut lines, page.truncated, page.next_offset);
+    lines
+}
+
+fn outline(page: CodeOutlinePage, expanded: bool) -> Vec<Line> {
+    let language = match page.language {
+        CodeLanguage::Rust => "rust",
+        CodeLanguage::Python => "python",
+    };
+    let mut lines = vec![vec![
+        Span::new(&page.path, Tone::Code),
+        Span::new(
+            format!(" · {language} · {} symbols", page.total_symbols),
+            Tone::Muted,
+        ),
+    ]];
+    if page.syntax_errors {
+        lines.push(vec![Span::new(
+            "Syntax errors detected; this outline may be incomplete",
+            Tone::Warning,
+        )]);
+    }
+    let limit = if expanded { 96 } else { 2 };
+    for symbol in page.symbols.iter().take(limit) {
+        let mut heading = vec![Span::new(
+            format!("{}–{} │ ", symbol.start_line, symbol.end_line),
+            Tone::Muted,
+        )];
+        let signature = symbol.signature.replace(['\n', '\r'], " ");
+        heading.extend(content::code(&signature, language).into_iter().flatten());
+        if symbol.signature_truncated {
+            heading.push(Span::new(" … [header truncated]", Tone::Warning));
+        }
+        lines.push(heading);
+    }
+    if page.symbols.len() > limit {
+        lines.push(vec![Span::new(
+            format!(
+                "… {} more symbols in this result",
+                page.symbols.len() - limit
+            ),
+            Tone::Muted,
+        )]);
+    }
+    if let Some(offset) = page.next_offset {
+        lines.push(vec![Span::new(
+            format!("More symbols available · code_outline offset={offset}"),
+            Tone::Warning,
+        )]);
+    } else if page.truncated {
+        lines.push(vec![Span::new(
+            "Outline truncated; inspect the source for further definitions",
+            Tone::Warning,
+        )]);
+    }
     lines
 }
 

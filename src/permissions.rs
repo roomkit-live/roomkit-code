@@ -84,7 +84,7 @@ impl Policy {
 
     pub async fn gate(&self, channel: &ConversationChannel, event: ToolCallEvent) -> ToolUse {
         match event.call.name.as_str() {
-            "list" | "glob" | "grep" | "read" | "diff" => return ToolUse::Allow,
+            "list" | "glob" | "grep" | "read" | "diff" | "code_outline" => return ToolUse::Allow,
             // The tool's schema defines an omitted dry_run as true.
             "patch"
                 if event

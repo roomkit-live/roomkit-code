@@ -41,6 +41,10 @@ class Model(BaseHTTPRequestHandler):
             delta, reason = {"content": '\n\n## Inspection\n\nFixture **inspection** complete.\n\n- Read `fixture.txt`\n- Read-only\n\n```json\n{"ok": true, "count": 1}\n```\n\nLatest answer marker.\n'}, "stop"
         body = ("data: " + json.dumps({"choices": [{"index": 0, "delta": delta}]}) + "\n\n"
                 + "data: " + json.dumps({"choices": [{"index": 0, "delta": {}, "finish_reason": reason}]})
+                + "\n\ndata: " + json.dumps({"choices":[], "usage": {
+                    "prompt_tokens":1000 if len(requests)==1 else 2000,
+                    "completion_tokens":20 if len(requests)==1 else 50,
+                    "prompt_tokens_details":{"cached_tokens":500}}})
                 + "\n\ndata: [DONE]\n\n").encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -56,7 +60,7 @@ def scenario(project, state, base_url, resume=False, color="never"):
     env = {k: v for k, v in os.environ.items() if not k.startswith("ROOMKIT_")}
     env["NO_COLOR"] = "1" # Explicit always must override this; auto/never must not.
     args = [str(binary), str(project), "--state-dir", str(state), "--base-url", base_url,
-            "--model", "fixture-model", "--color", color, "--no-animations"]
+            "--model", "fixture-model", "--context-window", "32768", "--color", color, "--no-animations"]
     if resume:
         args += ["--native-selection", "--no-logo"]
     else:
@@ -82,7 +86,7 @@ def scenario(project, state, base_url, resume=False, color="never"):
             offset = len(captured)
             os.write(master, b"/tools\r")
             wait_for(b"Tools available to code", offset)
-            wait_for(b"9 registered", offset)
+            wait_for(b"10 registered", offset)
             os.write(master, b"shell")
             wait_for(b"Filter: shell", offset)
             os.write(master, b"\r")
@@ -124,6 +128,7 @@ def scenario(project, state, base_url, resume=False, color="never"):
         # works even when native selection leaves mouse events to the terminal.
         os.write(master, b"Unsent draft\x1b[1;5F")
         wait_for(b"Latest answer marker.")
+        wait_for(b"context 2050/32768")
         offset = len(captured)
         os.write(master, b"\x1b[5~") # PageUp
         wait_for(b"Back to bottom", offset)

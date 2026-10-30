@@ -79,8 +79,8 @@ and the model's current capability inventory are derived from the same selected
 toolsets. Resuming keeps conversation history, but older assistant claims about
 missing tools do not change the currently registered capabilities.
 
-The selected agent has `list`, `glob`, `grep`, `read`, `diff`, `write`, `edit`,
-`patch` and `shell`, implemented by `roomkit-tools-fs` and `roomkit-tools-process`
+The selected agent has `code_outline`, `list`, `glob`, `grep`, `read`, `diff`, `write`, `edit`,
+`patch` and `shell`, implemented by `roomkit-tools-code`, `roomkit-tools-fs` and `roomkit-tools-process`
 and registered through their existing RoomKit adapters. Persistent process and
 web tools are not selected. Returned pages and scans are bounded by the tools' defaults. Hidden files are included and ignore files are not applied;
 choose a workspace appropriate to share with the configured model. Filesystem tools check paths under the configured root. Shell uses `/bin/sh -c`
@@ -136,8 +136,35 @@ refused. Files are created with private permissions on Linux and macOS.
 The engine owns persistence and bounded context restoration. The terminal
 adapter displays up to 500 stored events; the current provider uses the engine's
 bounded message/tool history, not the entire on-screen conversation. Model
-changes on restart apply to future turns. Effort selection, context percentage,
+changes on restart apply to future turns. Effort selection, automatic compaction
 and a remote-engine transport are not implemented in this version.
+
+`code_outline` uses Tree-sitter to locate Rust/Python definitions, signatures and
+line ranges before a targeted `read`. It does not resolve types or index an
+entire project. Outline cards show source ranges, syntax warnings and pagination;
+expansion reveals more symbols only when that result contains them.
+
+## Context, consumption and request failures
+
+The footer shows the last completed generation's measured context: input tokens
+(including cached input) plus output tokens. Configure `provider.context_window`
+or `--context-window` with the actual server capacity to see the remaining
+percentage. Without capacity the token count remains visible; without reported
+counts the context stays unknown. This is the last measured exchange, not a
+prediction including an unsent message or new tool definitions.
+
+The separate **turn** counter totals all reported input/output tokens across
+that execution's model calls. Cached input is counted once. Missing measurements
+or a failed generation mark totals partial. These are neither session-wide
+billing totals nor dollar costs. Resume restores applicable measurements; a
+new execution or model selection clears stale ones.
+
+`provider.timeout_seconds` (or `--provider-timeout-seconds`) controls the entire
+HTTP model request, including streaming. The application defaults to 600 seconds;
+the library's own default is unchanged. Failures explain timeout, access, rate
+limit, server and protocol errors without echoing raw provider responses or keys.
+Failed requests are not automatically retried. Existing completed tool actions
+remain in the project and conversation.
 
 ## Boundaries
 

@@ -33,6 +33,7 @@ struct Mock {
 struct Fixture {
     answer: String,
     calls: Vec<(&'static str, Value)>,
+    usage: Vec<Option<Value>>,
     requests: Arc<Mutex<Vec<Value>>>,
 }
 
@@ -42,6 +43,14 @@ impl Mock {
     }
 
     async fn with_answer(calls: Vec<(&'static str, Value)>, answer_text: &str) -> Self {
+        Self::with_reports(calls, answer_text, vec![]).await
+    }
+
+    async fn with_reports(
+        calls: Vec<(&'static str, Value)>,
+        answer_text: &str,
+        usage: Vec<Option<Value>>,
+    ) -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -50,6 +59,7 @@ impl Mock {
             .with_state(Fixture {
                 answer: answer_text.into(),
                 calls,
+                usage,
                 requests: requests.clone(),
             });
         let task = tokio::spawn(async move {
@@ -86,8 +96,14 @@ async fn answer(
         ),
         None => (json!({"content":fixture.answer}), "stop"),
     };
+    let report = fixture
+        .usage
+        .get(index)
+        .and_then(Option::as_ref)
+        .map(|usage| format!("data: {}\n\n", json!({"choices":[], "usage":usage})))
+        .unwrap_or_default();
     let body = format!(
-        "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+        "data: {}\n\ndata: {}\n\n{report}data: [DONE]\n\n",
         json!({"choices":[{"index":0,"delta":delta}]}),
         json!({"choices":[{"index":0,"delta":{},"finish_reason":reason}]})
     );
@@ -239,7 +255,16 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
     assert_eq!(
         names,
         BTreeSet::from([
-            "list", "glob", "grep", "read", "write", "edit", "diff", "patch", "shell"
+            "code_outline",
+            "list",
+            "glob",
+            "grep",
+            "read",
+            "write",
+            "edit",
+            "diff",
+            "patch",
+            "shell"
         ])
     );
     assert!(
@@ -272,7 +297,7 @@ async fn resumed_history_cannot_replace_the_current_wire_inventory_or_host_catal
     turn_operation(&app, "check-current-capabilities").await;
     let wire = current.requests.lock().unwrap()[0].clone();
     let expected: BTreeSet<_> = app.tools.iter().map(|tool| tool.name.as_str()).collect();
-    assert_eq!(expected.len(), 9);
+    assert_eq!(expected.len(), 10);
     let declared: BTreeSet<_> = wire["tools"]
         .as_array()
         .unwrap()
@@ -886,4 +911,186 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
     };
     assert_eq!(destination.room.as_str(), second);
     app.kit.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn outline_and_targeted_read_report_context_separately_from_consumption() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let source =
+        "pub fn first() -> u8 { 1 }\npub fn second() -> u8 { 2 }\npub fn third() -> u8 { 3 }\n";
+    std::fs::write(project.path().join("sample.rs"), source).unwrap();
+    let mock = Mock::with_reports(vec![
+        ("code_outline", json!({"path":"sample.rs"})),
+        ("read", json!({"path":"sample.rs", "offset":2, "limit":1})),
+    ], "The second function returns 2.", vec![
+        Some(json!({"prompt_tokens":200,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":100}})),
+        Some(json!({"prompt_tokens":300,"completion_tokens":30,"prompt_tokens_details":{"cached_tokens":200}})),
+        Some(json!({"prompt_tokens":400,"completion_tokens":40,"prompt_tokens_details":{"cached_tokens":300}})),
+    ]).await;
+    let mut settings = settings(project.path(), state.path(), &mock.base_url);
+    settings.context_window = Some(1024);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let session = turn(&app).await;
+    assert_eq!(session.context.as_ref().unwrap().tokens, 440);
+    assert_eq!(session.context.as_ref().unwrap().capacity, Some(1024));
+    let usage = session.usage.as_ref().unwrap();
+    assert_eq!(
+        (
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cached_input_tokens
+        ),
+        (Some(900), Some(90), 600)
+    );
+    assert!(usage.complete);
+    let screen = roomkit_tui::render::screen(
+        &session,
+        240,
+        45,
+        &crate::tool_views::renderers(project.path()),
+    );
+    let text = screen.lines.join("\n");
+    assert!(text.contains("3 symbols") && text.contains("pub fn first()"));
+    assert!(!text.contains("\"symbols\""));
+    assert!(text.contains("context 440/1024"));
+    assert_eq!(
+        std::fs::read_to_string(project.path().join("sample.rs")).unwrap(),
+        source
+    );
+    let requests = mock.requests.lock().unwrap().clone();
+    let result = requests[2]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|message| message["role"] == "tool")
+        .unwrap()["content"]
+        .as_str()
+        .unwrap();
+    assert!(result.contains("pub fn second()"));
+    assert!(!result.contains("pub fn first()") && !result.contains("pub fn third()"));
+    app.kit.close().await.unwrap();
+    drop(app);
+    let resumed = Application::open(&settings, String::new()).await.unwrap();
+    let restored = resumed.session().snapshot().await.unwrap();
+    assert_eq!(restored.context, session.context);
+    assert_eq!(restored.usage, session.usage);
+    assert_eq!(mock.requests.lock().unwrap().len(), 3);
+    resumed.kit.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn missing_last_usage_is_unknown_and_previous_round_totals_are_partial() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::with_reports(
+        vec![("list", json!({"path":"."}))],
+        "Done.",
+        vec![
+            Some(json!({"prompt_tokens":100,"completion_tokens":10})),
+            None,
+        ],
+    )
+    .await;
+    let settings = settings(project.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let session = turn(&app).await;
+    assert!(session.context.is_none());
+    let usage = session.usage.unwrap();
+    assert_eq!(usage.input_tokens, Some(100));
+    assert!(!usage.complete);
+    app.kit.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn provider_timeouts_and_refusals_have_actionable_private_diagnostics() {
+    for (status, delay, expected) in [
+        (
+            axum::http::StatusCode::OK,
+            Duration::from_secs(3),
+            "timed out",
+        ),
+        (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Duration::ZERO,
+            "access denied",
+        ),
+        (
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            Duration::ZERO,
+            "quota",
+        ),
+    ] {
+        let project = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = calls.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let router = Router::new().route(
+            "/v1/chat/completions",
+            post(move || {
+                let seen = seen.clone();
+                async move {
+                    seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    tokio::time::sleep(delay).await;
+                    (
+                        status,
+                        Json(json!({"error":{"message":"secret-key and private server details"}})),
+                    )
+                }
+            }),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let mut settings = settings(project.path(), state.path(), &base);
+        settings.provider_timeout_seconds = 1;
+        let app = Application::open(&settings, "secret-key".into())
+            .await
+            .unwrap();
+        let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+        let task = tokio::spawn(app.session().run(host));
+        let Event::Snapshot(snapshot) = event(&client).await else {
+            panic!("Expected snapshot")
+        };
+        command(
+            &client,
+            1,
+            "main",
+            Command::Submit {
+                agent: "code".into(),
+                text: "Inspect".into(),
+            },
+        );
+        let mut session = Session::default();
+        session.apply(Event::Snapshot(snapshot));
+        loop {
+            let next = event(&client).await;
+            let done = matches!(
+                next,
+                Event::RunFinished {
+                    outcome: RunOutcome::Failed,
+                    ..
+                }
+            );
+            session.apply(next);
+            if done {
+                break;
+            }
+        }
+        assert!(session.notice.contains(expected), "{}", session.notice);
+        assert!(
+            !session.notice.contains("secret-key") && !session.notice.contains("private server")
+        );
+        assert!(session.context.is_none());
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "failures are not silently retried"
+        );
+        drop(client);
+        task.await.unwrap().unwrap();
+        app.kit.close().await.unwrap();
+        server.abort();
+    }
 }

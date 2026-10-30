@@ -48,10 +48,11 @@ impl Application {
                     .await?;
             let mut view = SessionConfig::new(room, agent_id, "local-user");
             view.title = crate::sessions::title(&settings.workspace, &view.room);
+            view.context_capacity = settings.context_window;
             view.commands = crate::sessions::commands();
             view.mode = Some(policy.state(view.room.as_str()));
             view.model = Some(ModelInfo {
-                provider: "openai-compatible".into(),
+                provider: "openai".into(),
                 model: settings.model.clone(),
                 effort: None,
             });

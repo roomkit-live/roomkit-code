@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add Rust/Python structural outlines with colored signatures and line ranges,
+  available in both permission modes and in the host capability catalogue.
+- Display measured context and separate latest-execution token consumption;
+  configure server context capacity and model request deadlines explicitly.
+- Explain provider failures in the terminal and allow slower model generations
+  with a 600-second default request timeout.
+
+
 - Derive the model's current capability inventory and a filterable `/tools`
   catalogue from the toolsets actually registered by the application.
 - Clarify that resumed assistant claims do not override current capabilities,
