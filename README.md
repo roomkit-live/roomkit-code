@@ -633,8 +633,9 @@ connection, context occupancy with remaining percentage, configured MCP servers
 and running processes. It uses the reusable sidebar protocol from roomkit-cli;
 this application supplies its MCP and process sections. Provider credentials and
 endpoint settings are never included in the sidebar. Agent/model/effort appear
-only in the sidebar while it is open; the mode and shortcuts stay below the
-composer. Hiding the sidebar restores the complete footer.
+only in the sidebar while it is open; the mode and shortcuts share one line below
+the composer when space permits. Shift+Tab still changes the mode without a
+permanent shortcut label. Hiding the sidebar restores the complete footer.
 
 F7 hides/shows it; F8 focuses its actions. Up/Down or Tab chooses an action,
 Enter opens the existing detail/configuration view, and Escape returns to the

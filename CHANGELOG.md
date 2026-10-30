@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Combine Ask/Yolo and keyboard hints on one line with the sidebar open; remove
+  the permanent Shift+Tab label while preserving mode cycling.
+
 - Avoid duplicating agent/model/effort in the footer while the sidebar displays
   them; keep the mode below the composer and restore full status when hidden.
 
