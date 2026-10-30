@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Make human approvals selectable by keyboard or mouse, with readable command
+  details and one-time decision receipts retained when the turn settles.
+- Remove the technical provider protocol from the sidebar agent/model section.
+
 - Open empty conversations with a centered RoomKit symbol, wordmark and composer.
   Restore the conversation/sidebar on the first exchange, preserve commands and
   image input, and add a configurable blank row below the interface.

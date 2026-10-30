@@ -264,6 +264,17 @@ releasing owned archives do not need approval. Requests expire after five minute
 disconnecting refuses pending actions. Actions too large to show in full
 (64 KiB of approval detail) are refused and must be split.
 
+Approval requests use a filled decision card. Use Up/Down and Enter or click
+**Allow once** / **Deny**; Ctrl+Y and Ctrl+N remain available. PageUp/PageDown
+and the mouse wheel scroll the exact details, and Esc interrupts the run. The
+composer draft is preserved while the card is open. Commands show the command
+itself and its remaining parameters.
+
+A confirmed decision adds a compact history receipt naming the person, agent
+and action. It is saved when the turn settles and returns with `/resume`.
+Timeouts, disconnections and automatic Yolo actions never claim that a person
+approved or denied something. Approval remains distinct from tool success.
+
 Press **Shift+Tab** to cycle between **Ask** and **Yolo**, including while an
 agent is working. The status line shows the host-confirmed mode. `/mode ask` and
 `/mode yolo` select directly; `/mode` offers choices. Changing modes preserves

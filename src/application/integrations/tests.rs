@@ -136,6 +136,7 @@ fn resume_follows_the_displayed_session_and_confirmed_mode_with_explicit_options
     session.apply(Event::PermissionRequested {
         conversation: "first".into(),
         permission: Permission {
+            summary: None,
             id: "approval".into(),
             actor: "coder".into(),
             run: "run".into(),

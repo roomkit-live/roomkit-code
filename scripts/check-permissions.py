@@ -90,7 +90,8 @@ def scenario(project, state, url):
         wait_for(b"Allow write?")
         wait_for(b"denied.txt")
         assert not (project / "denied.txt").exists()
-        os.write(master, b"\x0e")  # Ctrl+N denies the actual call.
+        os.write(master, b"\x1b[B\r")  # Select Deny and explicitly confirm.
+        wait_for(b"denied")
         wait_for(b"Allow edit?")
         wait_for(b"old_text")
         assert (project / "source.txt").read_text() == "before\n"
@@ -100,7 +101,13 @@ def scenario(project, state, url):
         wait_for(b"Allow edit?")
         assert len(requests) == 2, "Yolo must not settle the existing approval"
         assert (project / "source.txt").read_text() == "before\n"
-        os.write(master, b"\x19")  # Ctrl+Y allows exactly this edit.
+        # Click the visible Allow once choice for this exact request.
+        marker = captured.rfind(b"1. Allow once")
+        positions = re.findall(rb"\x1b\[(\d+);(\d+)H", captured[:marker])
+        assert marker >= 0 and positions, "Approval choice is not visible"
+        row = positions[-1][0]
+        os.write(master, b"\x1b[<0;5;" + row + b"M\x1b[<0;5;" + row + b"m")
+        wait_for(b"approved")
         wait_for(b"Permission fixture complete.")
         wait_for(b"Execution Completed")
         assert (project / "source.txt").read_text() == "after\n"

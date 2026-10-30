@@ -134,18 +134,63 @@ impl Policy {
             }
             _ => "Proposed workspace change · exact tool arguments",
         };
-        let detail = format!("{label}:\n{arguments}");
+        let detail = if matches!(event.call.name.as_str(), "shell" | "process_start") {
+            let mut parameters = event.call.arguments.clone();
+            let command = parameters.remove("command");
+            if let Some(command) = command.and_then(|c| c.as_str().map(str::to_owned)) {
+                let command = if command.chars().any(|c| c.is_control() && c != '\n') {
+                    serde_json::to_string(&command).unwrap_or_default()
+                } else {
+                    command
+                };
+                format!(
+                    "{label}\n\n$ {command}\n\nOther parameters:\n{}",
+                    serde_json::to_string_pretty(&parameters).unwrap_or_default()
+                )
+            } else {
+                format!("{label}:\n{arguments}")
+            }
+        } else {
+            format!("{label}:\n{arguments}")
+        };
+        let target = ["command", "path", "url", "query", "process_id"]
+            .iter()
+            .find_map(|key| {
+                event
+                    .call
+                    .arguments
+                    .get(*key)
+                    .and_then(serde_json::Value::as_str)
+            });
+        let summary = target.map_or_else(
+            || event.call.name.clone(),
+            |target| {
+                let compact = target.split_whitespace().collect::<Vec<_>>().join(" ");
+                let preview: String = compact.chars().take(96).collect();
+                format!(
+                    "{} · {}{}",
+                    event.call.name,
+                    preview,
+                    if preview.len() < compact.len() {
+                        "…"
+                    } else {
+                        ""
+                    }
+                )
+            },
+        );
         if detail.len() > 65_536 {
             return ToolUse::block(
                 "The action is too large to review; split it into smaller calls.",
             );
         }
         match channel
-            .ask_permission(
+            .ask_permission_with_summary(
                 &event.room_id,
                 &event.channel_id,
                 format!("Allow {}?", event.call.name),
                 detail,
+                summary,
                 Duration::from_secs(300),
             )
             .await
