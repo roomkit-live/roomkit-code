@@ -239,7 +239,18 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
         })
         .unwrap();
     assert!(!session.can_interrupt);
-    assert_eq!(session.commands.len(), 7);
+    assert!(
+        session
+            .commands
+            .iter()
+            .any(|command| command.name == "effort")
+    );
+    assert!(
+        session
+            .commands
+            .iter()
+            .any(|command| command.name == "diagnostics")
+    );
     app.close().await.unwrap();
     drop(app);
     let app = Application::open(&settings, String::new()).await.unwrap();
@@ -1103,14 +1114,21 @@ async fn provider_timeouts_and_refusals_have_actionable_private_diagnostics() {
             !session.notice.contains("secret-key") && !session.notice.contains("private server")
         );
         assert!(session.context.is_none());
+        // ON_ERROR runs asynchronously; engine close drains its observers.
+        drop(client);
+        task.await.unwrap().unwrap();
+        app.close().await.unwrap();
+        let log =
+            std::fs::read_to_string(app._storage.database.with_file_name("diagnostics.jsonl"))
+                .unwrap();
+        assert!(log.contains("engine_error"), "{log}");
+        assert!(log.contains(expected), "{log}");
+        assert!(!log.contains("secret-key") && !log.contains("private server details"));
         assert_eq!(
             calls.load(std::sync::atomic::Ordering::SeqCst),
             1,
             "failures are not silently retried"
         );
-        drop(client);
-        task.await.unwrap().unwrap();
-        app.close().await.unwrap();
         server.abort();
     }
 }
@@ -1631,3 +1649,66 @@ mod catalogue;
 mod processes;
 
 mod accounts;
+
+#[tokio::test]
+async fn effort_selection_persists_reconfigures_requests_and_can_restore_provider_default() {
+    use roomkit_cli_roomkit::CommandResult;
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let mut app = Application::open(&settings, String::new()).await.unwrap();
+    let room = app.view.room.clone();
+    for effort in ["high", "default"] {
+        let CommandResult::Switch(view) = profile_command(
+            &app,
+            Command::Invoke {
+                name: "effort".into(),
+                arguments: effort.into(),
+            },
+        )
+        .await
+        .unwrap() else {
+            panic!("Expected refreshed view")
+        };
+        app.view = *view;
+        assert_eq!(app.view.room, room);
+        assert_eq!(
+            app.view.model.as_ref().unwrap().effort.as_deref(),
+            Some(effort)
+        );
+        turn_operation(&app, effort).await;
+        let request = mock.requests.lock().unwrap().last().unwrap().clone();
+        if effort == "default" {
+            assert!(request.get("reasoning_effort").is_none());
+        } else {
+            assert_eq!(request["reasoning_effort"], effort);
+        }
+    }
+    // The agent form uses the same persisted setting as the quick command.
+    edit_profile(&mut app, "agents", "edit:code", &[("effort", "medium")]).await;
+    assert!(
+        profile_command(
+            &app,
+            Command::Invoke {
+                name: "effort".into(),
+                arguments: "unsupported".into()
+            }
+        )
+        .await
+        .is_err()
+    );
+    app.close().await.unwrap();
+    drop(app);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    assert_eq!(
+        app.view.model.as_ref().unwrap().effort.as_deref(),
+        Some("medium")
+    );
+    turn_operation(&app, "after-restart").await;
+    assert_eq!(
+        mock.requests.lock().unwrap().last().unwrap()["reasoning_effort"],
+        "medium"
+    );
+    app.close().await.unwrap();
+}

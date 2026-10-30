@@ -35,6 +35,7 @@ impl Application {
         let kit = RoomKit::new(RoomKitOptions::with_store(store));
         let policy = crate::permissions::Policy::new(settings.mode);
         let setup = async {
+            profiles.diagnostics.install(&kit).await?;
             let agent_id = profiles.initialize(&kit).await?;
             let channel = ConversationChannel::new(ChannelId::new("terminal")?);
             kit.register_channel(channel.clone())?;
@@ -77,6 +78,7 @@ impl Application {
             }),
             Err(error) => {
                 let _ = kit.close().await;
+                profiles.diagnostics.close().await;
                 let _ = profiles.resources.close().await;
                 Err(error)
             }
@@ -87,6 +89,7 @@ impl Application {
         self.profiles.accounts.close().await;
         let engine = self.kit.close().await;
         let tools = self.profiles.resources.close().await;
+        self.profiles.diagnostics.close().await;
         engine?;
         if !tools {
             return Err("Workspace tool cleanup is still pending".into());

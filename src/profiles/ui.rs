@@ -26,6 +26,20 @@ fn choice(
         description: description.into(),
     }
 }
+fn effort_choices() -> Vec<Choice> {
+    std::iter::once(choice(
+        "default",
+        "Provider default",
+        "Let the model use its default effort",
+    ))
+    .chain(
+        model::EFFORTS
+            .iter()
+            .map(|e| choice(*e, *e, "Choose a level supported by this model")),
+    )
+    .collect()
+}
+
 fn field(
     name: &str,
     label: &str,
@@ -87,6 +101,43 @@ impl Profiles {
                 let id = parts.next().unwrap_or_default();
                 let model = parts.next().unwrap_or_default();
                 match (name.as_str(), action) {
+                    ("effort", effort) => {
+                        let mut agent = state
+                            .project
+                            .value
+                            .agents
+                            .get(current.agent.as_str())
+                            .ok_or("Configure an agent with /agents first")?
+                            .clone();
+                        if effort.is_empty() {
+                            return Ok(choices(
+                                &current,
+                                "effort",
+                                "Reasoning effort · supported levels depend on the model",
+                                effort_choices(),
+                            ));
+                        }
+                        agent.reasoning_effort = if effort == "default" {
+                            None
+                        } else {
+                            Some(effort.into())
+                        };
+                        agent.validate()?;
+                        let provider = state
+                            .providers
+                            .value
+                            .profiles
+                            .get(&agent.provider)
+                            .ok_or("Unknown provider")?;
+                        let (runtime, tools) = self.assemble(&agent, provider).await?;
+                        let mut project = state.project.value.clone();
+                        project.agents.insert(agent.id.clone(), agent);
+                        state.project.save(project)?;
+                        state.install(kit, current.agent.as_str(), runtime, tools)?;
+                        let mut next = current;
+                        state.view(&mut next);
+                        Ok(CommandResult::Switch(Box::new(next)))
+                    }
                     ("providers", "") => Ok(provider_choices(&state, &current)),
                     ("providers", "chatgpt-use") => {
                         let account = self
@@ -548,6 +599,7 @@ fn agent_form(
         label: "New agent".into(),
         provider: preset.map_or("", |p| p.0).into(),
         model: preset.map_or("", |p| p.1).into(),
+        reasoning_effort: None,
         context_window: None,
         instructions: String::new(),
         tools: TOOLS.iter().map(|s| (*s).into()).collect(),
@@ -605,6 +657,16 @@ fn agent_form(
                 "Effective server capacity in tokens; empty means unknown",
                 false,
                 FieldKind::Text,
+            ),
+            field(
+                "effort",
+                "Reasoning effort",
+                a.reasoning_effort.as_deref().unwrap_or("default"),
+                "Model-specific; default omits the parameter. Also available through /effort",
+                true,
+                FieldKind::Choice {
+                    choices: effort_choices(),
+                },
             ),
             field(
                 "instructions",
@@ -703,6 +765,10 @@ fn parse_agent(
         label: value(values, "label").trim().into(),
         provider: value(values, "provider").into(),
         model: value(values, "model").trim().into(),
+        reasoning_effort: match value(values, "effort") {
+            "" | "default" => None,
+            effort => Some(effort.into()),
+        },
         context_window: if capacity.is_empty() {
             None
         } else {

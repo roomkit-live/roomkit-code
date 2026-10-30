@@ -38,6 +38,9 @@ pub(crate) struct Cli {
     /// Storage directory; defaults to the user's application data directory.
     #[arg(long, env = "ROOMKIT_CODE_STATE_DIR", hide_env_values = true)]
     pub state_dir: Option<PathBuf>,
+    /// Record additional framework lifecycle events in the private diagnostic log.
+    #[arg(long)]
+    pub debug: bool,
     /// Check launch options and workspace without loading profiles or connecting.
     #[arg(long)]
     pub check_config: bool,
@@ -145,6 +148,7 @@ pub(crate) struct Settings {
     pub model: String,
     pub provider_timeout_seconds: u64,
     pub context_window: Option<u64>,
+    pub debug: bool,
     pub ui: UiOptions,
     pub mode: Mode,
 }
@@ -265,6 +269,7 @@ impl Settings {
         };
         Ok(Self {
             workspace,
+            debug: cli.debug,
             state_dir,
             session: cli.session.clone(),
             mode: cli.mode.unwrap_or(file.permissions.mode),

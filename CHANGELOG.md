@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Configure reasoning effort per agent using `/effort` or the agent form, with a
+  provider-default option and persistent settings.
+- Record private, rotating diagnostic logs from engine errors and tool audit
+  hooks; `/diagnostics` shows recent records and the log location, and `--debug`
+  adds framework events without logging payloads or credentials.
+- Fix Responses completion and tool execution with empty terminal output and
+  omitted optional namespaces; align account-based usage with the engine's provider
+  identity.
+
 - Add Sign in with ChatGPT through reusable `roomkit-auth`: browser consent,
   separate accounts, automatic credential refresh, account-specific models and
   sign-out. Agents use stateless Responses with namespaced function tools.

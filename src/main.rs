@@ -4,6 +4,7 @@ mod accounts;
 mod agent;
 mod application;
 mod config;
+mod diagnostics;
 mod permissions;
 mod processes;
 mod profiles;

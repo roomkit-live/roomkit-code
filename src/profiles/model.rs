@@ -67,6 +67,8 @@ pub(crate) struct Agent {
     pub label: String,
     pub provider: String,
     pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
     pub context_window: Option<u64>,
     pub instructions: String,
     pub tools: Vec<String>,
@@ -191,6 +193,13 @@ impl Provider {
 
 impl Agent {
     pub fn validate(&self) -> Result<(), String> {
+        if self
+            .reasoning_effort
+            .as_deref()
+            .is_some_and(|e| !EFFORTS.contains(&e))
+        {
+            return Err("Choose a supported reasoning effort or provider default".into());
+        }
         if !valid_id(&self.id)
             || !text(&self.label, 128)
             || !valid_id(&self.provider)
@@ -225,3 +234,5 @@ impl Agent {
         Ok(())
     }
 }
+
+pub(super) const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];

@@ -36,6 +36,18 @@ async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<bool> {
 pub(crate) fn commands() -> Vec<CommandSpec> {
     vec![
         CommandSpec {
+            name: "effort".into(),
+            description: "Choose reasoning effort for the current agent".into(),
+            arguments: "[default|low|medium|high|xhigh|max]".into(),
+            choices: Vec::new(),
+        },
+        CommandSpec {
+            name: "diagnostics".into(),
+            description: "Inspect recent engine errors and local audit logs".into(),
+            arguments: String::new(),
+            choices: Vec::new(),
+        },
+        CommandSpec {
             name: "processes".into(),
             description: "Inspect background processes and stop them (also F6)".into(),
             arguments: String::new(),
@@ -303,7 +315,7 @@ impl CommandHandler for Sessions {
     }
 
     fn allow_while_busy(&self, name: &str) -> bool {
-        matches!(name, "mode" | "tools" | "processes")
+        matches!(name, "mode" | "tools" | "processes" | "diagnostics")
     }
 
     async fn handle(
@@ -311,7 +323,7 @@ impl CommandHandler for Sessions {
         request: Request,
         current: SessionConfig,
     ) -> std::result::Result<CommandResult, String> {
-        if matches!(&request.command, Command::Invoke { name, .. } | Command::SubmitForm { name, .. } if matches!(name.as_str(), "providers" | "agents"))
+        if matches!(&request.command, Command::Invoke { name, .. } | Command::SubmitForm { name, .. } if matches!(name.as_str(), "providers" | "agents" | "effort"))
         {
             return self
                 .profiles
@@ -324,6 +336,7 @@ impl CommandHandler for Sessions {
         };
         let arguments = arguments.trim();
         match name.as_str() {
+            "diagnostics" => Ok(self.profiles.diagnostics.panel(&current, arguments)),
             "processes" => {
                 self.profiles
                     .processes

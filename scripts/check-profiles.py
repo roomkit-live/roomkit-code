@@ -114,7 +114,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         command("/agents", b"Project agents")
         offset = send(b"\r")
         wait_for(b"Agent profile", offset)
-        fields([identifier, label, None, model, "32768", "Fixture instructions", "read"])
+        fields([identifier, label, None, model, "32768", None, "Fixture instructions", "read"])
         save()
         wait_for(model.encode())
 

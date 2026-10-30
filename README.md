@@ -338,3 +338,26 @@ Provider profiles contain only an opaque account reference. If remote revocation
 cannot be confirmed, sign-out clears local tokens and reports that distinction.
 The OAuth callback uses a local browser on the same machine; remote browser
 forwarding and device-code sign-in are not implemented in this first version.
+
+### Reasoning effort and diagnostics
+
+Use `/effort` to select the active agent's reasoning effort, or edit **Reasoning
+effort** in `/agents`. The setting is saved per agent and applies to subsequent
+requests, including tool rounds. `default` leaves the parameter out; other levels
+must be supported by the chosen model. Changing effort keeps the current session.
+
+`/diagnostics` shows recent operational records and the exact log location. Each
+project's private state directory contains `diagnostics.jsonl` and, after rotation,
+`diagnostics.previous.jsonl` (at most 1 MiB each). Errors and tool outcomes are
+recorded automatically using RoomKit's `ON_ERROR`, `ON_TOOL_CALL` and framework
+events. Run `roomkit-code --debug` for additional lifecycle and delivery records.
+Records include timestamps, room/event/channel identifiers, known tool names,
+outcomes and safe error classifications. They never include prompts, tool
+arguments/results, credentials, encrypted reasoning or raw provider error bodies.
+The panel shows recent records for the current launch; files also cover previous
+launches. File write failures are shown in the panel and do not stop the agent.
+These operational logs are intended for troubleshooting, not as a tamper-proof
+audit trail. Raw dependency `tracing` output is not enabled by `--debug`.
+
+Context token counts become available after a response reports usage. A percentage
+also requires the agent's effective **Context capacity**, configurable in `/agents`.

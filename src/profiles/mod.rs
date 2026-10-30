@@ -22,6 +22,7 @@ use store::Document;
 
 pub(crate) struct Profiles {
     workspace: PathBuf,
+    pub(crate) diagnostics: Arc<crate::diagnostics::Diagnostics>,
     pub(crate) accounts: Arc<crate::accounts::Accounts>,
     pub(crate) resources: crate::agent::Resources,
     pub(crate) processes: Arc<crate::processes::Processes>,
@@ -44,6 +45,11 @@ impl Profiles {
         api_key: String,
         resources: Option<crate::agent::Resources>,
     ) -> Result<Arc<Self>, String> {
+        let diagnostics = crate::diagnostics::Diagnostics::open(
+            storage.database.with_file_name("diagnostics.jsonl"),
+            settings.debug,
+        )
+        .map_err(|_| "Cannot open the private diagnostic log")?;
         let mut providers =
             Document::<Providers>::load(settings.state_dir.join("connections.json"))?;
         let mut project =
@@ -98,6 +104,7 @@ impl Profiles {
                 label: "Code".into(),
                 provider: id,
                 model: settings.model.clone(),
+                reasoning_effort: None,
                 context_window: settings.context_window,
                 instructions: String::new(),
                 tools: TOOLS.iter().map(|s| (*s).into()).collect(),
@@ -126,6 +133,7 @@ impl Profiles {
             .map_err(|_| "Could not initialize workspace tools")?,
         };
         Ok(Arc::new(Self {
+            diagnostics,
             workspace: settings.workspace.clone(),
             accounts: crate::accounts::Accounts::new(&settings.state_dir.join("auth"))?,
             processes: crate::processes::Processes::new(resources.processes.clone()),
@@ -223,6 +231,10 @@ impl Profiles {
             ),
         }
         .with_timeout(std::time::Duration::from_secs(provider.timeout_seconds));
+        let config = match &profile.reasoning_effort {
+            Some(effort) => config.with_reasoning_effort(effort),
+            None => config,
+        };
         crate::agent::create(&self.workspace, &self.resources, profile, config)
             .await
             .map_err(
@@ -286,20 +298,15 @@ impl State {
             .collect();
         if let Some(profile) = self.project.value.agents.get(view.agent.as_str()) {
             view.model = Some(ModelInfo {
-                provider: if self
-                    .providers
-                    .value
-                    .profiles
-                    .get(&profile.provider)
-                    .is_some_and(|p| matches!(p.authentication, Authentication::ChatGpt { .. }))
-                {
-                    "chatgpt"
-                } else {
-                    "openai"
-                }
-                .into(),
+                // Match the engine's usage identity, including Responses over OAuth.
+                provider: "openai".into(),
                 model: profile.model.clone(),
-                effort: None,
+                effort: Some(
+                    profile
+                        .reasoning_effort
+                        .clone()
+                        .unwrap_or_else(|| "default".into()),
+                ),
             });
             view.context_capacity = profile.context_window;
         } else {
