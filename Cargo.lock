@@ -1474,7 +1474,7 @@ dependencies = [
 [[package]]
 name = "roomkit-cli-protocol"
 version = "0.1.0"
-source = "git+https://github.com/roomkit-live/roomkit-cli?rev=16cf31ce958290fbc629345c1435ab837059c66a#16cf31ce958290fbc629345c1435ab837059c66a"
+source = "git+https://github.com/roomkit-live/roomkit-cli?rev=6da674810d8b0185dd37f30d624621edb7cf1bf6#6da674810d8b0185dd37f30d624621edb7cf1bf6"
 dependencies = [
  "serde",
  "serde_json",
@@ -1483,7 +1483,7 @@ dependencies = [
 [[package]]
 name = "roomkit-cli-roomkit"
 version = "0.1.0"
-source = "git+https://github.com/roomkit-live/roomkit-cli?rev=16cf31ce958290fbc629345c1435ab837059c66a#16cf31ce958290fbc629345c1435ab837059c66a"
+source = "git+https://github.com/roomkit-live/roomkit-cli?rev=6da674810d8b0185dd37f30d624621edb7cf1bf6#6da674810d8b0185dd37f30d624621edb7cf1bf6"
 dependencies = [
  "roomkit",
  "roomkit-cli-protocol",
@@ -1496,7 +1496,7 @@ dependencies = [
 [[package]]
 name = "roomkit-cli-transport"
 version = "0.1.0"
-source = "git+https://github.com/roomkit-live/roomkit-cli?rev=16cf31ce958290fbc629345c1435ab837059c66a#16cf31ce958290fbc629345c1435ab837059c66a"
+source = "git+https://github.com/roomkit-live/roomkit-cli?rev=6da674810d8b0185dd37f30d624621edb7cf1bf6#6da674810d8b0185dd37f30d624621edb7cf1bf6"
 dependencies = [
  "roomkit-cli-protocol",
 ]
@@ -1687,7 +1687,7 @@ dependencies = [
 [[package]]
 name = "roomkit-tui"
 version = "0.1.0"
-source = "git+https://github.com/roomkit-live/roomkit-cli?rev=16cf31ce958290fbc629345c1435ab837059c66a#16cf31ce958290fbc629345c1435ab837059c66a"
+source = "git+https://github.com/roomkit-live/roomkit-cli?rev=6da674810d8b0185dd37f30d624621edb7cf1bf6#6da674810d8b0185dd37f30d624621edb7cf1bf6"
 dependencies = [
  "base64 0.22.1",
  "crossterm",

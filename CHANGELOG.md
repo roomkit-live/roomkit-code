@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Reduce terminal CPU use by avoiding idle redraws and reusing formatted message
+  and tool layouts, while preserving streaming, timers and interactive controls.
+
 - Add Rust/Python structural outlines with colored signatures and line ranges,
   available in both permission modes and in the host capability catalogue.
 - Display measured context and separate latest-execution token consumption;
