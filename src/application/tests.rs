@@ -239,7 +239,7 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
         })
         .unwrap();
     assert!(!session.can_interrupt);
-    assert_eq!(session.commands.len(), 6);
+    assert_eq!(session.commands.len(), 7);
     app.close().await.unwrap();
     drop(app);
     let app = Application::open(&settings, String::new()).await.unwrap();
@@ -1627,3 +1627,5 @@ async fn stale_or_conflicting_forms_cannot_replace_a_working_agent() {
 }
 
 mod catalogue;
+
+mod processes;

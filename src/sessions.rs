@@ -36,6 +36,12 @@ async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<bool> {
 pub(crate) fn commands() -> Vec<CommandSpec> {
     vec![
         CommandSpec {
+            name: "processes".into(),
+            description: "Inspect background processes and stop them (also F6)".into(),
+            arguments: String::new(),
+            choices: Vec::new(),
+        },
+        CommandSpec {
             name: "providers".into(),
             description: "Configure provider connections and test model discovery".into(),
             arguments: String::new(),
@@ -264,8 +270,19 @@ impl Sessions {
 }
 
 impl CommandHandler for Sessions {
+    fn subscribe(
+        &self,
+        current: SessionConfig,
+    ) -> Option<tokio::sync::watch::Receiver<Vec<Event>>> {
+        Some(
+            self.profiles
+                .processes
+                .subscribe(self.kit.clone(), self.channel.clone(), current),
+        )
+    }
+
     fn allow_while_busy(&self, name: &str) -> bool {
-        matches!(name, "mode" | "tools")
+        matches!(name, "mode" | "tools" | "processes")
     }
 
     async fn handle(
@@ -286,6 +303,12 @@ impl CommandHandler for Sessions {
         };
         let arguments = arguments.trim();
         match name.as_str() {
+            "processes" => {
+                self.profiles
+                    .processes
+                    .handle(&self.kit, &self.channel, &current, arguments)
+                    .await
+            }
             "tools" if arguments.is_empty() => Ok(CommandResult::Events(vec![Event::Choices {
                 conversation: current.room.as_str().into(),
                 command: "tools".into(),

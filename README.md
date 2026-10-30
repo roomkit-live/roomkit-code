@@ -165,6 +165,19 @@ including any explicitly supplied newline, and can deliver EOF. Inspect partial
 writes before deciding what to do next. Stop unneeded jobs and set `forget` to
 release their retained records. The application closes remaining processes on exit.
 
+**/processes**, **F6**, or the clickable **Processes** status open the live process
+monitor. It shows accessible jobs from this application's conversations, including
+other selected agents, with their command, originating agent/conversation, elapsed
+time and outcome. Open a job to inspect stdout/stderr, browse 4 KiB output pages,
+follow the latest output, stop its process group, or forget a completed record.
+These human controls work while the model is busy, preserve the composer draft,
+and do not send a request to the model. Press Esc to return to the conversation.
+
+The footer follows lifecycle notifications even after the agent finishes. Output
+refreshes at most once per second while the panel is open; closed panels have no
+refresh timer. Running processes and these records belong to the current app
+instance and are not restored by `/resume` after restarting the application.
+
 Shell and process tools share private temporary output archives, capped at 8 MiB
 per stream and 64 MiB overall, with 4 KiB read pages. `output_read` pages an owned archive using byte
 cursors; `output_forget` releases it. Check completeness and omitted bytes: these
@@ -276,7 +289,8 @@ remain in the project and conversation.
 `src/agent.rs` selects capabilities; `src/coding-agent.txt` supplies development
 instructions. `src/application.rs` assembles and closes the engine.
 `src/config.rs` and `src/storage.rs` own application settings and project state.
-`src/sessions.rs` owns new/resume/mode/tools commands and the project session catalogue.
+`src/processes.rs` owns scoped process monitoring and human controls.
+`src/sessions.rs` owns new/resume/mode/tools/processes commands and the project session catalogue.
 `src/permissions.rs` owns the tool policy and hooks that await actual approval.
 The TUI receives only its generic client connection, preserving the boundary
 needed for a future remote host.

@@ -15,19 +15,20 @@ roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs
 roomkit-ai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "c6de24a069a5d5c32d6ea57cd970a547bae63c25" }
 roomkit-openai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "c6de24a069a5d5c32d6ea57cd970a547bae63c25" }
 roomkit-sqlite = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "c6de24a069a5d5c32d6ea57cd970a547bae63c25" }
-roomkit-cli-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "f9eacee6feb8b7f69ee097e40a93c0c1d6ea7333" }
-roomkit-tui = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "f9eacee6feb8b7f69ee097e40a93c0c1d6ea7333" }
-roomkit-tools-code = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "90e2d4e9d874c7e61565d634639de963bba75a61" }
-roomkit-tools-fs = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "90e2d4e9d874c7e61565d634639de963bba75a61" }
-roomkit-tools-process = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "90e2d4e9d874c7e61565d634639de963bba75a61" }
-roomkit-tools-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "90e2d4e9d874c7e61565d634639de963bba75a61" }
-roomkit-tools-web = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "90e2d4e9d874c7e61565d634639de963bba75a61" }
-roomkit-tools-search = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "90e2d4e9d874c7e61565d634639de963bba75a61", default-features = false, features = ["exa"] }
+roomkit-cli-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "39c0c748837626c0c50da7a415b42f33a9517766" }
+roomkit-tui = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "39c0c748837626c0c50da7a415b42f33a9517766" }
+roomkit-tools-code = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "a9d092e87ab79a7573b0f8ab236117cec703bee0" }
+roomkit-tools-fs = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "a9d092e87ab79a7573b0f8ab236117cec703bee0" }
+roomkit-tools-process = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "a9d092e87ab79a7573b0f8ab236117cec703bee0" }
+roomkit-tools-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "a9d092e87ab79a7573b0f8ab236117cec703bee0" }
+roomkit-tools-web = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "a9d092e87ab79a7573b0f8ab236117cec703bee0" }
+roomkit-tools-search = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "a9d092e87ab79a7573b0f8ab236117cec703bee0", default-features = false, features = ["exa"] }
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.9"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 fs2 = "0.4"
 sha2 = "0.10"
 url = "2"

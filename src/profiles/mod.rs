@@ -23,6 +23,7 @@ use store::Document;
 pub(crate) struct Profiles {
     workspace: PathBuf,
     pub(crate) resources: crate::agent::Resources,
+    pub(crate) processes: Arc<crate::processes::Processes>,
     state: Mutex<State>,
 }
 
@@ -114,17 +115,19 @@ impl Profiles {
         {
             return Err("Selected agent profile does not exist".into());
         }
+        let resources = match resources {
+            Some(resources) => resources,
+            None => crate::agent::Resources::new(
+                &settings.workspace,
+                storage.database.parent().ok_or("Missing state directory")?,
+            )
+            .await
+            .map_err(|_| "Could not initialize workspace tools")?,
+        };
         Ok(Arc::new(Self {
             workspace: settings.workspace.clone(),
-            resources: match resources {
-                Some(resources) => resources,
-                None => crate::agent::Resources::new(
-                    &settings.workspace,
-                    storage.database.parent().ok_or("Missing state directory")?,
-                )
-                .await
-                .map_err(|_| "Could not initialize workspace tools")?,
-            },
+            processes: crate::processes::Processes::new(resources.processes.clone()),
+            resources,
             state: Mutex::new(State {
                 providers,
                 project,
