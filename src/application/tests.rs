@@ -238,7 +238,7 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
             _ => None,
         })
         .unwrap();
-    assert!(!session.can_interrupt);
+    assert!(session.can_interrupt);
     assert!(
         session
             .commands

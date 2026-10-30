@@ -66,8 +66,11 @@ are provided by `roomkit-tui`: F2 expands tool details, clicking a tool's
 disclosure does the same, and dragging text requests clipboard copying through
 OSC 52 when supported by the terminal. `--native-selection` delegates selection
 to the terminal and disables application mouse interactions. Ctrl+D detaches;
-this local application then closes its owned engine. Per-run interruption is
-not yet available in the local adapter.
+this local application then closes its owned engine. Esc closes the current menu or panel, otherwise it interrupts the active
+execution while keeping the draft. Ctrl+C clears the draft and interrupts active
+work; a second press within two seconds exits. Typing or pasting disarms exit.
+Interruption waits for engine cleanup, preserves completed tool effects and
+leaves the conversation ready to continue.
 
 Scrolling above the latest activity reveals a **Back to bottom** control.
 Click it or press **Ctrl+End** to return without losing the current draft.

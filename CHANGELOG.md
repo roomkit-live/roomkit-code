@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Interrupt active generations and tool calls with Esc while preserving drafts;
+  menus and panels close first. Wait for cleanup before allowing the next turn.
+- Clear the composer with Ctrl+C and require a second press within two seconds
+  to exit, with a visible temporary hint.
+
 - List and manage agent/provider profiles through one menu per profile, with
   explicit deletion confirmation and `list` / `delete <id>` command aliases.
 - Keep conversation history when deleting agents, select a remaining agent or

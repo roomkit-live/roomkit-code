@@ -33,8 +33,14 @@ class Model(BaseHTTPRequestHandler):
             return
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         requests.append(request)
-        if len(requests) == 3 and not continue_response.wait(timeout=15):
-            self.send_error(504, "Fixture response was not released")
+        if len(requests) == 3:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            partial = {"choices": [{"index": 0, "delta": {"content": "Partial answer kept."}}]}
+            self.wfile.write(("data: " + json.dumps(partial) + "\n\n").encode())
+            self.wfile.flush()
+            continue_response.wait(timeout=15)
             return
         if len(requests) == 1:
             delta = {"tool_calls": [{"index": 0, "id": "read-1", "type": "function", "function": {
@@ -54,7 +60,11 @@ class Model(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # The interruption scenario deliberately closes the response.
+
 
 
 def scenario(project, state, base_url, resume=False, color="never"):
@@ -178,11 +188,31 @@ def scenario(project, state, base_url, resume=False, color="never"):
             offset = len(captured)
             os.write(master, b"Check the context again.\r")
             wait_for(b"context (last report) 2050/32768", offset)
+            # Cancel a real pending HTTP generation; the host must join it
+            # without closing the engine or consuming the unsent draft.
+            wait_for(b"Partial answer kept.", offset)
+            os.write(master, b"Preserved after stop")
+            wait_for(b"Preserved after stop")
             offset = len(captured)
+            os.write(master, b"\x1b")
+            wait_for(b"Execution Interrupted", offset)
             continue_response.set()
+            offset = len(captured)
+            os.write(master, b"!")
+            wait_for(b"Preserved after stop!", offset)
+            os.write(master, b"\x03")
+            wait_for(b"Press Ctrl+C again to exit", offset)
+            assert process.poll() is None, "First Ctrl+C exited"
+            offset = len(captured)
+            os.write(master, b"Continue after interruption.\r")
             wait_for(b"Execution Completed", offset)
             wait_for(b"context 2050/32768", offset)
-        os.write(master, b"\x04")
+            offset = len(captured)
+            os.write(master, b"\x03")
+            wait_for(b"Press Ctrl+C again to exit", offset)
+            os.write(master, b"\x03")
+        else:
+            os.write(master, b"\x04")
         code = process.wait(timeout=10)
         while select.select([master], [], [], 0)[0]:
             captured.extend(os.read(master, 65536))
@@ -218,7 +248,8 @@ try:
         scenario(project, state, base_url, resume=True)
         scenario(project, state, base_url, resume=True, color="always")
         scenario(project, state, base_url, resume=True, color="auto")
-        assert len(requests) == 3, "Resume reexecuted a model turn"
+        assert len(requests) == 4, "Resume reexecuted a model turn"
+        assert sum(m.get("content") == "Partial answer kept." for m in requests[-1]["messages"]) == 1, "Cancelled partial response was lost or duplicated"
         assert any(m.get("role") == "tool" and "fictional project fixture" in m.get("content", "")
                    for m in requests[-1]["messages"]), "The model did not receive the actual file"
         assert sorted(p.name for p in project.iterdir()) == ["fixture.txt"], "Workspace was modified"
@@ -228,4 +259,4 @@ finally:
     server.server_close()
     thread.join(timeout=5)
 
-print("PTY checks passed: tools, Markdown, composer, history navigation, fresh launch, new/resume/filter/cancel, empty-draft filtering, working context report, preserved draft, colors, restart and terminal restoration.")
+print("PTY checks passed: tools, Markdown, composer, history navigation, fresh launch, new/resume/filter/cancel, empty-draft filtering, working context report, Esc interruption and continuation, double Ctrl+C, preserved draft, colors, restart and terminal restoration.")
