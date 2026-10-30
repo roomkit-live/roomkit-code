@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Execute `!command` or `/shell command` directly from the composer, without a
+  model request. Preserve multiline shell input and show stdout/stderr, elapsed
+  time and exit status using the existing supervised process manager.
+- Interrupt manual commands with Esc, inspect them through F6, and retain bounded
+  output in session history for the next agent turn. Retry identities prevent
+  duplicate execution across restarts. Explicit commands work in Ask and Yolo,
+  including before provider configuration.
+
 - Interrupt active generations and tool calls with Esc while preserving drafts;
   menus and panels close first. Wait for cleanup before allowing the next turn.
 - Clear the composer with Ctrl+C and require a second press within two seconds

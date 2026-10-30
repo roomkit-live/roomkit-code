@@ -270,7 +270,7 @@ impl Processes {
             let p = &job.process;
             spec.title = format!("Process {} · {}", id, state(job));
             spec.body = format!(
-                "Command: {}\nAgent: {}\nConversation: {}\nDirectory: {}\nElapsed: {}s · Lifetime limit: {}s\nState: {} · Exit: {} · Signal: {}\n\n",
+                "Command: {}\nOwner: {}\nConversation: {}\nDirectory: {}\nElapsed: {}s · Lifetime limit: {}s\nState: {} · Exit: {} · Signal: {}\n\n",
                 p.command,
                 job.agent,
                 job.room,

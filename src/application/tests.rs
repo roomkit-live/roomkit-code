@@ -1713,3 +1713,5 @@ async fn effort_selection_persists_reconfigures_requests_and_can_restore_provide
     );
     app.close().await.unwrap();
 }
+
+mod shell;

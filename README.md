@@ -72,6 +72,23 @@ work; a second press within two seconds exits. Typing or pasting disarms exit.
 Interruption waits for engine cleanup, preserves completed tool effects and
 leaves the conversation ready to continue.
 
+Type **!command** (for example `!git status`) to run a command directly in the
+project directory without invoking the model. `/shell command` is equivalent.
+The composer shows a command hint; Enter runs, Alt+Enter adds a line, and `\!`
+sends a literal leading exclamation mark to the agent. Explicit commands execute
+in both Ask and Yolo; those modes govern commands proposed by the agent.
+
+Commands use `/bin/sh -c` without a login shell or PTY, with stdin closed and a
+five-minute lifetime. Each starts in the project directory: `cd` affects that
+command only. Stdout/stderr, exit status and duration appear in the conversation;
+Esc interrupts and waits for cleanup. F6 or **/processes** inspects or stops the
+process. The retained conversation contains up to 4 KiB per output stream, with
+explicit truncation; larger output can be paged in the process panel during the
+current application. Old completed manual process slots are reclaimed as needed.
+The command and bounded result survive resume and enter the next agent request;
+no model request is sent automatically. Avoid entering credentials in commands
+that should not be saved in conversation history.
+
 Scrolling above the latest activity reveals a **Back to bottom** control.
 Click it or press **Ctrl+End** to return without losing the current draft.
 The filled input area starts at three rows, centers the draft vertically and

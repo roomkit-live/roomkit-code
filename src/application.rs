@@ -61,6 +61,11 @@ impl Application {
             let mut view = SessionConfig::new(room, agent_id, "local-user");
             view.title = crate::sessions::title(&settings.workspace, &view.room);
             view.commands = crate::sessions::commands();
+            view.input_actions = vec![roomkit_tui::protocol::InputAction {
+                prefix: '!',
+                command: "shell".into(),
+                description: "Run a shell command in this project".into(),
+            }];
             view.mode = Some(policy.state(view.room.as_str()));
             profiles.attach(&kit, &view, channel.id()).await?;
             profiles.configure_view(&mut view).await;
@@ -86,6 +91,7 @@ impl Application {
     }
 
     pub async fn close(&self) -> Result<()> {
+        self.profiles.shell.close().await;
         self.profiles.accounts.close().await;
         let engine = self.kit.close().await;
         let tools = self.profiles.resources.close().await;

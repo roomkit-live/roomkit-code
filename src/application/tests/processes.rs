@@ -105,7 +105,7 @@ async fn monitor_observes_actual_lifecycle_filters_owners_and_rejects_old_action
     assert!(!list.body.contains(&hidden.process_id));
     let open = action(&list, &format!("open:{}", process.process_id));
     let detail = panel(&app, &open).await.unwrap();
-    assert!(detail.body.contains("Command:") && detail.body.contains("Agent: code"));
+    assert!(detail.body.contains("Command:") && detail.body.contains("Owner: code"));
     let stop = action(&detail, ":stop");
     assert!(
         panel(&app, &open).await.is_err(),

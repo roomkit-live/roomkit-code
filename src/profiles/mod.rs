@@ -28,6 +28,7 @@ pub(crate) struct Profiles {
     pub(crate) accounts: Arc<crate::accounts::Accounts>,
     pub(crate) resources: crate::agent::Resources,
     pub(crate) processes: Arc<crate::processes::Processes>,
+    pub(crate) shell: Arc<crate::shell::Shell>,
     state: Mutex<State>,
 }
 
@@ -141,6 +142,7 @@ impl Profiles {
             .map_err(|_| "Could not initialize workspace tools")?,
         };
         Ok(Arc::new(Self {
+            shell: crate::shell::Shell::new(resources.processes.clone(), diagnostics.clone()),
             diagnostics,
             workspace: settings.workspace.clone(),
             state_dir: settings.state_dir.clone(),

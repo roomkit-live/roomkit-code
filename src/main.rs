@@ -9,6 +9,7 @@ mod permissions;
 mod processes;
 mod profiles;
 mod sessions;
+mod shell;
 mod storage;
 mod tool_views;
 
