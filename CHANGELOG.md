@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Saving an MCP server now connects it and enables tools for the current agent
+  automatically. Connected servers can be edited directly and reconnect on save.
+  Existing selections and explicit disabling are preserved, with bounded default
+  activation, cancellable setup and cleanup for both stdio and HTTP.
+
 - Configure remote MCP Streamable HTTP servers from `/mcp`, with optional bearer
   and header environment references, explicit per-agent selection, Ask approvals,
   cancellable connections and session cleanup. Existing stdio configurations are

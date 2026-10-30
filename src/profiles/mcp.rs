@@ -1,4 +1,4 @@
-//! MCP configuration, explicit connections and per-agent exposure belong to the
+//! MCP configuration, connection workflow and per-agent exposure belong to the
 //! host. Protocol, aliases, selection enforcement and process cleanup are supplied
 //! by roomkit-mcp; there is no application tool implementation here.
 mod config;
@@ -8,10 +8,9 @@ mod ui;
 use super::*;
 pub(super) use config::Servers;
 pub(crate) use config::valid_id;
-use roomkit_cli_roomkit::{CommandExecution, CommandResult};
-use roomkit_tui::protocol::{Command, Request, RunOutcome};
+use roomkit_cli_roomkit::CommandResult;
+use roomkit_tui::protocol::{Command, Request};
 pub(super) use runtime::Runtime;
-use runtime::{Connection, failure};
 pub(super) use ui::Pending;
 
 impl Profiles {
@@ -24,7 +23,9 @@ impl Profiles {
         let mut state = self.state.lock().await;
         let _lease = store::edit_lease(&self.state_dir)?;
         if let Command::SubmitForm { form, values, .. } = request.command {
-            return ui::save(&mut state, &current, &form, &values);
+            let (server, connector) =
+                ui::save(&mut state, &current, &form, &values, &self.workspace)?;
+            return Ok(self.connection_execution(kit, current, server.id, Some(connector)));
         }
         let Command::Invoke { arguments, .. } = request.command else {
             return Err("Unsupported MCP request".into());
@@ -91,24 +92,12 @@ impl Profiles {
                 )
                 .await
             }
-            "edit" => {
-                if self
-                    .mcp_runtime
-                    .connections
-                    .lock()
-                    .await
-                    .get(id)
-                    .is_some_and(|c| c.server.is_some())
-                {
-                    return Err("Disconnect this MCP server before editing its connection".into());
-                }
-                ui::form(
-                    &mut state,
-                    &current,
-                    Some(&server),
-                    server.transport.is_http(),
-                )
-            }
+            "edit" => ui::form(
+                &mut state,
+                &current,
+                Some(&server),
+                server.transport.is_http(),
+            ),
             "delete" => {
                 if self
                     .mcp_runtime
@@ -139,95 +128,9 @@ impl Profiles {
                 {
                     return Err("This MCP server is already connected".into());
                 }
-                let profiles = self.clone();
-                let kit = kit.clone();
-                let id = id.to_string();
-                // The adapter owns admission, busy state and Esc. No network or
-                // process startup is awaited in the UI command handler.
-                Ok(CommandResult::Execute(CommandExecution::new(
-                    format!("mcp-{}", uuid::Uuid::new_v4()).as_str().into(),
-                    move |mut context| async move {
-                        let runtime = &profiles.mcp_runtime;
-                        let _operation = runtime.operation.lock().await;
-                        if runtime.stop.is_cancelled() {
-                            return Ok(RunOutcome::Interrupted);
-                        }
-                        let previous = runtime.connections.lock().await.remove(&id);
-                        if let Some(old) = previous.and_then(|c| c.server) {
-                            old.close().await;
-                        }
-                        let mut error = None;
-                        let mut outcome = RunOutcome::Completed;
-                        let connection = if let Some(command) = command {
-                            profiles.diagnostics.record(
-                                "mcp_connecting",
-                                serde_json::json!({"server":id}),
-                                None,
-                            );
-                            let stopped = async {
-                                tokio::select! { () = context.cancelled() => {}, () = runtime.stop.cancelled() => {} }
-                            };
-                            match command.connect_until(stopped).await {
-                                Ok(server) => Connection {
-                                    server: Some(server),
-                                    status: "Connected".into(),
-                                },
-                                Err(cause) => {
-                                    let message = failure(&cause).to_string();
-                                    if matches!(cause, roomkit_mcp::McpError::Cancelled) {
-                                        outcome = RunOutcome::Interrupted;
-                                    } else {
-                                        error = Some(format!(
-                                            "{id}: {message}. Open /mcp to inspect or edit this server."
-                                        ));
-                                    }
-                                    Connection {
-                                        server: None,
-                                        status: message,
-                                    }
-                                }
-                            }
-                        } else {
-                            Connection {
-                                server: None,
-                                status: "Disconnected".into(),
-                            }
-                        };
-                        profiles.diagnostics.record(
-                            "mcp_connection",
-                            serde_json::json!({"server":id,"status":connection.status()}),
-                            None,
-                        );
-                        runtime.connections.lock().await.insert(id, connection);
-                        if !runtime.stop.is_cancelled() {
-                            // Idle agent slots are rebuilt when selected. The active
-                            // participant receives this connection's current catalogue.
-                            let mut state = profiles.state.lock().await;
-                            let profile = state
-                                .project
-                                .value
-                                .agents
-                                .get(current.agent.as_str())
-                                .cloned();
-                            if let Some(profile) = profile {
-                                let provider = state
-                                    .providers
-                                    .value
-                                    .profiles
-                                    .get(&profile.provider)
-                                    .ok_or("Unknown provider")?;
-                                let (agent, tools) = profiles.assemble(&profile, provider).await?;
-                                state.install(&kit, &profile.id, agent, tools)?;
-                            }
-                        }
-                        if let Some(error) = error {
-                            Err(error)
-                        } else {
-                            Ok(outcome)
-                        }
-                    },
-                )))
+                Ok(self.connection_execution(kit, current, id.to_string(), command))
             }
+
             "enable" | "disable" | "toggle" => {
                 state.pending = None;
                 state.pending_delete = None;
@@ -239,7 +142,7 @@ impl Profiles {
                     .ok_or("Configure an agent first")?
                     .clone();
                 if action == "disable" {
-                    agent.mcp.remove(id);
+                    agent.mcp.insert(id.into(), Vec::new());
                 } else {
                     let connections = self.mcp_runtime.connections.lock().await;
                     let live = connections
@@ -264,9 +167,6 @@ impl Profiles {
                         } else {
                             names.push(name.into());
                             names.sort();
-                        }
-                        if names.is_empty() {
-                            agent.mcp.remove(id);
                         }
                     }
                 }

@@ -560,15 +560,20 @@ workspace boundary.
    **name**, for example `{"API_KEY":"MY_SERVICE_KEY"}`. The configuration stores
    references, not their values. Keep secrets out of arguments. Apart from the
    engine's basic environment allowlist, variables are only passed explicitly.
-3. Save, reopen **/mcp**, select the server and choose **Connect**. Saving alone
-   never runs the program. Startup and discovery share a configurable timeout;
-   **Esc** cancels and waits for cleanup. Missing executables, handshake failures
-   and timeouts produce safe diagnostics without copying stderr or credentials.
-4. Choose **Choose tools for this agent**, or **Enable all current tools**. Each
-   tool appears as `mcp__<server>__<tool>`, so a server's `read` cannot collide with
-   the built-in `read`. At most 64 MCP tools can be selected across all servers
-   for one agent. Larger catalogues use paginated individual selection. Names
-   that cannot fit the supported model tool-name format are omitted.
+3. **Save** connects the server, discovers its tools and enables them for the
+   current agent. Editing a connected server reconnects it automatically; opening
+   or cancelling its form keeps the existing connection running. Existing tool
+   selections, including fully disabled servers, are preserved.
+4. Use **Choose tools for this agent** when you want to adjust the defaults.
+   Tools appear as `mcp__<server>__<tool>` and cannot collide with built-in tools.
+   Automatic activation fills the remaining capacity, up to 64 MCP tools across
+   all servers for one agent. Larger catalogues produce a notice and use paginated
+   individual selection. Names unsupported by the model protocol are omitted.
+
+Connection and discovery remain interruptible with **Esc**. An unavailable
+server leaves its configuration saved for correction or retry with **Connect**;
+its tools are unavailable until connected. Invalid form values or missing
+credential variables leave the form and the existing connection intact.
 
 For a remote server choose **Add an HTTP server** (or `/mcp add-http`):
 
@@ -580,7 +585,7 @@ For a remote server choose **Add an HTTP server** (or `/mcp add-http`):
 - **Header references**: `{}` by default. For API-key authentication use, for
   example, `{"X-API-Key":"MY_MCP_KEY"}`. Values are environment variable names;
   never paste credentials here. Do not configure Authorization twice.
-- Save, **Connect**, then select tools for the current agent, as for stdio.
+- **Save** connects and enables tools for the current agent, as for stdio.
   Credentials are resolved at connection time and their values are never saved.
 
 HTTP redirects are not followed. An expired session requires explicit reconnect;
@@ -608,8 +613,10 @@ disconnect it and remove its selections from every agent.
 
 Selections persist, but connections do not start automatically on launch or
 resume. Reconnect explicitly with `/mcp connect <id>`. A reconnect uses the
-server's current catalogue while preserving selected names: new tools remain
-unselected and removed tools are unavailable. Connections survive agent and
+server's current catalogue while preserving an existing selection, including an
+explicitly empty one. If this agent has never selected tools for the server,
+Connect activates them within the same 64-tool limit. New tools do not expand an
+existing selection and removed tools are unavailable. Connections survive agent and
 conversation changes and are closed on application exit.
 
 Existing stdio configurations are read automatically and upgraded on the next

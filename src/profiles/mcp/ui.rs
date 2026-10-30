@@ -2,7 +2,7 @@ use super::super::ui::choice;
 use super::super::*;
 use super::{
     Runtime,
-    config::{Server, Transport},
+    config::{Connection as Connector, Server, Transport},
 };
 use roomkit_ai::Toolset;
 use roomkit_cli_roomkit::CommandResult;
@@ -50,7 +50,7 @@ pub(super) async fn list(
         choice(
             "add",
             "Add a stdio server",
-            "Configure a local executable; connect explicitly after saving",
+            "Save to connect and enable tools for the current agent",
         ),
         choice(
             "add-http",
@@ -68,7 +68,7 @@ pub(super) async fn list(
         ));
     }
     panel(current, format!("MCP · agent {}", current.agent),
-        "Connect local stdio or remote Streamable HTTP servers. Local servers run with your user permissions, in this workspace. Connect explicitly, then select tools for this agent. Connections last until disconnect or application exit. Ask approves every MCP tool call; Yolo runs selected tools without asking. Servers and tools are independent of the agent's model provider.".into(), actions)
+        "Connect local stdio or remote Streamable HTTP servers. Local servers run with your user permissions, in this workspace. Saving connects the server and enables its tools for the current agent. Existing selections, including disabled tools, are preserved. Connections last until disconnect or application exit. Ask approves every MCP tool call; Yolo runs selected tools without asking. Servers and tools are independent of the agent's model provider.".into(), actions)
 }
 
 pub(super) fn available(id: &str, server: &roomkit_mcp::McpServer) -> Vec<ToolDefinition> {
@@ -182,7 +182,7 @@ pub(super) async fn detail(
         ),
     };
     let body = format!(
-        "Status: {status}\n{connection_details}\nConnection timeout: {} seconds\nAvailable tools: {}\nSelected for {}: {}\n\nMCP tools use mcp__{id}__<tool>. New tools are never enabled automatically after reconnect. Names unsupported by the model protocol are omitted. Status refreshes when this panel is reopened.",
+        "Status: {status}\n{connection_details}\nConnection timeout: {} seconds\nAvailable tools: {}\nSelected for {}: {}\n\nMCP tools use mcp__{id}__<tool>. Existing tool selections are preserved on save and reconnect. Names unsupported by the model protocol are omitted. Status refreshes when this panel is reopened.",
         config.timeout_seconds,
         tools.len(),
         current.agent,
@@ -211,19 +211,17 @@ pub(super) async fn detail(
             ),
         ]
     } else {
-        vec![
-            choice(
-                format!("connect:{id}"),
-                "Connect",
-                "Connect and discover available tools · Esc cancels",
-            ),
-            choice(
-                format!("edit:{id}"),
-                "Edit connection",
-                "Edit endpoint settings and credential references",
-            ),
-        ]
+        vec![choice(
+            format!("connect:{id}"),
+            "Connect",
+            "Connect and discover available tools · Esc cancels",
+        )]
     };
+    actions.push(choice(
+        format!("edit:{id}"),
+        "Edit connection",
+        "Save to reconnect; existing tool selections are preserved",
+    ));
     if live.is_none() && connection.is_some_and(|c| c.server.is_some()) {
         actions.insert(
             1,
@@ -335,9 +333,9 @@ pub(super) fn form(
             id,
             command: "mcp".into(),
             title: if http {
-                "MCP HTTP server · saving does not connect it"
+                "MCP HTTP server · save to connect and enable tools"
             } else {
-                "MCP stdio server · saving does not start it"
+                "MCP stdio server · save to connect and enable tools"
             }
             .into(),
             fields,
@@ -350,7 +348,8 @@ pub(super) fn save(
     current: &SessionConfig,
     form: &str,
     values: &FormValues,
-) -> Result<CommandResult, String> {
+    workspace: &std::path::Path,
+) -> Result<(Server, Connector), String> {
     let Some(Pending::Form {
         room,
         form: expected,
@@ -396,17 +395,15 @@ pub(super) fn save(
     if id.is_none() && state.mcp.value.servers.contains_key(&server.id) {
         return Err("This MCP server ID already exists".into());
     }
+    // Resolve credentials before saving: invalid fields leave both the form and
+    // any live connection intact. Network work starts after command admission.
+    let connector = server.connection(workspace)?;
     let mut config = state.mcp.value.clone();
-    let id = server.id.clone();
-    config.servers.insert(id.clone(), server);
+    config.servers.insert(server.id.clone(), server.clone());
     config.validate()?;
     state.mcp.save(config)?;
     state.pending_mcp = None;
-    Ok(CommandResult::Events(vec![Event::Notice {
-        text: format!(
-            "MCP server {id} saved. Open /mcp to connect and choose its tools for this agent."
-        ),
-    }]))
+    Ok((server, connector))
 }
 
 pub(super) fn confirm_delete(
@@ -419,7 +416,7 @@ pub(super) fn confirm_delete(
         .value
         .agents
         .values()
-        .any(|a| a.mcp.contains_key(&server.id))
+        .any(|a| a.mcp.get(&server.id).is_some_and(|names| !names.is_empty()))
     {
         return Err("Disable this server's tools for every agent before deleting it".into());
     }
@@ -466,9 +463,19 @@ pub(super) fn delete(
         .value
         .agents
         .values()
-        .any(|a| a.mcp.contains_key(id))
+        .any(|a| a.mcp.get(id).is_some_and(|names| !names.is_empty()))
     {
         return Err("This server is still selected by an agent".into());
+    }
+    // Empty entries remember an explicit disabled selection while a server
+    // exists. Remove those markers along with its configuration.
+    let mut project = state.project.value.clone();
+    let mut changed = false;
+    for agent in project.agents.values_mut() {
+        changed |= agent.mcp.remove(id).is_some();
+    }
+    if changed {
+        state.project.save(project)?;
     }
     let mut config = state.mcp.value.clone();
     config.servers.remove(id);

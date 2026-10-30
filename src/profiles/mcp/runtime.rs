@@ -104,3 +104,169 @@ pub(super) fn failure(error: &McpError) -> &'static str {
         _ => "Invalid MCP configuration",
     }
 }
+
+impl Profiles {
+    /// Both form saves and explicit connections use cancellable host work.
+    pub(super) fn connection_execution(
+        self: &Arc<Self>,
+        kit: &RoomKit<SqliteStore>,
+        current: SessionConfig,
+        id: String,
+        connector: Option<super::config::Connection>,
+    ) -> roomkit_cli_roomkit::CommandResult {
+        use roomkit_cli_roomkit::{CommandExecution, CommandResult};
+        use roomkit_tui::protocol::{Item, Message, RunOutcome};
+        let profiles = self.clone();
+        let kit = kit.clone();
+        CommandResult::Execute(CommandExecution::new(
+            format!("mcp-{}", uuid::Uuid::new_v4()).as_str().into(),
+            move |mut context| async move {
+                let runtime = &profiles.mcp_runtime;
+                let _operation = runtime.operation.lock().await;
+                if runtime.stop.is_cancelled() {
+                    return Ok(RunOutcome::Interrupted);
+                }
+                let previous = runtime.connections.lock().await.remove(&id);
+                if let Some(old) = previous.and_then(|c| c.server) {
+                    old.close().await;
+                }
+                let activate = connector.is_some();
+                let mut error = None;
+                let mut outcome = RunOutcome::Completed;
+                let connection = if let Some(connector) = connector {
+                    profiles.diagnostics.record(
+                        "mcp_connecting",
+                        serde_json::json!({"server":id}),
+                        None,
+                    );
+                    let stopped = async {
+                        tokio::select! { () = context.cancelled() => {}, () = runtime.stop.cancelled() => {} }
+                    };
+                    match connector.connect_until(stopped).await {
+                        Ok(server) => Connection {
+                            server: Some(server),
+                            status: "Connected".into(),
+                        },
+                        Err(cause) => {
+                            let message = failure(&cause).to_string();
+                            if matches!(cause, McpError::Cancelled) {
+                                outcome = RunOutcome::Interrupted;
+                            } else {
+                                error = Some(format!(
+                                    "{id}: {message}. Configuration is saved; open /mcp to edit or reconnect."
+                                ));
+                            }
+                            Connection {
+                                server: None,
+                                status: message,
+                            }
+                        }
+                    }
+                } else {
+                    Connection {
+                        server: None,
+                        status: "Disconnected".into(),
+                    }
+                };
+                let connected = connection.server.is_some();
+                profiles.diagnostics.record(
+                    "mcp_connection",
+                    serde_json::json!({"server":id,"status":connection.status()}),
+                    None,
+                );
+                runtime
+                    .connections
+                    .lock()
+                    .await
+                    .insert(id.clone(), connection);
+                if !runtime.stop.is_cancelled()
+                    && let Some(note) = profiles
+                        .refresh_mcp(&kit, &current, &id, activate && connected)
+                        .await?
+                {
+                    // Only exceptional setup results need a transcript note; the
+                    // normal path finishes with the existing execution status.
+                    context.publish(Item::Message(Message {
+                        id: format!("mcp-{}", uuid::Uuid::new_v4()).as_str().into(),
+                        actor: "mcp".into(),
+                        text: note,
+                    }));
+                }
+                if let Some(error) = error {
+                    Err(error)
+                } else {
+                    Ok(outcome)
+                }
+            },
+        ))
+    }
+
+    async fn refresh_mcp(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        current: &SessionConfig,
+        id: &str,
+        activate: bool,
+    ) -> Result<Option<String>, String> {
+        let mut state = self.state.lock().await;
+        let _lease = store::edit_lease(&self.state_dir)?;
+        state.project.reload()?;
+        if state.project.value.schema != 2 {
+            return Err("Unsupported agent configuration version".into());
+        }
+        let Some(mut profile) = state
+            .project
+            .value
+            .agents
+            .get(current.agent.as_str())
+            .cloned()
+        else {
+            return Ok(activate.then(||format!("MCP server {id} connected. Configure an agent with /agents, then choose its tools in /mcp.")));
+        };
+        let mut changed = false;
+        let mut note = None;
+        if activate && !profile.mcp.contains_key(id) {
+            let connections = self.mcp_runtime.connections.lock().await;
+            if let Some(server) = connections
+                .get(id)
+                .and_then(|c| c.server.as_ref())
+                .filter(|s| s.is_connected())
+            {
+                let tools = super::ui::available(id, server);
+                let capacity = 64usize.saturating_sub(profile.mcp.values().map(Vec::len).sum());
+                let names = tools
+                    .iter()
+                    .take(capacity)
+                    .map(|t| t.name.clone())
+                    .collect::<Vec<_>>();
+                if names.len() < tools.len() {
+                    note = Some(format!(
+                        "MCP server {id} connected: {} of {} tools enabled for {} (64 MCP tools maximum per agent). Adjust the selection in /mcp.",
+                        names.len(),
+                        tools.len(),
+                        profile.id
+                    ));
+                }
+                profile.mcp.insert(id.into(), names);
+                changed = true;
+            }
+        }
+        profile.validate()?;
+        state.providers.reload()?;
+        let provider = state
+            .providers
+            .value
+            .profiles
+            .get(&profile.provider)
+            .ok_or("Unknown provider")?;
+        let (agent, tools) = self.assemble(&profile, provider).await?;
+        if changed {
+            let mut project = state.project.value.clone();
+            project.agents.insert(profile.id.clone(), profile.clone());
+            state.project.save(project)?;
+            self.diagnostics.record("mcp_selection",serde_json::json!({"agent":profile.id,"server":id,"tools":profile.mcp.get(id).map_or(0,Vec::len),"automatic":true}),None);
+        }
+        state.install(kit, &profile.id, agent, tools)?;
+        Ok(note)
+    }
+}

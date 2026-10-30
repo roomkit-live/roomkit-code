@@ -89,27 +89,40 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
 
     try:
         wait_for(b"RoomKit Code")
-        command("/mcp add", b"saving does not start it")
+        command("/mcp add", b"save to connect and enable tools")
         args = json.dumps([str(script), "normal", str(pidfile), str(trace)])
         for index, value in enumerate(["demo", "python3", args, "{}", "5"]):
             send(b"\x15" + value.encode())
             if index < 4:
                 send(b"\t")
-        wait_for(b"saved. Open /mcp", send(b"\x13"))
-        assert not pidfile.exists() and not requests
+        wait_for(b"\x1b]7501;state=done", send(b"\x13"))
+        assert pidfile.exists() and not requests and not trace.exists()
         config_path = next((base / "state/projects").glob("*/mcp.json"))
         assert config_path.stat().st_mode & 0o777 == 0o600
         assert json.loads(config_path.read_text())["servers"]["demo"]["transport"]["args"] == json.loads(args)
-        command("/mcp connect demo", b"Execution Completed")
         pid = int(pidfile.read_text())
         os.kill(pid, 0)
         command("/mcp show demo", b"Status: Connected")
         wait_for(b"Choose tools for this agent")
         dismiss()
-        command("/mcp tools demo", b"[off] read")
-        # Select the first discovered tool in the real menu.
+        command("/mcp tools demo", b"[on] read")
+        # Automatic activation still permits an individual override.
+        wait_for(b"[off] read", send(b"\r"))
         wait_for(b"[on] read", send(b"\r"))
         dismiss()
+        command("/mcp toggle:demo:danger", b"[off] danger")
+        dismiss()
+        # An editor can be opened while connected; saving replaces the process.
+        command("/mcp edit demo", b"save to connect and enable tools")
+        os.kill(pid, 0)
+        wait_for(b"\x1b]7501;state=done", send(b"\x13"))
+        previous_pid, pid = pid, int(pidfile.read_text())
+        assert pid != previous_pid
+        try:
+            os.kill(previous_pid, 0)
+            raise AssertionError("Editing left the previous MCP process alive")
+        except ProcessLookupError:
+            pass
         command("Inspect the fixture", b"Allow mcp__demo__read?")
         assert not trace.exists()
         accepted = send(b"\x19")  # Ctrl+Y
@@ -132,6 +145,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
         command("/mcp delete demo", b"Delete configuration")
         wait_for(b"configuration removed", send(b"\r"))
         assert not json.loads(config_path.read_text())["servers"]
+        assert "demo" not in json.loads(config_path.with_name("agents.json").read_text())["agents"]["code"].get("mcp", {})
         dismiss()
         # Exercise the separate HTTP form with an environment reference, a
         # request SSE reply and explicit cleanup of a negotiated session.
@@ -144,18 +158,16 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
             assert time.monotonic() < deadline, "HTTP fixture did not start"
             time.sleep(0.01)
         url = f"http://127.0.0.1:{http_port.read_text()}/mcp"
-        command("/mcp add-http", b"saving does not connect it")
+        command("/mcp add-http", b"save to connect and enable tools")
         for index, value in enumerate(["remote", url, "MCP_FIXTURE_TOKEN", "{}", "5"]):
             send(b"\x15" + value.encode())
             if index < 4:
                 send(b"\t")
-        wait_for(b"saved. Open /mcp", send(b"\x13"))
+        wait_for(b"\x1b]7501;state=done", send(b"\x13"))
         stored = config_path.read_text()
         assert "MCP_FIXTURE_TOKEN" in stored and "fixture-secret-token" not in stored
         assert not http_trace.exists()
-        command("/mcp connect remote", b"\x1b]7501;state=done")
-        command("/mcp tools remote", b"[off] read")
-        wait_for(b"[on] read", send(b"\r"))
+        command("/mcp tools remote", b"[on] read")
         dismiss()
         requests.clear()
         active_tool = "mcp__remote__read"
@@ -164,8 +176,11 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
         accepted = send(b"\x19")
         wait_for(b"\x1b]7501;state=done", accepted)
         assert http_trace.read_text() == "read\n"
-        command("/mcp disconnect remote", b"\x1b]7501;state=done")
+        command("/mcp edit remote", b"save to connect and enable tools")
+        wait_for(b"\x1b]7501;state=done", send(b"\x13"))
         assert http_trace.read_text() == "read\ndelete\n"
+        command("/mcp disconnect remote", b"\x1b]7501;state=done")
+        assert http_trace.read_text() == "read\ndelete\ndelete\n"
         assert b"fixture-secret-token" not in captured
         send(b"\x04")
         assert process.wait(timeout=10) == 0
@@ -180,4 +195,4 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
         if http_fixture is not None:
             http_fixture.terminate()
             http_fixture.wait(timeout=5)
-print("MCP PTY: stdio and HTTP configuration, discovery, individual selection, approval, disconnect and deletion passed.")
+print("MCP PTY: stdio and HTTP save-and-connect, live editing, automatic selection, overrides, approval and cleanup passed.")
