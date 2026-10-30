@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Remove finished processes from the live list and hide the footer when none are
+  running. Keep command results in conversation history; retained output remains
+  accessible explicitly with `/processes ID` or in an already open detail panel.
+
 - Replace the composer arrow with `!` while entering a shell command, displaying
   the prefix only once and restoring the normal prompt outside command mode.
 

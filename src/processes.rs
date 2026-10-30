@@ -67,12 +67,8 @@ impl Processes {
                     .count();
                 let mut events = vec![Event::BackgroundChanged {
                     conversation: current.room.as_str().into(),
-                    status: (!jobs.is_empty()).then(|| BackgroundStatus {
-                        label: if running > 0 {
-                            format!("Processes: {running} running")
-                        } else {
-                            format!("Processes: {} finished", jobs.len())
-                        },
+                    status: (running > 0).then(|| BackgroundStatus {
+                        label: format!("Processes: {running} running"),
                         command: "processes".into(),
                         arguments: String::new(),
                     }),
@@ -139,12 +135,23 @@ impl Processes {
         arguments: &str,
     ) -> Result<CommandResult, String> {
         let jobs = self.jobs(kit, viewer, current).await;
-        let mut panel = if arguments.is_empty() {
+        let mut panel = if !arguments.contains(':') {
+            let selected = if arguments.is_empty() {
+                None
+            } else {
+                if !jobs
+                    .iter()
+                    .any(|job| job.process.status.process_id == arguments)
+                {
+                    return Err("Process is no longer available to this view".into());
+                }
+                Some(arguments.into())
+            };
             Panel {
                 id: uuid::Uuid::new_v4().to_string(),
                 room: current.room.to_string(),
                 agent: current.agent.to_string(),
-                selected: None,
+                selected,
                 offsets: None,
             }
         } else {
@@ -338,16 +345,20 @@ impl Processes {
                 spec.actions.push(action(value, label, ""));
             }
         } else {
-            spec.body = "Processes started by this application across accessible conversations and agents.\nThey remain visible after the agent finishes. Closing the application stops them.\n\n".into();
-            if jobs.is_empty() {
-                spec.body.push_str("No retained background processes.\n");
+            spec.body = "Running processes across accessible conversations and owners.\nFinished processes leave this list automatically. Closing the application stops running processes.\n\n".into();
+            let running: Vec<_> = jobs
+                .iter()
+                .filter(|job| job.process.status.state == ProcessState::Running)
+                .collect();
+            if running.is_empty() {
+                spec.body.push_str("No running processes.\n");
             }
-            for job in jobs {
+            for job in running {
                 let p = &job.process;
                 let command = p.command.split_whitespace().collect::<Vec<_>>().join(" ");
                 let command: String = command.chars().take(48).collect();
                 let description = format!(
-                    "{} · {}s · agent {} · conversation {}",
+                    "{} · {}s · owner {} · conversation {}",
                     state(job),
                     p.elapsed.as_secs(),
                     job.agent,

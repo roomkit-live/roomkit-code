@@ -378,7 +378,7 @@ fn format_output(command: &str, read: &ProcessReadResult, elapsed: Duration) -> 
     }
     text.push('\n');
     for (name, chunk) in [("stdout", &read.stdout), ("stderr", &read.stderr)] {
-        append_chunk(&mut text, name, chunk);
+        append_chunk(&mut text, name, chunk, &status.process_id);
     }
     if status.stdout_bytes == 0 && status.stderr_bytes == 0 {
         text.push_str("\nNo output.\n");
@@ -389,12 +389,12 @@ fn format_output(command: &str, read: &ProcessReadResult, elapsed: Duration) -> 
     text
 }
 
-fn append_chunk(text: &mut String, name: &str, chunk: &ProcessChunk) {
+fn append_chunk(text: &mut String, name: &str, chunk: &ProcessChunk, process_id: &str) {
     if chunk.total_bytes == 0 {
         return;
     }
     text.push_str(&format!("\n**{name}**\n\n{}", fenced(&chunk.text, "text")));
     if chunk.omitted_bytes > 0 || chunk.has_more || chunk.total_bytes > OUTPUT_BYTES {
-        text.push_str(&format!("\nOutput shortened: showing bytes {}–{} of {}. Inspect /processes while this application is open.\n", chunk.offset, chunk.next_offset, chunk.total_bytes));
+        text.push_str(&format!("\nOutput shortened: showing bytes {}–{} of {}. Inspect /processes {process_id} while this application is open.\n", chunk.offset, chunk.next_offset, chunk.total_bytes));
     }
 }

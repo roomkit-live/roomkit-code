@@ -82,9 +82,10 @@ Commands use `/bin/sh -c` without a login shell or PTY, with stdin closed and a
 five-minute lifetime. Each starts in the project directory: `cd` affects that
 command only. Stdout/stderr, exit status and duration appear in the conversation;
 Esc interrupts and waits for cleanup. F6 or **/processes** inspects or stops the
-process. The retained conversation contains up to 4 KiB per output stream, with
-explicit truncation; larger output can be paged in the process panel during the
-current application. Old completed manual process slots are reclaimed as needed.
+process. Finished commands automatically leave the live list and footer.
+The retained conversation contains up to 4 KiB per output stream, with explicit
+truncation; use `/processes ID` from the result to page larger output while the
+record is retained in the current application. Old completed manual process slots are reclaimed as needed.
 The command and bounded result survive resume and enter the next agent request;
 no model request is sent automatically. Avoid entering credentials in commands
 that should not be saved in conversation history.
@@ -186,10 +187,13 @@ writes before deciding what to do next. Stop unneeded jobs and set `forget` to
 release their retained records. The application closes remaining processes on exit.
 
 **/processes**, **F6**, or the clickable **Processes** status open the live process
-monitor. It shows accessible jobs from this application's conversations, including
-other selected agents, with their command, originating agent/conversation, elapsed
-time and outcome. Open a job to inspect stdout/stderr, browse 4 KiB output pages,
-follow the latest output, stop its process group, or forget a completed record.
+monitor. The list and footer show only running jobs from accessible conversations,
+including other selected agents. Completed, failed or stopped jobs leave the list
+automatically; the footer disappears when none remain. Open a running job to
+inspect stdout/stderr, browse 4 KiB output pages, follow output or stop its group.
+An already open detail panel retains the final result. `/processes ID` explicitly
+opens a retained result by its identifier, with the same access checks, and lets
+you browse output or forget the completed record.
 These human controls work while the model is busy, preserve the composer draft,
 and do not send a request to the model. Press Esc to return to the conversation.
 

@@ -54,6 +54,23 @@ async fn badge(
     .unwrap()
 }
 
+async fn no_badge(rx: &mut tokio::sync::watch::Receiver<Vec<Event>>) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if rx
+                .borrow_and_update()
+                .iter()
+                .any(|event| matches!(event, Event::BackgroundChanged { status: None, .. }))
+            {
+                return;
+            }
+            rx.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+}
+
 #[tokio::test]
 async fn monitor_observes_actual_lifecycle_filters_owners_and_rejects_old_actions() {
     let root = tempfile::tempdir().unwrap();
@@ -124,10 +141,7 @@ async fn monitor_observes_actual_lifecycle_filters_owners_and_rejects_old_action
     let stopped = panel(&app, &stop).await.unwrap();
     assert!(stopped.title.contains("stopped"));
     assert!(stopped.body.contains("stdout marker") && stopped.body.contains("stderr marker"));
-    assert_eq!(
-        badge(&mut updates, "finished").await.label,
-        "Processes: 1 finished"
-    );
+    no_badge(&mut updates).await;
     let jobs = manager.observe().await;
     assert_eq!(
         jobs.iter()
@@ -141,8 +155,19 @@ async fn monitor_observes_actual_lifecycle_filters_owners_and_rejects_old_action
         panel(&app, &stop).await.is_err(),
         "Repeated stop cannot act on a fresh panel"
     );
-    let list = panel(&app, &action(&stopped, ":forget")).await.unwrap();
-    assert!(list.body.contains("No retained background processes"));
+    let list = panel(&app, &action(&stopped, ":list")).await.unwrap();
+    assert!(list.actions.is_empty());
+    assert!(list.body.contains("No running processes"));
+    assert!(!list.body.contains(&process.process_id));
+    assert!(
+        panel(&app, &hidden.process_id).await.is_err(),
+        "Direct output access must still enforce conversation access"
+    );
+    // Output stays readable by ID, without keeping the command in the live list.
+    let retained = panel(&app, &process.process_id).await.unwrap();
+    assert!(retained.body.contains("stdout marker"));
+    let list = panel(&app, &action(&retained, ":forget")).await.unwrap();
+    assert!(list.body.contains("No running processes"));
     app.profiles
         .processes
         .handle(&app.kit, app.channel.id(), &app.view, &list.dismiss)
@@ -181,12 +206,40 @@ async fn monitor_pages_output_without_consuming_it_and_does_not_tick_when_closed
         app.view.clone(),
     );
     let owner = serde_json::to_string(&(app.view.room.as_str(), app.view.agent.as_str())).unwrap();
-    let p = manager.start(&owner, ProcessStartInput::new("printf FIRST; i=0; while [ $i -lt 5000 ]; do printf .; i=$((i+1)); done; printf LAST"), &CancellationToken::new()).await.unwrap().data;
-    badge(&mut updates, "finished").await;
+    let p = manager.start(&owner, ProcessStartInput::new("printf FIRST; i=0; while [ $i -lt 5000 ]; do printf .; i=$((i+1)); done; printf LAST; cat"), &CancellationToken::new()).await.unwrap().data;
+    badge(&mut updates, "running").await;
     let list = panel(&app, "").await.unwrap();
-    let tail = panel(&app, &action(&list, &format!("open:{}", p.process_id)))
+    assert_eq!(list.actions.len(), 1);
+    manager
+        .write(
+            &owner,
+            roomkit_tools_process::ProcessWriteInput {
+                process_id: p.process_id.clone(),
+                text: String::new(),
+                close_stdin: true,
+            },
+            &CancellationToken::new(),
+        )
         .await
         .unwrap();
+    // The list updates itself on natural exit, without reopening it or a model turn.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if updates.borrow_and_update().iter().any(|event| {
+                matches!(event,
+                    Event::PanelUpdated { panel, .. } if panel.id == list.id
+                        && panel.body.contains("No running processes") && panel.actions.is_empty()
+                )
+            }) {
+                break;
+            }
+            updates.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    no_badge(&mut updates).await;
+    let tail = panel(&app, &p.process_id).await.unwrap();
     assert!(tail.body.contains("LAST") && !tail.body.contains("\nFIRST"));
     let first = panel(&app, &action(&tail, ":first")).await.unwrap();
     assert!(first.body.contains("\nFIRST") && first.body.contains("more available"));

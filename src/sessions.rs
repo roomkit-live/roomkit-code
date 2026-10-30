@@ -56,7 +56,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         CommandSpec {
             name: "processes".into(),
             description: "Inspect background processes and stop them (also F6)".into(),
-            arguments: String::new(),
+            arguments: "[process-id]".into(),
             choices: Vec::new(),
         },
         CommandSpec {
