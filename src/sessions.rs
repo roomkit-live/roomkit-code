@@ -2,10 +2,10 @@
 
 use std::path::PathBuf;
 
-use roomkit::model::{Access, EventContent, RoomContext, RoomId, RoomStatus};
+use roomkit::model::{Access, EventContent, EventType, RoomContext, RoomId, RoomStatus};
 use roomkit::{
-    ConversationStore, CreateRoomOptions, GetRoomOptions, GetTimelineOptions, ListBindingsOptions,
-    RoomFilter, RoomKit,
+    ConversationStore, CreateRoomOptions, EventFilter, GetRoomOptions, GetTimelineOptions,
+    ListBindingsOptions, RoomFilter, RoomKit,
 };
 use roomkit_cli_roomkit::{CommandHandler, CommandResult, SessionConfig};
 use roomkit_sqlite::SqliteStore;
@@ -13,6 +13,25 @@ use roomkit_tui::protocol::{Choice, Command, CommandSpec, Event, Request};
 use sha2::{Digest, Sha256};
 
 use crate::{Result, config::valid_session_name};
+
+const DRAFT_MARKER: &str = "roomkit_code_draft";
+
+// Bindings are infrastructure, not conversation history. Even blocked messages
+// prevent reuse: an attempted conversation must never become another draft.
+async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<bool> {
+    Ok(kit
+        .store()
+        .get_event_count(
+            room,
+            Some(EventFilter {
+                exclude_types: Some(vec![EventType::ChannelAttached, EventType::ChannelDetached]),
+                include_blocked: true,
+                ..Default::default()
+            }),
+        )
+        .await?
+        == 0)
+}
 
 pub(crate) fn commands() -> Vec<CommandSpec> {
     vec![
@@ -58,6 +77,7 @@ pub(crate) async fn create(
     channel: &roomkit::model::ChannelId,
     agent: &roomkit::model::ChannelId,
     name: Option<&str>,
+    draft: bool,
 ) -> Result<RoomId> {
     let id = name.map(RoomId::new).transpose()?;
     if let Some(id) = &id {
@@ -66,10 +86,57 @@ pub(crate) async fn create(
             Err(roomkit::KitError::Store(roomkit::StoreError::RoomNotFound(_))) => {}
             Err(error) => return Err(error.into()),
         }
+    } else if draft {
+        // The application holds an exclusive lease for this project's store.
+        // Reuse only app-owned, unused drafts; named sessions stay untouched.
+        let mut rooms = kit
+            .store()
+            .list_rooms(&RoomFilter {
+                channel_id: Some(channel.clone()),
+                status: Some(RoomStatus::Active),
+                ..Default::default()
+            })
+            .await?;
+        rooms.sort_by(|a, b| {
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        for room in rooms {
+            if room.organization_id.is_some()
+                || room
+                    .metadata
+                    .get(DRAFT_MARKER)
+                    .and_then(serde_json::Value::as_bool)
+                    != Some(true)
+                || !empty(kit, &room.id).await?
+            {
+                continue;
+            }
+            let bindings = kit
+                .list_bindings(&room.id, ListBindingsOptions::default())
+                .await?;
+            if bindings
+                .iter()
+                .any(|b| b.channel_id == *channel && b.access == Access::ReadWrite)
+                && bindings
+                    .iter()
+                    .any(|b| b.channel_id == *agent && b.access == Access::ReadWrite)
+            {
+                return Ok(room.id);
+            }
+        }
     }
     let room = kit
         .create_room(CreateRoomOptions {
             room_id: id,
+            metadata: if draft {
+                [(DRAFT_MARKER.into(), serde_json::Value::Bool(true))]
+                    .into_iter()
+                    .collect()
+            } else {
+                Default::default()
+            },
             ..Default::default()
         })
         .await?;
@@ -113,7 +180,10 @@ impl Sessions {
                 .then_with(|| a.id.cmp(&b.id))
         });
         let mut choices = Vec::new();
-        for room in rooms.into_iter().take(200) {
+        for room in rooms {
+            if choices.len() == 200 {
+                break;
+            }
             let bindings = self
                 .kit
                 .list_bindings(
@@ -130,6 +200,9 @@ impl Sessions {
                 .iter()
                 .any(|binding| binding.channel_id == current.agent)
             {
+                continue;
+            }
+            if empty(&self.kit, &room.id).await? {
                 continue;
             }
             let rows = self
@@ -170,7 +243,7 @@ impl Sessions {
                     }
                     None
                 })
-                .unwrap_or_else(|| "Empty conversation".into());
+                .unwrap_or_else(|| "Conversation".into());
             choices.push(Choice {
                 value: id.clone(),
                 label,
@@ -250,9 +323,48 @@ impl CommandHandler for Sessions {
                 let identity = serde_json::to_vec(&(current.room.as_str(), request.operation.0))
                     .map_err(|_| "Invalid operation identity".to_string())?;
                 let name = format!("session-{:x}", Sha256::digest(identity));
-                let room = create(&self.kit, &self.channel, &current.agent, Some(&name[..48]))
+                let draft_key = format!("roomkit_code:new-draft:{name}");
+                let kept_draft = self
+                    .kit
+                    .store()
+                    .get_private_state(&current.room, &draft_key)
                     .await
-                    .map_err(|_| "Could not create a new session".to_string())?;
+                    .map_err(|_| "Could not inspect the previous command".to_string())?;
+                if kept_draft
+                    .is_some_and(|state| state.get("kept") == Some(&serde_json::Value::Bool(true)))
+                {
+                    return Ok(self.switched(current.clone(), current.room));
+                }
+                if empty(&self.kit, &current.room)
+                    .await
+                    .map_err(|_| "Could not inspect the current session".to_string())?
+                {
+                    // Remember a no-op too: a delayed retry after the first
+                    // message must not unexpectedly create another session.
+                    self.kit
+                        .store()
+                        .set_private_state(
+                            &current.room,
+                            &draft_key,
+                            Some(
+                                [("kept".into(), serde_json::Value::Bool(true))]
+                                    .into_iter()
+                                    .collect(),
+                            ),
+                        )
+                        .await
+                        .map_err(|_| "Could not retain the current draft".to_string())?;
+                    return Ok(self.switched(current.clone(), current.room));
+                }
+                let room = create(
+                    &self.kit,
+                    &self.channel,
+                    &current.agent,
+                    Some(&name[..48]),
+                    true,
+                )
+                .await
+                .map_err(|_| "Could not create a new session".to_string())?;
                 Ok(self.switched(current, room))
             }
             "new" => Err("Use /new without arguments".into()),

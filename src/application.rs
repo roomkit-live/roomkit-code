@@ -43,9 +43,14 @@ impl Application {
                     async move { Ok(policy.gate(&channel, event).await) }
                 },
             )?;
-            let room =
-                crate::sessions::create(&kit, channel.id(), &agent_id, settings.session.as_deref())
-                    .await?;
+            let room = crate::sessions::create(
+                &kit,
+                channel.id(),
+                &agent_id,
+                settings.session.as_deref(),
+                settings.session.is_none(),
+            )
+            .await?;
             let mut view = SessionConfig::new(room, agent_id, "local-user");
             view.title = crate::sessions::title(&settings.workspace, &view.room);
             view.context_capacity = settings.context_window;

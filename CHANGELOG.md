@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Hide unused sessions from `/resume` and reuse app-owned empty drafts across
+  launches and repeated `/new` commands, preserving all existing history.
+- Keep context tokens and remaining percentage visible while awaiting the next
+  measurement, with an explicit `last report` label.
+- Show context on a dedicated footer line with used and remaining percentages.
+
 - Reduce terminal CPU use by avoiding idle redraws and reusing formatted message
   and tool layouts, while preserving streaming, timers and interactive controls.
 

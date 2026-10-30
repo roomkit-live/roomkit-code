@@ -39,16 +39,19 @@ cargo run --locked -- /path/to/project --session investigation --theme light
 cargo run --locked -- /path/to/project --check-config
 ```
 
-Each normal launch starts a new conversation. Use **/resume** to list earlier
+Each normal launch opens a blank conversation, reusing an unused application
+draft when available. Use **/resume** to list earlier nonempty
 sessions for this project, filter by their first message, date or identifier,
 then press Enter to continue one. Escape cancels without switching. **/new**
-starts another conversation without leaving the application. These commands
+starts another conversation without leaving the application, or keeps the
+current draft if it is already empty. These commands
 are local navigation and never call the model; wait for an active response to
 finish before switching.
 
 `--session NAME` explicitly opens or creates a named session. Existing sessions,
 including the former default `main`, remain available through `/resume` or
-`--session main`. The picker shows up to 200 recent sessions, with timestamps in
+`--session main`. The picker hides empty drafts and shows up to 200 recent
+nonempty sessions, with timestamps in
 UTC; an older known identifier can be opened with `/resume ID`.
 
 `--check-config` validates configuration and the workspace without contacting
@@ -146,18 +149,22 @@ expansion reveals more symbols only when that result contains them.
 
 ## Context, consumption and request failures
 
-The footer shows the last completed generation's measured context: input tokens
+The dedicated context footer line shows the last completed generation's
+measured context: input tokens
 (including cached input) plus output tokens. Configure `provider.context_window`
-or `--context-window` with the actual server capacity to see the remaining
-percentage. Without capacity the token count remains visible; without reported
-counts the context stays unknown. This is the last measured exchange, not a
+or `--context-window` with the actual server capacity to see used and remaining
+percentages. Without capacity the token count remains visible; without reported
+counts the context stays unknown unless an earlier measurement is available.
+While awaiting a new report, that earlier context remains visible with the
+explicit `last report` label. This is the last measured exchange, not a
 prediction including an unsent message or new tool definitions.
 
 The separate **turn** counter totals all reported input/output tokens across
 that execution's model calls. Cached input is counted once. Missing measurements
 or a failed generation mark totals partial. These are neither session-wide
 billing totals nor dollar costs. Resume restores applicable measurements; a
-new execution or model selection clears stale ones.
+new execution clears its turn totals. Changing the model or conversation clears
+the previous-context fallback too.
 
 `provider.timeout_seconds` (or `--provider-timeout-seconds`) controls the entire
 HTTP model request, including streaming. The application defaults to 600 seconds;

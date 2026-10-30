@@ -874,7 +874,11 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
     drop(app);
     let app = Application::open(&settings, String::new()).await.unwrap();
     assert_ne!(app.view.room.as_str(), first);
-    assert_ne!(app.view.room.as_str(), second);
+    assert_eq!(
+        app.view.room.as_str(),
+        second,
+        "An unused draft is reused across launches"
+    );
     assert!(app.session().snapshot().await.unwrap().items.is_empty());
     assert_eq!(
         mock.requests.lock().unwrap().len(),
@@ -1093,4 +1097,139 @@ async fn provider_timeouts_and_refusals_have_actionable_private_diagnostics() {
         app.kit.close().await.unwrap();
         server.abort();
     }
+}
+
+#[tokio::test]
+async fn unused_automatic_drafts_are_reused_without_adopting_named_sessions() {
+    use roomkit::ConversationStore;
+    use roomkit_cli_roomkit::{CommandHandler, CommandResult};
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let mut settings = settings(project.path(), state.path(), &mock.base_url);
+    settings.session = None;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let draft = app.view.room.clone();
+    crate::sessions::create(
+        &app.kit,
+        app.channel.id(),
+        &app.view.agent,
+        Some("named-empty"),
+        false,
+    )
+    .await
+    .unwrap();
+    app.kit.close().await.unwrap();
+    drop(app);
+    for launch in 0..3 {
+        let app = Application::open(&settings, String::new()).await.unwrap();
+        assert_eq!(app.view.room, draft);
+        let handler = crate::sessions::Sessions {
+            kit: app.kit.clone(),
+            workspace: settings.workspace.clone(),
+            channel: app.channel.id().clone(),
+            policy: app.policy.clone(),
+            tools: app.tools.clone(),
+        };
+        let request = Request {
+            id: RequestId(1),
+            operation: "empty-new".into(),
+            conversation: draft.as_str().into(),
+            command: Command::Invoke {
+                name: "new".into(),
+                arguments: String::new(),
+            },
+        };
+        let CommandResult::Switch(destination) = handler
+            .handle(request.clone(), app.view.clone())
+            .await
+            .unwrap()
+        else {
+            panic!("Expected unchanged empty draft");
+        };
+        assert_eq!(destination.room, draft);
+        assert_eq!(
+            app.kit
+                .store()
+                .list_rooms(&Default::default())
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(app.session().snapshot().await.unwrap().items.is_empty());
+        if launch == 2 {
+            turn(&app).await;
+            let CommandResult::Switch(retried) =
+                handler.handle(request, app.view.clone()).await.unwrap()
+            else {
+                panic!("Expected retry of the empty-draft command");
+            };
+            assert_eq!(
+                retried.room, draft,
+                "A delayed no-op retry must stay a no-op after a message"
+            );
+        }
+        app.kit.close().await.unwrap();
+    }
+    assert_eq!(mock.requests.lock().unwrap().len(), 1);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    assert_ne!(
+        app.view.room, draft,
+        "A conversation with messages must never be reused as a draft"
+    );
+    assert_ne!(app.view.room.as_str(), "named-empty");
+    assert!(app.session().snapshot().await.unwrap().items.is_empty());
+    app.kit.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn resume_skips_legacy_empty_sessions_before_applying_the_catalogue_limit() {
+    use roomkit_cli_roomkit::{CommandHandler, CommandResult};
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let settings = settings(project.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    turn(&app).await;
+    let used = app.view.room.clone();
+    let mut current = app.view.clone();
+    for index in 0..201 {
+        current.room = crate::sessions::create(
+            &app.kit,
+            app.channel.id(),
+            &app.view.agent,
+            Some(&format!("legacy-empty-{index}")),
+            false,
+        )
+        .await
+        .unwrap();
+    }
+    let handler = crate::sessions::Sessions {
+        kit: app.kit.clone(),
+        workspace: settings.workspace.clone(),
+        channel: app.channel.id().clone(),
+        policy: app.policy.clone(),
+        tools: app.tools.clone(),
+    };
+    let request = Request {
+        id: RequestId(1),
+        operation: "list-sessions".into(),
+        conversation: current.room.as_str().into(),
+        command: Command::Invoke {
+            name: "resume".into(),
+            arguments: String::new(),
+        },
+    };
+    let CommandResult::Events(events) = handler.handle(request, current).await.unwrap() else {
+        panic!("Expected session catalogue");
+    };
+    let Event::Choices { choices, .. } = &events[0] else {
+        panic!("Expected choices")
+    };
+    assert_eq!(choices.len(), 1);
+    assert_eq!(choices[0].value, used.as_str());
+    assert_eq!(choices[0].label, "Inspect the project.");
+    assert_eq!(mock.requests.lock().unwrap().len(), 1);
+    app.kit.close().await.unwrap();
 }

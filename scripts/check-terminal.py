@@ -20,6 +20,7 @@ metadata = json.loads(subprocess.check_output(
 ))
 binary = Path(metadata["target_directory"]) / "debug" / "roomkit-code"
 requests = []
+continue_response = threading.Event()
 
 
 class Model(BaseHTTPRequestHandler):
@@ -32,6 +33,9 @@ class Model(BaseHTTPRequestHandler):
             return
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         requests.append(request)
+        if len(requests) == 3 and not continue_response.wait(timeout=15):
+            self.send_error(504, "Fixture response was not released")
+            return
         if len(requests) == 1:
             delta = {"tool_calls": [{"index": 0, "id": "read-1", "type": "function", "function": {
                 "name": "read", "arguments": json.dumps({"path": "fixture.txt"})
@@ -97,6 +101,7 @@ def scenario(project, state, base_url, resume=False, color="never"):
             offset = len(captured)
             os.write(master, b"/resume\r")
             wait_for(b"Resume session", offset)
+            assert b"Empty conversation" not in captured[offset:], "Unused drafts leaked into the picker"
             # Filtering is local; an unmatched query and Escape never call the model.
             os.write(master, b"no-such-session")
             wait_for(b"No matching choices", offset)
@@ -113,6 +118,9 @@ def scenario(project, state, base_url, resume=False, color="never"):
         # The longer answer can push the compact tool's summary off screen.
         # Inspect it through actual history navigation, not transient streaming.
         os.write(master, b"\x1b[5~")
+        # Transcript/footer height varies; focus the retained tool so its
+        # expanded body is visible instead of assuming a fixed page position.
+        os.write(master, b"\x1b[1;3A")
         wait_for('fixture.txt · lines 1–4'.encode())
         os.write(master, b"\x1b[1;5F")
         assert b'"data":' not in captured, "The file card leaked its raw JSON envelope"
@@ -121,7 +129,9 @@ def scenario(project, state, base_url, resume=False, color="never"):
             wait_for(b"Execution Completed")
             assert b"Expanded fixture line" not in captured
             offset = len(captured)
-            os.write(master, b"\x1bOQ")  # F2: the generic UI expands the real tool.
+            # Focus before expanding: Ctrl+End above deliberately returned to
+            # the latest answer, which can leave the tool outside the viewport.
+            os.write(master, b"\x1b[1;3A\x1bOQ")
             wait_for(b"F2 collapse", offset)
             wait_for(b"Expanded fixture line", offset)
         # A partially entered draft survives returning from history. Ctrl+End
@@ -163,6 +173,15 @@ def scenario(project, state, base_url, resume=False, color="never"):
             offset = len(captured)
             os.write(master, b"\r")
             wait_for(b"Latest answer marker.", offset)
+            # Hold the next provider response until the prior context is
+            # visibly labeled. It must not disappear during a working turn.
+            offset = len(captured)
+            os.write(master, b"Check the context again.\r")
+            wait_for(b"context (last report) 2050/32768", offset)
+            offset = len(captured)
+            continue_response.set()
+            wait_for(b"Execution Completed", offset)
+            wait_for(b"context 2050/32768", offset)
         os.write(master, b"\x04")
         code = process.wait(timeout=10)
         while select.select([master], [], [], 0)[0]:
@@ -199,13 +218,14 @@ try:
         scenario(project, state, base_url, resume=True)
         scenario(project, state, base_url, resume=True, color="always")
         scenario(project, state, base_url, resume=True, color="auto")
-        assert len(requests) == 2, "Resume reexecuted a model turn"
+        assert len(requests) == 3, "Resume reexecuted a model turn"
         assert any(m.get("role") == "tool" and "fictional project fixture" in m.get("content", "")
                    for m in requests[-1]["messages"]), "The model did not receive the actual file"
         assert sorted(p.name for p in project.iterdir()) == ["fixture.txt"], "Workspace was modified"
 finally:
+    continue_response.set()
     server.shutdown()
     server.server_close()
     thread.join(timeout=5)
 
-print("PTY checks passed: tools, Markdown, composer, history navigation, fresh launch, new/resume/filter/cancel, preserved draft, colors, restart and terminal restoration.")
+print("PTY checks passed: tools, Markdown, composer, history navigation, fresh launch, new/resume/filter/cancel, empty-draft filtering, working context report, preserved draft, colors, restart and terminal restoration.")
