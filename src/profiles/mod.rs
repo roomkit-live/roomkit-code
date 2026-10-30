@@ -1,5 +1,6 @@
 //! User connections and project agent composition, independent of terminal widgets.
 mod deletion;
+mod mcp;
 pub(crate) mod model;
 mod skills;
 mod slot;
@@ -32,10 +33,13 @@ pub(crate) struct Profiles {
     pub(crate) shell: Arc<crate::shell::Shell>,
     pub(crate) images: Arc<crate::images::Images>,
     skill_catalogue: tokio::sync::RwLock<skills::Catalogue>,
+    pub(crate) mcp_runtime: mcp::Runtime,
     state: Mutex<State>,
 }
 
 struct State {
+    mcp: Document<mcp::Servers>,
+    pending_mcp: Option<mcp::Pending>,
     providers: Document<Providers>,
     project: Document<Project>,
     slots: BTreeMap<String, AgentSlot>,
@@ -58,6 +62,8 @@ impl Profiles {
         )
         .map_err(|_| "Cannot open the private diagnostic log")?;
         let edit_lease = store::edit_lease(&settings.state_dir)?;
+        let mcp = Document::<mcp::Servers>::load(storage.database.with_file_name("mcp.json"))?;
+        mcp.value.validate()?;
         let mut providers =
             Document::<Providers>::load(settings.state_dir.join("connections.json"))?;
         let mut project =
@@ -118,6 +124,7 @@ impl Profiles {
                 reasoning_effort: None,
                 vision: false,
                 skills: Vec::new(),
+                mcp: BTreeMap::new(),
                 context_window: settings.context_window,
                 instructions: String::new(),
                 tools: TOOLS.iter().map(|s| (*s).into()).collect(),
@@ -158,7 +165,10 @@ impl Profiles {
             accounts: crate::accounts::Accounts::new(&settings.state_dir.join("auth"))?,
             processes: crate::processes::Processes::new(resources.processes.clone()),
             resources,
+            mcp_runtime: mcp::Runtime::default(),
             state: Mutex::new(State {
+                mcp,
+                pending_mcp: None,
                 providers,
                 project,
                 slots: BTreeMap::new(),
@@ -271,6 +281,7 @@ impl Profiles {
             config,
             skills,
             &skill_roots,
+            self.mcp_runtime.selected(profile).await?,
         )
         .await
         .map_err(

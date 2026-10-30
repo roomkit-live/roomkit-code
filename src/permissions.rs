@@ -111,6 +111,7 @@ impl Policy {
             }
             "write" | "edit" | "patch" | "shell" | "process_start" | "process_write"
             | "web_fetch" | "web_search" => {}
+            name if name.starts_with("mcp__") => {}
             _ => return ToolUse::block("This tool has no application permission policy."),
         }
         // Decide once for this call. Changing modes never auto-accepts an
@@ -128,6 +129,9 @@ impl Policy {
             "process_write" => "Process input · may trigger further actions in the running command",
             "web_fetch" => "Web request · retrieves this public URL",
             "web_search" => "Web search · sends this query to Exa's anonymous service",
+            name if name.starts_with("mcp__") => {
+                "MCP server tool · may access external resources or modify data; exact arguments"
+            }
             _ => "Proposed workspace change · exact tool arguments",
         };
         let detail = format!("{label}:\n{arguments}");

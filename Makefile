@@ -29,6 +29,7 @@ terminal-check:
 	python3 scripts/check-shell.py
 	python3 scripts/check-herdr.py
 	python3 scripts/check-skills.py
+	python3 scripts/check-mcp.py
 
 msrv:
 	cargo +1.92.0 test --locked

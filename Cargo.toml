@@ -12,18 +12,19 @@ include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
 [dependencies]
 roomkit-auth = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-auth", rev = "e995fe8f14d2c2d40f7330cb925ce7ad78126b4c" }
 # Keep the engine source identical to the CLI and tools adapters.
-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "700ae223e720b692d9bc2143d9259a358a9b993a" }
-roomkit-ai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "700ae223e720b692d9bc2143d9259a358a9b993a" }
-roomkit-openai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "700ae223e720b692d9bc2143d9259a358a9b993a" }
-roomkit-sqlite = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "700ae223e720b692d9bc2143d9259a358a9b993a" }
-roomkit-cli-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "181d370cee1ca9cc46e3febebb9b2769c4710093" }
-roomkit-tui = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "181d370cee1ca9cc46e3febebb9b2769c4710093" }
-roomkit-tools-code = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "4596fd3343e4283fae217416d0d5f744571ae2c4" }
-roomkit-tools-fs = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "4596fd3343e4283fae217416d0d5f744571ae2c4" }
-roomkit-tools-process = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "4596fd3343e4283fae217416d0d5f744571ae2c4" }
-roomkit-tools-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "4596fd3343e4283fae217416d0d5f744571ae2c4" }
-roomkit-tools-web = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "4596fd3343e4283fae217416d0d5f744571ae2c4" }
-roomkit-tools-search = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "4596fd3343e4283fae217416d0d5f744571ae2c4", default-features = false, features = ["exa"] }
+roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "70c0bc68cc3e0c0489272f1b6900014c9b81b8d9" }
+roomkit-mcp = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "70c0bc68cc3e0c0489272f1b6900014c9b81b8d9" }
+roomkit-ai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "70c0bc68cc3e0c0489272f1b6900014c9b81b8d9" }
+roomkit-openai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "70c0bc68cc3e0c0489272f1b6900014c9b81b8d9" }
+roomkit-sqlite = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "70c0bc68cc3e0c0489272f1b6900014c9b81b8d9" }
+roomkit-cli-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "93b613a79c3b36ec57e2104559ceb8ac16071fed" }
+roomkit-tui = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "93b613a79c3b36ec57e2104559ceb8ac16071fed" }
+roomkit-tools-code = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "70cd79640439c72b7f72e0389684591f14eb26dc" }
+roomkit-tools-fs = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "70cd79640439c72b7f72e0389684591f14eb26dc" }
+roomkit-tools-process = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "70cd79640439c72b7f72e0389684591f14eb26dc" }
+roomkit-tools-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "70cd79640439c72b7f72e0389684591f14eb26dc" }
+roomkit-tools-web = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "70cd79640439c72b7f72e0389684591f14eb26dc" }
+roomkit-tools-search = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "70cd79640439c72b7f72e0389684591f14eb26dc", default-features = false, features = ["exa"] }
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

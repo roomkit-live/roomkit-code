@@ -85,6 +85,7 @@ impl Application {
             }),
             Err(error) => {
                 let _ = kit.close().await;
+                profiles.mcp_runtime.close().await;
                 profiles.diagnostics.close().await;
                 let _ = profiles.resources.close().await;
                 Err(error)
@@ -95,6 +96,7 @@ impl Application {
     pub async fn close(&self) -> Result<()> {
         self.profiles.shell.close().await;
         self.profiles.accounts.close().await;
+        self.profiles.mcp_runtime.close().await;
         let engine = self.kit.close().await;
         let tools = self.profiles.resources.close().await;
         self.profiles.diagnostics.close().await;

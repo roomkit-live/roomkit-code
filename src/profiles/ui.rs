@@ -677,6 +677,7 @@ fn agent_form(
         reasoning_effort: None,
         vision: false,
         skills: Vec::new(),
+        mcp: BTreeMap::new(),
         context_window: None,
         instructions: String::new(),
         tools: TOOLS.iter().map(|s| (*s).into()).collect(),
@@ -874,6 +875,10 @@ fn parse_agent(
             )
         },
         instructions: value(values, "instructions").into(),
+        mcp: original
+            .and_then(|id| state.project.value.agents.get(id))
+            .map(|agent| agent.mcp.clone())
+            .unwrap_or_default(),
         skills: original
             .and_then(|id| state.project.value.agents.get(id))
             .map(|agent| agent.skills.clone())

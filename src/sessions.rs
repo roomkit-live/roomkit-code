@@ -36,6 +36,12 @@ async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<bool> {
 pub(crate) fn commands() -> Vec<CommandSpec> {
     vec![
         CommandSpec {
+            name: "mcp".into(),
+            description: "Configure MCP servers and choose tools for this agent".into(),
+            arguments: "[list|add|connect <id>|disconnect <id>|enable <id>|disable <id>]".into(),
+            choices: Vec::new(),
+        },
+        CommandSpec {
             name: "skills".into(),
             description: "Inspect and enable skills for this agent, or request their use".into(),
             arguments: "[list|reload|enable <name>|disable <name>|use <name> <task>]".into(),
@@ -364,6 +370,10 @@ impl CommandHandler for Sessions {
         request: Request,
         current: SessionConfig,
     ) -> std::result::Result<CommandResult, String> {
+        if matches!(&request.command, Command::Invoke { name, .. } | Command::SubmitForm { name, .. } if name == "mcp")
+        {
+            return self.profiles.mcp(&self.kit, request, current).await;
+        }
         if let Command::Invoke { name, arguments } = &request.command
             && name == "skills"
         {

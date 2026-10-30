@@ -73,6 +73,8 @@ pub(crate) struct Agent {
     pub vision: bool,
     #[serde(default)]
     pub skills: Vec<String>,
+    #[serde(default)]
+    pub mcp: BTreeMap<String, Vec<String>>,
     pub context_window: Option<u64>,
     pub instructions: String,
     pub tools: Vec<String>,
@@ -197,6 +199,27 @@ impl Provider {
 
 impl Agent {
     pub fn validate(&self) -> Result<(), String> {
+        if self.mcp.len() > 32
+            || self.mcp.values().map(Vec::len).sum::<usize>() > 64
+            || self.mcp.iter().any(|(id, names)| {
+                !super::mcp::valid_id(id)
+                    || names
+                        .iter()
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len()
+                        != names.len()
+                    || names.iter().any(|name| {
+                        name.is_empty()
+                            || format!("mcp__{id}__{name}").len() > 128
+                            || !name
+                                .bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+                    })
+            })
+        {
+            return Err("Select at most 64 valid MCP tools across 32 servers; use individual tool selection for large catalogues".into());
+        }
+
         if self.skills.len() > 128
             || self.skills.iter().any(|name| {
                 name.is_empty()

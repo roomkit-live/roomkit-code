@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add `/mcp` for private project stdio connections: configure executables and
+  environment references, connect/disconnect, inspect and select tools per agent.
+- Keep MCP tool names isolated from built-in tools; apply Ask/Yolo permissions
+  to every MCP call. Interrupt startup or calls with Esc and join server cleanup
+  at application exit. Retain selections without automatically starting servers.
+
+
 - Explain project skill creation, actual discovery roots and reload/enable/use
   commands to every agent, including before its first skill is available.
 

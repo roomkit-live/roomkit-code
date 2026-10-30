@@ -295,7 +295,7 @@ exit status, output cursors and archive completeness without raw byte arrays.
 A completed shell tool does not imply a successful command.
 
 Sub-agent delegation, inter-agent messaging, a Python execution interpreter and
-plugin/MCP discovery are not selected. The available agent-tool facade still needs
+plugin discovery are not selected. The available agent-tool facade still needs
 a native Rust backend and application orchestration before it can be enabled.
 Model messages use the CLI's Markdown renderer, including colored code blocks.
 Set `ui.markdown`, `ui.message_gap` and `ui.tool_preview_lines` in explicit TOML
@@ -353,7 +353,7 @@ remain in the project and conversation.
 | --- | --- |
 | [roomkit-code](https://github.com/roomkit-live/roomkit-code) | Development instructions, selected tools, workspace, configuration, lifecycle |
 | [roomkit-cli](https://github.com/roomkit-live/roomkit-cli) | Generic terminal interface, client protocol, local engine adapter |
-| [roomkit-rs](https://github.com/roomkit-live/roomkit-rs) | Conversation engine, agents, providers, policies, persistence |
+| [roomkit-rs](https://github.com/roomkit-live/roomkit-rs) | Conversation engine, agents, providers, MCP client, policies, persistence |
 | [roomkit-tools](https://github.com/roomkit-live/roomkit-tools) | Independently reusable tools and their RoomKit adapters |
 | [roomkit-auth](https://github.com/roomkit-live/roomkit-auth) | OAuth, account identity, credential storage and renewal |
 
@@ -363,6 +363,8 @@ instructions. `src/application.rs` assembles and closes the engine.
 `src/processes.rs` owns scoped process monitoring and human controls.
 `src/accounts.rs` owns account menus and browser launching; `src/profiles/` links
 accounts, providers and agents without exposing credentials to the UI.
+`src/profiles/mcp/` owns MCP configuration and exposure; the engine's
+`roomkit-mcp` crate owns protocol calls, aliases and server process cleanup.
 `src/sessions.rs` owns new/resume/mode/tools/processes commands and the project session catalogue.
 `src/permissions.rs` owns the tool policy and hooks that await actual approval.
 The TUI receives only its generic client connection, preserving the boundary
@@ -376,8 +378,8 @@ make msrv
 make audit # requires cargo-deny
 ```
 
-Tests use temporary projects and a local HTTP fixture, with no model service or
-credentials. They exercise real file tools, streaming, persistence and terminal
+Tests use temporary projects, local HTTP fixtures and a stdio MCP fixture, with
+no model service or credentials. They exercise real file tools, streaming, persistence and terminal
 cleanup. See [CONTRIBUTING.md](CONTRIBUTING.md) for dependency and CI setup.
 
 MIT licensed. This is an initial development version, not a published release.
@@ -541,3 +543,56 @@ active skills retained by the engine. They are recovered from retained tool
 history when resuming; a fresh activation returns the instructions if no record
 is available. Reload/restart uses the current installed content, not a historical
 snapshot of the package.
+
+
+## MCP servers
+
+Use **/mcp** to configure local MCP servers over **stdio**. Connections are
+independent of model providers. Each server runs with your user permissions in
+this project's workspace; it is not restricted by the built-in filesystem tools'
+workspace boundary.
+
+1. Choose **Add a stdio server**. Enter a server ID, executable and arguments as a
+   JSON array. For example: program `python3`, arguments `["/path/to/server.py"]`.
+   No shell parsing is performed; each array element is one argument.
+2. If credentials are needed, export them before launching RoomKit Code. In
+   **Environment references**, map the child variable to the host variable's
+   **name**, for example `{"API_KEY":"MY_SERVICE_KEY"}`. The configuration stores
+   references, not their values. Keep secrets out of arguments. Apart from the
+   engine's basic environment allowlist, variables are only passed explicitly.
+3. Save, reopen **/mcp**, select the server and choose **Connect**. Saving alone
+   never runs the program. Startup and discovery share a configurable timeout;
+   **Esc** cancels and waits for cleanup. Missing executables, handshake failures
+   and timeouts produce safe diagnostics without copying stderr or credentials.
+4. Choose **Choose tools for this agent**, or **Enable all current tools**. Each
+   tool appears as `mcp__<server>__<tool>`, so a server's `read` cannot collide with
+   the built-in `read`. At most 64 MCP tools can be selected across all servers
+   for one agent. Larger catalogues use paginated individual selection. Names
+   that cannot fit the supported model tool-name format are omitted.
+
+In **Ask**, every MCP call requires approval, including tools advertised as
+read-only. **Yolo** executes selected tools without asking. Server instructions
+are framed as external content by the engine and grant no permission. Tool
+results use the CLI's generic expandable presentation. **Esc** requests MCP
+cancellation of a running call; the server must honor that notification. This
+cannot undo effects already performed. **Disconnect** stops and waits for the
+owned server process group, including subprocesses on Linux and macOS.
+
+The server panel shows connection state, process ID, selected tools and the
+configured command; use **Refresh status** after an unexpected server exit.
+Configuration lives in the project's private state directory, in `mcp.json`;
+selections live in `agents.json`. It is not loaded from a repository-provided MCP
+file. Select a different agent with **/agents** to configure its own subset.
+Disabling tools leaves the shared connection open. Before deleting a server,
+disconnect it and remove its selections from every agent.
+
+Selections persist, but connections do not start automatically on launch or
+resume. Reconnect explicitly with `/mcp connect <id>`. A reconnect uses the
+server's current catalogue while preserving selected names: new tools remain
+unselected and removed tools are unavailable. Connections survive agent and
+conversation changes and are closed on application exit.
+
+This version includes stdio tool discovery and calls. HTTP/SSE transports, MCP
+OAuth, prompts/resources browsing, subscription-based catalogue refresh and
+MCP-hosted skills are not yet exposed. Non-text tool content follows the current
+engine adapter's text/placeholder behavior.
