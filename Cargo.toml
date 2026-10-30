@@ -15,8 +15,8 @@ roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs
 roomkit-ai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "c6de24a069a5d5c32d6ea57cd970a547bae63c25" }
 roomkit-openai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "c6de24a069a5d5c32d6ea57cd970a547bae63c25" }
 roomkit-sqlite = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "c6de24a069a5d5c32d6ea57cd970a547bae63c25" }
-roomkit-cli-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "a8de72e126b5e93e25bb7b1501c707207614d209" }
-roomkit-tui = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "a8de72e126b5e93e25bb7b1501c707207614d209" }
+roomkit-cli-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "fe72aa939008136e2f9d2df5d5d82625e46adaa2" }
+roomkit-tui = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "fe72aa939008136e2f9d2df5d5d82625e46adaa2" }
 roomkit-tools-code = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "108e4d2b21f77b3681c3a52665d3b63c285d55cd" }
 roomkit-tools-fs = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "108e4d2b21f77b3681c3a52665d3b63c285d55cd" }
 roomkit-tools-process = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "108e4d2b21f77b3681c3a52665d3b63c285d55cd" }
@@ -29,10 +29,12 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 fs2 = "0.4"
 sha2 = "0.10"
 url = "2"
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
 axum = "0.8"
-tempfile = "3"
 tokio = { version = "1", features = ["net"] }
 
 [lints.rust]

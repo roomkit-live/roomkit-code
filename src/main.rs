@@ -4,6 +4,7 @@ mod agent;
 mod application;
 mod config;
 mod permissions;
+mod profiles;
 mod sessions;
 mod storage;
 mod tool_views;
@@ -28,9 +29,7 @@ async fn launch() -> Result<()> {
     let cli = config::Cli::parse();
     let settings = config::Settings::load(&cli)?;
     if cli.check_config {
-        println!(
-            "Configuration valid. Workspace exists; coding tools and permission mode selected."
-        );
+        println!("Launch configuration valid. Provider and agent profiles are loaded at startup.");
         return Ok(());
     }
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Configure reusable OpenAI-compatible connections with `/providers`, including
+  local or environment credentials, timeouts, testing and model discovery.
+- Configure project agents with `/agents`: select their provider, model, context
+  capacity, instructions and tools; switch interlocutors in one shared history.
+- Persist profiles privately and atomically, retain the selected agent across
+  launches, and allow first-run setup entirely through the terminal.
+- Apply profile changes between turns and preserve existing credentials when
+  their masked edit field is left blank.
+
 - Hide unused sessions from `/resume` and reuse app-owned empty drafts across
   launches and repeated `/new` commands, preserving all existing history.
 - Keep context tokens and remaining percentage visible while awaiting the next

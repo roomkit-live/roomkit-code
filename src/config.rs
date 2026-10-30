@@ -17,16 +17,16 @@ pub(crate) struct Cli {
     /// Explicit TOML configuration file (never loaded from the project implicitly).
     #[arg(long)]
     pub config: Option<PathBuf>,
-    /// OpenAI-compatible API root; overrides environment and TOML.
+    /// Initial API root for a project without agent profiles.
     #[arg(long, env = "ROOMKIT_BASE_URL", hide_env_values = true)]
     pub base_url: Option<String>,
-    /// Model identifier served by the configured endpoint.
+    /// Initial model for a project without agent profiles.
     #[arg(long, env = "ROOMKIT_MODEL", hide_env_values = true)]
     pub model: Option<String>,
-    /// Maximum duration of one model request, including its streamed response.
+    /// Initial model-request timeout, including its streamed response.
     #[arg(long)]
     pub provider_timeout_seconds: Option<u64>,
-    /// Effective model context capacity in tokens, as configured on the server.
+    /// Initial effective model context capacity in tokens.
     #[arg(long)]
     pub context_window: Option<u64>,
     /// Open or create a named conversation; without this, start a new session.
@@ -38,7 +38,7 @@ pub(crate) struct Cli {
     /// Storage directory; defaults to the user's application data directory.
     #[arg(long, env = "ROOMKIT_CODE_STATE_DIR", hide_env_values = true)]
     pub state_dir: Option<PathBuf>,
-    /// Check configuration without opening a database, terminal or connection.
+    /// Check launch options and workspace without loading profiles or connecting.
     #[arg(long)]
     pub check_config: bool,
     /// Terminal palette.
@@ -166,23 +166,31 @@ impl Settings {
             .clone()
             .or(file.provider.base_url)
             .filter(|value| !value.trim().is_empty())
-            .ok_or("Set --base-url, ROOMKIT_BASE_URL or provider.base_url in --config")?;
-        let url = url::Url::parse(&base_url).map_err(|_| "Invalid provider base URL")?;
-        if !matches!(url.scheme(), "http" | "https")
-            || url.host_str().is_none()
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.query().is_some()
-            || url.fragment().is_some()
-        {
-            return Err("Use an HTTP(S) API root without credentials, query or fragment; set ROOMKIT_API_KEY separately".into());
+            .unwrap_or_default();
+        if !base_url.is_empty() {
+            let url = url::Url::parse(&base_url).map_err(|_| "Invalid provider base URL")?;
+            if !matches!(url.scheme(), "http" | "https")
+                || url.host_str().is_none()
+                || !url.username().is_empty()
+                || url.password().is_some()
+                || url.query().is_some()
+                || url.fragment().is_some()
+            {
+                return Err("Use an HTTP(S) API root without credentials, query or fragment; set ROOMKIT_API_KEY separately".into());
+            }
         }
         let model = cli
             .model
             .clone()
             .or(file.provider.model)
             .filter(|value| !value.trim().is_empty())
-            .ok_or("Set --model, ROOMKIT_MODEL or provider.model in --config")?;
+            .unwrap_or_default();
+        if base_url.is_empty() != model.is_empty() {
+            return Err(
+                "Supply both a base URL and model, or configure them with /providers and /agents"
+                    .into(),
+            );
+        }
         if cli
             .session
             .as_deref()

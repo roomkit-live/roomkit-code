@@ -24,6 +24,9 @@ export ROOMKIT_MODEL=your-model
 cargo run --locked -- /path/to/project
 ```
 
+You can also launch without a URL/model and configure everything using
+**/providers**, then **/agents**. Messages are disabled until an agent is ready.
+
 The model needs to support function calling and streamed Chat Completions.
 API requests go to the selected endpoint. File contents returned by tools can
 be included in those requests.
@@ -31,7 +34,10 @@ be included in those requests.
 Alternatively, copy `roomkit-code.example.toml` to `roomkit-code.local.toml` and
 pass `--config roomkit-code.local.toml`. CLI values override environment values,
 which override the explicit TOML file. Project configuration and `.env` files
-are never loaded automatically. API keys come only from `ROOMKIT_API_KEY`.
+are never loaded automatically. These connection values initialize the project's first agent once. Thereafter,
+saved profiles take precedence so an old launch command cannot undo UI edits.
+Appearance and permission flags still apply at every launch. A supplied
+`ROOMKIT_API_KEY` is imported into the protected local connection profile.
 
 ```sh
 cargo run --locked -- /path/to/project --config roomkit-code.local.toml
@@ -54,8 +60,8 @@ including the former default `main`, remain available through `/resume` or
 nonempty sessions, with timestamps in
 UTC; an older known identifier can be opened with `/resume ID`.
 
-`--check-config` validates configuration and the workspace without contacting
-the provider or creating state. `--help` lists all options. Terminal controls
+`--check-config` validates launch options and the workspace without loading
+saved profiles, contacting a provider or creating state. `--help` lists all options. Terminal controls
 are provided by `roomkit-tui`: F2 expands tool details, clicking a tool's
 disclosure does the same, and dragging text requests clipboard copying through
 OSC 52 when supported by the terminal. `--native-selection` delegates selection
@@ -73,6 +79,42 @@ string hides either. Neither is included in messages sent to the model.
 The selected theme supplies its background and text colors; monochrome mode
 uses reverse video to keep the area visible.
 
+## Providers and agents
+
+**/providers** manages connections shared across your projects. Add a name, API
+base URL, timeout and authentication: no key, a stored key, or a named environment
+variable. Stored keys live in a private local file (0600), not an OS keychain;
+secret fields are masked, never prefilled, never echoed in diagnostics and never
+stored in chat history. Leaving a stored-key field blank preserves that key.
+Choosing another authentication mode removes the stored key from that profile.
+Testing a connection makes a bounded `GET /models` request with no redirects;
+it sends no conversation. Some compatible servers do not implement discovery,
+so model identifiers can always be entered manually.
+
+**/agents** manages the project's interlocutors. Each has a stable ID, display
+name, provider, model, optional context capacity, additional instructions and
+selected tools. The tools field accepts comma-separated names; an empty field
+creates an agent without tools. Saving an agent also selects it. Selection and
+configuration wait for the current execution to finish. The selected agent's
+name/model appear in the footer, and only that agent receives the next message.
+The conversation remains shared, with stable authorship for previous messages;
+selecting a different provider can therefore send existing conversation context
+to that provider. This version does not orchestrate simultaneous responders.
+
+Forms use **Tab / Shift+Tab** for fields, **Left / Right** for choices,
+**Alt+Enter** for multiline instructions, **Ctrl+U** to clear a field,
+**Ctrl+S** to save and **Esc** to cancel. Invalid values retain your draft.
+Existing IDs cannot be renamed because they identify authors and references.
+Profile deletion and effort selection are not implemented yet.
+
+Connections are stored in `connections.json` under the user state directory;
+project composition and the last selected agent live in
+`projects/<workspace-path-hash>/agents.json`. Files are versioned, private and
+replaced atomically; conflicting connection edits from another process are
+refused instead of overwritten. To apply a connection changed by another
+project, reopen `/agents` and select the agent again. Profile files are outside
+the source tree and are never loaded from project instructions or model output.
+
 ## Tools and persistence
 
 Use **/tools** to browse the capabilities actually registered by the application,
@@ -82,7 +124,7 @@ and the model's current capability inventory are derived from the same selected
 toolsets. Resuming keeps conversation history, but older assistant claims about
 missing tools do not change the currently registered capabilities.
 
-The selected agent has `code_outline`, `list`, `glob`, `grep`, `read`, `diff`, `write`, `edit`,
+New agents initially select `code_outline`, `list`, `glob`, `grep`, `read`, `diff`, `write`, `edit`,
 `patch` and `shell`, implemented by `roomkit-tools-code`, `roomkit-tools-fs` and `roomkit-tools-process`
 and registered through their existing RoomKit adapters. Persistent process and
 web tools are not selected. Returned pages and scans are bounded by the tools' defaults. Hidden files are included and ignore files are not applied;
@@ -139,7 +181,7 @@ refused. Files are created with private permissions on Linux and macOS.
 The engine owns persistence and bounded context restoration. The terminal
 adapter displays up to 500 stored events; the current provider uses the engine's
 bounded message/tool history, not the entire on-screen conversation. Model
-changes on restart apply to future turns. Effort selection, automatic compaction
+changes apply to future turns. Effort selection, automatic compaction
 and a remote-engine transport are not implemented in this version.
 
 `code_outline` uses Tree-sitter to locate Rust/Python definitions, signatures and
@@ -151,8 +193,7 @@ expansion reveals more symbols only when that result contains them.
 
 The dedicated context footer line shows the last completed generation's
 measured context: input tokens
-(including cached input) plus output tokens. Configure `provider.context_window`
-or `--context-window` with the actual server capacity to see used and remaining
+(including cached input) plus output tokens. Set the agent's **Context capacity** in `/agents` to the actual server capacity to see used and remaining
 percentages. Without capacity the token count remains visible; without reported
 counts the context stays unknown unless an earlier measurement is available.
 While awaiting a new report, that earlier context remains visible with the
@@ -166,8 +207,9 @@ billing totals nor dollar costs. Resume restores applicable measurements; a
 new execution clears its turn totals. Changing the model or conversation clears
 the previous-context fallback too.
 
-`provider.timeout_seconds` (or `--provider-timeout-seconds`) controls the entire
-HTTP model request, including streaming. The application defaults to 600 seconds;
+The connection's **Timeout** in `/providers` controls the entire HTTP model
+request, including streaming. The initial TOML/CLI timeout and context flags
+remain available when bootstrapping a new project. The application defaults to 600 seconds;
 the library's own default is unchanged. Failures explain timeout, access, rate
 limit, server and protocol errors without echoing raw provider responses or keys.
 Failed requests are not automatically retried. Existing completed tool actions

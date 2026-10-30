@@ -26,6 +26,7 @@ use crate::config::Cli;
 struct Mock {
     base_url: String,
     requests: Arc<Mutex<Vec<Value>>>,
+    headers: Arc<Mutex<Vec<String>>>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -35,6 +36,7 @@ struct Fixture {
     calls: Vec<(&'static str, Value)>,
     usage: Vec<Option<Value>>,
     requests: Arc<Mutex<Vec<Value>>>,
+    headers: Arc<Mutex<Vec<String>>>,
 }
 
 impl Mock {
@@ -54,13 +56,21 @@ impl Mock {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
+        let headers = Arc::new(Mutex::new(Vec::new()));
         let router = Router::new()
             .route("/v1/chat/completions", post(answer))
+            .route(
+                "/v1/models",
+                axum::routing::get(|| async {
+                    Json(json!({"data":[{"id":"discovered-model","max_model_len":32768}]}))
+                }),
+            )
             .with_state(Fixture {
                 answer: answer_text.into(),
                 calls,
                 usage,
                 requests: requests.clone(),
+                headers: headers.clone(),
             });
         let task = tokio::spawn(async move {
             axum::serve(listener, router).await.unwrap();
@@ -68,6 +78,7 @@ impl Mock {
         Self {
             base_url,
             requests,
+            headers,
             task,
         }
     }
@@ -81,8 +92,16 @@ impl Drop for Mock {
 
 async fn answer(
     State(fixture): State<Fixture>,
+    headers: axum::http::HeaderMap,
     Json(request): Json<Value>,
 ) -> ([(&'static str, &'static str); 1], String) {
+    fixture.headers.lock().unwrap().push(
+        headers
+            .get("authorization")
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or_default()
+            .into(),
+    );
     let index = {
         let mut requests = fixture.requests.lock().unwrap();
         let index = requests.len();
@@ -154,7 +173,7 @@ async fn turn_operation(app: &Application, operation: &str) -> Session {
                                 operation: operation.into(),
                                 conversation: snapshot.conversation.clone(),
                                 command: Command::Submit {
-                                    agent: "code".into(),
+                                    agent: snapshot.selected_agent.clone(),
                                     text: "Inspect the project.".into(),
                                 },
                             })
@@ -220,7 +239,7 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
         })
         .unwrap();
     assert!(!session.can_interrupt);
-    assert_eq!(session.commands.len(), 4);
+    assert_eq!(session.commands.len(), 6);
     app.kit.close().await.unwrap();
     drop(app);
     let app = Application::open(&settings, String::new()).await.unwrap();
@@ -285,18 +304,26 @@ async fn resumed_history_cannot_replace_the_current_wire_inventory_or_host_catal
     let state = tempfile::tempdir().unwrap();
     let stale = "I only have read-only tools. Shell is unavailable and all attempts failed.";
     let old = Mock::with_answer(vec![], stale).await;
-    let mut settings = settings(project.path(), state.path(), &old.base_url);
+    let settings = settings(project.path(), state.path(), &old.base_url);
     let app = Application::open(&settings, String::new()).await.unwrap();
     turn(&app).await;
     app.kit.close().await.unwrap();
     drop(app);
 
     let current = Mock::start(vec![]).await;
-    settings.base_url = current.base_url.clone();
-    let app = Application::open(&settings, String::new()).await.unwrap();
+    let mut app = Application::open(&settings, String::new()).await.unwrap();
+    let provider_id = saved_provider_id(&settings);
+    edit_profile(
+        &mut app,
+        "providers",
+        &format!("edit:{provider_id}"),
+        &[("url", current.base_url.as_str())],
+    )
+    .await;
     turn_operation(&app, "check-current-capabilities").await;
     let wire = current.requests.lock().unwrap()[0].clone();
-    let expected: BTreeSet<_> = app.tools.iter().map(|tool| tool.name.as_str()).collect();
+    let inventory = app.profiles.tools(app.view.agent.as_str()).await;
+    let expected: BTreeSet<_> = inventory.iter().map(|tool| tool.name.as_str()).collect();
     assert_eq!(expected.len(), 10);
     let declared: BTreeSet<_> = wire["tools"]
         .as_array()
@@ -326,7 +353,7 @@ async fn resumed_history_cannot_replace_the_current_wire_inventory_or_host_catal
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
-        tools: app.tools.clone(),
+        profiles: app.profiles.clone(),
     };
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run_with_commands(host, handler));
@@ -449,7 +476,7 @@ async fn ask_gates_real_changes_and_yolo_never_auto_approves_an_existing_request
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
-        tools: app.tools.clone(),
+        profiles: app.profiles.clone(),
     };
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run_with_commands(host, handler));
@@ -704,7 +731,7 @@ async fn histories_are_scoped_to_project_and_session_and_storage_has_one_owner()
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
-        tools: app.tools.clone(),
+        profiles: app.profiles.clone(),
     };
     let request = Request {
         id: RequestId(1),
@@ -792,7 +819,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
-        tools: app.tools.clone(),
+        profiles: app.profiles.clone(),
     };
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run_with_commands(host, handler));
@@ -897,7 +924,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
-        tools: app.tools.clone(),
+        profiles: app.profiles.clone(),
     };
     let request = Request {
         id: RequestId(1),
@@ -1129,7 +1156,7 @@ async fn unused_automatic_drafts_are_reused_without_adopting_named_sessions() {
             workspace: settings.workspace.clone(),
             channel: app.channel.id().clone(),
             policy: app.policy.clone(),
-            tools: app.tools.clone(),
+            profiles: app.profiles.clone(),
         };
         let request = Request {
             id: RequestId(1),
@@ -1210,7 +1237,7 @@ async fn resume_skips_legacy_empty_sessions_before_applying_the_catalogue_limit(
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
-        tools: app.tools.clone(),
+        profiles: app.profiles.clone(),
     };
     let request = Request {
         id: RequestId(1),
@@ -1231,5 +1258,381 @@ async fn resume_skips_legacy_empty_sessions_before_applying_the_catalogue_limit(
     assert_eq!(choices[0].value, used.as_str());
     assert_eq!(choices[0].label, "Inspect the project.");
     assert_eq!(mock.requests.lock().unwrap().len(), 1);
+    app.kit.close().await.unwrap();
+}
+
+fn saved_provider_id(settings: &Settings) -> String {
+    let json: Value = serde_json::from_slice(
+        &std::fs::read(settings.state_dir.join("connections.json")).unwrap(),
+    )
+    .unwrap();
+    json["profiles"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .next()
+        .unwrap()
+        .clone()
+}
+
+async fn profile_command(
+    app: &Application,
+    command: Command,
+) -> Result<roomkit_cli_roomkit::CommandResult> {
+    Ok(app
+        .profiles
+        .handle(
+            &app.kit,
+            app.channel.id(),
+            Request {
+                id: RequestId(99),
+                operation: "profile-operation".into(),
+                conversation: app.view.room.as_str().into(),
+                command,
+            },
+            app.view.clone(),
+        )
+        .await?)
+}
+
+async fn edit_profile(
+    app: &mut Application,
+    command: &str,
+    action: &str,
+    changes: &[(&str, &str)],
+) {
+    use roomkit_cli_roomkit::CommandResult;
+    use roomkit_tui::protocol::FormValues;
+    let CommandResult::Events(events) = profile_command(
+        app,
+        Command::Invoke {
+            name: command.into(),
+            arguments: action.into(),
+        },
+    )
+    .await
+    .unwrap() else {
+        panic!("Expected a form")
+    };
+    let form = events
+        .into_iter()
+        .find_map(|event| match event {
+            Event::Form { form, .. } => Some(form),
+            _ => None,
+        })
+        .unwrap();
+    let mut values = FormValues(
+        form.fields
+            .iter()
+            .map(|field| (field.name.clone(), field.value.clone()))
+            .collect(),
+    );
+    for (name, value) in changes {
+        values.0.insert((*name).into(), (*value).into());
+    }
+    let CommandResult::Switch(view) = profile_command(
+        app,
+        Command::SubmitForm {
+            name: form.command,
+            form: form.id,
+            values: Box::new(values),
+        },
+    )
+    .await
+    .unwrap() else {
+        panic!("Expected refreshed view")
+    };
+    app.view = *view;
+}
+
+#[tokio::test]
+async fn profiles_select_independent_providers_tools_and_auth_in_one_durable_conversation() {
+    use roomkit_cli_roomkit::CommandResult;
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let first = Mock::with_answer(vec![], "First agent answer").await;
+    let second = Mock::with_answer(vec![], "Second agent answer").await;
+    let mut settings = settings(root.path(), state.path(), &first.base_url);
+    let mut app = Application::open(&settings, String::new()).await.unwrap();
+    let room = app.view.room.clone();
+    turn_operation(&app, "first-agent-turn").await;
+    edit_profile(
+        &mut app,
+        "providers",
+        "add",
+        &[
+            ("id", "secondary"),
+            ("label", "Second connection"),
+            ("url", &second.base_url),
+            ("auth", "stored"),
+            ("key", "fixture-private-key"),
+        ],
+    )
+    .await;
+    edit_profile(
+        &mut app,
+        "agents",
+        "add",
+        &[
+            ("id", "reviewer"),
+            ("label", "Reviewer"),
+            ("provider", "secondary"),
+            ("model", "second-model"),
+            ("context", "32768"),
+            (
+                "instructions",
+                "Review carefully with this distinct instruction.",
+            ),
+            ("tools", "read, code_outline"),
+        ],
+    )
+    .await;
+    assert_eq!(app.view.room, room);
+    assert_eq!(app.view.agent.as_str(), "reviewer");
+    let second_session = turn_operation(&app, "second-agent-turn").await;
+    assert_eq!(first.requests.lock().unwrap().len(), 1);
+    let request = second.requests.lock().unwrap()[0].clone();
+    assert_eq!(
+        second.headers.lock().unwrap().as_slice(),
+        ["Bearer fixture-private-key"]
+    );
+    assert_eq!(request["model"], "second-model");
+    assert!(
+        request["messages"]
+            .to_string()
+            .contains("First agent answer")
+    );
+    assert!(
+        request["messages"]
+            .to_string()
+            .contains("distinct instruction")
+    );
+    assert!(!request.to_string().contains("fixture-private-key"));
+    let tools: BTreeSet<_> = request["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["function"]["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(tools, BTreeSet::from(["read", "code_outline"]));
+    let snapshot = second_session.snapshot.unwrap();
+    assert!(
+        snapshot
+            .actors
+            .iter()
+            .any(|a| a.id.0 == "reviewer" && a.name == "Reviewer")
+    );
+    for (author, answer) in [
+        ("code", "First agent answer"),
+        ("reviewer", "Second agent answer"),
+    ] {
+        assert!(snapshot.items.iter().any(
+            |item| matches!(item, Item::Message(m) if m.actor.0 == author && m.text == answer)
+        ));
+    }
+    assert!(!format!("{snapshot:?}").contains("fixture-private-key"));
+    let CommandResult::Switch(view) = profile_command(
+        &app,
+        Command::Invoke {
+            name: "agents".into(),
+            arguments: "select:code".into(),
+        },
+    )
+    .await
+    .unwrap() else {
+        panic!("Expected switch")
+    };
+    app.view = *view;
+    turn_operation(&app, "back-to-first-agent").await;
+    assert_eq!(first.requests.lock().unwrap().len(), 2);
+    assert_eq!(second.requests.lock().unwrap().len(), 1);
+    assert!(first.headers.lock().unwrap().iter().all(String::is_empty));
+    let CommandResult::Switch(view) = profile_command(
+        &app,
+        Command::Invoke {
+            name: "agents".into(),
+            arguments: "select:reviewer".into(),
+        },
+    )
+    .await
+    .unwrap() else {
+        panic!("Expected switch")
+    };
+    app.view = *view;
+    // Editing a stored-key connection without entering a key retains it.
+    edit_profile(
+        &mut app,
+        "providers",
+        "edit:secondary",
+        &[("label", "Renamed connection")],
+    )
+    .await;
+    app.kit.close().await.unwrap();
+    drop(app);
+    settings.base_url.clear();
+    settings.model.clear();
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    assert_eq!(app.view.agent.as_str(), "reviewer");
+    assert_eq!(app.view.context_capacity, Some(32768));
+    let snapshot = app.session().snapshot().await.unwrap();
+    assert!(snapshot.items.len() >= 6);
+    assert!(!format!("{snapshot:?}").contains("fixture-private-key"));
+    turn_operation(&app, "after-restart").await;
+    assert_eq!(
+        second.headers.lock().unwrap().last().unwrap(),
+        "Bearer fixture-private-key"
+    );
+    app.kit.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn unconfigured_start_can_create_profiles_without_a_dummy_model_or_endpoint() {
+    use roomkit_cli_roomkit::CommandResult;
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let provider = Mock::start(vec![]).await;
+    let mut settings = settings(root.path(), state.path(), &provider.base_url);
+    settings.base_url.clear();
+    settings.model.clear();
+    let mut app = Application::open(&settings, String::new()).await.unwrap();
+    assert!(app.view.model.is_none());
+    assert!(app.view.submission_error.is_some());
+    edit_profile(
+        &mut app,
+        "providers",
+        "add",
+        &[("id", "local"), ("url", &provider.base_url)],
+    )
+    .await;
+    let CommandResult::Events(events) = profile_command(
+        &app,
+        Command::Invoke {
+            name: "providers".into(),
+            arguments: "test:local".into(),
+        },
+    )
+    .await
+    .unwrap() else {
+        panic!("Expected catalogue")
+    };
+    assert!(
+        matches!(&events[0], Event::Choices { choices, .. } if choices[0].value == "model:local:discovered-model")
+    );
+    edit_profile(
+        &mut app,
+        "providers",
+        "model:local:discovered-model",
+        &[("id", "assistant"), ("tools", "")],
+    )
+    .await;
+    assert!(app.view.submission_error.is_none());
+    assert_eq!(app.view.model.as_ref().unwrap().model, "discovered-model");
+    turn_operation(&app, "first-configured-turn").await;
+    assert_eq!(provider.requests.lock().unwrap().len(), 1);
+    app.kit.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn stale_or_conflicting_forms_cannot_replace_a_working_agent() {
+    use roomkit_cli_roomkit::CommandResult;
+    use roomkit_tui::protocol::FormValues;
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let provider = Mock::start(vec![]).await;
+    let settings = settings(root.path(), state.path(), &provider.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let open = || Command::Invoke {
+        name: "agents".into(),
+        arguments: "edit:code".into(),
+    };
+    let first = profile_command(&app, open()).await.unwrap();
+    let second = profile_command(&app, open()).await.unwrap();
+    let extract = |result| {
+        let CommandResult::Events(events) = result else {
+            panic!("Expected form")
+        };
+        events
+            .into_iter()
+            .find_map(|event| match event {
+                Event::Form { form, .. } => Some(form),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let old = extract(first);
+    let form = extract(second);
+    assert_ne!(old.id, form.id);
+    let mut values = FormValues(
+        form.fields
+            .iter()
+            .map(|f| (f.name.clone(), f.value.clone()))
+            .collect(),
+    );
+    assert!(
+        profile_command(
+            &app,
+            Command::SubmitForm {
+                name: "agents".into(),
+                form: old.id,
+                values: Box::new(values.clone())
+            }
+        )
+        .await
+        .is_err()
+    );
+    values.0.insert("model".into(), "should-not-be-used".into());
+    let submit = Command::SubmitForm {
+        name: "agents".into(),
+        form: form.id.clone(),
+        values: Box::new(values),
+    };
+    let mut wrong_view = app.view.clone();
+    wrong_view.room = roomkit::model::RoomId::new("other-room").unwrap();
+    assert!(
+        app.profiles
+            .handle(
+                &app.kit,
+                app.channel.id(),
+                Request {
+                    id: RequestId(1),
+                    operation: "other-view".into(),
+                    conversation: "other-room".into(),
+                    command: submit.clone()
+                },
+                wrong_view
+            )
+            .await
+            .is_err()
+    );
+    // Simulate an external editor changing the saved project while this form is open.
+    let projects = std::fs::read_dir(state.path().join("projects")).unwrap();
+    let file = projects
+        .into_iter()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path()
+        .join("agents.json");
+    let mut saved: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    saved["agents"]["code"]["label"] = "External edit".into();
+    std::fs::write(&file, serde_json::to_vec(&saved).unwrap()).unwrap();
+    let error = profile_command(&app, submit).await.unwrap_err().to_string();
+    assert!(error.contains("changed in another instance"));
+    turn_operation(&app, "after-rejected-edit").await;
+    assert_eq!(
+        provider.requests.lock().unwrap()[0]["model"],
+        "fixture-model"
+    );
+    // Reopening adopts the new disk revision and issues a fresh token.
+    let reopened = extract(profile_command(&app, open()).await.unwrap());
+    assert_eq!(
+        reopened
+            .fields
+            .iter()
+            .find(|f| f.name == "label")
+            .unwrap()
+            .value,
+        "External edit"
+    );
     app.kit.close().await.unwrap();
 }

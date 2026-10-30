@@ -6,31 +6,29 @@ use roomkit::model::ChannelId;
 use roomkit::{RoomKit, RoomKitOptions};
 use roomkit_cli_roomkit::{ConversationChannel, LocalSession, SessionConfig};
 use roomkit_sqlite::SqliteStore;
-use roomkit_tui::{connection, protocol::ModelInfo};
+use roomkit_tui::connection;
 
-use crate::{Result, agent, config::Settings, storage::Storage};
+use crate::{Result, config::Settings, profiles::Profiles, storage::Storage};
 
 pub(crate) struct Application {
     pub kit: RoomKit<SqliteStore>,
     pub channel: ConversationChannel,
     pub view: SessionConfig,
     pub policy: crate::permissions::Policy,
-    pub tools: Vec<roomkit_ai::ToolDefinition>,
+    pub profiles: std::sync::Arc<Profiles>,
     _storage: Storage,
 }
 
 impl Application {
     pub async fn open(settings: &Settings, api_key: String) -> Result<Self> {
-        // Validate and assemble the agent before creating durable state.
-        let (agent, tools) = agent::create(settings, api_key).await?;
         let storage = Storage::open(&settings.state_dir, &settings.workspace)?;
+        let profiles = Profiles::load(settings, &storage, api_key)?;
         let store = SqliteStore::open(&storage.database).await?;
         let kit = RoomKit::new(RoomKitOptions::with_store(store));
         let policy = crate::permissions::Policy::new(settings.mode);
         let setup = async {
-            let agent_id = ChannelId::new("code")?;
+            let agent_id = profiles.initialize(&kit).await?;
             let channel = ConversationChannel::new(ChannelId::new("terminal")?);
-            kit.register_channel(agent)?;
             kit.register_channel(channel.clone())?;
             let gate_policy = policy.clone();
             let gate_channel = channel.clone();
@@ -53,14 +51,10 @@ impl Application {
             .await?;
             let mut view = SessionConfig::new(room, agent_id, "local-user");
             view.title = crate::sessions::title(&settings.workspace, &view.room);
-            view.context_capacity = settings.context_window;
             view.commands = crate::sessions::commands();
             view.mode = Some(policy.state(view.room.as_str()));
-            view.model = Some(ModelInfo {
-                provider: "openai".into(),
-                model: settings.model.clone(),
-                effort: None,
-            });
+            profiles.attach(&kit, &view, channel.id()).await?;
+            profiles.configure_view(&mut view).await;
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>((channel, view))
         }
         .await;
@@ -70,7 +64,7 @@ impl Application {
                 channel,
                 view,
                 policy,
-                tools,
+                profiles,
                 _storage: storage,
             }),
             Err(error) => {
@@ -99,7 +93,7 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
         workspace: settings.workspace.clone(),
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
-        tools: app.tools.clone(),
+        profiles: app.profiles.clone(),
     };
     let adapter = tokio::spawn(app.session().run_with_commands(host, handler));
     let renderers = crate::tool_views::renderers(&settings.workspace);

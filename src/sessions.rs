@@ -36,6 +36,18 @@ async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<bool> {
 pub(crate) fn commands() -> Vec<CommandSpec> {
     vec![
         CommandSpec {
+            name: "providers".into(),
+            description: "Configure provider connections and test model discovery".into(),
+            arguments: String::new(),
+            choices: Vec::new(),
+        },
+        CommandSpec {
+            name: "agents".into(),
+            description: "Configure agents or choose your interlocutor".into(),
+            arguments: String::new(),
+            choices: Vec::new(),
+        },
+        CommandSpec {
             name: "tools".into(),
             description: "Inspect tools actually registered by the application".into(),
             arguments: "[tool]".into(),
@@ -151,7 +163,7 @@ pub(crate) struct Sessions {
     pub workspace: PathBuf,
     pub channel: roomkit::model::ChannelId,
     pub policy: crate::permissions::Policy,
-    pub tools: Vec<roomkit_ai::ToolDefinition>,
+    pub profiles: std::sync::Arc<crate::profiles::Profiles>,
 }
 
 impl Sessions {
@@ -196,10 +208,7 @@ impl Sessions {
             if !bindings.iter().any(|binding| {
                 binding.channel_id == self.channel
                     && matches!(binding.access, Access::ReadOnly | Access::ReadWrite)
-            }) || !bindings
-                .iter()
-                .any(|binding| binding.channel_id == current.agent)
-            {
+            }) {
                 continue;
             }
             if empty(&self.kit, &room.id).await? {
@@ -264,6 +273,14 @@ impl CommandHandler for Sessions {
         request: Request,
         current: SessionConfig,
     ) -> std::result::Result<CommandResult, String> {
+        if matches!(&request.command, Command::Invoke { name, .. } | Command::SubmitForm { name, .. } if matches!(name.as_str(), "providers" | "agents"))
+        {
+            return self
+                .profiles
+                .handle(&self.kit, &self.channel, request, current)
+                .await;
+        }
+        let tools = self.profiles.tools(current.agent.as_str()).await;
         let Command::Invoke { name, arguments } = request.command else {
             return Err("Unsupported application request".into());
         };
@@ -275,10 +292,9 @@ impl CommandHandler for Sessions {
                 title: format!(
                     "Tools available to {} · {} registered",
                     current.agent,
-                    self.tools.len()
+                    tools.len()
                 ),
-                choices: self
-                    .tools
+                choices: tools
                     .iter()
                     .map(|tool| Choice {
                         value: tool.name.clone(),
@@ -288,8 +304,7 @@ impl CommandHandler for Sessions {
                     .collect(),
             }])),
             "tools" => {
-                let tool = self
-                    .tools
+                let tool = tools
                     .iter()
                     .find(|tool| tool.name == arguments)
                     .ok_or_else(|| {
@@ -402,7 +417,12 @@ impl CommandHandler for Sessions {
                 if found.status != RoomStatus::Active {
                     return Err("This session is not active".into());
                 }
-                Ok(self.switched(current, room))
+                let mut next = current;
+                next.room = room.clone();
+                self.profiles
+                    .attach(&self.kit, &next, &self.channel)
+                    .await?;
+                Ok(self.switched(next, room))
             }
             "resume" => Err("Invalid session id; use /resume to choose from the list".into()),
             _ => Err("Unknown application command".into()),
