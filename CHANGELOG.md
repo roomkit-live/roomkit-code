@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Replace the composer arrow with `!` while entering a shell command, displaying
+  the prefix only once and restoring the normal prompt outside command mode.
+
 - Execute `!command` or `/shell command` directly from the composer, without a
   model request. Preserve multiline shell input and show stdout/stderr, elapsed
   time and exit status using the existing supervised process manager.
