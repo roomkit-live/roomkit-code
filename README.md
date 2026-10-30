@@ -403,3 +403,25 @@ at confirmation, under a shared profile edit lock. Stored API keys are removed
 with their provider. For ChatGPT, deleting a provider removes the connection
 profile; account sign-out and credential revocation remain separate actions in
 the ChatGPT account menu.
+
+### Sending images
+
+In `/agents`, edit the agent and enable **Image input** only when its model
+supports vision. Press **Ctrl+V** with a screenshot/image in the desktop
+clipboard. Attachment labels appear above the input; **Alt+Backspace** removes
+the last image and **Ctrl+C** clears the draft. Add a prompt or send an image
+alone with Enter. Text in the clipboard continues to paste as text.
+
+Up to four PNG images of 4 MiB and 16 million pixels each can accompany a message.
+RoomKit Code validates the image before sending it, and stores it outside the
+workspace in the private project state directory. `/resume` can reuse those
+attachments; the model receives the newest four images within its conversation
+history. Older images retain text mentions. Missing image files produce an
+unavailable-image marker. This applies to OpenAI-compatible Chat Completions
+and ChatGPT Responses connections; no image tool is needed for native vision.
+
+Image paste requires the native clipboard of the machine running the terminal
+(X11, a supported Wayland data-control compositor, or macOS). A remote SSH
+process cannot read your local desktop clipboard through terminal text paste.
+Images are sent only when the message is submitted. Slash commands and `!`
+commands cannot be submitted with images attached.

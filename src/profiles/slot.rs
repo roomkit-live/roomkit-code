@@ -14,12 +14,18 @@ pub(super) struct AgentSlot {
 }
 impl AgentSlot {
     pub fn new(id: ChannelId, agent: Option<OpenAiAgent>) -> Self {
-        let declaration = ChannelDeclaration::new(
+        let mut declaration = ChannelDeclaration::new(
             id,
             ChannelType::AI,
             ChannelCategory::Intelligence,
             ChannelDirection::Bidirectional,
         );
+        // Stable transport accepts media; each turn selects an opt-in vision provider.
+        declaration
+            .capabilities
+            .media_types
+            .insert(roomkit::model::ChannelMediaType::Media);
+        declaration.capabilities.supports_media = true;
         Self {
             declaration,
             current: Arc::new(RwLock::new(agent.map(Arc::new))),

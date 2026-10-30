@@ -675,6 +675,7 @@ fn agent_form(
         provider: preset.map_or("", |p| p.0).into(),
         model: preset.map_or("", |p| p.1).into(),
         reasoning_effort: None,
+        vision: false,
         context_window: None,
         instructions: String::new(),
         tools: TOOLS.iter().map(|s| (*s).into()).collect(),
@@ -759,6 +760,19 @@ fn agent_form(
                 false,
                 FieldKind::Text,
             ),
+            field(
+                "vision",
+                "Image input",
+                if a.vision { "enabled" } else { "disabled" },
+                "Enable only for models that accept images; Ctrl+V attaches a clipboard image",
+                true,
+                FieldKind::Choice {
+                    choices: vec![
+                        choice("disabled", "Disabled", "Text only"),
+                        choice("enabled", "Enabled", "Model supports vision"),
+                    ],
+                },
+            ),
         ],
     })
 }
@@ -840,6 +854,11 @@ fn parse_agent(
         label: value(values, "label").trim().into(),
         provider: value(values, "provider").into(),
         model: value(values, "model").trim().into(),
+        vision: match value(values, "vision") {
+            "" | "disabled" => false,
+            "enabled" => true,
+            _ => return Err("Choose enabled or disabled for image input".into()),
+        },
         reasoning_effort: match value(values, "effort") {
             "" | "default" => None,
             effort => Some(effort.into()),

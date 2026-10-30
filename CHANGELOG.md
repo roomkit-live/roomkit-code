@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Paste images with Ctrl+V, remove them with Alt+Backspace, and send them to
+  vision-enabled agents. Enable Image input in /agents. Validated PNG attachments
+  are private session data outside the workspace and remain available on resume.
+
 - Remove finished processes from the live list and hide the footer when none are
   running. Keep command results in conversation history; retained output remains
   accessible explicitly with `/processes ID` or in an already open detail panel.

@@ -159,7 +159,18 @@ async fn turn_operation(app: &Application, operation: &str) -> Session {
         loop {
             match client.try_recv() {
                 Ok(event) => {
-                    let finished = if let Event::RunFinished { outcome, .. } = &event {
+                    if let Event::RunFinished { outcome, .. } = &event {
+                        assert_eq!(*outcome, RunOutcome::Completed);
+                    }
+                    // A streamed run can finish before admission/delivery cleanup.
+                    // Reattach or edit profiles only at the operation boundary.
+                    let finished = if let Event::OperationFinished {
+                        operation: id,
+                        outcome,
+                        ..
+                    } = &event
+                    {
+                        assert_eq!(id.0, operation);
                         assert_eq!(*outcome, RunOutcome::Completed);
                         true
                     } else {
@@ -1714,4 +1725,5 @@ async fn effort_selection_persists_reconfigures_requests_and_can_restore_provide
     app.close().await.unwrap();
 }
 
+mod images;
 mod shell;

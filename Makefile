@@ -33,3 +33,9 @@ msrv:
 
 audit:
 	cargo deny $(DENY_FLAGS) check
+
+# Optional Linux integration; owns a private display, never the user's clipboard.
+.PHONY: clipboard-check
+clipboard-check:
+	cargo build --locked
+	python3 scripts/check-clipboard.py

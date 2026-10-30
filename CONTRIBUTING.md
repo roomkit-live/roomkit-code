@@ -4,6 +4,8 @@ Use the toolchain pinned in `rust-toolchain.toml`. Rust 1.92 is the minimum
 supported version. Run `make check`, `make msrv` and `make audit` before delivery.
 Install cargo-deny with `cargo install cargo-deny --locked` for the audit gate.
 CI runs on Linux and macOS; tests must not require a real model or credentials.
+For native image paste on Linux, `make clipboard-check` additionally uses Xvfb
+and xclip on a dedicated display; it never touches the desktop clipboard.
 
 Keep generic engine, tools and UI behavior in their owning repositories.
 Application-specific choices belong here. Dependencies use immutable Git

@@ -18,3 +18,11 @@ wildcards = "deny"
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-git = ["https://github.com/roomkit-live/roomkit-rs", "https://github.com/roomkit-live/roomkit-cli", "https://github.com/roomkit-live/roomkit-tools", "https://github.com/roomkit-live/roomkit-auth"]
+
+# arboard's optional Windows clipboard backend, inherited from roomkit-tui.
+[[licenses.exceptions]]
+name = "clipboard-win"
+allow = ["BSL-1.0"]
+[[licenses.exceptions]]
+name = "error-code"
+allow = ["BSL-1.0"]

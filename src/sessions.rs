@@ -288,6 +288,35 @@ impl Sessions {
 }
 
 impl CommandHandler for Sessions {
+    async fn prepare_images(
+        &self,
+        text: &str,
+        images: &[roomkit_tui::protocol::ImageUpload],
+        current: &SessionConfig,
+    ) -> std::result::Result<EventContent, String> {
+        let bindings = self
+            .kit
+            .list_bindings(
+                &current.room,
+                ListBindingsOptions {
+                    organization_id: current.organization.clone(),
+                },
+            )
+            .await
+            .map_err(|_| "Cannot authorize image attachments")?;
+        if !current.can_attach_images
+            || !bindings
+                .iter()
+                .any(|b| b.channel_id == self.channel && b.access == Access::ReadWrite)
+        {
+            return Err("This attachment cannot submit images".into());
+        }
+        self.profiles
+            .images
+            .prepare(&current.room, text, images)
+            .await
+    }
+
     fn subscribe(
         &self,
         current: SessionConfig,

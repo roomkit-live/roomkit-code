@@ -69,6 +69,8 @@ pub(crate) struct Agent {
     pub model: String,
     #[serde(default)]
     pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub vision: bool,
     pub context_window: Option<u64>,
     pub instructions: String,
     pub tools: Vec<String>,
