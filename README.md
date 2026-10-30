@@ -547,9 +547,9 @@ snapshot of the package.
 
 ## MCP servers
 
-Use **/mcp** to configure local MCP servers over **stdio**. Connections are
-independent of model providers. Each server runs with your user permissions in
-this project's workspace; it is not restricted by the built-in filesystem tools'
+Use **/mcp** to configure local **stdio** or remote **Streamable HTTP** servers.
+Connections are independent of model providers. Each local stdio server runs
+with your user permissions in this project's workspace; it is not restricted by the built-in filesystem tools'
 workspace boundary.
 
 1. Choose **Add a stdio server**. Enter a server ID, executable and arguments as a
@@ -570,16 +570,36 @@ workspace boundary.
    for one agent. Larger catalogues use paginated individual selection. Names
    that cannot fit the supported model tool-name format are omitted.
 
+For a remote server choose **Add an HTTP server** (or `/mcp add-http`):
+
+- **Endpoint URL**: the full MCP endpoint, for example
+  `https://mcp.example.com/mcp`. JSON replies and SSE response streams are supported.
+- **Bearer token · environment variable**: optional variable **name**, such as
+  `MY_MCP_TOKEN`, exported before starting the app. The app adds `Bearer ` itself.
+  Leave empty for an unauthenticated server.
+- **Header references**: `{}` by default. For API-key authentication use, for
+  example, `{"X-API-Key":"MY_MCP_KEY"}`. Values are environment variable names;
+  never paste credentials here. Do not configure Authorization twice.
+- Save, **Connect**, then select tools for the current agent, as for stdio.
+  Credentials are resolved at connection time and their values are never saved.
+
+HTTP redirects are not followed. An expired session requires explicit reconnect;
+failed calls are not automatically replayed. Authentication failures show a safe
+status without exposing response bodies or credential values. OAuth login and
+refresh are not part of this transport yet.
+
 In **Ask**, every MCP call requires approval, including tools advertised as
 read-only. **Yolo** executes selected tools without asking. Server instructions
 are framed as external content by the engine and grant no permission. Tool
 results use the CLI's generic expandable presentation. **Esc** requests MCP
-cancellation of a running call; the server must honor that notification. This
+cancellation of a running call; the server must honor the protocol cancellation. This
 cannot undo effects already performed. **Disconnect** stops and waits for the
-owned server process group, including subprocesses on Linux and macOS.
+owned stdio process group, including subprocesses on Linux and macOS. For HTTP,
+it closes local streams and attempts to delete the negotiated session; it does
+not stop the remote service.
 
 The server panel shows connection state, process ID, selected tools and the
-configured command; use **Refresh status** after an unexpected server exit.
+configured command or endpoint; use **Refresh status** after an unexpected server exit.
 Configuration lives in the project's private state directory, in `mcp.json`;
 selections live in `agents.json`. It is not loaded from a repository-provided MCP
 file. Select a different agent with **/agents** to configure its own subset.
@@ -592,7 +612,9 @@ server's current catalogue while preserving selected names: new tools remain
 unselected and removed tools are unavailable. Connections survive agent and
 conversation changes and are closed on application exit.
 
-This version includes stdio tool discovery and calls. HTTP/SSE transports, MCP
-OAuth, prompts/resources browsing, subscription-based catalogue refresh and
+Existing stdio configurations are read automatically and upgraded on the next
+save. This version includes stdio and Streamable HTTP tool discovery and calls.
+Legacy HTTP+SSE transport, MCP OAuth, prompts/resources browsing,
+subscription-based catalogue refresh and
 MCP-hosted skills are not yet exposed. Non-text tool content follows the current
 engine adapter's text/placeholder behavior.

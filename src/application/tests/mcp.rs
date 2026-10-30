@@ -463,3 +463,161 @@ async fn application_exit_joins_a_pending_mcp_connection_after_view_detach() {
         .unwrap();
     assert!(!alive(root.path(), "pending"));
 }
+
+struct HttpFixture {
+    child: std::process::Child,
+    url: String,
+}
+impl HttpFixture {
+    async fn start(root: &std::path::Path) -> Self {
+        let script = root.join("mcp_http.py");
+        std::fs::write(&script, include_str!("mcp_http_server.py")).unwrap();
+        let port = root.join("http.port");
+        let child = std::process::Command::new("python3")
+            .arg(script)
+            .arg(&port)
+            .arg(root.join("http.trace"))
+            .arg("PATH")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut fixture = Self {
+            child,
+            url: String::new(),
+        };
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !port.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        fixture.url = format!(
+            "http://127.0.0.1:{}/mcp",
+            std::fs::read_to_string(port).unwrap()
+        );
+        fixture
+    }
+}
+impl Drop for HttpFixture {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+async fn configure_http(app: &Application, url: &str) {
+    let CommandResult::Events(events) = invoke(app, "add-http").await.unwrap() else {
+        panic!("Expected HTTP form")
+    };
+    let Event::Form { form, .. } = &events[0] else {
+        panic!("Expected HTTP form")
+    };
+    assert!(form.title.contains("HTTP"));
+    let values = FormValues(
+        [
+            ("id", "remote"),
+            ("url", url),
+            ("bearer_env", "PATH"),
+            ("headers", "{}"),
+            ("timeout", "5"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.into(), v.into()))
+        .collect(),
+    );
+    app.profiles
+        .mcp(
+            &app.kit,
+            request(
+                app,
+                Command::SubmitForm {
+                    name: "mcp".into(),
+                    form: form.id.clone(),
+                    values: Box::new(values),
+                },
+            ),
+            app.view.clone(),
+        )
+        .await
+        .unwrap();
+}
+#[tokio::test]
+async fn http_mcp_uses_saved_references_permissions_and_closes_the_session() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let fixture = HttpFixture::start(root.path()).await;
+    let mock = Mock::start(vec![("mcp__remote__read", json!({}))]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    configure_http(&app, &fixture.url).await;
+    assert!(!root.path().join("http.trace").exists());
+    assert_eq!(
+        execute(&app, root.path(), "connect remote").await.0,
+        RunOutcome::Completed
+    );
+    assert!(
+        !app.profiles
+            .tools("code")
+            .await
+            .iter()
+            .any(|t| t.name.starts_with("mcp__"))
+    );
+    invoke(&app, "enable remote").await.unwrap();
+    let (client, task) = attach(&app, root.path()).await;
+    command(
+        &client,
+        91,
+        "main",
+        Command::Submit {
+            agent: app.view.agent.as_str().into(),
+            text: "Use remote read".into(),
+        },
+    );
+    let permission = approval(&client).await;
+    assert!(permission.title.contains("mcp__remote__read"));
+    assert!(!root.path().join("http.trace").exists());
+    command(
+        &client,
+        92,
+        "main",
+        Command::Decide {
+            permission: permission.id,
+            decision: Decision::Allow,
+        },
+    );
+    assert_eq!(finish(&client, 91).await.0, RunOutcome::Completed);
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("http.trace")).unwrap(),
+        "read\n"
+    );
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.close().await.unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("http.trace")).unwrap(),
+        "read\ndelete\n"
+    );
+    drop(app);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    assert!(
+        !app.profiles
+            .tools("code")
+            .await
+            .iter()
+            .any(|t| t.name.starts_with("mcp__"))
+    );
+    assert_eq!(
+        execute(&app, root.path(), "connect remote").await.0,
+        RunOutcome::Completed
+    );
+    assert!(
+        app.profiles
+            .tools("code")
+            .await
+            .iter()
+            .any(|t| t.name == "mcp__remote__read")
+    );
+    app.close().await.unwrap();
+}

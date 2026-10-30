@@ -1,4 +1,4 @@
-"""Exercise stdio MCP configuration, permission display and cleanup in a PTY."""
+"""Exercise stdio and HTTP MCP configuration, approvals and cleanup in a PTY."""
 import fcntl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -19,6 +19,7 @@ metadata = json.loads(subprocess.check_output(
 ))
 binary = Path(metadata["target_directory"]) / "debug" / "roomkit-code"
 requests = []
+active_tool = "mcp__demo__read"
 
 
 class Model(BaseHTTPRequestHandler):
@@ -29,7 +30,7 @@ class Model(BaseHTTPRequestHandler):
         requests.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
         if len(requests) == 1:
             delta = {"tool_calls": [{"index": 0, "id": "mcp-call", "type": "function",
-                                    "function": {"name": "mcp__demo__read", "arguments": '{}'}}]}
+                                    "function": {"name": active_tool, "arguments": '{}'}}]}
             reason = "tool_calls"
         else:
             delta, reason = {"content": "MCP fixture complete."}, "stop"
@@ -57,6 +58,8 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
     original = termios.tcgetattr(slave)
     env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
     env["TERM"] = "xterm-256color"
+    env["MCP_FIXTURE_TOKEN"] = "fixture-secret-token"
+    http_fixture = None
     process = subprocess.Popen([
         str(binary), str(project), "--state-dir", str(base / "state"),
         "--base-url", f"http://127.0.0.1:{server.server_port}/v1", "--model", "fixture-model",
@@ -96,7 +99,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
         assert not pidfile.exists() and not requests
         config_path = next((base / "state/projects").glob("*/mcp.json"))
         assert config_path.stat().st_mode & 0o777 == 0o600
-        assert json.loads(config_path.read_text())["servers"]["demo"]["args"] == json.loads(args)
+        assert json.loads(config_path.read_text())["servers"]["demo"]["transport"]["args"] == json.loads(args)
         command("/mcp connect demo", b"Execution Completed")
         pid = int(pidfile.read_text())
         os.kill(pid, 0)
@@ -129,6 +132,41 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
         command("/mcp delete demo", b"Delete configuration")
         wait_for(b"configuration removed", send(b"\r"))
         assert not json.loads(config_path.read_text())["servers"]
+        dismiss()
+        # Exercise the separate HTTP form with an environment reference, a
+        # request SSE reply and explicit cleanup of a negotiated session.
+        http_port, http_trace = base / "http.port", base / "http.trace"
+        http_fixture = subprocess.Popen(["python3", "src/application/tests/mcp_http_server.py",
+                                         str(http_port), str(http_trace)], env=env,
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        deadline = time.monotonic() + 5
+        while not http_port.exists():
+            assert time.monotonic() < deadline, "HTTP fixture did not start"
+            time.sleep(0.01)
+        url = f"http://127.0.0.1:{http_port.read_text()}/mcp"
+        command("/mcp add-http", b"saving does not connect it")
+        for index, value in enumerate(["remote", url, "MCP_FIXTURE_TOKEN", "{}", "5"]):
+            send(b"\x15" + value.encode())
+            if index < 4:
+                send(b"\t")
+        wait_for(b"saved. Open /mcp", send(b"\x13"))
+        stored = config_path.read_text()
+        assert "MCP_FIXTURE_TOKEN" in stored and "fixture-secret-token" not in stored
+        assert not http_trace.exists()
+        command("/mcp connect remote", b"\x1b]7501;state=done")
+        command("/mcp tools remote", b"[off] read")
+        wait_for(b"[on] read", send(b"\r"))
+        dismiss()
+        requests.clear()
+        active_tool = "mcp__remote__read"
+        command("Inspect the HTTP fixture", b"Allow mcp__remote__read?")
+        assert not http_trace.exists()
+        accepted = send(b"\x19")
+        wait_for(b"\x1b]7501;state=done", accepted)
+        assert http_trace.read_text() == "read\n"
+        command("/mcp disconnect remote", b"\x1b]7501;state=done")
+        assert http_trace.read_text() == "read\ndelete\n"
+        assert b"fixture-secret-token" not in captured
         send(b"\x04")
         assert process.wait(timeout=10) == 0
         assert termios.tcgetattr(slave) == original
@@ -139,4 +177,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
         os.close(master)
         os.close(slave)
         server.shutdown()
-print("MCP PTY: configuration, discovery, individual selection, approval, disconnect and deletion passed.")
+        if http_fixture is not None:
+            http_fixture.terminate()
+            http_fixture.wait(timeout=5)
+print("MCP PTY: stdio and HTTP configuration, discovery, individual selection, approval, disconnect and deletion passed.")

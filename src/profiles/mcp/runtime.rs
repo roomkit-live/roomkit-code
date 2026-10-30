@@ -73,6 +73,19 @@ impl Runtime {
 
 pub(super) fn failure(error: &McpError) -> &'static str {
     match error {
+        McpError::Http {
+            status: Some(401), ..
+        } => "Authentication required or rejected · check credential environment references",
+        McpError::Http {
+            status: Some(403), ..
+        } => "The MCP endpoint refused access · check credential permissions",
+        McpError::Http {
+            status: Some(404), ..
+        } => "MCP endpoint not found or session expired · check the URL and reconnect",
+        McpError::Http {
+            status: Some(429), ..
+        } => "MCP endpoint rate limit reached · try again later",
+        McpError::Http { reason, .. } => reason,
         McpError::Cancelled => "Connection cancelled",
         McpError::Spawn { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
             "Program not found · check its executable and PATH"

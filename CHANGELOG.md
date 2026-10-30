@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Configure remote MCP Streamable HTTP servers from `/mcp`, with optional bearer
+  and header environment references, explicit per-agent selection, Ask approvals,
+  cancellable connections and session cleanup. Existing stdio configurations are
+  preserved and upgraded when saved.
+
 - Add `/mcp` for private project stdio connections: configure executables and
   environment references, connect/disconnect, inspect and select tools per agent.
 - Keep MCP tool names isolated from built-in tools; apply Ask/Yolo permissions

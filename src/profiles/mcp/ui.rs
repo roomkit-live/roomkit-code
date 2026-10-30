@@ -1,6 +1,9 @@
 use super::super::ui::choice;
 use super::super::*;
-use super::{Runtime, config::Server};
+use super::{
+    Runtime,
+    config::{Server, Transport},
+};
 use roomkit_ai::Toolset;
 use roomkit_cli_roomkit::CommandResult;
 use roomkit_tui::protocol::{Choice, Event, FieldKind, FormField, FormSpec, FormValues, PanelSpec};
@@ -10,6 +13,7 @@ pub(in crate::profiles) enum Pending {
         room: String,
         form: String,
         id: Option<String>,
+        http: bool,
     },
     Delete {
         room: String,
@@ -42,11 +46,18 @@ pub(super) async fn list(
 ) -> CommandResult {
     let connections = runtime.connections.lock().await;
     let agent = state.project.value.agents.get(current.agent.as_str());
-    let mut actions = vec![choice(
-        "add",
-        "Add a stdio server",
-        "Configure a local executable; connect explicitly after saving",
-    )];
+    let mut actions = vec![
+        choice(
+            "add",
+            "Add a stdio server",
+            "Configure a local executable; connect explicitly after saving",
+        ),
+        choice(
+            "add-http",
+            "Add an HTTP server",
+            "Configure a Streamable HTTP endpoint and optional credentials",
+        ),
+    ];
     for id in state.mcp.value.servers.keys() {
         let status = connections.get(id).map_or("Disconnected", |c| c.status());
         let selected = agent.and_then(|a| a.mcp.get(id)).map_or(0, Vec::len);
@@ -57,7 +68,7 @@ pub(super) async fn list(
         ));
     }
     panel(current, format!("MCP · agent {}", current.agent),
-        "Local servers run with your user permissions, in this workspace. Connect explicitly, then select tools for this agent. Connections last until disconnect or application exit. Ask approves every MCP tool call; Yolo runs selected tools without asking. Servers and tools are independent of the agent's model provider.".into(), actions)
+        "Connect local stdio or remote Streamable HTTP servers. Local servers run with your user permissions, in this workspace. Connect explicitly, then select tools for this agent. Connections last until disconnect or application exit. Ask approves every MCP tool call; Yolo runs selected tools without asking. Servers and tools are independent of the agent's model provider.".into(), actions)
 }
 
 pub(super) fn available(id: &str, server: &roomkit_mcp::McpServer) -> Vec<ToolDefinition> {
@@ -150,11 +161,28 @@ pub(super) async fn detail(
     let process = live
         .and_then(|s| s.process_id())
         .map_or_else(|| "none".into(), |pid| pid.to_string());
+    let connection_details = match &config.transport {
+        Transport::Stdio {
+            program,
+            args,
+            environment,
+        } => format!(
+            "Transport: stdio\nProcess: {process}\nProgram: {program}\nArguments (JSON): {}\nEnvironment references (child → host): {}\nWorking directory: project workspace",
+            serde_json::to_string(args).map_err(|_| "Invalid arguments")?,
+            serde_json::to_string(environment).map_err(|_| "Invalid environment")?
+        ),
+        Transport::Http {
+            url,
+            bearer_env,
+            headers,
+        } => format!(
+            "Transport: Streamable HTTP\nEndpoint: {url}\nBearer token environment: {}\nHeader references (header → host variable): {}",
+            bearer_env.as_deref().unwrap_or("none"),
+            serde_json::to_string(headers).map_err(|_| "Invalid headers")?
+        ),
+    };
     let body = format!(
-        "Status: {status}\nProcess: {process}\nProgram: {}\nArguments (JSON): {}\nEnvironment references (child → host): {}\nWorking directory: project workspace\nConnection timeout: {} seconds\nAvailable tools: {}\nSelected for {}: {}\n\nMCP tools use mcp__{id}__<tool>. New tools are never enabled automatically after reconnect. Names unsupported by the model protocol are omitted. Status refreshes when this panel is reopened.",
-        config.program,
-        serde_json::to_string(&config.args).map_err(|_| "Invalid arguments")?,
-        serde_json::to_string(&config.environment).map_err(|_| "Invalid environment")?,
+        "Status: {status}\n{connection_details}\nConnection timeout: {} seconds\nAvailable tools: {}\nSelected for {}: {}\n\nMCP tools use mcp__{id}__<tool>. New tools are never enabled automatically after reconnect. Names unsupported by the model protocol are omitted. Status refreshes when this panel is reopened.",
         config.timeout_seconds,
         tools.len(),
         current.agent,
@@ -179,7 +207,7 @@ pub(super) async fn detail(
             choice(
                 format!("disconnect:{id}"),
                 "Disconnect",
-                "Stop and wait for this server's process group",
+                "Close the connection and release its process or HTTP session",
             ),
         ]
     } else {
@@ -187,12 +215,12 @@ pub(super) async fn detail(
             choice(
                 format!("connect:{id}"),
                 "Connect",
-                "Start the configured program and discover its tools · Esc cancels",
+                "Connect and discover available tools · Esc cancels",
             ),
             choice(
                 format!("edit:{id}"),
                 "Edit connection",
-                "Edit the program, arguments and environment references",
+                "Edit endpoint settings and credential references",
             ),
         ]
     };
@@ -202,7 +230,7 @@ pub(super) async fn detail(
             choice(
                 format!("disconnect:{id}"),
                 "Release disconnected server",
-                "Stop and wait for the owned process before editing or deleting",
+                "Release connection resources before editing or deleting",
             ),
         );
     }
@@ -239,59 +267,79 @@ pub(super) fn form(
     state: &mut State,
     current: &SessionConfig,
     server: Option<&Server>,
+    http: bool,
 ) -> Result<CommandResult, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let default = Server {
         id: String::new(),
-        program: String::new(),
-        args: vec![],
-        environment: BTreeMap::new(),
+        transport: Transport::empty(http),
         timeout_seconds: 30,
     };
     let config = server.unwrap_or(&default);
-    let fields = vec![
-        field(
-            "id",
-            "Server ID",
-            config.id.clone(),
-            "1–24 letters, digits or hyphens; cannot rename an existing server",
-        ),
-        field(
-            "program",
-            "Program",
-            config.program.clone(),
-            "Executable path or PATH name, for example uvx or npx; no shell parsing",
-        ),
-        field(
-            "args",
-            "Arguments · JSON array",
-            serde_json::to_string(&config.args).map_err(|_| "Invalid arguments")?,
-            "For example [\"-y\",\"my-mcp-server\"]; keep secrets in environment variables",
-        ),
-        field(
-            "environment",
-            "Environment references · JSON object",
-            serde_json::to_string(&config.environment).map_err(|_| "Invalid environment")?,
-            "For example {\"API_KEY\":\"MY_SERVICE_KEY\"}; values are host variable NAMES, not secrets",
-        ),
-        field(
-            "timeout",
-            "Connection timeout · seconds",
-            config.timeout_seconds.to_string(),
-            "1–120; covers handshake and discovery; Esc interrupts",
-        ),
-    ];
+    let mut fields = vec![field(
+        "id",
+        "Server ID",
+        config.id.clone(),
+        "1–24 letters, digits or hyphens; cannot rename an existing server",
+    )];
+    match &config.transport {
+        Transport::Stdio { program, args, environment } => fields.extend([
+            field(
+                "program", "Program", program.clone(),
+                "Executable path or PATH name, for example uvx or npx; no shell parsing",
+            ),
+            field(
+                "args", "Arguments · JSON array",
+                serde_json::to_string(args).map_err(|_| "Invalid arguments")?,
+                "For example [\"-y\",\"my-mcp-server\"]; keep secrets in environment variables",
+            ),
+            field(
+                "environment", "Environment references · JSON object",
+                serde_json::to_string(environment).map_err(|_| "Invalid environment")?,
+                "For example {\"API_KEY\":\"MY_SERVICE_KEY\"}; values are host variable NAMES, not secrets",
+            ),
+        ]),
+        Transport::Http { url, bearer_env, headers } => {
+            fields.push(field(
+                "url", "Endpoint URL", url.clone(),
+                "Full Streamable HTTP endpoint, for example https://mcp.example.com/mcp; no URL credentials",
+            ));
+            let mut bearer = field(
+                "bearer_env", "Bearer token · environment variable", bearer_env.clone().unwrap_or_default(),
+                "Optional variable NAME, for example MY_MCP_TOKEN; the app adds Bearer automatically",
+            );
+            bearer.required = false;
+            fields.push(bearer);
+            fields.push(field(
+                "headers", "Header references · JSON object",
+                serde_json::to_string(headers).map_err(|_| "Invalid headers")?,
+                "Optional headers, e.g. {\"X-API-Key\":\"MY_MCP_KEY\"}; use {} for none; values are variable NAMES",
+            ));
+        }
+    }
+    fields.push(field(
+        "timeout",
+        "Connection timeout · seconds",
+        config.timeout_seconds.to_string(),
+        "1–120; covers handshake and discovery; Esc interrupts",
+    ));
     state.pending_mcp = Some(Pending::Form {
         room: current.room.to_string(),
         form: id.clone(),
         id: server.map(|s| s.id.clone()),
+        http,
     });
     Ok(CommandResult::Events(vec![Event::Form {
         conversation: current.room.as_str().into(),
         form: FormSpec {
             id,
             command: "mcp".into(),
-            title: "MCP stdio server · saving does not start it".into(),
+            title: if http {
+                "MCP HTTP server · saving does not connect it"
+            } else {
+                "MCP stdio server · saving does not start it"
+            }
+            .into(),
             fields,
         },
     }]))
@@ -307,6 +355,7 @@ pub(super) fn save(
         room,
         form: expected,
         id,
+        http,
     }) = &state.pending_mcp
     else {
         return Err("Reopen /mcp before saving this form".into());
@@ -317,11 +366,25 @@ pub(super) fn save(
     let value = |name: &str| values.0.get(name).map_or("", String::as_str);
     let server = Server {
         id: value("id").trim().into(),
-        program: value("program").trim().into(),
-        args: serde_json::from_str(value("args"))
-            .map_err(|_| "Arguments must be a JSON array of strings")?,
-        environment: serde_json::from_str(value("environment"))
-            .map_err(|_| "Environment references must be a JSON object of string variable names")?,
+        transport: if *http {
+            Transport::Http {
+                url: value("url").trim().into(),
+                bearer_env: (!value("bearer_env").trim().is_empty())
+                    .then(|| value("bearer_env").trim().into()),
+                headers: serde_json::from_str(value("headers")).map_err(
+                    |_| "Header references must be a JSON object of string variable names",
+                )?,
+            }
+        } else {
+            Transport::Stdio {
+                program: value("program").trim().into(),
+                args: serde_json::from_str(value("args"))
+                    .map_err(|_| "Arguments must be a JSON array of strings")?,
+                environment: serde_json::from_str(value("environment")).map_err(
+                    |_| "Environment references must be a JSON object of string variable names",
+                )?,
+            }
+        },
         timeout_seconds: value("timeout")
             .parse()
             .map_err(|_| "Invalid connection timeout")?,
@@ -369,7 +432,7 @@ pub(super) fn confirm_delete(
     Ok(panel(
         current,
         format!("Delete MCP server {}?", server.id),
-        "Removes the local connection configuration. The executable is kept.".into(),
+        "Removes the saved connection configuration. The server itself is kept.".into(),
         vec![
             choice(
                 format!("confirm-delete:{}:{token}", server.id),

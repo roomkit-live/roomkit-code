@@ -69,8 +69,8 @@ impl Profiles {
         if action == "list" {
             return Ok(ui::list(&state, &current, &self.mcp_runtime).await);
         }
-        if action == "add" {
-            return ui::form(&mut state, &current, None);
+        if matches!(action, "add" | "add-http") {
+            return ui::form(&mut state, &current, None, action == "add-http");
         }
         let server = state
             .mcp
@@ -100,9 +100,14 @@ impl Profiles {
                     .get(id)
                     .is_some_and(|c| c.server.is_some())
                 {
-                    return Err("Disconnect this MCP server before editing its command".into());
+                    return Err("Disconnect this MCP server before editing its connection".into());
                 }
-                ui::form(&mut state, &current, Some(&server))
+                ui::form(
+                    &mut state,
+                    &current,
+                    Some(&server),
+                    server.transport.is_http(),
+                )
             }
             "delete" => {
                 if self
@@ -119,7 +124,7 @@ impl Profiles {
             }
             "connect" | "disconnect" => {
                 let command = if action == "connect" {
-                    Some(server.command(&self.workspace)?)
+                    Some(server.connection(&self.workspace)?)
                 } else {
                     None
                 };
