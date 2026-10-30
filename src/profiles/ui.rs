@@ -676,6 +676,7 @@ fn agent_form(
         model: preset.map_or("", |p| p.1).into(),
         reasoning_effort: None,
         vision: false,
+        skills: Vec::new(),
         context_window: None,
         instructions: String::new(),
         tools: TOOLS.iter().map(|s| (*s).into()).collect(),
@@ -873,6 +874,10 @@ fn parse_agent(
             )
         },
         instructions: value(values, "instructions").into(),
+        skills: original
+            .and_then(|id| state.project.value.agents.get(id))
+            .map(|agent| agent.skills.clone())
+            .unwrap_or_default(),
         tools: value(values, "tools")
             .split(',')
             .map(str::trim)

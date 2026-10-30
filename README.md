@@ -471,3 +471,67 @@ Image paste requires the native clipboard of the machine running the terminal
 process cannot read your local desktop clipboard through terminal text paste.
 Images are sent only when the message is submitted. Slash commands and `!`
 commands cannot be submitted with images attached.
+
+## Skills
+
+Use **/skills** to inspect the catalogue, source paths and loading errors for the
+selected agent. Skills start **disabled**. Open one, inspect its instructions,
+then choose **Enable for this agent**. The choice persists with that agent's
+project profile. Other agents keep their own selection.
+
+RoomKit's native `SkillRegistry` advertises only enabled names/descriptions to
+the model. The model loads instructions with `activate_skill`, then supplementary
+text with `read_skill_reference`. **Use in this conversation**, or
+`/skills use project-review Review the public API`, sends an explicit request to
+the current agent through the normal cancellable message path. Enabling a skill
+alone does not start a model request.
+
+Install each package as `<root>/<name>/SKILL.md`. `/skills locations` shows the
+actual roots. Discovery scans their direct child directories, in this order;
+the last source wins for duplicate names:
+
+1. `<state-dir>/skills` — personal packages shared by this application's projects.
+2. `<workspace>/.agents/skills` — portable project packages.
+3. `<workspace>/.roomkit/skills` — application-specific project packages.
+
+The state directory is selected with `--state-dir`; by default it is
+`$XDG_DATA_HOME/roomkit-code` (or `~/.local/share/roomkit-code`) on Linux and
+`~/Library/Application Support/roomkit-code` on macOS. No other assistant's
+configuration or ancestor directory is imported automatically.
+
+For example, `.agents/skills/project-review/SKILL.md`:
+
+```markdown
+---
+name: project-review
+description: Review project structure and public APIs
+---
+Inspect the entry points and public interfaces before suggesting changes.
+Use read_skill_reference for the bundled references/checklist.md if present.
+Present findings with file paths and concise explanations.
+```
+
+Use `/skills reload` after installing or editing packages. Discovery keeps valid
+packages available when another fails, reports conflicts, and refuses directory
+links escaping their root. A broken higher-priority package does not silently
+fall back to another source. Removing or disabling a package removes it from
+future model requests; earlier conversation text is retained.
+
+Supported format: a UTF-8 manifest, required `name` and `description`, optional
+`license` and `compatibility`, followed by Markdown instructions. Names must be
+kebab-case and match the directory. Manifests and each reference are bounded to
+256 KiB. References are plain filenames directly under `references/`. The
+loader does not execute bundled scripts; an agent can use separately enabled
+execution tools subject to Ask/Yolo, with relative paths based on the package
+directory. Enabling a skill never grants additional tools or permissions.
+
+Foreign tool-gating and invocation-policy fields, and `agents/openai.yaml`
+sidecars, are reported as unsupported rather than silently ignored. Full
+Codex/Maki/OpenCode plugin compatibility, automatic installation, nested
+references, skill-specific tool grants and MCP-hosted skills are not included.
+
+Active instructions are scoped to the conversation and agent, with up to four
+active skills retained by the engine. They are recovered from retained tool
+history when resuming; a fresh activation returns the instructions if no record
+is available. Reload/restart uses the current installed content, not a historical
+snapshot of the package.

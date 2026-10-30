@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add per-agent skills with `/skills`: inspect provenance and loading failures,
+  enable/disable packages, request their use, and reload local changes.
+- Reuse RoomKit's progressive activation, reference reads and session recovery;
+  keep skill execution subject to the existing tool permissions.
+- Display skill activation and reference results with compact expandable details.
+
 - Paste images with Ctrl+V, remove them with Alt+Backspace, and send them to
   vision-enabled agents. Enable Image input in /agents. Validated PNG attachments
   are private session data outside the workspace and remain available on resume.

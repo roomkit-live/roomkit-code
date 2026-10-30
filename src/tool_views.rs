@@ -2,6 +2,7 @@
 
 mod changes;
 mod processes;
+mod skills;
 mod web;
 
 use roomkit_tools_code::{CodeLanguage, CodeOutlinePage};
@@ -39,6 +40,9 @@ pub(crate) fn renderers(workspace: &std::path::Path) -> Renderers {
         "output_forget",
     ] {
         renderers.register(name, processes::Processes);
+    }
+    for name in ["activate_skill", "read_skill_reference"] {
+        renderers.register(name, skills::Skills);
     }
     renderers
 }

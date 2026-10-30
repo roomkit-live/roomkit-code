@@ -36,6 +36,12 @@ async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<bool> {
 pub(crate) fn commands() -> Vec<CommandSpec> {
     vec![
         CommandSpec {
+            name: "skills".into(),
+            description: "Inspect and enable skills for this agent, or request their use".into(),
+            arguments: "[list|reload|enable <name>|disable <name>|use <name> <task>]".into(),
+            choices: Vec::new(),
+        },
+        CommandSpec {
             name: "shell".into(),
             description: "Run a shell command without the model (also !command)".into(),
             arguments: "<command>".into(),
@@ -358,6 +364,11 @@ impl CommandHandler for Sessions {
         request: Request,
         current: SessionConfig,
     ) -> std::result::Result<CommandResult, String> {
+        if let Command::Invoke { name, arguments } = &request.command
+            && name == "skills"
+        {
+            return self.profiles.skills(&self.kit, current, arguments).await;
+        }
         if matches!(&request.command, Command::Invoke { name, .. } if name == "shell") {
             return self
                 .profiles

@@ -84,8 +84,19 @@ impl Policy {
 
     pub async fn gate(&self, channel: &ConversationChannel, event: ToolCallEvent) -> ToolUse {
         match event.call.name.as_str() {
-            "list" | "glob" | "grep" | "read" | "diff" | "code_outline" | "process_status"
-            | "process_read" | "process_stop" | "output_read" | "output_forget" => {
+            "activate_skill"
+            | "read_skill_reference"
+            | "list"
+            | "glob"
+            | "grep"
+            | "read"
+            | "diff"
+            | "code_outline"
+            | "process_status"
+            | "process_read"
+            | "process_stop"
+            | "output_read"
+            | "output_forget" => {
                 return ToolUse::Allow;
             }
             // The tool's schema defines an omitted dry_run as true.
