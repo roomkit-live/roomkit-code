@@ -83,7 +83,7 @@ macro_rules! assemble {
         let inventory = tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>().join(", ");
         let prompt = format!("{INSTRUCTIONS}\nCurrent agent: {} (ID: {}). Answer as this selected participant. Other participants may have different tools and providers.\nAgent instructions:\n{}\nCurrent capability inventory (provided by the application for this run):\n{inventory}\nOnly tools in this inventory are available to you. Apply tool-specific guidance only when that tool is present.\n", $profile.label, $profile.id, $profile.instructions);
         let prompt = format!("{prompt}\n{}", skill_context(&$skills, $skill_roots));
-        let mut agent = OpenAiAgent::new($id, $provider.with_system_prompt(prompt))?.with_skills($skills)?;
+        let mut agent = OpenAiAgent::new($id, $provider.with_system_prompt(prompt))?.with_tool_call_intents(true).with_skills($skills)?;
         $(if $binding.tools().iter().any(|tool| $profile.tools.contains(&tool.name)) { agent = agent.with_tools($binding)?; })+
         for (label, server) in $mcp {
             agent = agent.with_server_instructions(&label, server.instructions())?.with_tools(server)?;

@@ -378,6 +378,7 @@ mod tests {
 
     fn call(name: &str, data: serde_json::Value) -> ToolCall {
         ToolCall {
+            intent: None,
             id: "call".into(),
             name: name.into(),
             arguments: json!({"pattern":"answer"}),

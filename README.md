@@ -698,3 +698,12 @@ cargo fmt --all
 
 The generated Rust strings live in `src/branding.rs`; Python is not required to
 build or run the application.
+
+Tool activity is shown as a short public sentence in the conversation's language,
+without tool names, arguments or output. Consecutive calls update the same line;
+an agent message starts a new sequence. F2 or a click opens the technical history,
+and F2 returns to the conversation view. Approvals and unsuccessful outcomes remain
+visible. Set `[ui] tool_activity = false` to keep individual tool cards instead.
+The engine requests the intention with the ordinary tool call, without another
+model request; the tools themselves receive only their business arguments.
+When the model supplies no intention, a neutral activity label is used.

@@ -1730,3 +1730,5 @@ mod shell;
 mod skills;
 
 mod mcp;
+
+mod intents;

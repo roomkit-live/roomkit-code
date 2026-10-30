@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Show public intentions as updating activity lines instead of accumulating
+  technical tool cards. Messages separate activity sequences; F2 or a click
+  reveals technical details. Preserve approvals, failures and parallel work.
+  Enable engine intentions for all assembled agents, including edited profiles.
+
 - Generate both header and welcome symbols from the same RoomKit SVG, using a
   compact seven-column, four-row mark in conversation headers instead of the
   library default. Preserve the four cells while reducing the header's footprint.

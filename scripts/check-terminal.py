@@ -44,7 +44,7 @@ class Model(BaseHTTPRequestHandler):
             return
         if len(requests) == 1:
             delta = {"tool_calls": [{"index": 0, "id": "read-1", "type": "function", "function": {
-                "name": "read", "arguments": json.dumps({"path": "fixture.txt"})
+                "name": "read", "arguments": json.dumps({"path": "fixture.txt", "_roomkit_intent": "Reading the fixture document"})
             }}]}
             reason = "tool_calls"
         else:
@@ -133,27 +133,24 @@ def scenario(project, state, base_url, resume=False, color="never"):
         os.write(master, b"\x1b[18~")
         wait_for(b"F7 sidebar", offset)
         wait_for(b"Read-only")
-        # The longer answer can push the compact tool's summary off screen.
-        # Inspect it through actual history navigation, not transient streaming.
-        os.write(master, b"\x1b[5~")
-        # Transcript/footer height varies; focus the retained tool so its
-        # expanded body is visible instead of assuming a fixed page position.
-        os.write(master, b"\x1b[1;3A")
-        wait_for('fixture.txt · lines 1–4'.encode())
-        os.write(master, b"\x1b[1;5F")
+        # Activity keeps public intent visible and hides technical output until F2.
+        os.write(master, b"\x1b[5~\x1b[1;3A")
+        wait_for(b"Reading the fixture document")
+        assert b"Expanded fixture line" not in captured
+        offset = len(captured)
+        os.write(master, b"\x1bOQ")
+        wait_for('fixture.txt · lines 1–4'.encode(), offset)
+        wait_for(b"F2 collapse", offset)
+        wait_for(b"Expanded fixture line", offset)
         assert b'"data":' not in captured, "The file card leaked its raw JSON envelope"
         assert b"**inspection**" not in captured, "Markdown was displayed as raw syntax"
+        offset = len(captured)
+        os.write(master, b"\x1bOQ")
+        wait_for(b"Reading the fixture document", offset)
+        os.write(master, b"\x1b[1;5F")
         if not resume:
             wait_for(b"Execution Completed")
-            assert b"Expanded fixture line" not in captured
-            offset = len(captured)
-            # Focus before expanding: Ctrl+End above deliberately returned to
-            # the latest answer, which can leave the tool outside the viewport.
-            os.write(master, b"\x1b[1;3A\x1bOQ")
-            wait_for(b"F2 collapse", offset)
-            wait_for(b"Expanded fixture line", offset)
-        # A partially entered draft survives returning from history. Ctrl+End
-        # works even when native selection leaves mouse events to the terminal.
+
         os.write(master, b"Unsent draft\x1b[1;5F")
         wait_for(b"Latest answer marker.")
         wait_for(b"context 2050/32768")
