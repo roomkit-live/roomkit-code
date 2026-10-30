@@ -1649,6 +1649,7 @@ mod catalogue;
 mod processes;
 
 mod accounts;
+mod profile_deletion;
 
 #[tokio::test]
 async fn effort_selection_persists_reconfigures_requests_and_can_restore_provider_default() {

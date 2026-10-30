@@ -15,6 +15,26 @@ pub(super) struct Document<T> {
     revision: Option<Vec<u8>>,
 }
 
+/// Serialize cross-document profile edits, including provider reference checks.
+pub(super) fn edit_lease(root: &Path) -> Result<FileLease, String> {
+    let path = root.join("profiles.lock");
+    if std::fs::symlink_metadata(&path).is_ok_and(|m| !m.is_file()) {
+        return Err("Profile edit lock must be a regular file".into());
+    }
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options
+        .open(path)
+        .map_err(|_| "Cannot open profile edit lock")?;
+    FileLease::exclusive(file)
+        .map_err(|_| "Profiles are being edited elsewhere; retry shortly".into())
+}
+
 fn read(path: &Path) -> Result<Option<Vec<u8>>, String> {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(value) => value,
@@ -37,6 +57,13 @@ fn read(path: &Path) -> Result<Option<Vec<u8>>, String> {
 }
 
 impl<T: Serialize + DeserializeOwned + Default> Document<T> {
+    pub fn revision(&self) -> Option<Vec<u8>> {
+        self.revision.clone()
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
     pub fn load(path: PathBuf) -> Result<Self, String> {
         let bytes = read(&path)?;
         let value = bytes

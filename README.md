@@ -361,3 +361,21 @@ audit trail. Raw dependency `tracing` output is not enabled by `--debug`.
 
 Context token counts become available after a response reports usage. A percentage
 also requires the agent's effective **Context capacity**, configurable in `/agents`.
+
+### Listing and removing profiles
+
+`/agents` (or `/agents list`) lists this project's agents and marks the active
+one. Select a profile to select, edit or delete it. `/providers` (or
+`/providers list`) lists shared connections with their management actions.
+You can also open a deletion confirmation directly with `/agents delete <id>`
+or `/providers delete <id>`. Cancel is selected first.
+
+Deleting an agent removes its configuration while keeping conversations. Deleting
+the active agent selects the first remaining profile, or returns to setup if none
+remain. An explicitly empty project is not repopulated from launch options.
+A provider cannot be deleted while any saved project's agent references it;
+change those agents' provider or delete them first. References are checked again
+at confirmation, under a shared profile edit lock. Stored API keys are removed
+with their provider. For ChatGPT, deleting a provider removes the connection
+profile; account sign-out and credential revocation remain separate actions in
+the ChatGPT account menu.

@@ -10,12 +10,13 @@ pub(super) struct Pending {
     form: FormSpec,
     target: Target,
 }
+#[derive(Clone)]
 enum Target {
     Provider(Option<String>),
     Agent(Option<String>),
 }
 
-fn choice(
+pub(super) fn choice(
     value: impl Into<String>,
     label: impl Into<String>,
     description: impl Into<String>,
@@ -57,7 +58,7 @@ fn field(
         kind,
     }
 }
-fn choices(
+pub(super) fn choices(
     current: &SessionConfig,
     command: &str,
     title: &str,
@@ -76,16 +77,47 @@ impl Profiles {
         &self,
         kit: &RoomKit<SqliteStore>,
         terminal: &ChannelId,
-        request: Request,
+        mut request: Request,
         current: SessionConfig,
     ) -> Result<CommandResult, String> {
+        // Human-readable aliases; choice values remain structured actions.
+        if let Command::Invoke { name, arguments } = &mut request.command
+            && matches!(name.as_str(), "agents" | "providers")
+        {
+            let trimmed = arguments.trim();
+            if trimmed == "list" {
+                arguments.clear();
+            } else if let Some(id) = trimmed.strip_prefix("delete ") {
+                *arguments = format!("delete:{}", id.trim());
+            }
+        }
+        if let Command::Invoke { name, arguments } = &request.command
+            && matches!(name.as_str(), "agents" | "providers")
+            && (arguments.starts_with("delete:") || arguments.starts_with("confirm-delete:"))
+        {
+            return self.delete(kit, terminal, name, arguments, current).await;
+        }
         if let Command::Invoke { name, arguments } = &request.command
             && name == "providers"
             && let Some(action) = arguments.strip_prefix("chatgpt:")
         {
+            self.state.lock().await.pending_delete = None;
             return self.accounts.handle(current.room.as_str(), action).await;
         }
         let mut state = self.state.lock().await;
+        state.pending_delete = None;
+        // Menus and model discovery do not hold the cross-process edit lease.
+        let mutating = match &request.command {
+            Command::SubmitForm { .. } => true,
+            Command::Invoke { name, arguments } => {
+                (name == "agents" && arguments.starts_with("select:"))
+                    || (name == "effort" && !arguments.trim().is_empty())
+            }
+            _ => false,
+        };
+        let _edit_lease = mutating
+            .then(|| store::edit_lease(&self.state_dir))
+            .transpose()?;
         match request.command {
             Command::Invoke { name, arguments } => {
                 state.pending = None;
@@ -157,6 +189,8 @@ impl Profiles {
                         if models.is_empty() {
                             return Err("This ChatGPT account returned no available models".into());
                         }
+                        let _edit_lease = store::edit_lease(&self.state_dir)?;
+                        state.providers.reload()?;
                         let provider_id = format!("chatgpt-{id}");
                         let provider = Provider {
                             id: provider_id.clone(),
@@ -204,10 +238,23 @@ impl Profiles {
                             .get(id)
                             .ok_or("Unknown provider")?;
                         if let Authentication::ChatGpt { account } = &p.authentication {
-                            return self
-                                .accounts
-                                .handle(current.room.as_str(), &format!("account:{account}"))
-                                .await;
+                            return Ok(choices(
+                                &current,
+                                "providers",
+                                &p.label,
+                                vec![
+                                    choice(
+                                        format!("chatgpt:account:{account}"),
+                                        "Manage ChatGPT account",
+                                        "Choose models, sign in or sign out",
+                                    ),
+                                    choice(
+                                        format!("delete:{id}"),
+                                        "Delete provider",
+                                        "Remove this connection; account sign-out is separate",
+                                    ),
+                                ],
+                            ));
                         }
                         Ok(choices(
                             &current,
@@ -223,6 +270,11 @@ impl Profiles {
                                     format!("test:{id}"),
                                     "Test connection and list models",
                                     "Read-only GET /models; no conversation is sent",
+                                ),
+                                choice(
+                                    format!("delete:{id}"),
+                                    "Delete provider",
+                                    "Remove this shared connection if no agents use it",
                                 ),
                             ],
                         ))
@@ -303,6 +355,31 @@ impl Profiles {
                         Ok(open_form(&mut state, &current, form, Target::Agent(None)))
                     }
                     ("agents", "") => Ok(agent_choices(&state, &current)),
+                    ("agents", "open") => {
+                        let agent = state.project.value.agents.get(id).ok_or("Unknown agent")?;
+                        Ok(choices(
+                            &current,
+                            "agents",
+                            &agent.label,
+                            vec![
+                                choice(
+                                    format!("select:{id}"),
+                                    "Select agent",
+                                    format!("{} · {}", agent.provider, agent.model),
+                                ),
+                                choice(
+                                    format!("edit:{id}"),
+                                    "Edit agent",
+                                    "Provider, model, effort, instructions and tools",
+                                ),
+                                choice(
+                                    format!("delete:{id}"),
+                                    "Delete agent",
+                                    "Remove this profile; keep conversation history",
+                                ),
+                            ],
+                        ))
+                    }
                     ("agents", "add" | "edit") => {
                         let existing = if action == "edit" {
                             Some(state.project.value.agents.get(id).ok_or("Unknown agent")?)
@@ -363,8 +440,9 @@ impl Profiles {
                 {
                     return Err("The form fields changed; cancel and reopen it".into());
                 }
+                let target = pending.target.clone();
                 let mut next = current;
-                match &pending.target {
+                match &target {
                     Target::Provider(original) => {
                         let profile = parse_provider(&values, original.as_deref(), &state)?;
                         let runtime = if let Some(agent) = state
@@ -386,6 +464,8 @@ impl Profiles {
                         }
                     }
                     Target::Agent(original) => {
+                        // A provider may have been deleted while this form was open.
+                        state.providers.reload()?;
                         let profile = parse_agent(&values, original.as_deref(), &state)?;
                         let provider = state
                             .providers
@@ -430,7 +510,7 @@ fn open_form(
     }])
 }
 
-fn provider_choices(state: &State, current: &SessionConfig) -> CommandResult {
+pub(super) fn provider_choices(state: &State, current: &SessionConfig) -> CommandResult {
     let mut entries = vec![
         choice("add", "+ Add provider", "OpenAI-compatible connection"),
         choice(
@@ -461,7 +541,7 @@ fn agent_choices(state: &State, current: &SessionConfig) -> CommandResult {
     )];
     for agent in state.project.value.agents.values() {
         entries.push(choice(
-            format!("select:{}", agent.id),
+            format!("open:{}", agent.id),
             format!(
                 "{}{}",
                 if current.agent.as_str() == agent.id {
@@ -471,12 +551,7 @@ fn agent_choices(state: &State, current: &SessionConfig) -> CommandResult {
                 },
                 agent.label
             ),
-            format!("{} · {} · select interlocutor", agent.provider, agent.model),
-        ));
-        entries.push(choice(
-            format!("edit:{}", agent.id),
-            format!("Edit {}", agent.label),
-            "Save changes and select this agent",
+            format!("{} · {} · {}", agent.id, agent.provider, agent.model),
         ));
     }
     choices(

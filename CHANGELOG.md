@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- List and manage agent/provider profiles through one menu per profile, with
+  explicit deletion confirmation and `list` / `delete <id>` command aliases.
+- Keep conversation history when deleting agents, select a remaining agent or
+  return to setup, and never reimport an explicitly emptied project on restart.
+- Prevent deleting providers referenced by any saved project; serialize profile
+  edits and recheck references when deletion is confirmed. Removing a ChatGPT
+  provider leaves account sign-out as a separate operation.
+
 - Configure reasoning effort per agent using `/effort` or the agent form, with a
   provider-default option and persistent settings.
 - Record private, rotating diagnostic logs from engine errors and tool audit

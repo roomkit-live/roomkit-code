@@ -31,6 +31,12 @@ impl AgentSlot {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(agent));
     }
+    pub fn disable(&self) {
+        *self
+            .current
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
 }
 impl Channel for AgentSlot {
     fn declaration(&self) -> ChannelDeclaration {

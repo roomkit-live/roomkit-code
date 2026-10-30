@@ -161,6 +161,8 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         offset = send("First agent")
         wait_for(b"Filter: First agent", offset)
         offset = send(b"\r")
+        wait_for(b"Select agent", offset)
+        offset = send(b"\r")
         wait_for(b"Enter send", offset)
         command("Hello again", b"Answer from fixture-a.")
         wait_for(b"Execution Completed")
@@ -198,6 +200,33 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         assert agents["selected"] == "first"
         # Secrets are neither messages nor tool records, even in SQLite's raw pages.
         assert secret.encode() not in next(state.glob("projects/*/history.sqlite3")).read_bytes()
+        # List aliases and profile menus expose deletion, with Cancel selected first.
+        command("/providers delete fixture", b"Provider is used by")
+        command("/agents list", b"Project agents")
+        send("Second agent")
+        offset = send(b"\r")
+        wait_for(b"Select agent", offset)
+        send("Delete agent")
+        offset = send(b"\r")
+        wait_for(b"Delete Second agent", offset)
+        offset = send(b"\r")  # Default is Cancel.
+        wait_for(b"Select agent", offset)
+        assert "second" in json.loads(next(state.glob("projects/*/agents.json")).read_text())["agents"]
+        offset = send(b"\x1b")
+        wait_for(b"Enter send", offset)
+        for identifier, label in [("second", "Second agent"), ("first", "First agent")]:
+            command(f"/agents delete {identifier}", f"Delete {label}".encode())
+            send(b"\x1b[B")
+            offset = send(b"\r")
+            wait_for(b"Enter send", offset)
+            assert identifier not in json.loads(next(state.glob("projects/*/agents.json")).read_text())["agents"]
+        command("/providers delete fixture", b"Delete Fixture provider")
+        send(b"\x1b[B")
+        offset = send(b"\r")
+        wait_for(b"Providers", offset)
+        assert not json.loads((state / "connections.json").read_text())["profiles"]
+        offset = send(b"\x1b")
+        wait_for(b"Enter send", offset)
         send(b"\x04")
         process.wait(timeout=10)
         assert process.returncode == 0
@@ -211,4 +240,4 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         server.shutdown()
         server.server_close()
 
-print("Profile PTY checks passed: account menus, bootstrap, masked credentials, persistent forms, two agents, shared history, discovery and cancellation.")
+print("Profile PTY checks passed: account menus, bootstrap, masked credentials, persistent forms, two agents, shared history, discovery, listing, confirmed deletion and cancellation.")

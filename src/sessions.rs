@@ -55,14 +55,14 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "providers".into(),
-            description: "Configure provider connections and test model discovery".into(),
-            arguments: String::new(),
+            description: "List, configure or delete shared provider connections".into(),
+            arguments: "[list|delete <id>]".into(),
             choices: Vec::new(),
         },
         CommandSpec {
             name: "agents".into(),
-            description: "Configure agents or choose your interlocutor".into(),
-            arguments: String::new(),
+            description: "List, select, configure or delete project agents".into(),
+            arguments: "[list|delete <id>]".into(),
             choices: Vec::new(),
         },
         CommandSpec {

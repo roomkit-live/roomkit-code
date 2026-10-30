@@ -1,4 +1,5 @@
 //! User connections and project agent composition, independent of terminal widgets.
+mod deletion;
 pub(crate) mod model;
 mod slot;
 mod store;
@@ -22,6 +23,7 @@ use store::Document;
 
 pub(crate) struct Profiles {
     workspace: PathBuf,
+    state_dir: PathBuf,
     pub(crate) diagnostics: Arc<crate::diagnostics::Diagnostics>,
     pub(crate) accounts: Arc<crate::accounts::Accounts>,
     pub(crate) resources: crate::agent::Resources,
@@ -35,6 +37,7 @@ struct State {
     slots: BTreeMap<String, AgentSlot>,
     tools: BTreeMap<String, Vec<ToolDefinition>>,
     pending: Option<ui::Pending>,
+    pending_delete: Option<deletion::Pending>,
     setup_error: Option<String>,
 }
 
@@ -50,6 +53,7 @@ impl Profiles {
             settings.debug,
         )
         .map_err(|_| "Cannot open the private diagnostic log")?;
+        let edit_lease = store::edit_lease(&settings.state_dir)?;
         let mut providers =
             Document::<Providers>::load(settings.state_dir.join("connections.json"))?;
         let mut project =
@@ -76,7 +80,10 @@ impl Profiles {
         if migrated.migrate()? {
             project.save(migrated)?;
         }
-        if project.value.agents.is_empty() && !settings.base_url.is_empty() {
+        if project.revision().is_none()
+            && project.value.agents.is_empty()
+            && !settings.base_url.is_empty()
+        {
             let digest = format!(
                 "{:x}",
                 Sha256::digest(settings.workspace.as_os_str().as_encoded_bytes())
@@ -123,6 +130,7 @@ impl Profiles {
         {
             return Err("Selected agent profile does not exist".into());
         }
+        drop(edit_lease);
         let resources = match resources {
             Some(resources) => resources,
             None => crate::agent::Resources::new(
@@ -135,6 +143,7 @@ impl Profiles {
         Ok(Arc::new(Self {
             diagnostics,
             workspace: settings.workspace.clone(),
+            state_dir: settings.state_dir.clone(),
             accounts: crate::accounts::Accounts::new(&settings.state_dir.join("auth"))?,
             processes: crate::processes::Processes::new(resources.processes.clone()),
             resources,
@@ -144,6 +153,7 @@ impl Profiles {
                 slots: BTreeMap::new(),
                 tools: BTreeMap::new(),
                 pending: None,
+                pending_delete: None,
                 setup_error: None,
             }),
         }))
