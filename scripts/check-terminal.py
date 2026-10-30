@@ -145,7 +145,8 @@ def scenario(project, state, base_url, resume=False, color="never"):
         assert b'"data":' not in captured, "The file card leaked its raw JSON envelope"
         assert b"**inspection**" not in captured, "Markdown was displayed as raw syntax"
         offset = len(captured)
-        os.write(master, b"\x1bOQ")
+        # Closing details follows the latest reply; revisit the old activity.
+        os.write(master, b"\x1bOQ\x1b[1;3A")
         wait_for(b"Reading the fixture document", offset)
         os.write(master, b"\x1b[1;5F")
         if not resume:
