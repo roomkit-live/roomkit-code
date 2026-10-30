@@ -682,8 +682,10 @@ application names fall back to plain lettering unless a wordmark is supplied.
 Small windows use the regular conversation layout without discarding input.
 
 The default terminal artwork is generated from `assets/roomkit-mark.svg` and
-the website's Space Grotesk 600 font. It uses Unicode quadrant blocks, inherits
-the terminal theme and requires no image protocol or runtime font dependency.
+the website's Space Grotesk 600 font. The same SVG produces the five-row header
+symbol and the larger welcome symbol; neither is drawn separately by hand.
+It uses Unicode quadrant blocks, inherits the terminal theme and requires no
+image protocol or runtime font dependency.
 To regenerate it during development, install CairoSVG and Pillow in a local
 Python environment, then run:
 

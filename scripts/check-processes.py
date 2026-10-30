@@ -93,11 +93,19 @@ def scenario(project, state, url):
         click("› Processes".encode(), 110)
         wait_for(b"Background processes", offset)
         wait_for(b"owner code", offset)
+        offset = len(captured)
         os.write(master, b"\x1b")
         wait_for(b"Enter send", offset)
         offset = len(captured)
         os.write(master, b"Continue working\r")
-        assert provider_waiting.wait(5), "Provider fixture did not receive the second turn"
+        # Drain redraws while waiting: a full PTY can block the app before it
+        # processes Enter, especially after restoring a taller header.
+        deadline = time.monotonic() + 5
+        while not provider_waiting.is_set():
+            if time.monotonic() >= deadline or process.poll() is not None:
+                raise RuntimeError(f"Provider fixture did not receive the second turn: {bytes(captured[-4000:])!r}")
+            if select.select([master], [], [], 0.1)[0]:
+                captured.extend(os.read(master, 65536))
         os.write(master, b"Preserved draft")
         wait_for(b"Preserved draft", offset)
         offset = len(captured)

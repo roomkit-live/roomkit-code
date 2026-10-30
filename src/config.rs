@@ -272,11 +272,8 @@ impl Settings {
         let mut branding = Branding {
             name: appearance.name,
             subtitle: "Explore, edit and test your project".into(),
-            ..Branding::default()
+            logo: appearance.logo.unwrap_or_else(crate::branding::header_logo),
         };
-        if let Some(logo) = appearance.logo {
-            branding.logo = logo;
-        }
         if cli.no_logo {
             branding.logo.clear();
         }

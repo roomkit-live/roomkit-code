@@ -49,7 +49,10 @@ def main():
     lettering = Image.new("L", (right - left, bottom - top))
     ImageDraw.Draw(lettering).text((-left, -top), "roomkit.", font=font, fill=255)
     text = "//! Generated from the RoomKit SVG and Space Grotesk 600.\n//! Regenerate with scripts/generate-branding.py; layout belongs to roomkit-tui.\n"
-    for name, rows in [("welcome_logo", blocks(symbol, 14, 128)),
+    # Both symbol sizes come from this SVG. The compact grid needs five rows to
+    # retain the gap between its four cells instead of merging them into bars.
+    for name, rows in [("header_logo", blocks(symbol, 9, 120)),
+                       ("welcome_logo", blocks(symbol, 14, 128)),
                        ("welcome_wordmark", blocks(lettering, 52, 110))]:
         text += f"\npub(crate) fn {name}() -> Vec<String> {{\n    [\n"
         text += "".join(f"        {json.dumps(row, ensure_ascii=False)},\n" for row in rows)
