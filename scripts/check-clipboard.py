@@ -62,7 +62,7 @@ try:
         raise RuntimeError("Private X server did not start")
     display = os.read(read_fd, 32).strip().decode()
     assert display.isdigit()
-    env = {k: v for k, v in os.environ.items() if not k.startswith("ROOMKIT_") and k not in {"DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"}}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_")) and k not in {"DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"}}
     env["DISPLAY"] = ":" + display
     env["TERM"] = "xterm-256color"
     owner = subprocess.Popen(["xclip", "-quiet", "-selection", "clipboard", "-t", "image/png", "-i"], env=env, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

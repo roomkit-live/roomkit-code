@@ -71,7 +71,7 @@ def scenario(project, state, base_url, resume=False, color="never"):
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 120, 0, 0))
     original = termios.tcgetattr(slave)
-    env = {k: v for k, v in os.environ.items() if not k.startswith("ROOMKIT_")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
     env["NO_COLOR"] = "1" # Explicit always must override this; auto/never must not.
     args = [str(binary), str(project), "--state-dir", str(state), "--base-url", base_url,
             "--model", "fixture-model", "--context-window", "32768", "--color", color, "--no-animations"]

@@ -69,7 +69,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 28, 110, 0, 0))
     original = termios.tcgetattr(slave)
-    env = {key: value for key, value in os.environ.items() if not key.startswith("ROOMKIT_")}
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("ROOMKIT_", "HERDR_"))}
     env["TERM"] = "xterm-256color"
     process = subprocess.Popen([str(binary), str(workspace), "--state-dir", str(state), "--no-animations"], stdin=slave, stdout=slave, stderr=slave, env=env)
     captured = bytearray()

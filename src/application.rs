@@ -10,6 +10,8 @@ use roomkit_tui::connection;
 
 use crate::{Result, config::Settings, profiles::Profiles, storage::Storage};
 
+mod integrations;
+
 pub(crate) struct Application {
     pub kit: RoomKit<SqliteStore>,
     pub channel: ConversationChannel,
@@ -126,12 +128,18 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
     };
     let adapter = tokio::spawn(app.session().run_with_commands(host, handler));
     let renderers = crate::tool_views::renderers(&settings.workspace);
-    let terminal = tokio::task::spawn_blocking(move || {
-        roomkit_tui::run_with_options(client, renderers, settings.ui)
+    let integrations =
+        integrations::Integration::start(&settings, app.profiles.diagnostics.clone());
+    let observer = integrations.observer.clone();
+    let terminal = tokio::task::spawn_blocking(move || match observer {
+        Some(observer) => roomkit_tui::run_with_observer(client, renderers, settings.ui, observer),
+        None => roomkit_tui::run_with_options(client, renderers, settings.ui),
     })
     .await;
+    integrations.freeze();
     let attached = adapter.await;
     let closed = app.close().await;
+    integrations.close().await;
     terminal??;
     attached??;
     closed?;

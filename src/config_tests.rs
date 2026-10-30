@@ -15,6 +15,41 @@ fn cli(root: &std::path::Path) -> Cli {
 }
 
 #[test]
+fn resume_options_exclude_provider_bootstrap_values() {
+    let root = tempfile::tempdir().unwrap();
+    let mut cli = cli(root.path());
+    cli.base_url = Some("https://example.invalid/private-provider".into());
+    cli.model = Some("private-model".into());
+    cli.no_logo = true;
+    assert_eq!(resume_options(&cli).unwrap().unwrap(), ["--no-logo"]);
+}
+
+#[test]
+fn terminal_and_herdr_integrations_are_independently_optional() {
+    let root = tempfile::tempdir().unwrap();
+    let mut cli = cli(root.path());
+    let settings = Settings::load(&cli).unwrap();
+    assert!(settings.herdr && settings.ui.terminal_status.is_some());
+    cli.no_herdr = true;
+    assert!(!Settings::load(&cli).unwrap().herdr);
+    assert!(Settings::load(&cli).unwrap().ui.terminal_status.is_some());
+    cli.no_herdr = false;
+    cli.no_terminal_status = true;
+    assert!(Settings::load(&cli).unwrap().herdr);
+    assert!(Settings::load(&cli).unwrap().ui.terminal_status.is_none());
+    let config = root.path().join("config.toml");
+    std::fs::write(
+        &config,
+        "[ui]\nterminal_status = false\n[integrations]\nherdr = false\n",
+    )
+    .unwrap();
+    cli.config = Some(config);
+    cli.no_terminal_status = false;
+    let settings = Settings::load(&cli).unwrap();
+    assert!(!settings.herdr && settings.ui.terminal_status.is_none());
+}
+
+#[test]
 fn explicit_configuration_and_cli_overrides_control_appearance_without_creating_state() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("config.toml");

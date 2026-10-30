@@ -5,6 +5,14 @@
 - Paste images with Ctrl+V, remove them with Alt+Backspace, and send them to
   vision-enabled agents. Enable Image input in /agents. Validated PNG attachments
   are private session data outside the workspace and remain available on resume.
+- Emit optional OSC 7501 terminal status for Herdr App/Core and other compatible
+  terminals, independently of the Herdr TUI adapter.
+- Report activity, permission waits, conversation titles and resumable sessions
+  to Herdr TUI when its environment is present. Resume the confirmed conversation
+  and Ask/Yolo mode with the original workspace, storage and appearance options.
+  Keep reports ordered across restarts, tolerate unavailable reporters and release
+  the pane after application cleanup. Disable each integration independently with
+  `--no-terminal-status` / `--no-herdr` or the corresponding TOML settings.
 
 - Remove finished processes from the live list and hide the footer when none are
   running. Keep command results in conversation history; retained output remains

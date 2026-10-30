@@ -27,6 +27,7 @@ terminal-check:
 	python3 scripts/check-profiles.py
 	python3 scripts/check-processes.py
 	python3 scripts/check-shell.py
+	python3 scripts/check-herdr.py
 
 msrv:
 	cargo +1.92.0 test --locked

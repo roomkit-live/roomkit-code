@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
-use roomkit_tui::{Branding, ColorMode, SelectionMode, Theme, UiOptions};
+use roomkit_tui::{Branding, ColorMode, SelectionMode, TerminalStatus, Theme, UiOptions};
 use serde::Deserialize;
 
 use crate::{Result, permissions::Mode};
@@ -59,6 +59,12 @@ pub(crate) struct Cli {
     /// Hide the startup logo.
     #[arg(long)]
     pub no_logo: bool,
+    /// Disable OSC 7501 program status in the terminal.
+    #[arg(long)]
+    pub no_terminal_status: bool,
+    /// Disable the optional Herdr TUI integration.
+    #[arg(long)]
+    pub no_herdr: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, ValueEnum)]
@@ -85,6 +91,19 @@ struct FileConfig {
     provider: Provider,
     ui: Appearance,
     permissions: Permissions,
+    integrations: Integrations,
+}
+
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct Integrations {
+    herdr: bool,
+}
+
+impl Default for Integrations {
+    fn default() -> Self {
+        Self { herdr: true }
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -105,6 +124,7 @@ struct Provider {
 #[derive(Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Appearance {
+    terminal_status: bool,
     theme: Palette,
     color: Color,
     animations: bool,
@@ -123,6 +143,7 @@ struct Appearance {
 impl Default for Appearance {
     fn default() -> Self {
         Self {
+            terminal_status: true,
             theme: Palette::default(),
             color: Color::default(),
             animations: true,
@@ -141,6 +162,8 @@ impl Default for Appearance {
 }
 
 pub(crate) struct Settings {
+    pub herdr: bool,
+    pub resume_options: Option<Vec<String>>,
     pub workspace: PathBuf,
     pub state_dir: PathBuf,
     pub session: Option<String>,
@@ -241,6 +264,9 @@ impl Settings {
             branding.logo.clear();
         }
         let ui = UiOptions {
+            terminal_status: (appearance.terminal_status && !cli.no_terminal_status)
+                .then(|| TerminalStatus::new("roomkit-code"))
+                .transpose()?,
             branding,
             theme: match cli.theme.unwrap_or(appearance.theme) {
                 Palette::Dark => Theme::dark(),
@@ -268,6 +294,8 @@ impl Settings {
             ..UiOptions::default()
         };
         Ok(Self {
+            herdr: file.integrations.herdr && !cli.no_herdr,
+            resume_options: resume_options(cli)?,
             workspace,
             debug: cli.debug,
             state_dir,
@@ -290,7 +318,7 @@ pub(crate) fn valid_session_name(session: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
 }
 
-fn default_state_dir() -> Option<PathBuf> {
+pub(crate) fn default_state_dir() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute());
@@ -305,6 +333,55 @@ fn default_state_dir() -> Option<PathBuf> {
     } else {
         None
     }
+}
+
+/// Retain explicit UI/configuration choices; provider secrets and bootstrap
+/// options are deliberately absent. Persisted profiles restore agent/model.
+fn resume_options(cli: &Cli) -> Result<Option<Vec<String>>> {
+    let mut args = vec![];
+    if let Some(path) = &cli.config {
+        let path = std::path::absolute(path)?;
+        // Non-UTF-8 paths disable resume without preventing application launch.
+        let Some(path) = path.to_str() else {
+            return Ok(None);
+        };
+        args.extend(["--config".into(), path.into()]);
+    }
+    if let Some(theme) = cli.theme {
+        args.extend([
+            "--theme".into(),
+            match theme {
+                Palette::Dark => "dark",
+                Palette::Light => "light",
+                Palette::Terminal => "terminal",
+            }
+            .into(),
+        ]);
+    }
+    if let Some(color) = cli.color {
+        args.extend([
+            "--color".into(),
+            match color {
+                Color::Auto => "auto",
+                Color::Always => "always",
+                Color::Never => "never",
+            }
+            .into(),
+        ]);
+    }
+    for (enabled, flag) in [
+        (cli.no_animations, "--no-animations"),
+        (cli.native_selection, "--native-selection"),
+        (cli.no_logo, "--no-logo"),
+        (cli.no_terminal_status, "--no-terminal-status"),
+        (cli.no_herdr, "--no-herdr"),
+        (cli.debug, "--debug"),
+    ] {
+        if enabled {
+            args.push(flag.into());
+        }
+    }
+    Ok(Some(args))
 }
 
 #[cfg(test)]

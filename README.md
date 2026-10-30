@@ -100,6 +100,52 @@ string hides either. Neither is included in messages sent to the model.
 The selected theme supplies its background and text colors; monochrome mode
 uses reverse video to keep the area visible.
 
+## Terminal integrations
+
+Two independent integrations are enabled by default. Neither changes the tools,
+permissions or provider configuration selected by the application.
+
+| Integration | Behavior | Disable |
+| --- | --- | --- |
+| Terminal status | OSC 7501 for Herdr App/Core and compatible terminals | `--no-terminal-status` or `[ui] terminal_status = false` |
+| Herdr TUI | Activity, conversation title and session resume through `herdr` | `--no-herdr` or `[integrations] herdr = false` |
+
+Terminal status reports idle, working, permission waits, completion and failure.
+Completion/failure stays visible until the next user interaction; exit clears it.
+No status is emitted for redirected output or `TERM=dumb`. This integration
+does not need Herdr environment variables or execute `hc`.
+
+The Herdr TUI adapter activates only with `HERDR_ENV=1` and nonempty
+`HERDR_BIN_PATH`, `HERDR_SOCKET_PATH` and `HERDR_PANE_ID`. It uses that executable
+and socket without a shell. Reports use the stable source/agent `roomkit-code`;
+the separate `roomkit-code-title` metadata source is scoped to that agent.
+Only the latest observed state is retained, duplicate reports are skipped, and
+each command has a 500 ms deadline. Failures retry without blocking the UI;
+private diagnostics contain an integration error code, never raw command output.
+Exit freezes reporting, completes application cleanup, clears the title and
+releases the agent.
+
+Herdr's published resume command uses `roomkit-code` from `PATH`. Install it there
+before relying on pane restoration. The command preserves the absolute workspace,
+state directory, explicit config file, appearance flags, currently displayed
+conversation and host-confirmed Ask/Yolo mode. Saved profiles supply the provider
+and selected agent; bootstrap model options and credentials are not copied into
+the command. Session changes update the command only after successful navigation.
+Resuming restores history without replaying model requests or tools.
+
+Herdr TUI accepts at most 64 arguments and 8 KiB of argument text, without
+apostrophes or control characters. Non-UTF-8 paths or arguments outside these
+limits disable resume while retaining status and title reporting. The adapter
+clears any previous resume command in that case. App/Core receives terminal
+status only; this TUI resume integration does not call the Core API.
+
+Sequence counters and exclusive reporter locks live under
+`integrations/herdr` in the default user state directory, independently of
+`--state-dir`, so changing project storage cannot roll reports backward in the
+same pane. An unavailable/invalid counter or another reporter holding that pane
+disables the TUI adapter for that launch and records `sequence_unavailable`.
+These files contain counters, not conversation content or resume arguments.
+
 ## Providers and agents
 
 **/providers** manages connections shared across your projects. Add a name, API

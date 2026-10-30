@@ -5,6 +5,7 @@ mod agent;
 mod application;
 mod config;
 mod diagnostics;
+mod herdr;
 mod images;
 mod permissions;
 mod processes;
