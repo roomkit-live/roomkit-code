@@ -82,6 +82,18 @@ impl Application {
         Ok(())
     }
 
+    /// The router of the terminal's commands on this application.
+    fn commands(&self, workspace: &std::path::Path) -> crate::sessions::Sessions {
+        crate::sessions::Sessions {
+            kit: self.kit.clone(),
+            workspace: workspace.to_path_buf(),
+            channel: self.channel.id().clone(),
+            policy: self.policy.clone(),
+            profiles: self.profiles.clone(),
+            services: self.services.clone(),
+        }
+    }
+
     pub fn session(&self) -> LocalSession<SqliteStore> {
         LocalSession::new(self.kit.clone(), self.channel.clone(), self.view.clone())
             .with_lifecycle(self.services.hooks.lifecycle())
@@ -170,15 +182,10 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
     crate::diagnostics::report_panics(app.profiles.diagnostics.clone());
     app.services.updates.start(settings.update_check);
     let (client, host) = connection(NonZeroUsize::new(256).ok_or("Invalid queue capacity")?);
-    let handler = crate::sessions::Sessions {
-        kit: app.kit.clone(),
-        workspace: settings.workspace.clone(),
-        channel: app.channel.id().clone(),
-        policy: app.policy.clone(),
-        profiles: app.profiles.clone(),
-        services: app.services.clone(),
-    };
-    let adapter = tokio::spawn(app.session().run_with_commands(host, handler));
+    let adapter = tokio::spawn(
+        app.session()
+            .run_with_commands(host, app.commands(&settings.workspace)),
+    );
     let renderers = crate::tool_views::renderers(&settings.workspace);
     // The final observation outlives the view: it names the conversation to resume.
     let observer = roomkit_tui::SessionObserver::default();
@@ -195,14 +202,19 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
     let summary = summarize(&app, observer.latest(), &resume).await;
     let closed = app.close().await;
     integrations.close().await;
-    summary.print(closed.is_ok());
-    if let Some(notice) = app.profiles.diagnostics.panic_notice() {
-        eprintln!("{notice}");
-    }
+    report(&app, &summary, closed.is_ok());
     terminal??;
     attached??;
     closed?;
     Ok(())
+}
+
+/// The exit report, then a line when internal errors occurred.
+fn report(app: &Application, summary: &crate::exit_summary::Summary, stopped: bool) {
+    summary.print(stopped);
+    if let Some(notice) = app.profiles.diagnostics.panic_notice() {
+        eprintln!("{notice}");
+    }
 }
 
 /// Gather the exit report while the store and the processes are still open.
