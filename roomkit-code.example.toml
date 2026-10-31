@@ -7,6 +7,9 @@ timeout_seconds = 600 # total deadline per model request, including streaming
 # context_window = 32768 # actual server capacity; omitted means unknown
 # API keys are read only from ROOMKIT_API_KEY, never from this file.
 
+[agent]
+require_tool_intent = false # true requires a public description in model-facing tool schemas
+
 [permissions]
 mode = "ask" # ask, yolo; --mode overrides this explicit configuration
 

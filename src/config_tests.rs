@@ -25,6 +25,52 @@ fn resume_options_exclude_provider_bootstrap_values() {
 }
 
 #[test]
+fn required_intents_are_opt_in_and_cli_overrides_survive_resume() {
+    let root = tempfile::tempdir().unwrap();
+    let mut cli = cli(root.path());
+    assert!(!Settings::load(&cli).unwrap().require_tool_intent);
+    let config = root.path().join("options.toml");
+    std::fs::write(&config, "[agent]\nrequire_tool_intent = true\n").unwrap();
+    cli.config = Some(config.clone());
+    assert!(Settings::load(&cli).unwrap().require_tool_intent);
+    for required in [false, true] {
+        let flag = format!("--require-tool-intent={required}");
+        let parsed = Cli::try_parse_from([
+            "roomkit-code",
+            root.path().to_str().unwrap(),
+            "--config",
+            config.to_str().unwrap(),
+            &flag,
+        ])
+        .unwrap();
+        assert_eq!(
+            Settings::load(&parsed).unwrap().require_tool_intent,
+            required
+        );
+        let resumed = Cli::try_parse_from(
+            [
+                "roomkit-code".to_owned(),
+                root.path().to_str().unwrap().to_owned(),
+            ]
+            .into_iter()
+            .chain(resume_options(&parsed).unwrap().unwrap()),
+        )
+        .unwrap();
+        assert_eq!(
+            Settings::load(&resumed).unwrap().require_tool_intent,
+            required
+        );
+    }
+    let parsed = Cli::try_parse_from([
+        "roomkit-code",
+        "--require-tool-intent",
+        root.path().to_str().unwrap(),
+    ])
+    .unwrap();
+    assert!(Settings::load(&parsed).unwrap().require_tool_intent);
+}
+
+#[test]
 fn terminal_and_herdr_integrations_are_independently_optional() {
     let root = tempfile::tempdir().unwrap();
     let mut cli = cli(root.path());

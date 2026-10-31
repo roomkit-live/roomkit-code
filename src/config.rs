@@ -43,6 +43,9 @@ pub(crate) struct Cli {
     /// Record additional framework lifecycle events in the private diagnostic log.
     #[arg(long)]
     pub debug: bool,
+    /// Require the public intent field in tool schemas sent to the model.
+    #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
+    pub require_tool_intent: Option<bool>,
     /// Check launch options and workspace without loading profiles or connecting.
     #[arg(long)]
     pub check_config: bool,
@@ -90,10 +93,17 @@ pub(crate) enum Color {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct FileConfig {
+    agent: AgentOptions,
     provider: Provider,
     ui: Appearance,
     permissions: Permissions,
     integrations: Integrations,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct AgentOptions {
+    require_tool_intent: bool,
 }
 
 #[derive(Deserialize)]
@@ -180,6 +190,7 @@ impl Default for Appearance {
 }
 
 pub(crate) struct Settings {
+    pub require_tool_intent: bool,
     pub herdr: bool,
     pub resume_options: Option<Vec<String>>,
     pub workspace: PathBuf,
@@ -340,6 +351,9 @@ impl Settings {
             ..UiOptions::default()
         };
         Ok(Self {
+            require_tool_intent: cli
+                .require_tool_intent
+                .unwrap_or(file.agent.require_tool_intent),
             herdr: file.integrations.herdr && !cli.no_herdr,
             resume_options: resume_options(cli)?,
             workspace,
@@ -385,6 +399,9 @@ pub(crate) fn default_state_dir() -> Option<PathBuf> {
 /// options are deliberately absent. Persisted profiles restore agent/model.
 fn resume_options(cli: &Cli) -> Result<Option<Vec<String>>> {
     let mut args = vec![];
+    if let Some(required) = cli.require_tool_intent {
+        args.push(format!("--require-tool-intent={required}"));
+    }
     if let Some(path) = &cli.config {
         let path = std::path::absolute(path)?;
         // Non-UTF-8 paths disable resume without preventing application launch.

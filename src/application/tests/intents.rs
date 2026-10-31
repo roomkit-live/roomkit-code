@@ -2,7 +2,7 @@
 use super::*;
 use roomkit_tui::render::screen_with_options;
 
-fn assert_schemas(request: &Value) {
+fn assert_schemas(request: &Value, required: bool) {
     // A schema alone does not ask the agent to use the optional display field.
     // Check the instructions on the real request, including rebuilt agents.
     let instructions = request["messages"]
@@ -29,6 +29,10 @@ fn assert_schemas(request: &Value) {
             tool["function"]["parameters"]["properties"]["_roomkit_intent"]["type"],
             "string"
         );
+        let contains_intent = tool["function"]["parameters"]["required"]
+            .as_array()
+            .is_some_and(|fields| fields.iter().any(|field| field == "_roomkit_intent"));
+        assert_eq!(contains_intent, required);
     }
 }
 
@@ -55,6 +59,7 @@ async fn missing_public_intent_keeps_the_call_executable_and_displays_its_name()
     assert!(!text.contains("Action completed"));
     assert!(text.contains("listed-fixture.txt"));
     assert!(!text.contains("\"data\":"));
+    assert_schemas(&mock.requests.lock().unwrap()[0], false);
     app.close().await.unwrap();
 }
 
@@ -71,6 +76,7 @@ async fn public_intents_reach_the_view_and_survive_profile_changes_and_restart()
     )])
     .await;
     let mut settings = settings(root.path(), state.path(), &mock.base_url);
+    settings.require_tool_intent = true;
     settings.mode = crate::permissions::Mode::Yolo;
     // Include stdout after the shell's command, exit status and archive metadata.
     settings.ui.tool_preview_lines = 6;
@@ -91,7 +97,7 @@ async fn public_intents_reach_the_view_and_survive_profile_changes_and_restart()
     assert_eq!(call.intent.as_deref(), Some("Je vérifie le projet 文档"));
     assert_eq!(call.arguments, json!({"command":"printf fixture-result"}));
     assert!(call.text.contains("fixture-result"));
-    assert_schemas(&mock.requests.lock().unwrap()[0]);
+    assert_schemas(&mock.requests.lock().unwrap()[0], true);
     let frame = screen_with_options(
         &session,
         100,
@@ -109,7 +115,7 @@ async fn public_intents_reach_the_view_and_survive_profile_changes_and_restart()
     // Editing the profile reconstructs its agent through the same factory.
     edit_profile(&mut app, "agents", "edit:code", &[("label", "Reviewer")]).await;
     turn_operation(&app, "after-profile-edit").await;
-    assert_schemas(mock.requests.lock().unwrap().last().unwrap());
+    assert_schemas(mock.requests.lock().unwrap().last().unwrap(), true);
     app.close().await.unwrap();
     drop(app);
     let app = Application::open(&settings, String::new()).await.unwrap();
@@ -127,5 +133,7 @@ async fn public_intents_reach_the_view_and_survive_profile_changes_and_restart()
         Duration::ZERO,
     );
     assert!(frame.lines.join("\n").contains("Je vérifie le projet 文档"));
+    turn_operation(&app, "after-restart").await;
+    assert_schemas(mock.requests.lock().unwrap().last().unwrap(), true);
     app.close().await.unwrap();
 }

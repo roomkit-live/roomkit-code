@@ -25,6 +25,7 @@ use slot::AgentSlot;
 use store::Document;
 
 pub(crate) struct Profiles {
+    require_tool_intent: bool,
     workspace: PathBuf,
     state_dir: PathBuf,
     pub(crate) diagnostics: Arc<crate::diagnostics::Diagnostics>,
@@ -158,6 +159,7 @@ impl Profiles {
         let skill_catalogue =
             skills::Catalogue::load(settings.workspace.clone(), settings.state_dir.clone()).await?;
         Ok(Arc::new(Self {
+            require_tool_intent: settings.require_tool_intent,
             skill_catalogue: tokio::sync::RwLock::new(skill_catalogue),
             images: crate::images::Images::new(storage.database.with_file_name("attachments")),
             shell: crate::shell::Shell::new(resources.processes.clone(), diagnostics.clone()),
@@ -291,7 +293,14 @@ impl Profiles {
             |_| "Could not configure this agent; verify its provider, credential and workspace",
         )
         .map_err(String::from)
-        .map(|(agent, tools)| (agent.with_image_resolver(self.images.clone()), tools))
+        .map(|(agent, tools)| {
+            (
+                agent
+                    .with_tool_call_intents_required(self.require_tool_intent)
+                    .with_image_resolver(self.images.clone()),
+                tools,
+            )
+        })
     }
 
     pub async fn configure_view(&self, view: &mut SessionConfig) {

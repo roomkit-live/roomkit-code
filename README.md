@@ -710,3 +710,11 @@ model request; the tools themselves receive only their business arguments.
 Agent instructions ask for this public sentence on each supported call, using it
 for routine progress and reserving assistant messages for findings and explanations.
 When the model supplies no intention, the current tool's actual name is shown.
+
+To require `_roomkit_intent` in the schemas sent to the model, set
+`[agent] require_tool_intent = true` in the explicit TOML configuration, or launch
+with `--require-tool-intent`. It is optional by default; `--require-tool-intent=false`
+overrides the file setting. The option applies to all agents in that application
+instance, including after profile changes. It does not change tool-owned parameters
+of the same name. Providers may ignore schema requirements: a missing intention
+still uses the tool name, without blocking execution or triggering a retry.
