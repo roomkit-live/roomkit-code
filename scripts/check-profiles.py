@@ -15,6 +15,7 @@ import tempfile
 import termios
 import threading
 import time
+import unicodedata
 
 if os.environ.get("ROOMKIT_TEST_BINARY"):
     binary = Path(os.environ["ROOMKIT_TEST_BINARY"])
@@ -94,6 +95,35 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         offset = send(text + "\r")
         wait_for(marker, offset)
 
+    def screen(rows=28, cols=110):
+        """The screen as drawn so far, one string per row."""
+        cells = [[" "] * cols for _ in range(rows)]
+        row = col = 0
+        data = captured.decode(errors="replace")
+        index = 0
+        while index < len(data):
+            osc = re.match(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", data[index:])
+            if osc:
+                index += len(osc.group(0))
+                continue
+            csi = re.match(r"\x1b\[([0-9;?<]*)([A-Za-z])", data[index:])
+            if csi:
+                args, command = csi.groups()
+                if command == "H":
+                    position = [int(x) for x in args.split(";") if x.isdigit()] or [1, 1]
+                    row, col = position[0] - 1, (position[1] - 1 if len(position) > 1 else 0)
+                elif command == "K" and args == "2":
+                    cells[row] = [" "] * cols
+                index += len(csi.group(0))
+                continue
+            char = data[index]
+            index += 1
+            if char == "\x1b" or char in "\r\n" or not (0 <= row < rows and 0 <= col < cols):
+                continue
+            cells[row][col] = char
+            col += 2 if unicodedata.east_asian_width(char) in "WF" else 1
+        return "\n".join("".join(line) for line in cells)
+
     def fields(values):
         for index, value in enumerate(values):
             if value is None:
@@ -120,6 +150,11 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
 
     try:
         wait_for(b"RoomKit Code")
+        # Without an agent, the setup notice stays on the welcome screen.
+        wait_for(b"Configure a connection")
+        pump(0.3)
+        drawn = screen()
+        assert "RoomKit Code · Start a conversation" in drawn and "Configure a connection" in drawn, drawn
         command("/providers", b"Providers")
         # Account discovery is a local menu, not an implicit network login.
         send("Sign in with ChatGPT")

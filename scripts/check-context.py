@@ -73,6 +73,11 @@ class App:
             if select.select([self.master], [], [], 0.02)[0]:
                 self.output.extend(os.read(self.master, 65536))
 
+    def settle(self):
+        """Read until the terminal has been quiet for a moment: a whole frame."""
+        while select.select([self.master], [], [], 0.3)[0]:
+            self.output.extend(os.read(self.master, 65536))
+
     def sidebar(self):
         """The sidebar column of the last drawn screen, row by row."""
         rows, cols = 48, 160
@@ -132,9 +137,10 @@ try:
         offset = app.send("Show the context\r")
         app.wait("Context fixture complete.", offset)
         app.wait("Messages", offset)
+        app.settle()
         rows = app.sidebar()
         section = rows[rows.index("Context") + 1:]
-        section = section[:section.index("")]
+        section = section[:section.index("")] if "" in section else section
         legend = [row.split()[1] for row in section if row[:1] in "█▓▒░▄" and row[1:2] == " "]
         # Each part the host estimates, then the measured remainder.
         assert legend[:3] == ["System", "Instructions", "Tools"] and legend[-1] == "Messages", section

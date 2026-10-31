@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Keep the welcome screen in a project without an agent: the setup notice now
+  shows above its composer instead of switching to the conversation layout
+  (roomkit-tui fa0988f).
+
 - Split the sidebar's context gauge into what every request carries: the system
   prompt, per-turn instructions, tool schemas, skills and each MCP server,
   estimated at four characters per token, with the measured remainder as

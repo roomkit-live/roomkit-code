@@ -75,6 +75,11 @@ class App:
             if select.select([self.master], [], [], 0.02)[0]:
                 self.output.extend(os.read(self.master, 65536))
 
+    def settle(self):
+        """Read until the terminal has been quiet for a moment: a whole frame."""
+        while select.select([self.master], [], [], 0.3)[0]:
+            self.output.extend(os.read(self.master, 65536))
+
     def sidebar(self):
         """The sidebar column of the last drawn screen, row by row."""
         rows, cols = 48, 160
@@ -137,6 +142,7 @@ try:
         # The sidebar names each file with how it changed, the shell's included.
         # The transcript shows these paths too: read the sidebar column itself.
         app.wait("Created · shell", offset)
+        app.settle()
         rows = app.sidebar()
         files = rows[rows.index("› Files") + 1:][:4]
         assert files == ["› made.txt", "Created · shell", "› notes.md", "Created"], rows
