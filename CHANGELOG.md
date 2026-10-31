@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Give sent messages the same prompt arrow as the input, with a filled blank
+  row above and below the text for a three-row minimum.
+
 - Show submitted messages on the input-colored surface, without the technical
   local author label. Preserve other participants' names; configure this with
   `ui.highlight_own_messages`.
