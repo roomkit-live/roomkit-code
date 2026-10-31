@@ -166,6 +166,8 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
         let _ = app.close().await;
         return Err(error.into());
     }
+    // From here the terminal's screen hides the default hook's message.
+    crate::diagnostics::report_panics(app.profiles.diagnostics.clone());
     app.services.updates.start(settings.update_check);
     let (client, host) = connection(NonZeroUsize::new(256).ok_or("Invalid queue capacity")?);
     let handler = crate::sessions::Sessions {
@@ -194,6 +196,9 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
     let closed = app.close().await;
     integrations.close().await;
     summary.print(closed.is_ok());
+    if let Some(notice) = app.profiles.diagnostics.panic_notice() {
+        eprintln!("{notice}");
+    }
     terminal??;
     attached??;
     closed?;

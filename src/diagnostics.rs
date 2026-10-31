@@ -6,7 +6,7 @@ use std::{
     fs::{File, OpenOptions},
     io::Write,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::AtomicUsize},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -26,6 +26,8 @@ pub(crate) struct Diagnostics {
     state: Mutex<State>,
     stop: CancellationToken,
     listener: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Panics in this run, recorded or not.
+    panics: AtomicUsize,
 }
 
 struct State {
@@ -46,6 +48,7 @@ impl Diagnostics {
             }),
             stop: CancellationToken::new(),
             listener: tokio::sync::Mutex::new(None),
+            panics: AtomicUsize::new(0),
         });
         diagnostics.record("application_started", json!({"debug":debug}), None);
         Ok(diagnostics)
@@ -64,9 +67,8 @@ impl Diagnostics {
             fields["code"] = json!(diagnostic.code);
             fields["summary"] = json!(diagnostic.summary);
         }
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
+        let _recording = panics::Recording::start();
+        let mut state = crate::sync::lock(&self.state);
         let line = format!("{fields}\n");
         if state.recent.len() == 100 {
             state.recent.pop_front();
@@ -287,6 +289,10 @@ fn private_file(path: &std::path::Path) -> std::io::Result<File> {
     #[cfg(not(unix))]
     options.open(path)
 }
+
+mod panics;
+
+pub(crate) use panics::report as report_panics;
 
 #[cfg(test)]
 mod tests;

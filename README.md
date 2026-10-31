@@ -608,6 +608,9 @@ outcomes and safe error classifications. They never include prompts, tool
 arguments/results, credentials, encrypted reasoning or raw provider error bodies.
 The panel shows recent records for the current launch; files also cover previous
 launches. File write failures are shown in the panel and do not stop the agent.
+An internal error (a panic) is recorded with where it happened and what kind it
+is, never its full message, which can quote your text; the session goes on, and
+the exit report says how many occurred and where the log is.
 These operational logs are intended for troubleshooting, not as a tamper-proof
 audit trail. Raw dependency `tracing` output is not enabled by `--debug`.
 

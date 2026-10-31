@@ -92,3 +92,76 @@ fn write_failures_remain_visible_in_the_diagnostic_panel() -> crate::Result<()> 
     assert!(!body.contains("secret"));
     Ok(())
 }
+
+#[test]
+fn a_panic_kind_keeps_what_failed_never_what_it_quotes() {
+    let kind = super::panics::kind;
+    assert_eq!(
+        kind("index out of bounds: the len is 3 but the index is 5"),
+        "index out of bounds"
+    );
+    assert_eq!(
+        kind("called `Result::unwrap()` on an `Err` value: Os { code: 2 }"),
+        "called `Result::unwrap()` on an `Err` value"
+    );
+    assert_eq!(
+        kind("byte index 5 is not a char boundary; it is inside 'é' of `secret text`"),
+        "byte index 5 is not a char boundary"
+    );
+    assert_eq!(
+        kind("assertion `left == right` failed\n  left: 1"),
+        "assertion `left == right` failed"
+    );
+    assert_eq!(kind(&"x".repeat(200)).len(), 80);
+    assert_eq!(kind(""), "");
+}
+
+#[test]
+#[allow(clippy::panic, reason = "The test panics on purpose")]
+fn panics_are_recorded_and_counted_without_waiting_on_the_log() -> crate::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("diagnostics.jsonl");
+    let log = Diagnostics::open(path.clone(), false)?;
+    assert_eq!(log.panic_notice(), None);
+    super::report_panics(log.clone());
+    let failed = std::thread::Builder::new()
+        .name("panic-probe".into())
+        .spawn(|| std::panic::panic_any("index out of bounds: the len is 3 but the index is 5"))?
+        .join();
+    // A panic while this thread writes a record must not wait for the log.
+    let nested = std::thread::Builder::new()
+        .name("nested-probe".into())
+        .spawn(|| {
+            let _recording = super::panics::Recording::start();
+            std::panic::panic_any("inside a record")
+        })?
+        .join();
+    // Restore the default hook; other tests may panic on purpose meanwhile.
+    drop(std::panic::take_hook());
+    assert!(failed.is_err() && nested.is_err());
+    let records: Vec<Value> = std::fs::read_to_string(&path)?
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .filter(|record: &Value| record["event"] == "panic")
+        .collect();
+    let probe = records
+        .iter()
+        .find(|record| record["thread"] == "panic-probe")
+        .ok_or("The panic was not recorded")?;
+    assert_eq!(probe["kind"], "index out of bounds");
+    assert!(
+        probe["location"]
+            .as_str()
+            .is_some_and(|at| at.contains("diagnostics/tests.rs")),
+        "{probe}"
+    );
+    assert!(
+        !records
+            .iter()
+            .any(|record| record["thread"] == "nested-probe")
+    );
+    let notice = log.panic_notice().ok_or("No notice")?;
+    assert!(notice.starts_with("RoomKit Code hit ") && notice.contains("internal error"));
+    assert!(notice.ends_with(&path.display().to_string()));
+    Ok(())
+}

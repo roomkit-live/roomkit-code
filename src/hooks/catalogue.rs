@@ -68,6 +68,11 @@ impl Catalogue {
     /// old one whole, so a failure midway never leaves a partial list of
     /// enabled hooks behind its lock.
     pub fn reload(&mut self) {
+        self.reload_with(read);
+    }
+
+    /// `reload`, reading files through `read`.
+    fn reload_with(&mut self, read: impl Fn(&Path, u64) -> Result<Option<Vec<u8>>, String>) {
         let mut next = Self {
             entries: vec![],
             problems: vec![],
@@ -165,6 +170,40 @@ impl Catalogue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[allow(clippy::panic, reason = "The reader fails midway on purpose")]
+    fn a_reload_that_fails_midway_keeps_the_previous_catalogue() -> crate::Result<()> {
+        let workspace = tempfile::tempdir()?;
+        let state = tempfile::tempdir()?;
+        let private = tempfile::tempdir()?;
+        std::fs::write(
+            state.path().join("hooks.json"),
+            serde_json::json!({"hooks": {"PreToolUse": [{"hooks": [
+                {"type":"command", "command":"exit 2"}
+            ]}]}})
+            .to_string(),
+        )?;
+        let mut catalogue = Catalogue::load(workspace.path(), state.path(), private.path());
+        let id = catalogue.entries[0].id.clone();
+        catalogue.set_enabled(&id, true)?;
+        // The trust file reads; the first source fails.
+        let trust = catalogue.trust.clone();
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            catalogue.reload_with(|path, limit| {
+                if path == trust {
+                    read(path, limit)
+                } else {
+                    panic!("source unreadable")
+                }
+            });
+        }));
+        assert!(failed.is_err());
+        assert_eq!(catalogue.entries.len(), 1);
+        assert!(catalogue.enabled.contains(&id));
+        assert!(catalogue.problems.is_empty());
+        Ok(())
+    }
 
     #[test]
     fn every_unreadable_file_is_reported_after_a_reload() -> crate::Result<()> {
