@@ -76,11 +76,10 @@ pub(crate) fn fixture() -> crate::Result<ImageUpload> {
         writer.write_image_data(&[255, 0, 0, 255])?;
         writer.finish()?;
     }
-    Ok(ImageUpload {
-        name: "fixture.png".into(),
-        mime_type: "image/png".into(),
-        data: STANDARD.encode(bytes),
-        width: 1,
-        height: 1,
-    })
+    Ok(ImageUpload::png(
+        "fixture.png",
+        STANDARD.encode(bytes),
+        1,
+        1,
+    ))
 }

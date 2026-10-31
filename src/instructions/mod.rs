@@ -2,8 +2,8 @@
 mod discovery;
 mod tools;
 
-use roomkit_cli_roomkit::{CommandResult, SessionConfig};
 use roomkit_tui::protocol::{Event, PanelSpec};
+use roomkit_tui_engine::{CommandResult, SessionConfig};
 use std::{
     collections::{BTreeMap, VecDeque},
     path::{Path, PathBuf},
@@ -168,14 +168,13 @@ impl Instructions {
         );
         Ok(CommandResult::Events(vec![Event::Panel {
             conversation: view.room.as_str().into(),
-            panel: PanelSpec {
-                id: uuid::Uuid::new_v4().to_string(),
-                command: "instructions".into(),
-                title: "Project instructions · sources and scope".into(),
+            panel: PanelSpec::new(
+                uuid::Uuid::new_v4().to_string(),
+                "instructions",
+                "Project instructions · sources and scope",
                 body,
-                actions: vec![],
-                dismiss: "dismiss".into(),
-            },
+            )
+            .with_dismiss("dismiss"),
         }]))
     }
 }

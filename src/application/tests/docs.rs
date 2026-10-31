@@ -4,8 +4,7 @@ use crate::permissions::Mode;
 
 fn result(session: &Session, name: &str) -> Value {
     let tool = session
-        .snapshot
-        .as_ref()
+        .snapshot()
         .unwrap()
         .items
         .iter()

@@ -312,21 +312,23 @@ Approval requests use a filled decision card. Use Up/Down and Enter or click
 **Allow once** / **Deny**; Ctrl+Y and Ctrl+N remain available. PageUp/PageDown
 and the mouse wheel scroll the exact details, and Esc interrupts the run. The
 composer draft is preserved while the card is open. Commands show the command
-itself and its remaining parameters.
+itself and its remaining parameters. A new card accepts an answer only after it
+has been on screen for half a second, so keys typed for the composer never answer
+it. A terminal too small to show the card asks to be enlarged.
 
 A confirmed decision adds a compact history receipt naming the person, agent
 and action. It is saved when the turn settles and returns with `/resume`.
 Timeouts, disconnections and automatic Yolo actions never claim that a person
 approved or denied something. Approval remains distinct from tool success.
 
-Press **Shift+Tab** to cycle **Ask → Plan → Yolo → Ask**, including while an
-agent is working. The status line shows the host-confirmed mode. `/mode ask`,
-`/mode plan` and `/mode yolo` select directly; `/mode` offers choices. Changing
-modes preserves the draft and never starts a model turn or accepts a pending
-approval. Entering Plan refuses a pending mutation even if its old approval is
-subsequently accepted. Actions already dispatched are not revoked. Yolo permits
-subsequent selected tool calls without asking; tool path, revision, timeout and
-size checks still apply.
+Press **Shift+Tab** in the composer to cycle **Ask → Plan → Yolo → Ask**,
+including while an agent is working. While an approval card is open, Shift+Tab
+does not change the mode: decide first. The status line shows the host-confirmed
+mode. `/mode ask`, `/mode plan` and `/mode yolo` select directly; `/mode` offers
+choices. Changing modes preserves the draft and never starts a model turn.
+Actions already dispatched are not revoked. Yolo permits subsequent selected
+tool calls without asking; tool path, revision, timeout and size checks still
+apply.
 
 Modes are kept per conversation for this process. Restart defaults to Ask;
 `--mode plan`, `--mode yolo` or `[permissions] mode = "plan"` (or `"yolo"`) in an explicitly loaded TOML file
@@ -451,7 +453,7 @@ remain in the project and conversation.
 | Repository | Responsibility |
 | --- | --- |
 | [roomkit-code](https://github.com/roomkit-live/roomkit-code) | Development instructions, selected tools, workspace, configuration, lifecycle |
-| [roomkit-cli](https://github.com/roomkit-live/roomkit-cli) | Generic terminal interface, client protocol, local engine adapter |
+| [roomkit-tui](https://github.com/roomkit-live/roomkit-tui) | Generic terminal interface, client protocol, local engine adapter |
 | [roomkit-rs](https://github.com/roomkit-live/roomkit-rs) | Conversation engine, agents, providers, MCP client, policies, persistence |
 | [roomkit-tools](https://github.com/roomkit-live/roomkit-tools) | Independently reusable tools and their RoomKit adapters |
 | [roomkit-auth](https://github.com/roomkit-live/roomkit-auth) | OAuth, account identity, credential storage and renewal |
@@ -751,7 +753,7 @@ engine adapter's text/placeholder behavior.
 
 On wide terminals, a right sidebar displays the selected agent/model and provider
 connection, context occupancy with remaining percentage, configured MCP servers
-and running processes. It uses the reusable sidebar protocol from roomkit-cli;
+and running processes. It uses the reusable sidebar protocol from roomkit-tui;
 this application supplies its MCP and process sections. Provider credentials and
 endpoint settings are never included in the sidebar. Agent/model/effort appear
 only in the sidebar while it is open; the mode and shortcuts share one line below

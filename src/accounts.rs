@@ -1,7 +1,7 @@
 //! Application menus and browser launching over reusable account authentication.
 use roomkit_auth::{Account, ChatGpt, SignOut};
-use roomkit_cli_roomkit::CommandResult;
 use roomkit_tui::protocol::{Choice, Event, PanelSpec};
+use roomkit_tui_engine::CommandResult;
 use std::{path::Path, sync::Arc};
 use tokio::{
     sync::{Mutex, watch},
@@ -60,7 +60,7 @@ impl Accounts {
                 let outcome = self.auth.sign_out(id).await.map_err(|e| e.to_string())?;
                 let mut result = self.account_menu(room, id)?;
                 if let CommandResult::Events(events) = &mut result {
-                    events.push(Event::Notice { text: match outcome {
+                    events.push(Event::Notice { conversation: room.into(), text: match outcome {
                         SignOut::Revoked => "Signed out of this ChatGPT account".into(),
                         SignOut::LocalOnly => "Signed out locally. Remote revocation could not be confirmed; revoke access in your ChatGPT account settings if needed.".into(),
                     } });
@@ -169,11 +169,11 @@ impl Accounts {
         let url = sign_in.url().clone();
         let id = uuid::Uuid::new_v4().to_string();
         let browser_opened = open_browser(&url).is_ok();
-        let panel = PanelSpec {
-            id: id.clone(),
-            command: "providers".into(),
-            title: "Sign in with ChatGPT".into(),
-            body: format!(
+        let panel = PanelSpec::new(
+            id.clone(),
+            "providers",
+            "Sign in with ChatGPT",
+            format!(
                 "{}\n\nComplete sign-in in your browser, then return here.\nIf no browser opened, copy this local URL:\n\n{url}\n\nThis attempt expires in ten minutes. Esc cancels sign-in.",
                 if browser_opened {
                     "Browser launch requested."
@@ -181,12 +181,12 @@ impl Accounts {
                     "Could not launch a browser automatically."
                 }
             ),
-            actions: vec![
-                choice(format!("chatgpt:browser:{id}"), "Open browser", ""),
-                choice(format!("chatgpt:cancel:{id}"), "Cancel sign-in", ""),
-            ],
-            dismiss: format!("chatgpt:dismiss:{id}"),
-        };
+        )
+        .with_actions(vec![
+            choice(format!("chatgpt:browser:{id}"), "Open browser", ""),
+            choice(format!("chatgpt:cancel:{id}"), "Cancel sign-in", ""),
+        ])
+        .with_dismiss(format!("chatgpt:dismiss:{id}"));
         let mut state = self.pending.lock().await;
         *state = Some(Pending {
             room: room.into(),
@@ -263,11 +263,7 @@ fn label(account: &Account) -> String {
         .unwrap_or_else(|| format!("Account {}", account.id.chars().take(8).collect::<String>()))
 }
 fn choice(value: impl Into<String>, label: impl Into<String>, description: &str) -> Choice {
-    Choice {
-        value: value.into(),
-        label: label.into(),
-        description: description.into(),
-    }
+    Choice::new(value, label).with_description(description)
 }
 fn choices(room: &str, title: &str, choices: Vec<Choice>) -> CommandResult {
     CommandResult::Events(vec![Event::Choices {

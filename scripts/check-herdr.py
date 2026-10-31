@@ -18,6 +18,8 @@ import time
 
 metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True))
 binary = Path(metadata["target_directory"]) / "debug" / "roomkit-code"
+# roomkit-tui ignores answers until a card has been shown for 500 ms.
+ARMING = 0.6
 requests = []
 send_tool, send_answer = threading.Event(), threading.Event()
 
@@ -175,6 +177,7 @@ if mode == "fail": sys.exit(1)
             app.text("Allow write?")
             assert not (project / "approved.txt").exists()
             offset = len(app.calls())
+            time.sleep(ARMING)
             app.send(b"\x19")
             app.state("working", offset)
             app.wait(lambda: (project / "approved.txt").exists())

@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use clap::ValueEnum;
 use roomkit::{ToolCallEvent, ToolUse};
-use roomkit_cli_roomkit::ConversationChannel;
 use roomkit_tui::protocol::{Choice, Decision, ModeState};
+use roomkit_tui_engine::{ConversationChannel, PermissionRequest};
 use serde::Deserialize;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, ValueEnum)]
@@ -53,28 +53,18 @@ impl Policy {
     }
 
     pub fn state(&self, room: &str) -> ModeState {
-        ModeState {
-            command: "mode".into(),
-            selected: self.mode(room).value().into(),
-            choices: vec![
-                Choice {
-                    value: "ask".into(),
-                    label: "Ask".into(),
-                    description: "Approve changes, commands, process input and web requests".into(),
-                },
-                Choice {
-                    value: "plan".into(),
-                    label: "Plan".into(),
-                    description:
-                        "Explore and maintain plans; no project changes or command execution".into(),
-                },
-                Choice {
-                    value: "yolo".into(),
-                    label: "Yolo".into(),
-                    description: "Run selected tools without asking".into(),
-                },
+        ModeState::new(
+            "mode",
+            self.mode(room).value(),
+            vec![
+                Choice::new("ask", "Ask")
+                    .with_description("Approve changes, commands, process input and web requests"),
+                Choice::new("plan", "Plan").with_description(
+                    "Explore and maintain plans; no project changes or command execution",
+                ),
+                Choice::new("yolo", "Yolo").with_description("Run selected tools without asking"),
             ],
-        }
+        )
     }
 
     pub(crate) fn instruction(&self, room: &str) -> &'static str {
@@ -243,10 +233,12 @@ impl Policy {
         match channel
             .ask_tool_permission(
                 &event,
-                format!("Allow {}?", event.call.name),
-                detail,
-                summary,
-                Duration::from_secs(300),
+                PermissionRequest::new(
+                    format!("Allow {}?", event.call.name),
+                    detail,
+                    Duration::from_secs(300),
+                )
+                .with_summary(summary),
             )
             .await
         {
@@ -258,7 +250,8 @@ impl Policy {
                 )
             }
             Decision::Allow => ToolUse::Allow,
-            Decision::Deny => ToolUse::block(
+            // Deny, or a decision added by a newer adapter: never execute.
+            _ => ToolUse::block(
                 "The action was not approved (refused, expired or view disconnected). Do not retry it without a new user instruction.",
             ),
         }

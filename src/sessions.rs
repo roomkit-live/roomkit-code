@@ -7,9 +7,9 @@ use roomkit::{
     ConversationStore, CreateRoomOptions, EventFilter, GetRoomOptions, GetTimelineOptions,
     ListBindingsOptions, RoomFilter, RoomKit,
 };
-use roomkit_cli_roomkit::{CommandHandler, CommandResult, SessionConfig};
 use roomkit_sqlite::SqliteStore;
-use roomkit_tui::protocol::{Choice, Command, CommandSpec, Event, Request};
+use roomkit_tui::protocol::{Choice, Command, CommandSpec, Event, Rejection, Request};
+use roomkit_tui_engine::{CommandHandler, CommandResult, SessionConfig};
 use sha2::{Digest, Sha256};
 
 use crate::{Result, config::valid_session_name};
@@ -34,104 +34,94 @@ pub(crate) async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<b
 }
 
 pub(crate) fn commands() -> Vec<CommandSpec> {
-    vec![
-        CommandSpec {
-            name: "update".into(),
-            description: "Check releases, install an update or restore the previous version".into(),
-            arguments: "[rollback]".into(),
-            choices: Vec::new(),
-        },
-        CommandSpec {
-            name: "instructions".into(),
-            description: "Inspect applicable AGENTS.md files and their scope".into(),
-            arguments: "[project-relative path]".into(),
-            choices: Vec::new(),
-        },
-        CommandSpec {
-            name: "hooks".into(),
-            description: "Inspect, enable and diagnose configured command hooks".into(),
-            arguments: String::new(),
-            choices: Vec::new(),
-        },
-        CommandSpec {
-            name: "plans".into(),
-            description: "Follow this agent's plans and inspect their steps".into(),
-            arguments: "[plan-id]".into(),
-            choices: Vec::new(),
-        },
-        CommandSpec {
-            name: "mcp".into(),
-            description: "Configure MCP servers and choose tools for this agent".into(),
-            arguments: "[list|add|connect <id>|disconnect <id>|enable <id>|disable <id>]".into(),
-            choices: Vec::new(),
-        },
-        CommandSpec {
-            name: "skills".into(),
-            description: "Inspect and enable skills for this agent, or request their use".into(),
-            arguments: "[list|reload|enable <name>|disable <name>|use <name> <task>]".into(),
-            choices: Vec::new(),
-        },
-        CommandSpec {
-            name: "shell".into(),
-            description: "Run a shell command without the model (also !command)".into(),
-            arguments: "<command>".into(),
-            choices: Vec::new(),
-        },
-        CommandSpec {
-            name: "effort".into(),
-            description: "Choose reasoning effort for the current agent".into(),
-            arguments: "[default|low|medium|high|xhigh|max]".into(),
-            choices: Vec::new(),
-        },
-        CommandSpec {
-            name: "diagnostics".into(),
-            description: "Inspect recent engine errors and local audit logs".into(),
-            arguments: String::new(),
-            choices: Vec::new(),
-        },
-        CommandSpec {
-            name: "processes".into(),
-            description: "Inspect background processes and stop them (also F6)".into(),
-            arguments: "[process-id]".into(),
-            choices: Vec::new(),
-        },
-        CommandSpec {
-            name: "providers".into(),
-            description: "List, configure or delete shared provider connections".into(),
-            arguments: "[list|delete <id>]".into(),
-            choices: Vec::new(),
-        },
-        CommandSpec {
-            name: "agents".into(),
-            description: "List, select, configure or delete project agents".into(),
-            arguments: "[list|delete <id>]".into(),
-            choices: Vec::new(),
-        },
-        CommandSpec {
-            name: "tools".into(),
-            description: "Inspect tools actually registered by the application".into(),
-            arguments: "[tool]".into(),
-            choices: Vec::new(),
-        },
-        CommandSpec {
-            name: "mode".into(),
-            description: "Change permissions (also Shift+Tab)".into(),
-            arguments: "[ask|plan|yolo]".into(),
-            choices: vec!["ask".into(), "plan".into(), "yolo".into()],
-        },
-        CommandSpec {
-            name: "new".into(),
-            description: "Start a new conversation in this project".into(),
-            arguments: String::new(),
-            choices: Vec::new(),
-        },
-        CommandSpec {
-            name: "resume".into(),
-            description: "Choose a previous project session".into(),
-            arguments: "[session-id]".into(),
-            choices: Vec::new(),
-        },
+    [
+        (
+            "update",
+            "Check releases, install an update or restore the previous version",
+            "[rollback]",
+        ),
+        (
+            "instructions",
+            "Inspect applicable AGENTS.md files and their scope",
+            "[project-relative path]",
+        ),
+        (
+            "hooks",
+            "Inspect, enable and diagnose configured command hooks",
+            "",
+        ),
+        (
+            "plans",
+            "Follow this agent's plans and inspect their steps",
+            "[plan-id]",
+        ),
+        (
+            "mcp",
+            "Configure MCP servers and choose tools for this agent",
+            "[list|add|connect <id>|disconnect <id>|enable <id>|disable <id>]",
+        ),
+        (
+            "skills",
+            "Inspect and enable skills for this agent, or request their use",
+            "[list|reload|enable <name>|disable <name>|use <name> <task>]",
+        ),
+        (
+            "shell",
+            "Run a shell command without the model (also !command)",
+            "<command>",
+        ),
+        (
+            "effort",
+            "Choose reasoning effort for the current agent",
+            "[default|low|medium|high|xhigh|max]",
+        ),
+        (
+            "diagnostics",
+            "Inspect recent engine errors and local audit logs",
+            "",
+        ),
+        (
+            "processes",
+            "Inspect background processes and stop them (also F6)",
+            "[process-id]",
+        ),
+        (
+            "providers",
+            "List, configure or delete shared provider connections",
+            "[list|delete <id>]",
+        ),
+        (
+            "agents",
+            "List, select, configure or delete project agents",
+            "[list|delete <id>]",
+        ),
+        (
+            "tools",
+            "Inspect tools actually registered by the application",
+            "[tool]",
+        ),
+        (
+            "mode",
+            "Change permissions (also Shift+Tab)",
+            "[ask|plan|yolo]",
+        ),
+        ("new", "Start a new conversation in this project", ""),
+        (
+            "resume",
+            "Choose a previous project session",
+            "[session-id]",
+        ),
     ]
+    .into_iter()
+    .map(|(name, description, arguments)| {
+        let spec = CommandSpec::new(name, description).with_arguments(arguments);
+        if name == "mode" {
+            spec.with_choices(["ask", "plan", "yolo"].map(String::from).to_vec())
+        } else {
+            spec
+        }
+    })
+    .collect()
 }
 
 pub(crate) fn title(workspace: &std::path::Path, room: &RoomId) -> String {
@@ -324,7 +314,7 @@ impl Sessions {
                         && let EventContent::Text(text) = &event.content
                     {
                         let text = text.body.split_whitespace().collect::<Vec<_>>().join(" ");
-                        return Some(text.chars().take(100).collect());
+                        return Some(text.chars().take(100).collect::<String>());
                     }
                     None
                 })
@@ -334,11 +324,10 @@ impl Sessions {
             } else {
                 ""
             };
-            choices.push(Choice {
-                value: id.clone(),
-                label,
-                description: format!("{occupied}{date} UTC · {count} events · {id}"),
-            });
+            choices.push(
+                Choice::new(id.clone(), label)
+                    .with_description(format!("{occupied}{date} UTC · {count} events · {id}")),
+            );
         }
         Ok(choices)
     }
@@ -350,7 +339,7 @@ impl CommandHandler for Sessions {
         text: &str,
         images: &[roomkit_tui::protocol::ImageUpload],
         current: &SessionConfig,
-    ) -> std::result::Result<EventContent, String> {
+    ) -> std::result::Result<EventContent, Rejection> {
         let bindings = self
             .kit
             .list_bindings(
@@ -360,18 +349,19 @@ impl CommandHandler for Sessions {
                 },
             )
             .await
-            .map_err(|_| "Cannot authorize image attachments")?;
+            .map_err(|_| Rejection::unavailable("Cannot authorize image attachments"))?;
         if !current.can_attach_images
             || !bindings
                 .iter()
                 .any(|b| b.channel_id == self.channel && b.access == Access::ReadWrite)
         {
-            return Err("This attachment cannot submit images".into());
+            return Err(Rejection::refused("This attachment cannot submit images"));
         }
         self.profiles
             .images
             .prepare(&current.room, text, images)
             .await
+            .map_err(Rejection::from)
     }
 
     fn subscribe(
@@ -442,6 +432,18 @@ impl CommandHandler for Sessions {
         &self,
         request: Request,
         current: SessionConfig,
+    ) -> std::result::Result<CommandResult, Rejection> {
+        self.dispatch(request, current)
+            .await
+            .map_err(Rejection::from)
+    }
+}
+
+impl Sessions {
+    async fn dispatch(
+        &self,
+        request: Request,
+        current: SessionConfig,
     ) -> std::result::Result<CommandResult, String> {
         if matches!(&request.command, Command::Invoke { name, .. } | Command::SubmitForm { name, .. } if name == "mcp")
         {
@@ -504,10 +506,9 @@ impl CommandHandler for Sessions {
                 ),
                 choices: tools
                     .iter()
-                    .map(|tool| Choice {
-                        value: tool.name.clone(),
-                        label: tool.name.clone(),
-                        description: tool.description.clone(),
+                    .map(|tool| {
+                        Choice::new(tool.name.clone(), tool.name.clone())
+                            .with_description(tool.description.clone())
                     })
                     .collect(),
             }])),
@@ -520,6 +521,7 @@ impl CommandHandler for Sessions {
                     })?;
                 let mode = self.policy.state(current.room.as_str()).selected;
                 Ok(CommandResult::Events(vec![Event::Notice {
+                    conversation: current.room.as_str().into(),
                     text: format!(
                         "{} is registered · mode {mode} · inspection only; no tool executed",
                         tool.name
@@ -543,8 +545,9 @@ impl CommandHandler for Sessions {
             "new" if arguments.is_empty() => {
                 // A retried operation from the same source session reuses its
                 // destination, including after the application restarts.
-                let identity = serde_json::to_vec(&(current.room.as_str(), request.operation.0))
-                    .map_err(|_| "Invalid operation identity".to_string())?;
+                let identity =
+                    serde_json::to_vec(&(current.room.as_str(), request.operation.as_str()))
+                        .map_err(|_| "Invalid operation identity".to_string())?;
                 let name = format!("session-{:x}", Sha256::digest(identity));
                 let draft_key = format!("roomkit_code:new-draft:{name}");
                 let kept_draft = self

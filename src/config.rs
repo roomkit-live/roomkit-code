@@ -323,17 +323,16 @@ impl Settings {
         let state_dir = std::path::absolute(state_dir)?;
         let appearance = file.ui;
         let custom_logo = appearance.logo.is_some();
-        let mut branding = Branding {
-            name: appearance.name,
-            subtitle: "Explore, edit and test your project".into(),
-            logo: appearance.logo.unwrap_or_else(crate::branding::header_logo),
-        };
+        let mut branding = Branding::new(appearance.name)
+            .with_subtitle("Explore, edit and test your project")
+            .with_logo(appearance.logo.unwrap_or_else(crate::branding::header_logo));
         if cli.no_logo {
             branding.logo.clear();
         }
-        let welcome = appearance.welcome.then(|| WelcomeScreen {
-            width: appearance.welcome_width,
-            logo: if cli.no_logo {
+        let welcome = appearance.welcome.then(|| {
+            let mut welcome = WelcomeScreen::default();
+            welcome.width = appearance.welcome_width;
+            welcome.logo = if cli.no_logo {
                 Vec::new()
             } else {
                 appearance.welcome_logo.unwrap_or_else(|| {
@@ -343,8 +342,8 @@ impl Settings {
                         crate::branding::welcome_logo()
                     }
                 })
-            },
-            wordmark: if cli.no_logo {
+            };
+            welcome.wordmark = if cli.no_logo {
                 Vec::new()
             } else {
                 appearance.welcome_wordmark.unwrap_or_else(|| {
@@ -354,43 +353,43 @@ impl Settings {
                         Vec::new()
                     }
                 })
-            },
+            };
+            welcome
         });
-        let ui = UiOptions {
-            welcome,
-            bottom_margin: appearance.bottom_margin,
-            sidebar_visible: appearance.sidebar,
-            sidebar_width: appearance.sidebar_width,
-            terminal_status: (appearance.terminal_status && !cli.no_terminal_status)
-                .then(|| TerminalStatus::new("roomkit-code"))
-                .transpose()?,
-            branding,
-            theme: match cli.theme.unwrap_or(appearance.theme) {
-                Palette::Dark => Theme::dark(),
-                Palette::Light => Theme::light(),
-                Palette::Terminal => Theme::terminal(),
-            },
-            color: match cli.color.unwrap_or(appearance.color) {
-                Color::Auto => ColorMode::Auto,
-                Color::Always => ColorMode::Always,
-                Color::Never => ColorMode::Never,
-            },
-            animations: appearance.animations && !cli.no_animations,
-            markdown: appearance.markdown,
-            message_gap: appearance.message_gap,
-            highlight_own_messages: appearance.highlight_own_messages,
-            tool_preview_lines: appearance.tool_preview_lines,
-            tool_activity: appearance.tool_activity,
-            input_min_lines: appearance.input_min_lines,
-            input_padding: appearance.input_padding,
-            input_placeholder: appearance.input_placeholder,
-            input_prompt: appearance.input_prompt,
-            selection: if cli.native_selection || appearance.native_selection {
-                SelectionMode::Native
-            } else {
-                SelectionMode::CopyOnSelect
-            },
-            ..UiOptions::default()
+        // UiOptions is non-exhaustive: start from its defaults, then set each field.
+        let mut ui = UiOptions::default();
+        ui.welcome = welcome;
+        ui.bottom_margin = appearance.bottom_margin;
+        ui.sidebar_visible = appearance.sidebar;
+        ui.sidebar_width = appearance.sidebar_width;
+        ui.terminal_status = (appearance.terminal_status && !cli.no_terminal_status)
+            .then(|| TerminalStatus::new("roomkit-code"))
+            .transpose()?;
+        ui.branding = branding;
+        ui.theme = match cli.theme.unwrap_or(appearance.theme) {
+            Palette::Dark => Theme::dark(),
+            Palette::Light => Theme::light(),
+            Palette::Terminal => Theme::terminal(),
+        };
+        ui.color = match cli.color.unwrap_or(appearance.color) {
+            Color::Auto => ColorMode::Auto,
+            Color::Always => ColorMode::Always,
+            Color::Never => ColorMode::Never,
+        };
+        ui.animations = appearance.animations && !cli.no_animations;
+        ui.markdown = appearance.markdown;
+        ui.message_gap = appearance.message_gap;
+        ui.highlight_own_messages = appearance.highlight_own_messages;
+        ui.tool_preview_lines = appearance.tool_preview_lines;
+        ui.tool_activity = appearance.tool_activity;
+        ui.input_min_lines = appearance.input_min_lines;
+        ui.input_padding = appearance.input_padding;
+        ui.input_placeholder = appearance.input_placeholder;
+        ui.input_prompt = appearance.input_prompt;
+        ui.selection = if cli.native_selection || appearance.native_selection {
+            SelectionMode::Native
+        } else {
+            SelectionMode::CopyOnSelect
         };
         Ok(Self {
             update_check: file.updates.check && !cli.no_update_check,

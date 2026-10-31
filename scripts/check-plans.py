@@ -18,6 +18,8 @@ import time
 metadata = json.loads(subprocess.check_output(
     ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True))
 binary = Path(metadata["target_directory"]) / "debug" / "roomkit-code"
+# roomkit-tui ignores answers until a card has been shown for 500 ms.
+ARMING = 0.6
 requests = []
 plan_id = None
 steps = [
@@ -159,6 +161,7 @@ try:
             app.wait("Allow write?", offset)
             app.wait("Implement the change", offset)
             assert not (project / "approved.txt").exists()
+            time.sleep(ARMING)
             app.send(b"\x19")  # Ctrl+Y: approve this exact write.
             app.wait("Plan fixture complete.", offset)
             app.wait("3/3 completed", offset)

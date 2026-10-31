@@ -13,13 +13,13 @@ use roomkit::model::{
 use roomkit::{
     CommitEventOptions, ConversationStore, ListBindingsOptions, RoomKit, UpdateEventOptions,
 };
-use roomkit_cli_roomkit::{CommandExecution, CommandResult, ExecutionContext, SessionConfig};
 use roomkit_sqlite::SqliteStore;
 use roomkit_tools_process::{
     ProcessChunk, ProcessEnd, ProcessManager, ProcessReadInput, ProcessReadResult,
     ProcessStartInput, ProcessState, ProcessStopInput, ProcessWriteInput,
 };
 use roomkit_tui::protocol::{Command, Event, Item, Message, Request, RunOutcome};
+use roomkit_tui_engine::{CommandExecution, CommandResult, ExecutionContext, SessionConfig};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
@@ -91,7 +91,7 @@ impl Shell {
             view.room.as_str(),
             channel.as_str(),
             &view.sender,
-            request.operation.0,
+            request.operation.as_str(),
         ))
         .map_err(|_| "Invalid operation identity")?;
         let id = EventId::new(format!("shell-{:x}", Sha256::digest(identity)))
@@ -331,17 +331,18 @@ impl Shell {
 }
 
 fn item(row: &RoomEvent) -> Item {
-    Item::Message(Message {
-        id: row.id.as_str().into(),
-        actor: roomkit_tui::protocol::ActorId(format!(
-            "person:{}",
-            row.source
-                .participant_id
-                .as_ref()
-                .map_or("", |id| id.as_str())
-        )),
-        text: roomkit::text_of(&row.content),
-    })
+    let actor = format!(
+        "person:{}",
+        row.source
+            .participant_id
+            .as_ref()
+            .map_or("", |id| id.as_str())
+    );
+    Item::Message(Message::new(
+        row.id.as_str(),
+        roomkit_tui::protocol::ActorId::new(actor),
+        roomkit::text_of(&row.content),
+    ))
 }
 
 fn fenced(text: &str, language: &str) -> String {

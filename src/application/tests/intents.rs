@@ -83,8 +83,7 @@ async fn public_intents_reach_the_view_and_survive_profile_changes_and_restart()
     let mut app = Application::open(&settings, String::new()).await.unwrap();
     let session = turn(&app).await;
     let call = session
-        .snapshot
-        .as_ref()
+        .snapshot()
         .unwrap()
         .items
         .iter()

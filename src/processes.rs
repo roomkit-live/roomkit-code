@@ -3,7 +3,6 @@ use std::{collections::BTreeMap, num::NonZeroUsize, sync::Arc, time::Duration};
 
 use roomkit::model::{Access, ChannelId, RoomId};
 use roomkit::{GetRoomOptions, ListBindingsOptions, RoomKit};
-use roomkit_cli_roomkit::{CommandResult, SessionConfig};
 use roomkit_sqlite::SqliteStore;
 use roomkit_tools_process::{
     ObservedProcess, ProcessChunk, ProcessManager, ProcessReadInput, ProcessState, ProcessStopInput,
@@ -12,6 +11,7 @@ use roomkit_tui::protocol::{
     BackgroundStatus, Choice, Event, PanelSpec, SidebarContent, SidebarEntry, SidebarSection,
     SidebarTone,
 };
+use roomkit_tui_engine::{CommandResult, SessionConfig};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
@@ -78,10 +78,12 @@ impl Processes {
                     .count();
                 let mut events = vec![Event::BackgroundChanged {
                     conversation: current.room.as_str().into(),
-                    status: (running > 0).then(|| BackgroundStatus {
-                        label: format!("Processes: {running} running"),
-                        command: "processes".into(),
-                        arguments: String::new(),
+                    status: (running > 0).then(|| {
+                        BackgroundStatus::new(
+                            format!("Processes: {running} running"),
+                            "processes",
+                            "",
+                        )
                     }),
                 }];
                 if let Some(panel) = &panel {
@@ -275,18 +277,15 @@ impl Processes {
     }
 
     async fn render(&self, panel: &Panel, jobs: &[Job]) -> PanelSpec {
-        let mut spec = PanelSpec {
-            id: panel.id.clone(),
-            command: "processes".into(),
-            title: "Background processes · current application".into(),
-            body: String::new(),
-            actions: Vec::new(),
-            dismiss: format!("{}:dismiss", panel.id),
-        };
-        let action = |value: &str, label: &str, description: &str| Choice {
-            value: format!("{}:{value}", panel.id),
-            label: label.into(),
-            description: description.into(),
+        let mut spec = PanelSpec::new(
+            panel.id.clone(),
+            "processes",
+            "Background processes · current application",
+            "",
+        )
+        .with_dismiss(format!("{}:dismiss", panel.id));
+        let action = |value: &str, label: &str, description: &str| {
+            Choice::new(format!("{}:{value}", panel.id), label).with_description(description)
         };
         if let Some(id) = &panel.selected {
             spec.actions
@@ -510,8 +509,8 @@ fn sidebar(jobs: &[Job]) -> SidebarSection {
         .iter()
         .filter(|j| j.process.status.state == ProcessState::Running)
         .take(128)
-        .map(|job| SidebarEntry {
-            label: format!(
+        .map(|job| {
+            SidebarEntry::new(format!(
                 "● {}",
                 job.process
                     .command
@@ -521,26 +520,21 @@ fn sidebar(jobs: &[Job]) -> SidebarSection {
                     .chars()
                     .take(60)
                     .collect::<String>()
-            ),
-            detail: format!(
+            ))
+            .with_detail(format!(
                 "Running · {}",
                 job.agent.chars().take(64).collect::<String>()
-            ),
-            tone: SidebarTone::Accent,
-            action: crate::profiles::sidebar::action("processes", &job.process.status.process_id),
+            ))
+            .with_tone(SidebarTone::Accent)
+            .with_action(crate::profiles::sidebar::action(
+                "processes",
+                &job.process.status.process_id,
+            ))
         })
         .collect::<Vec<_>>();
     if entries.is_empty() {
-        entries.push(SidebarEntry {
-            label: "No running processes".into(),
-            detail: String::new(),
-            tone: SidebarTone::Muted,
-            action: None,
-        });
+        entries.push(SidebarEntry::new("No running processes").with_tone(SidebarTone::Muted));
     }
-    SidebarSection {
-        title: "Processes".into(),
-        action: crate::profiles::sidebar::action("processes", ""),
-        content: SidebarContent::Entries(entries),
-    }
+    SidebarSection::new("Processes", SidebarContent::Entries { entries })
+        .with_action(crate::profiles::sidebar::action("processes", ""))
 }

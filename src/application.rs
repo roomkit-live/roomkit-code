@@ -4,9 +4,9 @@ use std::num::NonZeroUsize;
 
 use roomkit::model::ChannelId;
 use roomkit::{RoomKit, RoomKitOptions};
-use roomkit_cli_roomkit::{ConversationChannel, LocalSession, SessionConfig};
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui::connection;
+use roomkit_tui_engine::{ConversationChannel, LocalSession, SessionConfig};
 
 use crate::{Result, config::Settings, profiles::Profiles, storage::Storage};
 
@@ -85,11 +85,11 @@ impl Application {
             let mut view = SessionConfig::new(room, agent_id, "local-user");
             view.title = crate::sessions::title(&settings.workspace, &view.room);
             view.commands = crate::sessions::commands();
-            view.input_actions = vec![roomkit_tui::protocol::InputAction {
-                prefix: '!',
-                command: "shell".into(),
-                description: "Run a shell command in this project".into(),
-            }];
+            view.input_actions = vec![roomkit_tui::protocol::InputAction::new(
+                '!',
+                "shell",
+                "Run a shell command in this project",
+            )];
             view.mode = Some(policy.state(view.room.as_str()));
             profiles.attach(&kit, &view, channel.id()).await?;
             profiles.configure_view(&mut view).await;
@@ -197,8 +197,8 @@ async fn summarize(
         let command = view
             .mode
             .as_ref()
-            .and_then(|mode| resume.command(&view.conversation.0, mode.selected.as_str()));
-        (view.conversation.0, command)
+            .and_then(|mode| resume.command(view.conversation.as_str(), mode.selected.as_str()));
+        (view.conversation.into_inner(), command)
     });
     crate::exit_summary::collect(&app.kit, &app.profiles.resources.processes, shown).await
 }

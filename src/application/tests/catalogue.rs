@@ -22,8 +22,7 @@ fn data(output: ToolOutput) -> Value {
 
 fn tool_result(session: &Session, name: &str) -> Value {
     let tool = session
-        .snapshot
-        .as_ref()
+        .snapshot()
         .unwrap()
         .items
         .iter()
@@ -208,7 +207,7 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
         .unwrap()
         .is_empty()
     );
-    let roomkit_cli_roomkit::CommandResult::Switch(view) = profile_command(
+    let roomkit_tui_engine::CommandResult::Switch(view) = profile_command(
         &app,
         Command::Invoke {
             name: "agents".into(),

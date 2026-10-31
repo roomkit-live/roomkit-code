@@ -11,10 +11,10 @@ mod ui;
 use roomkit::model::{Access, ChannelId};
 use roomkit::{ListBindingsOptions, RoomKit};
 use roomkit_ai::ToolDefinition;
-use roomkit_cli_roomkit::SessionConfig;
 use roomkit_openai::OpenAiAgent;
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::ModelInfo;
+use roomkit_tui_engine::SessionConfig;
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::sync::Mutex;
@@ -392,17 +392,15 @@ impl State {
             .map(|a| (a.id.as_str().into(), a.label.clone()))
             .collect();
         if let Some(profile) = self.project.value.agents.get(view.agent.as_str()) {
-            view.model = Some(ModelInfo {
-                // Match the engine's usage identity, including Responses over OAuth.
-                provider: "openai".into(),
-                model: profile.model.clone(),
-                effort: Some(
+            // Match the engine's usage identity, including Responses over OAuth.
+            view.model = Some(
+                ModelInfo::new("openai", profile.model.clone()).with_effort(
                     profile
                         .reasoning_effort
                         .clone()
                         .unwrap_or_else(|| "default".into()),
                 ),
-            });
+            );
             view.context_capacity = profile.context_window;
         } else {
             view.model = None;

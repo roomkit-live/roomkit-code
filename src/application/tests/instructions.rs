@@ -1,5 +1,5 @@
 use super::*;
-use roomkit_cli_roomkit::CommandResult;
+use roomkit_tui_engine::CommandResult;
 
 fn write(root: &std::path::Path, name: &str, text: &str) {
     let path = root.join(name);
@@ -38,7 +38,7 @@ async fn instructions_reach_model_in_scope_before_edit_and_refresh_on_resume() {
     let mut settings = settings(root.path(), state.path(), &mock.base_url);
     settings.mode = crate::permissions::Mode::Yolo;
     let app = Application::open(&settings, String::new()).await.unwrap();
-    let view = turn(&app).await.snapshot.unwrap();
+    let view = turn(&app).await.snapshot().cloned().unwrap();
     assert_eq!(
         std::fs::read_to_string(root.path().join("src/file.rs")).unwrap(),
         "new contents"

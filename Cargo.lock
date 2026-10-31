@@ -2014,36 +2014,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "roomkit-cli-protocol"
-version = "0.1.0"
-source = "git+https://github.com/roomkit-live/roomkit-cli?rev=550e2371f1e2f5944bf7eb40996445f633412145#550e2371f1e2f5944bf7eb40996445f633412145"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "roomkit-cli-roomkit"
-version = "0.1.0"
-source = "git+https://github.com/roomkit-live/roomkit-cli?rev=550e2371f1e2f5944bf7eb40996445f633412145#550e2371f1e2f5944bf7eb40996445f633412145"
-dependencies = [
- "roomkit",
- "roomkit-cli-protocol",
- "roomkit-cli-transport",
- "serde_json",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "roomkit-cli-transport"
-version = "0.1.0"
-source = "git+https://github.com/roomkit-live/roomkit-cli?rev=550e2371f1e2f5944bf7eb40996445f633412145#550e2371f1e2f5944bf7eb40996445f633412145"
-dependencies = [
- "roomkit-cli-protocol",
-]
-
-[[package]]
 name = "roomkit-code"
 version = "0.1.0"
 dependencies = [
@@ -2056,7 +2026,6 @@ dependencies = [
  "roomkit",
  "roomkit-ai",
  "roomkit-auth",
- "roomkit-cli-roomkit",
  "roomkit-hooks",
  "roomkit-mcp",
  "roomkit-openai",
@@ -2071,6 +2040,7 @@ dependencies = [
  "roomkit-tools-search",
  "roomkit-tools-web",
  "roomkit-tui",
+ "roomkit-tui-engine",
  "rustix",
  "serde",
  "serde_json",
@@ -2304,20 +2274,51 @@ dependencies = [
 [[package]]
 name = "roomkit-tui"
 version = "0.1.0"
-source = "git+https://github.com/roomkit-live/roomkit-cli?rev=550e2371f1e2f5944bf7eb40996445f633412145#550e2371f1e2f5944bf7eb40996445f633412145"
+source = "git+https://github.com/roomkit-live/roomkit-tui?rev=bcc376253ad5f967d38d7f169ca07ee9bde52845#bcc376253ad5f967d38d7f169ca07ee9bde52845"
 dependencies = [
  "arboard",
  "base64 0.22.1",
  "crossterm",
  "png",
  "pulldown-cmark",
- "roomkit-cli-protocol",
- "roomkit-cli-transport",
+ "roomkit-tui-protocol",
+ "roomkit-tui-transport",
  "serde_json",
  "syntect",
+ "thiserror",
  "unicode-segmentation",
  "unicode-width",
  "uuid",
+]
+
+[[package]]
+name = "roomkit-tui-engine"
+version = "0.1.0"
+source = "git+https://github.com/roomkit-live/roomkit-tui?rev=bcc376253ad5f967d38d7f169ca07ee9bde52845#bcc376253ad5f967d38d7f169ca07ee9bde52845"
+dependencies = [
+ "roomkit",
+ "roomkit-tui-protocol",
+ "roomkit-tui-transport",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "roomkit-tui-protocol"
+version = "0.1.0"
+source = "git+https://github.com/roomkit-live/roomkit-tui?rev=bcc376253ad5f967d38d7f169ca07ee9bde52845#bcc376253ad5f967d38d7f169ca07ee9bde52845"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "roomkit-tui-transport"
+version = "0.1.0"
+source = "git+https://github.com/roomkit-live/roomkit-tui?rev=bcc376253ad5f967d38d7f169ca07ee9bde52845#bcc376253ad5f967d38d7f169ca07ee9bde52845"
+dependencies = [
+ "roomkit-tui-protocol",
 ]
 
 [[package]]

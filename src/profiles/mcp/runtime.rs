@@ -113,9 +113,9 @@ impl Profiles {
         current: SessionConfig,
         id: String,
         connector: Option<super::config::Connection>,
-    ) -> roomkit_cli_roomkit::CommandResult {
-        use roomkit_cli_roomkit::{CommandExecution, CommandResult};
+    ) -> roomkit_tui_engine::CommandResult {
         use roomkit_tui::protocol::{Item, Message, RunOutcome};
+        use roomkit_tui_engine::{CommandExecution, CommandResult};
         let profiles = self.clone();
         let kit = kit.clone();
         CommandResult::Execute(CommandExecution::new(
@@ -186,11 +186,11 @@ impl Profiles {
                 {
                     // Only exceptional setup results need a transcript note; the
                     // normal path finishes with the existing execution status.
-                    context.publish(Item::Message(Message {
-                        id: format!("mcp-{}", uuid::Uuid::new_v4()).as_str().into(),
-                        actor: "mcp".into(),
-                        text: note,
-                    }));
+                    context.publish(Item::Message(Message::new(
+                        format!("mcp-{}", uuid::Uuid::new_v4()).as_str(),
+                        "mcp",
+                        note,
+                    )));
                 }
                 if let Some(error) = error {
                     Err(error)

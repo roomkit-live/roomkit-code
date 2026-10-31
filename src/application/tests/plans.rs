@@ -1,7 +1,7 @@
 use super::*;
-use roomkit_cli_roomkit::{CommandHandler, CommandResult};
 use roomkit_tools_plans::{PlanBackend, PlanCreateInput, PlanScope, PlanUpdateInput, StepStatus};
 use roomkit_tui::protocol::{PanelSpec, SidebarContent};
+use roomkit_tui_engine::{CommandHandler, CommandResult};
 use tokio_util::sync::CancellationToken;
 
 fn handler(app: &Application, workspace: &std::path::Path) -> crate::sessions::Sessions {
@@ -142,7 +142,7 @@ async fn plan_mode_uses_native_tools_blocks_effects_and_resumes_the_same_plan_in
     settings.mode = crate::permissions::Mode::Plan;
     let app = Application::open(&settings, String::new()).await.unwrap();
     let session = turn(&app).await;
-    let snapshot = session.snapshot.as_ref().unwrap();
+    let snapshot = session.snapshot().unwrap();
     let mut plan_id = None;
     for item in &snapshot.items {
         if let Item::Tool { call, .. } = item {
@@ -220,19 +220,19 @@ async fn plan_mode_uses_native_tools_blocks_effects_and_resumes_the_same_plan_in
     let h = handler(&app, root.path());
     let manual = h
         .handle(
-            Request {
-                id: RequestId(100),
-                operation: "manual".into(),
-                conversation: "main".into(),
-                command: Command::Invoke {
+            Request::new(
+                RequestId::new(100),
+                "manual",
+                "main",
+                Command::Invoke {
                     name: "shell".into(),
                     arguments: "touch denied-manual".into(),
                 },
-            },
+            ),
             app.view.clone(),
         )
         .await;
-    assert!(manual.unwrap_err().contains("Plan"));
+    assert!(manual.unwrap_err().message.contains("Plan"));
     app.close().await.unwrap();
     drop(app);
 
@@ -381,7 +381,7 @@ async fn plan_views_follow_live_records_bound_long_steps_and_reject_stale_action
             if update.iter().any(|e| matches!(e, Event::PanelUpdated { panel, .. } if panel.id == followed.id && panel.body.contains("1 blocked"))) {
                 let sidebar = update.iter().find_map(|e| if let Event::SidebarChanged { sidebar, .. } = e { sidebar.as_ref() } else { None }).unwrap();
                 let section = sidebar.sections.iter().find(|s| s.title == "Plan").unwrap();
-                let SidebarContent::Entries(entries) = &section.content else { panic!("Expected plan entries") };
+                let SidebarContent::Entries { entries } = &section.content else { panic!("Expected plan entries") };
                 assert_eq!(entries[0].label, "Second");
                 assert!(entries.iter().all(|e| e.label.len() <= 256 && e.detail.len() <= 1024));
                 assert!(entries.iter().any(|e| e.detail.ends_with('…')));

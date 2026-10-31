@@ -92,10 +92,9 @@ impl Resume {
     }
 
     fn report(&self, observation: SessionObservation) -> Report {
-        let resume = observation
-            .mode
-            .as_ref()
-            .and_then(|mode| self.command(&observation.conversation.0, mode.selected.as_str()));
+        let resume = observation.mode.as_ref().and_then(|mode| {
+            self.command(observation.conversation.as_str(), mode.selected.as_str())
+        });
         let state = if !observation.permissions.is_empty() {
             State::Blocked
         } else if observation
@@ -115,7 +114,7 @@ impl Resume {
             state,
             title: observation.title,
             session: SessionRef {
-                id: observation.conversation.0,
+                id: observation.conversation.into_inner(),
                 resume,
             },
         }

@@ -4,9 +4,9 @@ mod ui;
 
 use catalogue::{Catalogue, Entry};
 use roomkit::ToolCallEvent;
-use roomkit_cli_roomkit::{LifecycleFuture, SessionConfig, SessionLifecycle, TurnOutcome};
 use roomkit_hooks::{Decision, Event as HookEvent, Report, RunStatus};
-use roomkit_tui::protocol::OperationId;
+use roomkit_tui::protocol::{OperationId, Rejection};
+use roomkit_tui_engine::{LifecycleFuture, SessionConfig, SessionLifecycle, TurnOutcome};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -438,7 +438,7 @@ fn key(view: &SessionConfig, operation: &OperationId) -> Key {
     (
         view.room.to_string(),
         view.agent.to_string(),
-        operation.0.clone(),
+        operation.as_str().to_owned(),
     )
 }
 
@@ -460,19 +460,21 @@ impl SessionLifecycle for Lifecycle {
         view: &'a SessionConfig,
         operation: &'a OperationId,
         content: &'a roomkit::model::EventContent,
-    ) -> LifecycleFuture<'a, Result<(), String>> {
+    ) -> LifecycleFuture<'a, Result<(), Rejection>> {
         Box::pin(async move {
             let hooks = &self.0;
             if hooks.closing.load(Ordering::Acquire) {
-                return Err("Application is closing".into());
+                return Err(Rejection::unavailable("Application is closing"));
             }
             let session = hooks.session(view);
             let key = key(view, operation);
-            let context = hooks.context(&session, view.agent.as_str(), Some(&operation.0));
+            let context = hooks.context(&session, view.agent.as_str(), Some(operation.as_str()));
             {
                 let mut state = hooks.state();
                 if !state.catalogue.problems.is_empty() {
-                    return Err("Hook configuration has errors; inspect /hooks and reload after correcting it".into());
+                    return Err(Rejection::refused(
+                        "Hook configuration has errors; inspect /hooks and reload after correcting it",
+                    ));
                 }
                 if state.completed.contains(&key) {
                     return Ok(());
@@ -496,7 +498,7 @@ impl SessionLifecycle for Lifecycle {
                 .dispatch(HookEvent::UserPromptSubmit, "", &context)
                 .await
             {
-                Decision::Deny(reason) => Err(reason),
+                Decision::Deny(reason) => Err(Rejection::refused(reason)),
                 _ => Ok(()),
             }
         })
@@ -537,6 +539,8 @@ impl SessionLifecycle for Lifecycle {
                         TurnOutcome::Failed => "failed",
                         TurnOutcome::Interrupted => "cancelled",
                         TurnOutcome::Blocked => "blocked",
+                        // An outcome added by a newer adapter is never reported as success.
+                        _ => "failed",
                     });
                     self.0.dispatch(HookEvent::TurnEnd, "", &context).await;
                 }

@@ -1,7 +1,7 @@
-use roomkit_cli_roomkit::CommandResult;
 use roomkit_tui::protocol::{
     Choice, Command, Event, FieldKind, FormField, FormSpec, FormValues, Request,
 };
+use roomkit_tui_engine::CommandResult;
 
 use super::*;
 
@@ -21,11 +21,7 @@ pub(super) fn choice(
     label: impl Into<String>,
     description: impl Into<String>,
 ) -> Choice {
-    Choice {
-        value: value.into(),
-        label: label.into(),
-        description: description.into(),
-    }
+    Choice::new(value, label).with_description(description)
 }
 fn effort_choices() -> Vec<Choice> {
     std::iter::once(choice(
@@ -49,14 +45,10 @@ fn field(
     required: bool,
     kind: FieldKind,
 ) -> FormField {
-    FormField {
-        name: name.into(),
-        label: label.into(),
-        value: value.into(),
-        help: help.into(),
-        required,
-        kind,
-    }
+    let field = FormField::new(name, label, kind)
+        .with_value(value)
+        .with_help(help);
+    if required { field.required() } else { field }
 }
 pub(super) fn choices(
     current: &SessionConfig,
@@ -432,12 +424,12 @@ impl Profiles {
                 {
                     return Err("This form does not belong to the current view".into());
                 }
-                if values.0.len() != pending.form.fields.len()
+                if values.len() != pending.form.fields.len()
                     || pending
                         .form
                         .fields
                         .iter()
-                        .any(|f| !values.0.contains_key(&f.name))
+                        .any(|f| values.get(&f.name).is_none())
                 {
                     return Err("The form fields changed; cancel and reopen it".into());
                 }
@@ -587,11 +579,11 @@ fn provider_form(existing: Option<&Provider>, state: &State, id: String) -> Form
         Authentication::Stored { .. } => ("stored", ""),
         Authentication::Environment { variable } => ("environment", variable.as_str()),
     };
-    FormSpec {
+    FormSpec::new(
         id,
-        command: "providers".into(),
-        title: "Provider connection · OpenAI-compatible".into(),
-        fields: vec![
+        "providers",
+        "Provider connection · OpenAI-compatible",
+        vec![
             field(
                 "id",
                 "ID",
@@ -655,7 +647,7 @@ fn provider_form(existing: Option<&Provider>, state: &State, id: String) -> Form
                 FieldKind::Text,
             ),
         ],
-    }
+    )
 }
 
 fn agent_form(
@@ -684,11 +676,11 @@ fn agent_form(
         tools: TOOLS.iter().map(|s| (*s).into()).collect(),
     };
     let a = existing.unwrap_or(&default);
-    Ok(FormSpec {
+    Ok(FormSpec::new(
         id,
-        command: "agents".into(),
-        title: "Agent profile · save and select".into(),
-        fields: vec![
+        "agents",
+        "Agent profile · save and select",
+        vec![
             field(
                 "id",
                 "ID",
@@ -777,11 +769,11 @@ fn agent_form(
                 },
             ),
         ],
-    })
+    ))
 }
 
 fn value<'a>(values: &'a FormValues, key: &str) -> &'a str {
-    values.0.get(key).map_or("", String::as_str)
+    values.get(key).unwrap_or("")
 }
 fn identity(id: &str, original: Option<&str>, exists: bool) -> Result<(), String> {
     if original.is_some_and(|old| old != id) {

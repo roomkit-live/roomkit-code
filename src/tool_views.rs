@@ -391,16 +391,14 @@ mod tests {
     use serde_json::json;
 
     fn call(name: &str, data: serde_json::Value) -> ToolCall {
-        ToolCall {
-            intent: None,
-            id: "call".into(),
-            name: name.into(),
-            arguments: json!({"pattern":"answer"}),
-            state: ToolState::Succeeded,
-            data: None,
-            text: json!({"data":data,"text":"model rendering"}).to_string(),
-            duration_ms: Some(1),
-        }
+        ToolCall::new(
+            "call",
+            name,
+            json!({"pattern":"answer"}),
+            ToolState::Succeeded,
+        )
+        .with_text(json!({"data":data,"text":"model rendering"}).to_string())
+        .with_duration_ms(1)
     }
 
     fn plain(lines: &[Line]) -> String {

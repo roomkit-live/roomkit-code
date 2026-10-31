@@ -1,5 +1,5 @@
 use super::*;
-use roomkit_cli_roomkit::CommandResult;
+use roomkit_tui_engine::CommandResult;
 
 async fn invoke(app: &Application, name: &str, arguments: &str) -> Result<CommandResult> {
     profile_command(
@@ -189,15 +189,15 @@ async fn cancelled_stale_or_cross_room_confirmation_never_deletes_a_profile() {
             .handle(
                 &app.kit,
                 app.channel.id(),
-                Request {
-                    id: RequestId(9),
-                    operation: "wrong-view".into(),
-                    conversation: "other".into(),
-                    command: Command::Invoke {
+                Request::new(
+                    RequestId::new(9),
+                    "wrong-view",
+                    "other",
+                    Command::Invoke {
                         name: "agents".into(),
                         arguments: token
-                    },
-                },
+                    }
+                ),
                 wrong
             )
             .await
@@ -276,14 +276,13 @@ async fn an_open_agent_form_cannot_restore_a_deleted_provider_reference_and_edit
     let Event::Form { form, .. } = &events[0] else {
         panic!("Expected form")
     };
-    let mut values = FormValues(
-        form.fields
-            .iter()
-            .map(|f| (f.name.clone(), f.value.clone()))
-            .collect(),
-    );
-    values.0.insert("provider".into(), "unused".into());
-    values.0.insert("model".into(), "fixture-model".into());
+    let mut values = form
+        .fields
+        .iter()
+        .map(|f| (f.name.clone(), f.value.clone()))
+        .collect::<FormValues>();
+    values.insert("provider", "unused");
+    values.insert("model", "fixture-model");
     let submit = Command::SubmitForm {
         name: "agents".into(),
         form: form.id.clone(),

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Move to roomkit-tui, formerly roomkit-cli, and its public API: constructors for
+  its non-exhaustive types, session accessors and `Rejection` for refused
+  commands. Notices now name their conversation. An approval card accepts an
+  answer only after half a second on screen, and Shift+Tab no longer changes the
+  mode while a card is open. Approval receipts saved by earlier versions no
+  longer appear in restored history.
+
 - Print an exit report once the view closes: the command that reopens the
   displayed conversation, its token usage summed over every turn and launch,
   and the background processes that closing stopped. Herdr and the report share

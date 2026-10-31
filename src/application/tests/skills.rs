@@ -1,5 +1,5 @@
 use super::*;
-use roomkit_cli_roomkit::CommandResult;
+use roomkit_tui_engine::CommandResult;
 
 fn install(root: &std::path::Path, body: &str) {
     let skill = root.join(".agents/skills/project-review");
@@ -146,7 +146,7 @@ async fn skills_are_opt_in_progressive_and_resume_for_the_same_agent() {
             .any(|t| t.name == "activate_skill")
     );
     let session = turn_operation(&app, "skills-first").await;
-    assert!(session.snapshot.as_ref().unwrap().items.iter().any(|item| matches!(item, Item::Tool { call: t, .. } if t.name == "activate_skill" && t.state == ToolState::Succeeded)));
+    assert!(session.snapshot().unwrap().items.iter().any(|item| matches!(item, Item::Tool { call: t, .. } if t.name == "activate_skill" && t.state == ToolState::Succeeded)));
     let requests = mock.requests.lock().unwrap().clone();
     assert!(system(&requests[0]).contains("project-review"));
     assert!(!system(&requests[0]).contains("PRIVATE-SKILL-BODY"));

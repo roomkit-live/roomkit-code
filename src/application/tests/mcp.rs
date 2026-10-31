@@ -1,17 +1,17 @@
 use super::*;
-use roomkit_cli_roomkit::CommandResult;
 use roomkit_tui::{
     Client,
     protocol::{Decision, FormValues},
 };
+use roomkit_tui_engine::CommandResult;
 
 fn request(app: &Application, command: Command) -> Request {
-    Request {
-        id: RequestId(80),
-        operation: "mcp-configuration".into(),
-        conversation: app.view.room.as_str().into(),
+    Request::new(
+        RequestId::new(80),
+        "mcp-configuration",
+        app.view.room.as_str(),
         command,
-    }
+    )
 }
 async fn invoke(app: &Application, arguments: &str) -> std::result::Result<CommandResult, String> {
     app.profiles
@@ -60,18 +60,16 @@ async fn stdio_form(
         root.join(format!("{id}.trace"))
     ])
     .to_string();
-    let values = FormValues(
-        [
-            ("id", id),
-            ("program", "python3"),
-            ("args", &args),
-            ("environment", "{}"),
-            ("timeout", timeout),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.into(), v.into()))
-        .collect(),
-    );
+    let values = [
+        ("id", id),
+        ("program", "python3"),
+        ("args", &args),
+        ("environment", "{}"),
+        ("timeout", timeout),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect::<FormValues>();
     Command::SubmitForm {
         name: "mcp".into(),
         form: form.id.clone(),
@@ -98,7 +96,7 @@ async fn attach(
     root: &std::path::Path,
 ) -> (
     Client,
-    tokio::task::JoinHandle<std::result::Result<(), roomkit_cli_roomkit::AdapterError>>,
+    tokio::task::JoinHandle<std::result::Result<(), roomkit_tui_engine::AdapterError>>,
 ) {
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let handler = crate::sessions::Sessions {
@@ -123,7 +121,7 @@ async fn finish(client: &Client, id: u64) -> (RunOutcome, Vec<Event>) {
         if let Event::OperationFinished {
             operation, outcome, ..
         } = &next
-            && operation.0 == format!("operation-{id}")
+            && operation.as_str() == format!("operation-{id}")
         {
             return (*outcome, events);
         }
@@ -195,7 +193,7 @@ async fn saving_mcp_connects_and_enables_tools_with_permissions_and_durable_sele
         sidebar: Some(sidebar),
     });
     assert!(
-        ui.sidebar.is_some(),
+        ui.sidebar().is_some(),
         "Application sidebar must satisfy the generic protocol"
     );
     assert!(mock.requests.lock().unwrap().is_empty());
@@ -532,18 +530,16 @@ async fn configure_http(app: &Application, root: &std::path::Path, action: &str,
         panic!("Expected HTTP form")
     };
     assert!(form.title.contains("HTTP"));
-    let values = FormValues(
-        [
-            ("id", "remote"),
-            ("url", url),
-            ("bearer_env", "PATH"),
-            ("headers", "{}"),
-            ("timeout", "5"),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.into(), v.into()))
-        .collect(),
-    );
+    let values = [
+        ("id", "remote"),
+        ("url", url),
+        ("bearer_env", "PATH"),
+        ("headers", "{}"),
+        ("timeout", "5"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect::<FormValues>();
     let command = Command::SubmitForm {
         name: "mcp".into(),
         form: form.id.clone(),
@@ -738,8 +734,8 @@ async fn invalid_mcp_edits_keep_the_saved_configuration_and_live_connection() {
     let Command::SubmitForm { values, .. } = &mut edit else {
         panic!("Expected form")
     };
-    values.0.insert(
-        "environment".into(),
+    values.insert(
+        "environment",
         json!({"API_KEY":"ROOMKIT_MCP_AUTOCONNECT_MISSING_KEY"}).to_string(),
     );
     let error = app

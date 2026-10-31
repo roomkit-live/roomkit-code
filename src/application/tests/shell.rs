@@ -6,7 +6,7 @@ async fn attach(
     workspace: &std::path::Path,
 ) -> (
     Client,
-    tokio::task::JoinHandle<std::result::Result<(), roomkit_cli_roomkit::AdapterError>>,
+    tokio::task::JoinHandle<std::result::Result<(), roomkit_tui_engine::AdapterError>>,
 ) {
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let handler = crate::sessions::Sessions {
@@ -38,15 +38,15 @@ async fn next(client: &Client) -> Event {
 }
 
 fn command(app: &Application, operation: &str, text: &str) -> Request {
-    Request {
-        id: RequestId(30),
-        operation: operation.into(),
-        conversation: app.view.room.as_str().into(),
-        command: Command::Invoke {
+    Request::new(
+        RequestId::new(30),
+        operation,
+        app.view.room.as_str(),
+        Command::Invoke {
             name: "shell".into(),
             arguments: text.into(),
         },
-    }
+    )
 }
 
 async fn finish(client: &Client) -> (Vec<Event>, RunOutcome) {
@@ -54,7 +54,7 @@ async fn finish(client: &Client) -> (Vec<Event>, RunOutcome) {
     loop {
         let event = next(client).await;
         assert!(
-            !matches!(&event, Event::Reply { error: Some(e), .. } if !e.is_empty()),
+            !matches!(&event, Event::Reply { error: Some(e), .. } if !e.message.is_empty()),
             "{event:?}"
         );
         assert!(
@@ -135,7 +135,7 @@ async fn user_shell_persists_output_and_next_model_turn_sees_it_without_automati
             error: Some(error), ..
         } = next(&client).await
         {
-            assert!(error.contains("different command"));
+            assert!(error.message.contains("different command"));
             break;
         }
     }

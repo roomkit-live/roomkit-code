@@ -1,10 +1,10 @@
 use super::Plans;
-use roomkit_cli_roomkit::{CommandResult, SessionConfig};
 use roomkit_tools_plans::{Plan, PlanScope, PlanStep, StepStatus};
 use roomkit_tui::protocol::{
     Choice, Event, PanelSpec, SidebarAction, SidebarContent, SidebarEntry, SidebarSection,
     SidebarTone,
 };
+use roomkit_tui_engine::{CommandResult, SessionConfig};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -26,11 +26,8 @@ fn scope(view: &SessionConfig) -> PlanScope {
         caller_id: view.agent.to_string(),
     }
 }
-fn action(arguments: impl Into<String>) -> Option<SidebarAction> {
-    Some(SidebarAction {
-        command: "plans".into(),
-        arguments: arguments.into(),
-    })
+fn action(arguments: impl Into<String>) -> SidebarAction {
+    SidebarAction::new("plans", arguments)
 }
 
 fn step_preview(text: &str) -> String {
@@ -164,18 +161,10 @@ impl PlanView {
     }
 
     async fn render(&self, panel: &Panel) -> PanelSpec {
-        let mut spec = PanelSpec {
-            id: panel.id.clone(),
-            command: "plans".into(),
-            title: "Plans".into(),
-            body: String::new(),
-            actions: Vec::new(),
-            dismiss: format!("{}:dismiss", panel.id),
-        };
-        let choose = |value: String, label: String, description: String| Choice {
-            value: format!("{}:{value}", panel.id),
-            label,
-            description,
+        let mut spec = PanelSpec::new(panel.id.clone(), "plans", "Plans", "")
+            .with_dismiss(format!("{}:dismiss", panel.id));
+        let choose = |value: String, label: String, description: String| {
+            Choice::new(format!("{}:{value}", panel.id), label).with_description(description)
         };
         let doc = match self.store.snapshot(&panel.scope).await {
             Ok(doc) => doc,
@@ -233,28 +222,32 @@ impl PlanView {
     }
 
     pub async fn sidebar(&self, view: &SessionConfig) -> SidebarSection {
-        let mut section = SidebarSection {
-            title: "Plan".into(),
-            action: action(""),
-            content: SidebarContent::Entries(Vec::new()),
-        };
+        let mut section = SidebarSection::new(
+            "Plan",
+            SidebarContent::Entries {
+                entries: Vec::new(),
+            },
+        )
+        .with_action(action(""));
         let mut entries = Vec::new();
         match self.store.snapshot(&scope(view)).await {
             Ok(doc) => {
                 if let Some(plan) = doc.selected.as_ref().and_then(|id| doc.plans.get(id)) {
-                    section.action = action(&plan.plan_id);
-                    entries.push(SidebarEntry {
-                        label: plan.title.clone(),
-                        detail: progress(plan),
-                        tone: if !plan.steps.is_empty()
-                            && plan.steps.iter().all(|s| s.status == StepStatus::Completed)
-                        {
-                            SidebarTone::Success
-                        } else {
-                            SidebarTone::Neutral
-                        },
-                        action: action(&plan.plan_id),
-                    });
+                    section.action = Some(action(&plan.plan_id));
+                    entries.push(
+                        SidebarEntry::new(plan.title.clone())
+                            .with_detail(progress(plan))
+                            .with_tone(
+                                if !plan.steps.is_empty()
+                                    && plan.steps.iter().all(|s| s.status == StepStatus::Completed)
+                                {
+                                    SidebarTone::Success
+                                } else {
+                                    SidebarTone::Neutral
+                                },
+                            )
+                            .with_action(action(&plan.plan_id)),
+                    );
                     // Keep active/blocked work visible; otherwise show the next pending step.
                     let mut focused = plan
                         .steps
@@ -274,8 +267,8 @@ impl PlanView {
                     }
                     let count = focused.len();
                     for (index, step) in focused.into_iter().take(3) {
-                        entries.push(SidebarEntry {
-                            label: format!(
+                        entries.push(
+                            SidebarEntry::new(format!(
                                 "Step {} · {}",
                                 index + 1,
                                 match step.status {
@@ -283,53 +276,50 @@ impl PlanView {
                                     StepStatus::Blocked => "Blocked",
                                     _ => "Next",
                                 }
-                            ),
-                            detail: step_preview(&step.description),
-                            tone: match step.status {
+                            ))
+                            .with_detail(step_preview(&step.description))
+                            .with_tone(match step.status {
                                 StepStatus::Blocked => SidebarTone::Warning,
                                 StepStatus::InProgress => SidebarTone::Accent,
                                 _ => SidebarTone::Muted,
-                            },
-                            action: action(&plan.plan_id),
-                        });
+                            })
+                            .with_action(action(&plan.plan_id)),
+                        );
                     }
                     if count > 3 {
-                        entries.push(SidebarEntry {
-                            label: format!("{} more active steps", count - 3),
-                            detail: String::new(),
-                            tone: SidebarTone::Muted,
-                            action: action(&plan.plan_id),
-                        });
+                        entries.push(
+                            SidebarEntry::new(format!("{} more active steps", count - 3))
+                                .with_tone(SidebarTone::Muted)
+                                .with_action(action(&plan.plan_id)),
+                        );
                     }
                     if doc.plans.len() > 1 {
-                        entries.push(SidebarEntry {
-                            label: format!("{} plans · choose", doc.plans.len()),
-                            detail: String::new(),
-                            tone: SidebarTone::Muted,
-                            action: action(""),
-                        });
+                        entries.push(
+                            SidebarEntry::new(format!("{} plans · choose", doc.plans.len()))
+                                .with_tone(SidebarTone::Muted)
+                                .with_action(action("")),
+                        );
                     }
                 } else {
-                    entries.push(SidebarEntry {
-                        label: if doc.plans.is_empty() {
+                    entries.push(
+                        SidebarEntry::new(if doc.plans.is_empty() {
                             "No plan yet".into()
                         } else {
                             format!("{} plans · choose one to follow", doc.plans.len())
-                        },
-                        detail: String::new(),
-                        tone: SidebarTone::Muted,
-                        action: action(""),
-                    });
+                        })
+                        .with_tone(SidebarTone::Muted)
+                        .with_action(action("")),
+                    );
                 }
             }
-            Err(_) => entries.push(SidebarEntry {
-                label: "Plan storage unavailable".into(),
-                detail: "Open /plans for details".into(),
-                tone: SidebarTone::Warning,
-                action: action(""),
-            }),
+            Err(_) => entries.push(
+                SidebarEntry::new("Plan storage unavailable")
+                    .with_detail("Open /plans for details")
+                    .with_tone(SidebarTone::Warning)
+                    .with_action(action("")),
+            ),
         }
-        section.content = SidebarContent::Entries(entries);
+        section.content = SidebarContent::Entries { entries };
         section
     }
 }

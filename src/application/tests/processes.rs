@@ -1,7 +1,7 @@
 use super::*;
-use roomkit_cli_roomkit::{CommandHandler, CommandResult};
 use roomkit_tools_process::{ProcessStartInput, ProcessState};
 use roomkit_tui::protocol::{BackgroundStatus, PanelSpec};
+use roomkit_tui_engine::{CommandHandler, CommandResult};
 use tokio_util::sync::CancellationToken;
 
 async fn panel(app: &Application, args: &str) -> std::result::Result<PanelSpec, String> {
@@ -122,7 +122,7 @@ async fn monitor_observes_actual_lifecycle_filters_owners_and_rejects_old_action
         .iter()
         .find(|s| s.title == "Processes")
         .unwrap();
-    let roomkit_tui::protocol::SidebarContent::Entries(entries) = &processes.content else {
+    let roomkit_tui::protocol::SidebarContent::Entries { entries } = &processes.content else {
         panic!("Expected process entries");
     };
     assert_eq!(entries.len(), 1);

@@ -11,9 +11,9 @@ use std::{
 };
 
 use roomkit::{FrameworkEvent, HookTrigger, RoomKit};
-use roomkit_cli_roomkit::{CommandResult, Diagnostic, SessionConfig};
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::{Choice, Event, PanelSpec};
+use roomkit_tui_engine::{CommandResult, Diagnostic, SessionConfig};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
@@ -245,11 +245,11 @@ impl Diagnostics {
             .unwrap_or_else(|_| (String::new(), true));
         CommandResult::Events(vec![Event::Panel {
             conversation: current.room.as_str().into(),
-            panel: PanelSpec {
-                id: uuid::Uuid::new_v4().to_string(),
-                command: "diagnostics".into(),
-                title: "Diagnostics · current application".into(),
-                body: format!(
+            panel: PanelSpec::new(
+                uuid::Uuid::new_v4().to_string(),
+                "diagnostics",
+                "Diagnostics · current application",
+                format!(
                     "Log: {}\nDebug: {}\nStorage: {}\n\nErrors and tool outcomes are recorded automatically. Use --debug for additional framework events.\nNo prompts, credentials, tool arguments/results or raw provider errors are recorded.\nTwo files, at most 1 MiB each. Recent records, newest first:\n\n{recent}",
                     self.path.display(),
                     self.debug,
@@ -259,13 +259,11 @@ impl Diagnostics {
                         "available"
                     }
                 ),
-                actions: vec![Choice {
-                    value: "refresh".into(),
-                    label: "Refresh".into(),
-                    description: "Reload recent diagnostics".into(),
-                }],
-                dismiss: "dismiss".into(),
-            },
+            )
+            .with_actions(vec![
+                Choice::new("refresh", "Refresh").with_description("Reload recent diagnostics"),
+            ])
+            .with_dismiss("dismiss"),
         }])
     }
 }

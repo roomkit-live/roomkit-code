@@ -1,6 +1,6 @@
 use super::*;
-use roomkit_cli_roomkit::CommandResult;
 use roomkit_tui::protocol::PanelSpec;
+use roomkit_tui_engine::CommandResult;
 use sha2::Digest;
 use std::path::Path;
 
@@ -328,7 +328,7 @@ async fn prompt_refusal_is_visible_and_does_not_start_a_model_turn() {
     let mut notice = false;
     loop {
         match event(&client).await {
-            Event::Notice { text } => notice |= text.contains("Provide an issue identifier"),
+            Event::Notice { text, .. } => notice |= text.contains("Provide an issue identifier"),
             Event::OperationFinished { outcome, .. } => {
                 assert_eq!(outcome, RunOutcome::Failed);
                 break;
@@ -398,7 +398,7 @@ async fn interrupted_tool_hook_is_cleaned_up_and_emits_one_cancelled_turn_end() 
     );
     let run = loop {
         if let Event::RunStarted { run, .. } = event(&client).await
-            && !run.0.starts_with("prepare:")
+            && !run.as_str().starts_with("prepare:")
         {
             break run;
         }
@@ -618,7 +618,7 @@ async fn changing_views_does_not_close_sessions_or_replay_their_start() {
     );
     let other = loop {
         if let Event::Snapshot(snapshot) = event(&client).await {
-            break snapshot.conversation.0;
+            break snapshot.conversation.into_inner();
         }
     };
     assert_ne!(other, "main");
@@ -633,7 +633,7 @@ async fn changing_views_does_not_close_sessions_or_replay_their_start() {
     );
     loop {
         if let Event::Snapshot(snapshot) = event(&client).await {
-            assert_eq!(snapshot.conversation.0, "main");
+            assert_eq!(snapshot.conversation.as_str(), "main");
             break;
         }
     }

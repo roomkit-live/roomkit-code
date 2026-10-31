@@ -23,7 +23,7 @@ also exclude local planning and credentials. Do not force-add ignored files.
 
 Until dependencies are public, set a repository Actions secret named
 `ROOMKIT_DEPS_READ_CI`. Use a fine-grained GitHub token with **Contents: read** on
-`roomkit-live/roomkit-rs`, `roomkit-live/roomkit-cli` and
+`roomkit-live/roomkit-rs`, `roomkit-live/roomkit-tui` and
 `roomkit-live/roomkit-tools` and `roomkit-live/roomkit-auth`. No write permission is needed. An organization may
 require approval for its use. Add it using the hidden interactive prompt:
 

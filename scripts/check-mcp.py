@@ -18,6 +18,8 @@ metadata = json.loads(subprocess.check_output(
     ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True
 ))
 binary = Path(metadata["target_directory"]) / "debug" / "roomkit-code"
+# roomkit-tui ignores answers until a card has been shown for 500 ms.
+ARMING = 0.6
 requests = []
 active_tool = "mcp__demo__read"
 
@@ -125,6 +127,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
             pass
         command("Inspect the fixture", b"Allow mcp__demo__read?")
         assert not trace.exists()
+        time.sleep(ARMING)
         accepted = send(b"\x19")  # Ctrl+Y
         wait_for(b"MCP fixture complete.", accepted)
         wait_for(b"\x1b]7501;state=done", accepted)
@@ -173,6 +176,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
         active_tool = "mcp__remote__read"
         command("Inspect the HTTP fixture", b"Allow mcp__remote__read?")
         assert not http_trace.exists()
+        time.sleep(ARMING)
         accepted = send(b"\x19")
         wait_for(b"\x1b]7501;state=done", accepted)
         assert http_trace.read_text() == "read\n"

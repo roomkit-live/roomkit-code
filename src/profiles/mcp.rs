@@ -9,8 +9,8 @@ use super::*;
 pub(super) use config::Servers;
 pub(crate) use config::valid_id;
 use roomkit_ai::Toolset;
-use roomkit_cli_roomkit::CommandResult;
 use roomkit_tui::protocol::{Command, Request};
+use roomkit_tui_engine::CommandResult;
 pub(super) use runtime::Runtime;
 pub(super) use ui::Pending;
 
@@ -225,31 +225,23 @@ pub(super) async fn sidebar(
             .iter()
             .filter(|name| available.iter().any(|tool| &tool.name == *name))
             .count();
-        entries.push(SidebarEntry {
-            label: format!("{} {id}", if live.is_some() { "●" } else { "○" }),
-            detail: format!(
-                "{} · {enabled} active tools",
-                connection.map_or("Disconnected", |c| c.status())
-            ),
-            tone: if live.is_some() {
-                SidebarTone::Success
-            } else {
-                SidebarTone::Warning
-            },
-            action: super::sidebar::action("mcp", format!("show:{id}")),
-        });
+        entries.push(
+            SidebarEntry::new(format!("{} {id}", if live.is_some() { "●" } else { "○" }))
+                .with_detail(format!(
+                    "{} · {enabled} active tools",
+                    connection.map_or("Disconnected", |c| c.status())
+                ))
+                .with_tone(if live.is_some() {
+                    SidebarTone::Success
+                } else {
+                    SidebarTone::Warning
+                })
+                .with_action(super::sidebar::action("mcp", format!("show:{id}"))),
+        );
     }
     if entries.is_empty() {
-        entries.push(SidebarEntry {
-            label: "No servers configured".into(),
-            detail: String::new(),
-            tone: SidebarTone::Muted,
-            action: None,
-        });
+        entries.push(SidebarEntry::new("No servers configured").with_tone(SidebarTone::Muted));
     }
-    SidebarSection {
-        title: "MCP servers".into(),
-        action: super::sidebar::action("mcp", ""),
-        content: SidebarContent::Entries(entries),
-    }
+    SidebarSection::new("MCP servers", SidebarContent::Entries { entries })
+        .with_action(super::sidebar::action("mcp", ""))
 }

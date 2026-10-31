@@ -32,31 +32,13 @@ fn setup() -> (tempfile::TempDir, Resume, Session) {
     .unwrap();
     let settings = Settings::load(&cli).unwrap();
     let mut session = Session::default();
-    session.apply(Event::Snapshot(Snapshot {
-        local_actor: None,
-        conversation: "first".into(),
-        title: "Project title".into(),
-        actors: vec![Actor {
-            id: "coder".into(),
-            name: "Coder".into(),
-        }],
-        selected_agent: "coder".into(),
-        model: None,
-        context: None,
-        usage: None,
-        items: vec![],
-        active_run: None,
-        permissions: vec![],
-        can_interrupt: true,
-        input_actions: vec![],
-        can_attach_images: false,
-        commands: vec![CommandSpec {
-            name: "mode".into(),
-            description: "Policy".into(),
-            arguments: String::new(),
-            choices: vec![],
-        }],
-        mode: Some(crate::permissions::Policy::new(crate::permissions::Mode::Ask).state("first")),
+    session.apply(Event::Snapshot({
+        let mut snapshot = Snapshot::new("first", "Project title", Actor::new("coder", "Coder"));
+        snapshot.can_interrupt = true;
+        snapshot.commands = vec![CommandSpec::new("mode", "Policy")];
+        snapshot.mode =
+            Some(crate::permissions::Policy::new(crate::permissions::Mode::Ask).state("first"));
+        snapshot
     }));
     (root, Resume::new(&settings), session)
 }
@@ -101,7 +83,7 @@ fn resume_follows_the_displayed_session_and_confirmed_mode_with_explicit_options
         resume.report(session.observation().unwrap()).state,
         State::Working
     );
-    let mut mode = session.snapshot.as_ref().unwrap().mode.clone().unwrap();
+    let mut mode = session.snapshot().unwrap().mode.clone().unwrap();
     mode.selected = "yolo".into();
     session.apply(Event::ModeChanged {
         conversation: "foreign".into(),
@@ -136,19 +118,12 @@ fn resume_follows_the_displayed_session_and_confirmed_mode_with_explicit_options
     });
     session.apply(Event::PermissionRequested {
         conversation: "first".into(),
-        permission: Permission {
-            summary: None,
-            id: "approval".into(),
-            actor: "coder".into(),
-            run: "run".into(),
-            title: "Change?".into(),
-            detail: "Private".into(),
-        },
+        permission: Permission::new("approval", "coder", "run", "Change?", "Private"),
     });
     let blocked = resume.report(session.observation().unwrap());
     assert_eq!(blocked.state, State::Blocked);
     assert!(!format!("{blocked:?}").contains("Private"));
-    let mut restored = session.snapshot.clone().unwrap();
+    let mut restored = session.snapshot().cloned().unwrap();
     restored.conversation = "second".into();
     restored.active_run = None;
     restored.permissions.clear();

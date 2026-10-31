@@ -1,7 +1,7 @@
 //! Account menus are host behavior; OAuth wire tests live in roomkit-auth.
 use super::*;
 use crate::profiles::model::{Authentication, Provider};
-use roomkit_cli_roomkit::CommandResult;
+use roomkit_tui_engine::CommandResult;
 
 #[tokio::test]
 async fn opening_account_menus_does_not_start_login_or_change_existing_connections() {

@@ -126,8 +126,8 @@ fn release_versions_are_numeric_and_reject_paths_and_prereleases() {
 
 #[tokio::test]
 async fn rollback_requires_a_fresh_confirmation_scoped_to_the_view() {
-    use roomkit_cli_roomkit::{CommandResult, SessionConfig};
     use roomkit_tui::protocol::Event;
+    use roomkit_tui_engine::{CommandResult, SessionConfig};
     let temp = tempfile::tempdir().unwrap();
     let installation = Installation {
         bin: temp.path().join("bin"),

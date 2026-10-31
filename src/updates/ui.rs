@@ -1,19 +1,18 @@
 use super::*;
-use roomkit_cli_roomkit::{CommandResult, SessionConfig};
 use roomkit_tui::protocol::{
     Choice, Event, PanelSpec, SidebarAction, SidebarContent, SidebarEntry, SidebarSection,
     SidebarTone,
 };
+use roomkit_tui_engine::{CommandResult, SessionConfig};
 
 fn panel(body: String) -> PanelSpec {
-    PanelSpec {
-        id: uuid::Uuid::new_v4().to_string(),
-        command: "update".into(),
-        title: "RoomKit Code · updates".into(),
+    PanelSpec::new(
+        uuid::Uuid::new_v4().to_string(),
+        "update",
+        "RoomKit Code · updates",
         body,
-        actions: vec![],
-        dismiss: "dismiss".into(),
-    }
+    )
+    .with_dismiss("dismiss")
 }
 impl Updates {
     pub fn events(&self, view: &SessionConfig) -> Vec<Event> {
@@ -32,19 +31,16 @@ impl Updates {
         events
     }
     pub fn sidebar(&self) -> SidebarSection {
-        SidebarSection {
-            title: "Application".into(),
-            action: None,
-            content: SidebarContent::Entries(vec![SidebarEntry {
-                label: self.label(),
-                detail: String::new(),
-                tone: SidebarTone::Muted,
-                action: Some(SidebarAction {
-                    command: "update".into(),
-                    arguments: String::new(),
-                }),
-            }]),
-        }
+        SidebarSection::new(
+            "Application",
+            SidebarContent::Entries {
+                entries: vec![
+                    SidebarEntry::new(self.label())
+                        .with_tone(SidebarTone::Muted)
+                        .with_action(SidebarAction::new("update", "")),
+                ],
+            },
+        )
     }
     fn finish(&self, room: &str, mut panel: PanelSpec, result: Result<Option<Action>>) {
         match result {
@@ -54,12 +50,11 @@ impl Updates {
                     Action::Install(r) => format!("Install {}", r.tag_name),
                     Action::Rollback(v) => format!("Restore v{v}"),
                 };
-                panel.actions = vec![Choice {
-                    value: format!("confirm {token}"),
-                    label,
-                    description: "Takes effect on next launch; current conversation continues"
-                        .into(),
-                }];
+                panel.actions = vec![
+                    Choice::new(format!("confirm {token}"), label).with_description(
+                        "Takes effect on next launch; current conversation continues",
+                    ),
+                ];
                 self.state().pending = Some((room.into(), token, action));
             }
             Ok(None) => {}

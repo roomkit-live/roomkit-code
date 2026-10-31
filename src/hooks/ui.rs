@@ -1,9 +1,9 @@
 use super::*;
-use roomkit_cli_roomkit::CommandResult;
 use roomkit_tui::protocol::{
     Choice, Event, PanelSpec, SidebarAction, SidebarContent, SidebarEntry, SidebarSection,
     SidebarTone,
 };
+use roomkit_tui_engine::CommandResult;
 
 #[derive(Clone)]
 pub(super) struct Panel {
@@ -15,11 +15,7 @@ pub(super) struct Panel {
 }
 
 fn action(value: String, label: impl Into<String>, description: impl Into<String>) -> Choice {
-    Choice {
-        value,
-        label: label.into(),
-        description: description.into(),
-    }
+    Choice::new(value, label).with_description(description)
 }
 
 impl Hooks {
@@ -146,33 +142,33 @@ impl Hooks {
                     .count()
             )
         };
-        Some(SidebarSection {
-            title: "Hooks".into(),
-            action: Some(SidebarAction {
-                command: "hooks".into(),
-                arguments: String::new(),
-            }),
-            content: SidebarContent::Entries(vec![SidebarEntry {
-                label: if active > 0 {
-                    "Running automation"
-                } else {
-                    "Command hooks"
-                }
-                .into(),
-                detail: bounded(&detail, 512),
-                tone: if !state.catalogue.problems.is_empty()
-                    || recent.is_some_and(|r| r.status == "failed" || r.status == "blocked")
-                {
-                    SidebarTone::Warning
-                } else {
-                    SidebarTone::Muted
+        Some(
+            SidebarSection::new(
+                "Hooks",
+                SidebarContent::Entries {
+                    entries: vec![
+                        SidebarEntry::new(if active > 0 {
+                            "Running automation"
+                        } else {
+                            "Command hooks"
+                        })
+                        .with_detail(bounded(&detail, 512))
+                        .with_tone(
+                            if !state.catalogue.problems.is_empty()
+                                || recent
+                                    .is_some_and(|r| r.status == "failed" || r.status == "blocked")
+                            {
+                                SidebarTone::Warning
+                            } else {
+                                SidebarTone::Muted
+                            },
+                        )
+                        .with_action(SidebarAction::new("hooks", "")),
+                    ],
                 },
-                action: Some(SidebarAction {
-                    command: "hooks".into(),
-                    arguments: String::new(),
-                }),
-            }]),
-        })
+            )
+            .with_action(SidebarAction::new("hooks", "")),
+        )
     }
 }
 
@@ -302,12 +298,7 @@ fn specification(state: &State, panel: &Panel) -> Result<PanelSpec, String> {
             actions,
         )
     };
-    Ok(PanelSpec {
-        id: panel.id.clone(),
-        command: "hooks".into(),
-        title,
-        body,
-        actions,
-        dismiss: format!("{prefix}:dismiss"),
-    })
+    Ok(PanelSpec::new(panel.id.clone(), "hooks", title, body)
+        .with_actions(actions)
+        .with_dismiss(format!("{prefix}:dismiss")))
 }

@@ -1,5 +1,5 @@
 use super::*;
-use roomkit_cli_roomkit::{CommandHandler, CommandResult};
+use roomkit_tui_engine::{CommandHandler, CommandResult};
 
 fn handler(app: &Application, settings: &Settings) -> crate::sessions::Sessions {
     crate::sessions::Sessions {
@@ -12,15 +12,15 @@ fn handler(app: &Application, settings: &Settings) -> crate::sessions::Sessions 
 }
 
 fn command(app: &Application, name: &str, arguments: &str) -> Request {
-    Request {
-        id: RequestId(1),
-        operation: format!("{name}-{arguments}").as_str().into(),
-        conversation: app.view.room.as_str().into(),
-        command: Command::Invoke {
+    Request::new(
+        RequestId::new(1),
+        format!("{name}-{arguments}").as_str(),
+        app.view.room.as_str(),
+        Command::Invoke {
             name: name.into(),
             arguments: arguments.into(),
         },
-    }
+    )
 }
 
 #[tokio::test]
@@ -44,11 +44,11 @@ async fn independent_instances_share_a_project_without_sharing_a_conversation() 
         turn_operation(&second, "two")
     );
     assert_eq!(
-        one.snapshot.unwrap().conversation.0,
+        one.snapshot().unwrap().conversation.as_str(),
         first.view.room.as_str()
     );
     assert_eq!(
-        two.snapshot.unwrap().conversation.0,
+        two.snapshot().unwrap().conversation.as_str(),
         second.view.room.as_str()
     );
     let command_handler = handler(&second, &settings);
@@ -60,7 +60,7 @@ async fn independent_instances_share_a_project_without_sharing_a_conversation() 
         .await
         .err()
         .unwrap();
-    assert!(error.contains("open in another"), "{error}");
+    assert!(error.message.contains("open in another"), "{error}");
     let CommandResult::Events(events) = command_handler
         .handle(command(&second, "resume", ""), second.view.clone())
         .await

@@ -1,7 +1,7 @@
 //! Confirmed profile removal without deleting room history or shared accounts.
 
 use super::*;
-use roomkit_cli_roomkit::CommandResult;
+use roomkit_tui_engine::CommandResult;
 use ui::{choice, choices};
 
 pub(super) struct Pending {

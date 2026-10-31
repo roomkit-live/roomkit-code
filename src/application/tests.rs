@@ -170,24 +170,24 @@ async fn turn_operation(app: &Application, operation: &str) -> Session {
                         ..
                     } = &event
                     {
-                        assert_eq!(id.0, operation);
+                        assert_eq!(id.as_str(), operation);
                         assert_eq!(*outcome, RunOutcome::Completed);
                         true
                     } else {
                         false
                     };
                     session.apply(event);
-                    if !submitted && let Some(snapshot) = &session.snapshot {
+                    if !submitted && let Some(snapshot) = session.snapshot() {
                         client
-                            .try_send(Request {
-                                id: RequestId(1),
-                                operation: operation.into(),
-                                conversation: snapshot.conversation.clone(),
-                                command: Command::Submit {
+                            .try_send(Request::new(
+                                RequestId::new(1),
+                                operation,
+                                snapshot.conversation.clone(),
+                                Command::Submit {
                                     agent: snapshot.selected_agent.clone(),
                                     text: "Inspect the project.".into(),
                                 },
-                            })
+                            ))
                             .unwrap();
                         submitted = true;
                     }
@@ -228,7 +228,7 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
     .await;
     let settings = settings(root.path(), state.path(), &mock.base_url);
     let app = Application::open(&settings, String::new()).await.unwrap();
-    let session = turn(&app).await.snapshot.unwrap();
+    let session = turn(&app).await.snapshot().cloned().unwrap();
     assert_eq!(
         session
             .items
@@ -382,7 +382,7 @@ async fn resumed_history_cannot_replace_the_current_wire_inventory_or_host_catal
     );
     assert!(choices.iter().all(|choice| !choice.description.is_empty()));
     assert!(
-        matches!(command_event(&client, "main", "tools", "shell", 21).await, Event::Notice { text } if text.contains("no tool executed"))
+        matches!(command_event(&client, "main", "tools", "shell", 21).await, Event::Notice { text, .. } if text.contains("no tool executed"))
     );
     assert_eq!(
         current.requests.lock().unwrap().len(),
@@ -415,7 +415,7 @@ async fn unregistered_tools_and_outside_reads_have_no_effect_or_disclosure() {
     )
     .await
     .unwrap();
-    let session = turn(&app).await.snapshot.unwrap();
+    let session = turn(&app).await.snapshot().cloned().unwrap();
     assert!(!root.join("marker").exists());
     assert!(session.items.iter().all(
         |item| !matches!(item, Item::Tool { call, .. } if call.state == ToolState::Succeeded)
@@ -448,12 +448,12 @@ async fn event(client: &roomkit_tui::Client) -> Event {
 
 fn command(client: &roomkit_tui::Client, id: u64, room: &str, command: Command) {
     client
-        .try_send(Request {
-            id: RequestId(id),
-            operation: format!("operation-{id}").as_str().into(),
-            conversation: room.into(),
+        .try_send(Request::new(
+            RequestId::new(id),
+            format!("operation-{id}").as_str(),
+            room,
             command,
-        })
+        ))
         .unwrap();
 }
 
@@ -760,7 +760,7 @@ async fn histories_are_scoped_to_project_and_session_and_storage_has_one_owner()
     settings.session = Some("main".into());
     let app = Application::open(&settings, String::new()).await.unwrap();
     assert!(app.session().snapshot().await.unwrap().items.is_empty());
-    use roomkit_cli_roomkit::{CommandHandler, CommandResult};
+    use roomkit_tui_engine::{CommandHandler, CommandResult};
     let handler = crate::sessions::Sessions {
         kit: app.kit.clone(),
         workspace: settings.workspace.clone(),
@@ -768,15 +768,15 @@ async fn histories_are_scoped_to_project_and_session_and_storage_has_one_owner()
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
     };
-    let request = Request {
-        id: RequestId(1),
-        operation: "project-catalogue".into(),
-        conversation: "main".into(),
-        command: Command::Invoke {
+    let request = Request::new(
+        RequestId::new(1),
+        "project-catalogue",
+        "main",
+        Command::Invoke {
             name: "resume".into(),
             arguments: String::new(),
         },
-    };
+    );
     let CommandResult::Events(events) = handler
         .handle(request.clone(), app.view.clone())
         .await
@@ -788,12 +788,10 @@ async fn histories_are_scoped_to_project_and_session_and_storage_has_one_owner()
         matches!(&events[0], Event::Choices { choices, .. } if choices.is_empty()),
         "Other projects must not appear in the selector"
     );
-    let request = Request {
-        command: Command::Invoke {
-            name: "resume".into(),
-            arguments: "separate".into(),
-        },
-        ..request
+    let mut request = request;
+    request.command = Command::Invoke {
+        name: "resume".into(),
+        arguments: "separate".into(),
     };
     assert!(handler.handle(request, app.view.clone()).await.is_err());
     app.close().await.unwrap();
@@ -807,15 +805,15 @@ async fn command_event(
     id: u64,
 ) -> Event {
     client
-        .try_send(Request {
-            id: RequestId(id),
-            operation: format!("command-{id}").as_str().into(),
-            conversation: conversation.into(),
-            command: Command::Invoke {
+        .try_send(Request::new(
+            RequestId::new(id),
+            format!("command-{id}").as_str(),
+            conversation,
+            Command::Invoke {
                 name: name.into(),
                 arguments: arguments.into(),
             },
-        })
+        ))
         .unwrap();
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -848,7 +846,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
     settings.session = None;
     let app = Application::open(&settings, String::new()).await.unwrap();
     let first = app.view.room.to_string();
-    let saved = turn(&app).await.snapshot.unwrap();
+    let saved = turn(&app).await.snapshot().cloned().unwrap();
     let handler = crate::sessions::Sessions {
         kit: app.kit.clone(),
         workspace: settings.workspace.clone(),
@@ -872,9 +870,9 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
     let Event::Snapshot(fresh) = command_event(&client, &first, "new", "", 1).await else {
         panic!("Expected a new session");
     };
-    assert_ne!(fresh.conversation.0, first);
+    assert_ne!(fresh.conversation.as_str(), first);
     assert!(fresh.items.is_empty());
-    let second = fresh.conversation.0;
+    let second = fresh.conversation.into_inner();
     let Event::Choices { choices, .. } = command_event(&client, &second, "resume", "", 2).await
     else {
         panic!("Expected the selector");
@@ -920,7 +918,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
     let Event::Snapshot(retried) = command_event(&client, &first, "new", "", 1).await else {
         panic!("Expected retry destination");
     };
-    assert_eq!(retried.conversation.0, second);
+    assert_eq!(retried.conversation.as_str(), second);
     assert_eq!(
         app.kit
             .store()
@@ -953,7 +951,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
     let app = Application::open(&settings, String::new()).await.unwrap();
     assert_eq!(app.view.room.as_str(), first);
     assert_eq!(app.session().snapshot().await.unwrap().items, saved.items);
-    use roomkit_cli_roomkit::{CommandHandler, CommandResult};
+    use roomkit_tui_engine::{CommandHandler, CommandResult};
     let handler = crate::sessions::Sessions {
         kit: app.kit.clone(),
         workspace: settings.workspace.clone(),
@@ -961,15 +959,15 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
     };
-    let request = Request {
-        id: RequestId(1),
-        operation: "command-1".into(),
-        conversation: first.as_str().into(),
-        command: Command::Invoke {
+    let request = Request::new(
+        RequestId::new(1),
+        "command-1",
+        first.as_str(),
+        Command::Invoke {
             name: "new".into(),
             arguments: String::new(),
         },
-    };
+    );
     let CommandResult::Switch(destination) =
         handler.handle(request, app.view.clone()).await.unwrap()
     else {
@@ -998,9 +996,9 @@ async fn outline_and_targeted_read_report_context_separately_from_consumption() 
     settings.context_window = Some(1024);
     let app = Application::open(&settings, String::new()).await.unwrap();
     let session = turn(&app).await;
-    assert_eq!(session.context.as_ref().unwrap().tokens, 440);
-    assert_eq!(session.context.as_ref().unwrap().capacity, Some(1024));
-    let usage = session.usage.as_ref().unwrap();
+    assert_eq!(session.context().unwrap().tokens, 440);
+    assert_eq!(session.context().unwrap().capacity, Some(1024));
+    let usage = session.usage().unwrap();
     assert_eq!(
         (
             usage.input_tokens,
@@ -1040,8 +1038,8 @@ async fn outline_and_targeted_read_report_context_separately_from_consumption() 
     drop(app);
     let resumed = Application::open(&settings, String::new()).await.unwrap();
     let restored = resumed.session().snapshot().await.unwrap();
-    assert_eq!(restored.context, session.context);
-    assert_eq!(restored.usage, session.usage);
+    assert_eq!(restored.context.as_ref(), session.context());
+    assert_eq!(restored.usage.as_ref(), session.usage());
     assert_eq!(mock.requests.lock().unwrap().len(), 3);
     resumed.kit.close().await.unwrap();
 }
@@ -1062,8 +1060,8 @@ async fn missing_last_usage_is_unknown_and_previous_round_totals_are_partial() {
     let settings = settings(project.path(), state.path(), &mock.base_url);
     let app = Application::open(&settings, String::new()).await.unwrap();
     let session = turn(&app).await;
-    assert!(session.context.is_none());
-    let usage = session.usage.unwrap();
+    assert!(session.context().is_none());
+    let usage = session.usage().cloned().unwrap();
     assert_eq!(usage.input_tokens, Some(100));
     assert!(!usage.complete);
     app.close().await.unwrap();
@@ -1144,11 +1142,12 @@ async fn provider_timeouts_and_refusals_have_actionable_private_diagnostics() {
                 break;
             }
         }
-        assert!(session.notice.contains(expected), "{}", session.notice);
+        assert!(session.notice().contains(expected), "{}", session.notice());
         assert!(
-            !session.notice.contains("secret-key") && !session.notice.contains("private server")
+            !session.notice().contains("secret-key")
+                && !session.notice().contains("private server")
         );
-        assert!(session.context.is_none());
+        assert!(session.context().is_none());
         // ON_ERROR runs asynchronously; engine close drains its observers.
         drop(client);
         task.await.unwrap().unwrap();
@@ -1171,7 +1170,7 @@ async fn provider_timeouts_and_refusals_have_actionable_private_diagnostics() {
 #[tokio::test]
 async fn unused_automatic_drafts_are_reused_without_adopting_named_sessions() {
     use roomkit::ConversationStore;
-    use roomkit_cli_roomkit::{CommandHandler, CommandResult};
+    use roomkit_tui_engine::{CommandHandler, CommandResult};
     let project = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let mock = Mock::start(vec![]).await;
@@ -1201,15 +1200,15 @@ async fn unused_automatic_drafts_are_reused_without_adopting_named_sessions() {
             policy: app.policy.clone(),
             profiles: app.profiles.clone(),
         };
-        let request = Request {
-            id: RequestId(1),
-            operation: "empty-new".into(),
-            conversation: draft.as_str().into(),
-            command: Command::Invoke {
+        let request = Request::new(
+            RequestId::new(1),
+            "empty-new",
+            draft.as_str(),
+            Command::Invoke {
                 name: "new".into(),
                 arguments: String::new(),
             },
-        };
+        );
         let CommandResult::Switch(destination) = handler
             .handle(request.clone(), app.view.clone())
             .await
@@ -1255,7 +1254,7 @@ async fn unused_automatic_drafts_are_reused_without_adopting_named_sessions() {
 
 #[tokio::test]
 async fn resume_skips_legacy_empty_sessions_before_applying_the_catalogue_limit() {
-    use roomkit_cli_roomkit::{CommandHandler, CommandResult};
+    use roomkit_tui_engine::{CommandHandler, CommandResult};
     let project = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let mock = Mock::start(vec![]).await;
@@ -1283,15 +1282,15 @@ async fn resume_skips_legacy_empty_sessions_before_applying_the_catalogue_limit(
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
     };
-    let request = Request {
-        id: RequestId(1),
-        operation: "list-sessions".into(),
-        conversation: current.room.as_str().into(),
-        command: Command::Invoke {
+    let request = Request::new(
+        RequestId::new(1),
+        "list-sessions",
+        current.room.as_str(),
+        Command::Invoke {
             name: "resume".into(),
             arguments: String::new(),
         },
-    };
+    );
     let CommandResult::Events(events) = handler.handle(request, current).await.unwrap() else {
         panic!("Expected session catalogue");
     };
@@ -1322,18 +1321,18 @@ fn saved_provider_id(settings: &Settings) -> String {
 async fn profile_command(
     app: &Application,
     command: Command,
-) -> Result<roomkit_cli_roomkit::CommandResult> {
+) -> Result<roomkit_tui_engine::CommandResult> {
     Ok(app
         .profiles
         .handle(
             &app.kit,
             app.channel.id(),
-            Request {
-                id: RequestId(99),
-                operation: "profile-operation".into(),
-                conversation: app.view.room.as_str().into(),
+            Request::new(
+                RequestId::new(99),
+                "profile-operation",
+                app.view.room.as_str(),
                 command,
-            },
+            ),
             app.view.clone(),
         )
         .await?)
@@ -1345,8 +1344,8 @@ async fn edit_profile(
     action: &str,
     changes: &[(&str, &str)],
 ) {
-    use roomkit_cli_roomkit::CommandResult;
     use roomkit_tui::protocol::FormValues;
+    use roomkit_tui_engine::CommandResult;
     let CommandResult::Events(events) = profile_command(
         app,
         Command::Invoke {
@@ -1365,14 +1364,13 @@ async fn edit_profile(
             _ => None,
         })
         .unwrap();
-    let mut values = FormValues(
-        form.fields
-            .iter()
-            .map(|field| (field.name.clone(), field.value.clone()))
-            .collect(),
-    );
+    let mut values = form
+        .fields
+        .iter()
+        .map(|field| (field.name.clone(), field.value.clone()))
+        .collect::<FormValues>();
     for (name, value) in changes {
-        values.0.insert((*name).into(), (*value).into());
+        values.insert(*name, *value);
     }
     let CommandResult::Switch(view) = profile_command(
         app,
@@ -1391,7 +1389,7 @@ async fn edit_profile(
 
 #[tokio::test]
 async fn profiles_select_independent_providers_tools_and_auth_in_one_durable_conversation() {
-    use roomkit_cli_roomkit::CommandResult;
+    use roomkit_tui_engine::CommandResult;
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let first = Mock::with_answer(vec![], "First agent answer").await;
@@ -1459,19 +1457,19 @@ async fn profiles_select_independent_providers_tools_and_auth_in_one_durable_con
         .map(|t| t["function"]["name"].as_str().unwrap())
         .collect();
     assert_eq!(tools, BTreeSet::from(["read", "code_outline"]));
-    let snapshot = second_session.snapshot.unwrap();
+    let snapshot = second_session.snapshot().cloned().unwrap();
     assert!(
         snapshot
             .actors
             .iter()
-            .any(|a| a.id.0 == "reviewer" && a.name == "Reviewer")
+            .any(|a| a.id.as_str() == "reviewer" && a.name == "Reviewer")
     );
     for (author, answer) in [
         ("code", "First agent answer"),
         ("reviewer", "Second agent answer"),
     ] {
         assert!(snapshot.items.iter().any(
-            |item| matches!(item, Item::Message(m) if m.actor.0 == author && m.text == answer)
+            |item| matches!(item, Item::Message(m) if m.actor.as_str() == author && m.text == answer)
         ));
     }
     assert!(!format!("{snapshot:?}").contains("fixture-private-key"));
@@ -1531,7 +1529,7 @@ async fn profiles_select_independent_providers_tools_and_auth_in_one_durable_con
 
 #[tokio::test]
 async fn unconfigured_start_can_create_profiles_without_a_dummy_model_or_endpoint() {
-    use roomkit_cli_roomkit::CommandResult;
+    use roomkit_tui_engine::CommandResult;
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let provider = Mock::start(vec![]).await;
@@ -1578,8 +1576,8 @@ async fn unconfigured_start_can_create_profiles_without_a_dummy_model_or_endpoin
 
 #[tokio::test]
 async fn stale_or_conflicting_forms_cannot_replace_a_working_agent() {
-    use roomkit_cli_roomkit::CommandResult;
     use roomkit_tui::protocol::FormValues;
+    use roomkit_tui_engine::CommandResult;
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let provider = Mock::start(vec![]).await;
@@ -1606,12 +1604,11 @@ async fn stale_or_conflicting_forms_cannot_replace_a_working_agent() {
     let old = extract(first);
     let form = extract(second);
     assert_ne!(old.id, form.id);
-    let mut values = FormValues(
-        form.fields
-            .iter()
-            .map(|f| (f.name.clone(), f.value.clone()))
-            .collect(),
-    );
+    let mut values = form
+        .fields
+        .iter()
+        .map(|f| (f.name.clone(), f.value.clone()))
+        .collect::<FormValues>();
     assert!(
         profile_command(
             &app,
@@ -1624,7 +1621,7 @@ async fn stale_or_conflicting_forms_cannot_replace_a_working_agent() {
         .await
         .is_err()
     );
-    values.0.insert("model".into(), "should-not-be-used".into());
+    values.insert("model", "should-not-be-used");
     let submit = Command::SubmitForm {
         name: "agents".into(),
         form: form.id.clone(),
@@ -1637,12 +1634,12 @@ async fn stale_or_conflicting_forms_cannot_replace_a_working_agent() {
             .handle(
                 &app.kit,
                 app.channel.id(),
-                Request {
-                    id: RequestId(1),
-                    operation: "other-view".into(),
-                    conversation: "other-room".into(),
-                    command: submit.clone()
-                },
+                Request::new(
+                    RequestId::new(1),
+                    "other-view",
+                    "other-room",
+                    submit.clone()
+                ),
                 wrong_view
             )
             .await
@@ -1692,7 +1689,7 @@ mod profile_deletion;
 
 #[tokio::test]
 async fn effort_selection_persists_reconfigures_requests_and_can_restore_provider_default() {
-    use roomkit_cli_roomkit::CommandResult;
+    use roomkit_tui_engine::CommandResult;
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let mock = Mock::start(vec![]).await;

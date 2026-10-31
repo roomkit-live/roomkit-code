@@ -2,8 +2,8 @@
 //! belong to roomkit-ai. No skill is made available without a host selection.
 use super::*;
 use roomkit_ai::SkillRegistry;
-use roomkit_cli_roomkit::CommandResult;
 use roomkit_tui::protocol::{Choice, Event, PanelSpec};
+use roomkit_tui_engine::CommandResult;
 use std::path::{Path, PathBuf};
 
 const MAX_ENTRIES: usize = 256;
@@ -185,14 +185,14 @@ impl Catalogue {
         actions.push(ui::choice("list", "Back to skills", ""));
         Ok(CommandResult::Events(vec![Event::Panel {
             conversation: current.room.as_str().into(),
-            panel: PanelSpec {
-                id: uuid::Uuid::new_v4().to_string(),
-                command: "skills".into(),
-                title: format!("Skill · {name}"),
+            panel: PanelSpec::new(
+                uuid::Uuid::new_v4().to_string(),
+                "skills",
+                format!("Skill · {name}"),
                 body,
-                actions,
-                dismiss: "close".into(),
-            },
+            )
+            .with_actions(actions)
+            .with_dismiss("close"),
         }]))
     }
 }
@@ -320,11 +320,10 @@ impl Profiles {
                 } else {
                     "disabled"
                 };
-                choices.push(Choice {
-                    value: format!("open:{name}"),
-                    label: format!("{name} · {status}"),
-                    description: format!("{} · {}", entry.source, entry.description),
-                });
+                choices.push(
+                    Choice::new(format!("open:{name}"), format!("{name} · {status}"))
+                        .with_description(format!("{} · {}", entry.source, entry.description)),
+                );
             }
             for name in agent
                 .skills
@@ -359,18 +358,19 @@ impl Profiles {
             body.push_str(&catalogue.notes.join("\n"));
             return Ok(CommandResult::Events(vec![Event::Panel {
                 conversation: current.room.as_str().into(),
-                panel: PanelSpec {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    command: "skills".into(),
-                    title: "Skill discovery".into(),
+                panel: PanelSpec::new(
+                    uuid::Uuid::new_v4().to_string(),
+                    "skills",
+                    "Skill discovery",
                     body,
-                    actions: vec![ui::choice("list", "Back to skills", "")],
-                    dismiss: "close".into(),
-                },
+                )
+                .with_actions(vec![ui::choice("list", "Back to skills", "")])
+                .with_dismiss("close"),
             }]));
         }
         if !catalogue.entries.contains_key(name) && action == "disable" {
             return Ok(CommandResult::Events(vec![Event::Notice {
+                conversation: current.room.as_str().into(),
                 text: format!("Removed missing skill {name} from this agent"),
             }]));
         }

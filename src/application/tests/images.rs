@@ -1,5 +1,8 @@
 use super::*;
-use roomkit_tui::{Client, protocol::OperationId};
+use roomkit_tui::{
+    Client,
+    protocol::{ImageMessage, OperationId},
+};
 
 async fn next(client: &Client) -> Event {
     tokio::time::timeout(Duration::from_secs(15), async {
@@ -21,7 +24,7 @@ async fn attach(
     workspace: &std::path::Path,
 ) -> (
     Client,
-    tokio::task::JoinHandle<std::result::Result<(), roomkit_cli_roomkit::AdapterError>>,
+    tokio::task::JoinHandle<std::result::Result<(), roomkit_tui_engine::AdapterError>>,
 ) {
     let (client, host) = connection(NonZeroUsize::new(64).unwrap());
     let handler = crate::sessions::Sessions {
@@ -36,12 +39,12 @@ async fn attach(
     (client, task)
 }
 fn request(app: &Application, command: Command) -> Request {
-    Request {
-        id: RequestId(91),
-        conversation: app.view.room.as_str().into(),
-        operation: OperationId(uuid::Uuid::new_v4().to_string()),
+    Request::new(
+        RequestId::new(91),
+        OperationId::new(uuid::Uuid::new_v4().to_string()),
+        app.view.room.as_str(),
         command,
-    }
+    )
 }
 async fn completed(client: &Client) -> Vec<Event> {
     let mut events = vec![];
@@ -75,10 +78,10 @@ async fn images_reach_the_provider_and_resume_from_private_references() {
             &app,
             Command::SubmitImages {
                 agent: "code".into(),
-                message: Box::new(roomkit_tui::protocol::ImageMessage {
-                    text: "Describe this image.".into(),
-                    images: vec![image.clone()],
-                }),
+                message: Box::new(ImageMessage::new(
+                    "Describe this image.",
+                    vec![image.clone()],
+                )),
             },
         ))
         .unwrap();
@@ -153,10 +156,7 @@ async fn invalid_images_and_text_only_agents_never_call_the_provider() {
                 &app,
                 Command::SubmitImages {
                     agent: "code".into(),
-                    message: Box::new(roomkit_tui::protocol::ImageMessage {
-                        text: "".into(),
-                        images: vec![image],
-                    }),
+                    message: Box::new(ImageMessage::new("", vec![image])),
                 },
             ))
             .unwrap();

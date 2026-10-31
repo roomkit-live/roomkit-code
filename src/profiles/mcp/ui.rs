@@ -5,8 +5,8 @@ use super::{
     config::{Connection as Connector, Server, Transport},
 };
 use roomkit_ai::Toolset;
-use roomkit_cli_roomkit::CommandResult;
 use roomkit_tui::protocol::{Choice, Event, FieldKind, FormField, FormSpec, FormValues, PanelSpec};
+use roomkit_tui_engine::CommandResult;
 
 pub(in crate::profiles) enum Pending {
     Form {
@@ -29,14 +29,9 @@ fn panel(
 ) -> CommandResult {
     CommandResult::Events(vec![Event::Panel {
         conversation: current.room.as_str().into(),
-        panel: PanelSpec {
-            id: uuid::Uuid::new_v4().to_string(),
-            command: "mcp".into(),
-            title,
-            body,
-            actions,
-            dismiss: "close".into(),
-        },
+        panel: PanelSpec::new(uuid::Uuid::new_v4().to_string(), "mcp", title, body)
+            .with_actions(actions)
+            .with_dismiss("close"),
     }])
 }
 pub(super) async fn list(
@@ -252,14 +247,10 @@ pub(super) async fn detail(
 }
 
 fn field(name: &str, label: &str, value: String, help: &str) -> FormField {
-    FormField {
-        name: name.into(),
-        label: label.into(),
-        value,
-        help: help.into(),
-        required: true,
-        kind: FieldKind::Text,
-    }
+    FormField::new(name, label, FieldKind::Text)
+        .with_help(help)
+        .with_value(value)
+        .required()
 }
 pub(super) fn form(
     state: &mut State,
@@ -329,17 +320,16 @@ pub(super) fn form(
     });
     Ok(CommandResult::Events(vec![Event::Form {
         conversation: current.room.as_str().into(),
-        form: FormSpec {
+        form: FormSpec::new(
             id,
-            command: "mcp".into(),
-            title: if http {
+            "mcp",
+            if http {
                 "MCP HTTP server · save to connect and enable tools"
             } else {
                 "MCP stdio server · save to connect and enable tools"
-            }
-            .into(),
+            },
             fields,
-        },
+        ),
     }]))
 }
 
@@ -362,7 +352,7 @@ pub(super) fn save(
     if room != current.room.as_str() || expected != form {
         return Err("This MCP form is stale".into());
     }
-    let value = |name: &str| values.0.get(name).map_or("", String::as_str);
+    let value = |name: &str| values.get(name).unwrap_or("");
     let server = Server {
         id: value("id").trim().into(),
         transport: if *http {
@@ -482,6 +472,7 @@ pub(super) fn delete(
     state.mcp.save(config)?;
     state.pending_mcp = None;
     Ok(CommandResult::Events(vec![Event::Notice {
+        conversation: current.room.as_str().into(),
         text: "MCP server configuration removed".into(),
     }]))
 }
