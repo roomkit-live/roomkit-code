@@ -131,6 +131,8 @@ try:
         offset = app.send("Start the server\r")
         app.wait("Exit fixture first.", offset)
         assert alive(), "The fixture process must run before exit"
+        # The badge follows the exit warning: once it shows, Ctrl+D must ask first.
+        app.wait("Processes: 1 running")
         # With a running process, the first Ctrl+D only states what exiting stops.
         offset = app.send("\x04")
         app.wait("Press Ctrl+D again to exit · 1 running process will be stopped", offset)

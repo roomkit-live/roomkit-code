@@ -96,7 +96,11 @@ impl Processes {
                     .iter()
                     .filter(|j| j.process.status.state == ProcessState::Running)
                     .count();
+                // The terminal applies events in order but reads keys between
+                // bounded batches: send the warning first, so a visible badge
+                // means Ctrl+D already asks for confirmation.
                 let mut events = vec![
+                    this.exit_warning(current.room.as_str()).await,
                     Event::BackgroundChanged {
                         conversation: current.room.as_str().into(),
                         status: (running > 0).then(|| {
@@ -107,7 +111,6 @@ impl Processes {
                             )
                         }),
                     },
-                    this.exit_warning(current.room.as_str()).await,
                 ];
                 if let Some(panel) = &panel {
                     events.push(Event::PanelUpdated {
