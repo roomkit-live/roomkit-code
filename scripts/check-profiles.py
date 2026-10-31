@@ -141,7 +141,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         wait_for(b"Tab commands", offset)
 
     def add_agent(identifier, label, model):
-        command("/agents", b"Project agents")
+        command("/agents", "Agents · global".encode())
         offset = send(b"\r")
         wait_for(b"Agent profile", offset)
         fields([identifier, label, None, model, "32768", None, "Fixture instructions", "read"])
@@ -192,7 +192,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         add_agent("second", "Second agent", "fixture-b")
         command("Hello second", b"Answer from fixture-b.")
         wait_for(b"Execution Completed")
-        command("/agents", b"Project agents")
+        command("/agents", "Agents · global".encode())
         offset = send("First agent")
         wait_for(b"Filter: First agent", offset)
         offset = send(b"\r")
@@ -230,14 +230,17 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         wait_for(b"fixture-discovered", offset)
         send(b"\x1b")
         assert secret.encode() not in captured
-        agents = json.loads(next(state.glob("projects/*/agents.json")).read_text())
+        # Agents are global by default: shared by every project, selected here.
+        agents = json.loads((state / "agents.json").read_text())
         assert len(agents["agents"]) == 2
         assert agents["selected"] == "first"
+        project = json.loads(next(state.glob("projects/*/agents.json")).read_text())
+        assert not project["agents"] and project["selected"] == "first"
         # Secrets are neither messages nor tool records, even in SQLite's raw pages.
         assert secret.encode() not in next(state.glob("projects/*/history.sqlite3")).read_bytes()
         # List aliases and profile menus expose deletion, with Cancel selected first.
         command("/providers delete fixture", b"Provider is used by")
-        command("/agents list", b"Project agents")
+        command("/agents list", "Agents · global".encode())
         send("Second agent")
         offset = send(b"\r")
         wait_for(b"Select agent", offset)
@@ -246,7 +249,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         wait_for(b"Delete Second agent", offset)
         offset = send(b"\r")  # Default is Cancel.
         wait_for(b"Select agent", offset)
-        assert "second" in json.loads(next(state.glob("projects/*/agents.json")).read_text())["agents"]
+        assert "second" in json.loads((state / "agents.json").read_text())["agents"]
         offset = send(b"\x1b")
         wait_for(b"Enter send", offset)
         for identifier, label in [("second", "Second agent"), ("first", "First agent")]:
@@ -254,7 +257,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
             send(b"\x1b[B")
             offset = send(b"\r")
             wait_for(b"Enter send", offset)
-            assert identifier not in json.loads(next(state.glob("projects/*/agents.json")).read_text())["agents"]
+            assert identifier not in json.loads((state / "agents.json").read_text())["agents"]
         command("/providers delete fixture", b"Delete Fixture provider")
         send(b"\x1b[B")
         offset = send(b"\r")

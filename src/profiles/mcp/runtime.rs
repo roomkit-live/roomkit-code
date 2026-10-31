@@ -210,17 +210,8 @@ impl Profiles {
     ) -> Result<Option<String>, String> {
         let mut state = self.state.lock().await;
         let _lease = store::edit_lease(&self.state_dir)?;
-        state.project.reload()?;
-        if state.project.value.schema != PROJECT_SCHEMA {
-            return Err("Unsupported agent configuration version".into());
-        }
-        let Some(mut profile) = state
-            .project
-            .value
-            .agents
-            .get(current.agent.as_str())
-            .cloned()
-        else {
+        state.reload_agents()?;
+        let Some(mut profile) = state.agent(current.agent.as_str()) else {
             return Ok(activate.then(||format!("MCP server {id} connected. Configure an agent with /agents, then choose its tools in /mcp.")));
         };
         let mut changed = false;
@@ -261,9 +252,7 @@ impl Profiles {
             .ok_or("Unknown provider")?;
         let (agent, tools) = self.assemble(&profile, provider).await?;
         if changed {
-            let mut project = state.project.value.clone();
-            project.agents.insert(profile.id.clone(), profile.clone());
-            state.project.save(project)?;
+            state.update_agent(profile.clone())?;
             self.diagnostics.record("mcp_selection",serde_json::json!({"agent":profile.id,"server":id,"tools":profile.mcp.get(id).map_or(0,Vec::len),"automatic":true}),None);
         }
         state.install(kit, &profile.id, agent, tools)?;

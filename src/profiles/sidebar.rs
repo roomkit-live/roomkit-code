@@ -91,7 +91,7 @@ impl Profiles {
         let instructions = self.instruction_chars(current).await;
         let state = self.state.lock().await;
         let composition = state.compositions.get(current.agent.as_str());
-        let agent = state.project.value.agents.get(current.agent.as_str());
+        let agent = state.agent(current.agent.as_str());
         let mut agent_entries = Vec::new();
         if let Some(profile) = agent {
             let label = state

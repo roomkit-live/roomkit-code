@@ -61,10 +61,7 @@ impl Profiles {
         state.pending_mcp = None;
         state.mcp.reload()?;
         state.mcp.value.validate()?;
-        state.project.reload()?;
-        if state.project.value.schema != PROJECT_SCHEMA {
-            return Err("Unsupported agent configuration version".into());
-        }
+        state.reload_agents()?;
         if action == "close" {
             return Ok(CommandResult::Events(Vec::new()));
         }
@@ -136,10 +133,7 @@ impl Profiles {
                 state.pending = None;
                 state.pending_delete = None;
                 let mut agent = state
-                    .project
-                    .value
-                    .agents
-                    .get(current.agent.as_str())
+                    .agent(current.agent.as_str())
                     .ok_or("Configure an agent first")?
                     .clone();
                 if action == "disable" {
@@ -179,9 +173,7 @@ impl Profiles {
                     .get(&agent.provider)
                     .ok_or("Unknown provider")?;
                 let (runtime, tools) = self.assemble(&agent, provider).await?;
-                let mut project = state.project.value.clone();
-                project.agents.insert(agent.id.clone(), agent.clone());
-                state.project.save(project)?;
+                state.update_agent(agent.clone())?;
                 state.install(kit, &agent.id, runtime, tools)?;
 
                 self.diagnostics.record("mcp_selection", serde_json::json!({"agent":agent.id,"server":id,"tools":agent.mcp.get(id).map_or(0,Vec::len)}), None);
@@ -210,7 +202,7 @@ pub(super) async fn sidebar(
 ) -> roomkit_tui::protocol::SidebarSection {
     use roomkit_tui::protocol::{SidebarContent, SidebarEntry, SidebarSection, SidebarTone};
     let connections = runtime.connections.lock().await;
-    let agent = state.project.value.agents.get(current.agent.as_str());
+    let agent = state.agent(current.agent.as_str());
     let mut entries = Vec::new();
     for id in state.mcp.value.servers.keys() {
         let connection = connections.get(id);
@@ -218,6 +210,7 @@ pub(super) async fn sidebar(
             .and_then(|c| c.server.as_ref())
             .filter(|s| s.is_connected());
         let names = agent
+            .as_ref()
             .and_then(|a| a.mcp.get(id))
             .map_or(&[][..], Vec::as_slice);
         let available = live.map(|s| s.tools()).unwrap_or_default();

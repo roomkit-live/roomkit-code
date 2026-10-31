@@ -209,16 +209,13 @@ impl Profiles {
         // Preserve revisions of already issued forms; a skill edit invalidates them.
         state.pending = None;
         state.pending_delete = None;
-        state.project.reload()?;
+        state.reload_agents()?;
         state.providers.reload()?;
-        if state.providers.value.schema != 1 || state.project.value.schema != PROJECT_SCHEMA {
+        if state.providers.value.schema != 1 {
             return Err("Unsupported profile file version".into());
         }
         let mut agent = state
-            .project
-            .value
-            .agents
-            .get(current.agent.as_str())
+            .agent(current.agent.as_str())
             .ok_or("Configure an agent with /agents first")?
             .clone();
         let arguments = arguments.trim();
@@ -271,9 +268,7 @@ impl Profiles {
                 .get(&agent.provider)
                 .ok_or("Unknown provider")?;
             let (runtime, tools) = self.assemble(&agent, provider).await?;
-            let mut project = state.project.value.clone();
-            project.agents.insert(agent.id.clone(), agent.clone());
-            state.project.save(project)?;
+            state.update_agent(agent.clone())?;
             state.install(kit, &agent.id, runtime, tools)?;
         } else if action == "use" {
             let (name, task) = name.split_once(' ').unwrap_or((

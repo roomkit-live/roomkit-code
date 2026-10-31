@@ -58,7 +58,7 @@ async fn legacy_default_catalogue_migrates_once_but_custom_selections_stay_restr
         let mut app = Application::open(&settings, String::new()).await.unwrap();
         assert_eq!(app.profiles.tools("code").await.len(), 27);
         let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(saved["schema"], 4);
+        assert_eq!(saved["schema"], crate::profiles::model::PROJECT_SCHEMA);
         assert_eq!(saved["agents"]["reader"]["tools"], json!(["read"]));
         let original = crate::profiles::model::TOOLS[..10].join(", ");
         edit_profile(&mut app, "agents", "edit:code", &[("tools", &original)]).await;

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add global agents, the default scope in `/agents`: created once and available
+  in every project, which opens with the global agent used last. MCP servers and
+  skills stay per project. Existing agents stay in their project; changing the
+  scope moves an agent. An ID another project uses for its own agent cannot
+  become global. Project profiles move to schema 5.
+
 - Keep the welcome screen in a project without an agent: the setup notice now
   shows above its composer instead of switching to the conversation layout
   (roomkit-tui fa0988f).

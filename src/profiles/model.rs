@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Current `agents.json` version; older versions migrate through `Project::migrate`.
-pub(crate) const PROJECT_SCHEMA: u32 = 4;
+pub(crate) const PROJECT_SCHEMA: u32 = 5;
 
 pub(crate) const TOOLS: &[&str] = &[
     "code_outline",
@@ -106,12 +106,28 @@ impl Default for Providers {
     }
 }
 
+/// A project's own choices for a global agent: the MCP servers configured in
+/// this project and the skills it enables there.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Extension {
+    #[serde(default)]
+    pub skills: Vec<String>,
+    #[serde(default)]
+    pub mcp: BTreeMap<String, Vec<String>>,
+}
+
+/// A project's agents (`projects/<hash>/agents.json`) or the global ones
+/// shared by every project (`agents.json` beside `connections.json`).
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Project {
     pub schema: u32,
     pub selected: Option<String>,
     pub agents: BTreeMap<String, Agent>,
+    /// In a project file, its choices for global agents, by agent ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extensions: BTreeMap<String, Extension>,
 }
 impl Project {
     /// Upgrade only the original complete catalogue, once. Explicit subsets stay restricted.
@@ -119,6 +135,8 @@ impl Project {
         // Size of the complete catalogue that each earlier schema selected.
         let complete = match self.schema {
             PROJECT_SCHEMA => return Ok(false),
+            // Schema 5 adds global agents' extensions; the catalogue is unchanged.
+            4 => TOOLS.len(),
             3 => 24,
             2 => 19,
             1 => 10,
@@ -144,6 +162,7 @@ impl Default for Project {
             schema: PROJECT_SCHEMA,
             selected: None,
             agents: BTreeMap::new(),
+            extensions: BTreeMap::new(),
         }
     }
 }

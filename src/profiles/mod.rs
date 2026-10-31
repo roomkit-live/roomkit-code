@@ -1,4 +1,5 @@
 //! User connections and project agent composition, independent of terminal widgets.
+mod catalog;
 mod deletion;
 mod mcp;
 pub(crate) mod model;
@@ -52,6 +53,8 @@ struct State {
     pending_mcp: Option<mcp::Pending>,
     providers: Document<Providers>,
     project: Document<Project>,
+    /// Agents shared by every project, beside the shared connections.
+    global: Document<Project>,
     slots: BTreeMap<String, AgentSlot>,
     tools: BTreeMap<String, Vec<ToolDefinition>>,
     /// What each configured agent's requests carry before their messages.
@@ -80,10 +83,14 @@ impl Profiles {
             Document::<Providers>::load(settings.state_dir.join("connections.json"))?;
         let mut project =
             Document::<Project>::load(storage.database.with_file_name("agents.json"))?;
+        let mut global = Document::<Project>::load(settings.state_dir.join("agents.json"))?;
         if providers.value.schema != 1 {
             return Err("Unsupported profile file version".into());
         }
-        if providers.value.profiles.len() > 128 || project.value.agents.len() > 64 {
+        if providers.value.profiles.len() > 128
+            || project.value.agents.len() > catalog::MAX_AGENTS
+            || global.value.agents.len() > catalog::MAX_AGENTS
+        {
             return Err("Too many provider or agent profiles".into());
         }
         for (id, provider) in &providers.value.profiles {
@@ -92,18 +99,23 @@ impl Profiles {
                 return Err("Invalid provider identity".into());
             }
         }
-        for (id, agent) in &project.value.agents {
+        for (id, agent) in project.value.agents.iter().chain(&global.value.agents) {
             agent.validate()?;
             if id != &agent.id {
                 return Err("Invalid agent identity".into());
             }
         }
-        let mut migrated = project.value.clone();
-        if migrated.migrate()? {
-            project.save(migrated)?;
+        for document in [&mut project, &mut global] {
+            let mut migrated = document.value.clone();
+            if migrated.migrate()? {
+                document.save(migrated)?;
+            }
         }
+        // A configured connection starts a new project with its own agent,
+        // unless a global agent already lets it start.
         if project.revision().is_none()
             && project.value.agents.is_empty()
+            && global.value.agents.is_empty()
             && !settings.base_url.is_empty()
         {
             let digest = format!(
@@ -147,14 +159,8 @@ impl Profiles {
             updated.agents.insert(agent.id.clone(), agent);
             project.save(updated)?;
         }
-        if project
-            .value
-            .selected
-            .as_ref()
-            .is_some_and(|id| !project.value.agents.contains_key(id))
-        {
-            return Err("Selected agent profile does not exist".into());
-        }
+        // A selection may name a global agent another project deleted: the
+        // project then opens with the global agent used last, or none.
         drop(edit_lease);
         let resources = match resources {
             Some(resources) => resources,
@@ -201,6 +207,7 @@ impl Profiles {
                 pending_mcp: None,
                 providers,
                 project,
+                global,
                 slots: BTreeMap::new(),
                 tools: BTreeMap::new(),
                 compositions: BTreeMap::new(),
@@ -213,14 +220,9 @@ impl Profiles {
 
     pub async fn initialize(&self, kit: &RoomKit<SqliteStore>) -> Result<ChannelId, String> {
         let mut state = self.state.lock().await;
-        let id = state
-            .project
-            .value
-            .selected
-            .clone()
-            .unwrap_or_else(|| "code".into());
+        let id = state.selected().unwrap_or_else(|| "code".into());
         let channel = ChannelId::new(&id).map_err(|_| "Invalid agent ID")?;
-        let assembled = if let Some(profile) = state.project.value.agents.get(&id) {
+        let assembled = if let Some(profile) = state.agent(&id) {
             let provider = state
                 .providers
                 .value
@@ -229,7 +231,7 @@ impl Profiles {
                 .ok_or("Agent references an unknown provider")?;
             // A missing environment credential should not prevent opening its
             // settings. The view disables messages until configuration succeeds.
-            match self.assemble(profile, provider).await {
+            match self.assemble(&profile, provider).await {
                 Ok(assembled) => Some(assembled),
                 Err(error) => {
                     state.setup_error = Some(error);
@@ -379,21 +381,15 @@ impl Profiles {
 
 impl State {
     fn view(&self, view: &mut SessionConfig) {
+        let agent = self.agent(view.agent.as_str());
         view.can_attach_images = self.tools.contains_key(view.agent.as_str())
-            && self
-                .project
-                .value
-                .agents
-                .get(view.agent.as_str())
-                .is_some_and(|a| a.vision);
+            && agent.as_ref().is_some_and(|a| a.vision);
         view.actor_names = self
-            .project
-            .value
-            .agents
-            .values()
-            .map(|a| (a.id.as_str().into(), a.label.clone()))
+            .agents()
+            .into_iter()
+            .map(|(a, _)| (a.id.as_str().into(), a.label))
             .collect();
-        if let Some(profile) = self.project.value.agents.get(view.agent.as_str()) {
+        if let Some(profile) = agent {
             // Match the engine's usage identity, including Responses over OAuth.
             view.model = Some(
                 ModelInfo::new("openai", profile.model.clone()).with_effort(

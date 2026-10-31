@@ -193,11 +193,21 @@ Testing a connection makes a bounded `GET /models` request with no redirects;
 it sends no conversation. Some compatible servers do not implement discovery,
 so model identifiers can always be entered manually.
 
-**/agents** manages the project's interlocutors. Each has a stable ID, display
-name, provider, model, optional context capacity, additional instructions and
-selected tools. The tools field accepts comma-separated names; an empty field
-creates an agent without tools. Saving an agent also selects it. Selection and
-configuration wait for the current execution to finish. The selected agent's
+**/agents** manages the interlocutors. Each has a stable ID, display name,
+provider, model, optional context capacity, additional instructions, selected
+tools and a **Scope**. A **Global** agent, the default, is available in every
+project: a new project opens with the global agent used last, ready to write.
+A **This project** agent exists only in its project. Changing the scope moves
+the agent. A project sees an ID once; an ID another project uses for its own
+agent cannot become global, and a new agent's default ID avoids those. A global
+agent's provider, model, instructions and tools are shared; its MCP servers and
+enabled skills stay each project's choice, because servers are configured per
+project. Deleting a global agent removes it from every project; a project that
+was using it opens with another agent it can use. A new global agent never
+inherits the choices a project kept for an earlier one with the same ID. The
+tools field accepts comma-separated names; an empty field creates an agent
+without tools. Saving an agent also selects it. Selection and configuration
+wait for the current execution to finish. The selected agent's
 name/model appear in the footer, and only that agent receives the next message.
 The conversation remains shared, with stable authorship for previous messages;
 selecting a different provider can therefore send existing conversation context
@@ -207,15 +217,17 @@ Forms use **Tab / Shift+Tab** for fields, **Left / Right** for choices,
 **Alt+Enter** for multiline instructions, **Ctrl+U** to clear a field,
 **Ctrl+S** to save and **Esc** to cancel. Invalid values retain your draft.
 Existing IDs cannot be renamed because they identify authors and references.
-Profile deletion and effort selection are not implemented yet.
 
-Connections are stored in `connections.json` under the user state directory;
-project composition and the last selected agent live in
-`projects/<workspace-path-hash>/agents.json`. Files are versioned, private and
+Connections and global agents are stored in `connections.json` and
+`agents.json` under the user state directory; project agents, a project's MCP
+and skill choices for global agents and its selected agent live in
+`projects/<workspace-path-hash>/agents.json`. Agents created before global
+agents existed stay in their project. Files are versioned, private and
 replaced atomically; conflicting connection edits from another process are
-refused instead of overwritten. To apply a connection changed by another
-project, reopen `/agents` and select the agent again. Profile files are outside
-the source tree and are never loaded from project instructions or model output.
+refused instead of overwritten. To apply a connection or a global agent changed
+by another project, reopen `/agents` and select the agent again. Profile files
+are outside the source tree and are never loaded from project instructions or
+model output.
 
 ## Tools and persistence
 

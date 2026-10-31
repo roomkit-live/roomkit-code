@@ -40,7 +40,7 @@ pub(super) async fn list(
     runtime: &Runtime,
 ) -> CommandResult {
     let connections = runtime.connections.lock().await;
-    let agent = state.project.value.agents.get(current.agent.as_str());
+    let agent = state.agent(current.agent.as_str());
     let mut actions = vec![
         choice(
             "add",
@@ -55,7 +55,10 @@ pub(super) async fn list(
     ];
     for id in state.mcp.value.servers.keys() {
         let status = connections.get(id).map_or("Disconnected", |c| c.status());
-        let selected = agent.and_then(|a| a.mcp.get(id)).map_or(0, Vec::len);
+        let selected = agent
+            .as_ref()
+            .and_then(|a| a.mcp.get(id))
+            .map_or(0, Vec::len);
         actions.push(choice(
             format!("show:{id}"),
             id,
@@ -94,12 +97,8 @@ pub(super) async fn detail(
     let live = connection
         .and_then(|c| c.server.as_ref())
         .filter(|s| s.is_connected());
-    let selected = state
-        .project
-        .value
-        .agents
-        .get(current.agent.as_str())
-        .and_then(|a| a.mcp.get(&config.id));
+    let agent = state.agent(current.agent.as_str());
+    let selected = agent.as_ref().and_then(|a| a.mcp.get(&config.id));
     let names = selected.map_or(&[][..], Vec::as_slice);
     let tools = live.map(|s| available(&config.id, s)).unwrap_or_default();
     let id = &config.id;
@@ -402,11 +401,9 @@ pub(super) fn confirm_delete(
     server: &Server,
 ) -> Result<CommandResult, String> {
     if state
-        .project
-        .value
-        .agents
-        .values()
-        .any(|a| a.mcp.get(&server.id).is_some_and(|names| !names.is_empty()))
+        .agents()
+        .iter()
+        .any(|(a, _)| a.mcp.get(&server.id).is_some_and(|names| !names.is_empty()))
     {
         return Err("Disable this server's tools for every agent before deleting it".into());
     }
@@ -447,22 +444,24 @@ pub(super) fn delete(
     if room != current.room.as_str() || token != expected || id != target {
         return Err("This deletion confirmation is stale".into());
     }
-    state.project.reload()?;
+    state.reload_agents()?;
     if state
-        .project
-        .value
-        .agents
-        .values()
-        .any(|a| a.mcp.get(id).is_some_and(|names| !names.is_empty()))
+        .agents()
+        .iter()
+        .any(|(a, _)| a.mcp.get(id).is_some_and(|names| !names.is_empty()))
     {
         return Err("This server is still selected by an agent".into());
     }
     // Empty entries remember an explicit disabled selection while a server
-    // exists. Remove those markers along with its configuration.
+    // exists. Remove those markers along with its configuration, for project
+    // agents and for this project's choices of global agents.
     let mut project = state.project.value.clone();
     let mut changed = false;
     for agent in project.agents.values_mut() {
         changed |= agent.mcp.remove(id).is_some();
+    }
+    for extension in project.extensions.values_mut() {
+        changed |= extension.mcp.remove(id).is_some();
     }
     if changed {
         state.project.save(project)?;

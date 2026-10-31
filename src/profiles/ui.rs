@@ -4,6 +4,7 @@ use roomkit_tui::protocol::{
 use roomkit_tui_engine::CommandResult;
 
 use super::*;
+use catalog::Scope;
 
 pub(super) struct Pending {
     room: String,
@@ -116,9 +117,8 @@ impl Profiles {
                 // Refresh shared connections only when opening a menu/form,
                 // never just before saving an older form's revision.
                 state.providers.reload()?;
-                state.project.reload()?;
-                if state.providers.value.schema != 1 || state.project.value.schema != PROJECT_SCHEMA
-                {
+                state.reload_agents()?;
+                if state.providers.value.schema != 1 {
                     return Err("Unsupported profile file version".into());
                 }
                 let mut parts = arguments.trim().splitn(3, ':');
@@ -128,10 +128,7 @@ impl Profiles {
                 match (name.as_str(), action) {
                     ("effort", effort) => {
                         let mut agent = state
-                            .project
-                            .value
-                            .agents
-                            .get(current.agent.as_str())
+                            .agent(current.agent.as_str())
                             .ok_or("Configure an agent with /agents first")?
                             .clone();
                         if effort.is_empty() {
@@ -155,9 +152,7 @@ impl Profiles {
                             .get(&agent.provider)
                             .ok_or("Unknown provider")?;
                         let (runtime, tools) = self.assemble(&agent, provider).await?;
-                        let mut project = state.project.value.clone();
-                        project.agents.insert(agent.id.clone(), agent);
-                        state.project.save(project)?;
+                        state.update_agent(agent)?;
                         state.install(kit, current.agent.as_str(), runtime, tools)?;
                         let mut next = current;
                         state.view(&mut next);
@@ -349,7 +344,7 @@ impl Profiles {
                     }
                     ("agents", "") => Ok(agent_choices(&state, &current)),
                     ("agents", "open") => {
-                        let agent = state.project.value.agents.get(id).ok_or("Unknown agent")?;
+                        let agent = state.agent(id).ok_or("Unknown agent")?;
                         Ok(choices(
                             &current,
                             "agents",
@@ -375,23 +370,21 @@ impl Profiles {
                     }
                     ("agents", "add" | "edit") => {
                         let existing = if action == "edit" {
-                            Some(state.project.value.agents.get(id).ok_or("Unknown agent")?)
+                            Some(state.agent(id).ok_or("Unknown agent")?)
                         } else {
                             None
                         };
-                        let target = Target::Agent(existing.map(|a| a.id.clone()));
-                        let form =
-                            agent_form(existing, &state, uuid::Uuid::new_v4().to_string(), None)?;
+                        let target = Target::Agent(existing.as_ref().map(|a| a.id.clone()));
+                        let form = agent_form(
+                            existing.as_ref(),
+                            &state,
+                            uuid::Uuid::new_v4().to_string(),
+                            None,
+                        )?;
                         Ok(open_form(&mut state, &current, form, target))
                     }
                     ("agents", "select") => {
-                        let agent = state
-                            .project
-                            .value
-                            .agents
-                            .get(id)
-                            .ok_or("Unknown agent")?
-                            .clone();
+                        let agent = state.agent(id).ok_or("Unknown agent")?.clone();
                         let provider = state
                             .providers
                             .value
@@ -403,9 +396,7 @@ impl Profiles {
                         let mut next = current;
                         next.agent = ChannelId::new(id).map_err(|_| "Invalid agent ID")?;
                         self.attach(kit, &next, terminal).await?;
-                        let mut project = state.project.value.clone();
-                        project.selected = Some(id.into());
-                        state.project.save(project)?;
+                        state.select_agent(id)?;
                         state.install(kit, id, runtime, tools)?;
                         state.view(&mut next);
                         Ok(CommandResult::Switch(Box::new(next)))
@@ -439,13 +430,10 @@ impl Profiles {
                     Target::Provider(original) => {
                         let profile = parse_provider(&values, original.as_deref(), &state)?;
                         let runtime = if let Some(agent) = state
-                            .project
-                            .value
-                            .agents
-                            .get(next.agent.as_str())
+                            .agent(next.agent.as_str())
                             .filter(|a| a.provider == profile.id)
                         {
-                            Some(self.assemble(agent, &profile).await?)
+                            Some(self.assemble(&agent, &profile).await?)
                         } else {
                             None
                         };
@@ -459,7 +447,7 @@ impl Profiles {
                     Target::Agent(original) => {
                         // A provider may have been deleted while this form was open.
                         state.providers.reload()?;
-                        let profile = parse_agent(&values, original.as_deref(), &state)?;
+                        let (profile, scope) = parse_agent(&values, original.as_deref(), &state)?;
                         let provider = state
                             .providers
                             .value
@@ -470,10 +458,8 @@ impl Profiles {
                         state.ensure_slot(kit, &profile.id)?;
                         next.agent = ChannelId::new(&profile.id).map_err(|_| "Invalid agent ID")?;
                         self.attach(kit, &next, terminal).await?;
-                        let mut project = state.project.value.clone();
-                        project.selected = Some(profile.id.clone());
-                        project.agents.insert(profile.id.clone(), profile);
-                        state.project.save(project)?;
+                        state.save_agent(profile, scope)?;
+                        state.select_agent(next.agent.as_str())?;
                         state.install(kit, next.agent.as_str(), runtime, tools)?;
                     }
                 }
@@ -532,7 +518,7 @@ fn agent_choices(state: &State, current: &SessionConfig) -> CommandResult {
         "+ Add agent",
         "Choose its provider, model, instructions and tools",
     )];
-    for agent in state.project.value.agents.values() {
+    for (agent, scope) in state.agents() {
         entries.push(choice(
             format!("open:{}", agent.id),
             format!(
@@ -544,13 +530,19 @@ fn agent_choices(state: &State, current: &SessionConfig) -> CommandResult {
                 },
                 agent.label
             ),
-            format!("{} · {} · {}", agent.id, agent.provider, agent.model),
+            format!(
+                "{} · {} · {} · {}",
+                agent.id,
+                scope.value(),
+                agent.provider,
+                agent.model
+            ),
         ));
     }
     choices(
         current,
         "agents",
-        "Project agents · shared conversation",
+        "Agents · global and this project's · shared conversation",
         entries,
     )
 }
@@ -659,11 +651,16 @@ fn agent_form(
     if state.providers.value.profiles.is_empty() {
         return Err("Add a connection with /providers first".into());
     }
-    if existing.is_none() && state.project.value.agents.len() >= 64 {
-        return Err("Maximum of 64 agents reached".into());
-    }
+    // Only a new agent's default ID avoids other projects' IDs.
+    let elsewhere = if existing.is_none() {
+        state.other_ids()
+    } else {
+        Vec::new()
+    };
     let default = Agent {
-        id: next_id("agent", |id| state.project.value.agents.contains_key(id)),
+        id: next_id("agent", |id| {
+            state.scope(id).is_some() || elsewhere.iter().any(|used| used == id)
+        }),
         label: "New agent".into(),
         provider: preset.map_or("", |p| p.0).into(),
         model: preset.map_or("", |p| p.1).into(),
@@ -768,6 +765,22 @@ fn agent_form(
                     ],
                 },
             ),
+            field(
+                "scope",
+                "Scope",
+                existing
+                    .and_then(|a| state.scope(&a.id))
+                    .unwrap_or(Scope::Global)
+                    .value(),
+                "Global agents are available in every project; MCP servers and skills stay per project",
+                true,
+                FieldKind::Choice {
+                    choices: vec![
+                        choice("global", "Global", "Available in every project"),
+                        choice("project", "This project", "Only in this project"),
+                    ],
+                },
+            ),
         ],
     ))
 }
@@ -840,9 +853,17 @@ fn parse_agent(
     values: &FormValues,
     original: Option<&str>,
     state: &State,
-) -> Result<Agent, String> {
+) -> Result<(Agent, Scope), String> {
     let id = value(values, "id").trim();
-    identity(id, original, state.project.value.agents.contains_key(id))?;
+    identity(id, original, state.scope(id).is_some())?;
+    let scope = match value(values, "scope") {
+        "global" => Scope::Global,
+        "project" => Scope::Project,
+        _ => return Err("Choose a global or project scope".into()),
+    };
+    if scope == Scope::Global && state.scope(id) != Some(Scope::Global) {
+        state.check_global_id(id)?;
+    }
     let capacity = value(values, "context").trim();
     let profile = Agent {
         id: id.into(),
@@ -869,11 +890,11 @@ fn parse_agent(
         },
         instructions: value(values, "instructions").into(),
         mcp: original
-            .and_then(|id| state.project.value.agents.get(id))
+            .and_then(|id| state.agent(id))
             .map(|agent| agent.mcp.clone())
             .unwrap_or_default(),
         skills: original
-            .and_then(|id| state.project.value.agents.get(id))
+            .and_then(|id| state.agent(id))
             .map(|agent| agent.skills.clone())
             .unwrap_or_default(),
         tools: value(values, "tools")
@@ -884,7 +905,7 @@ fn parse_agent(
             .collect(),
     };
     profile.validate()?;
-    Ok(profile)
+    Ok((profile, scope))
 }
 
 async fn discover(provider: &Provider) -> Result<Vec<(String, Option<u64>)>, String> {

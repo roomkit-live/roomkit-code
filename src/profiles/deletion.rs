@@ -12,6 +12,9 @@ pub(super) struct Pending {
     selected: String,
     providers_revision: Option<Vec<u8>>,
     project_revision: Option<Vec<u8>>,
+    global_revision: Option<Vec<u8>>,
+    /// Deleting a global agent needs the global file unchanged.
+    global: bool,
 }
 
 impl Profiles {
@@ -40,9 +43,12 @@ impl Profiles {
             }
             let _lease = store::edit_lease(&self.state_dir)?;
             state.providers.reload()?;
-            state.project.reload()?;
+            state.reload_agents()?;
+            // A provider's references are rechecked below, global agents
+            // included; an agent's deletion needs the agent unchanged.
             if state.providers.revision() != pending.providers_revision
                 || state.project.revision() != pending.project_revision
+                || (pending.global && state.global.revision() != pending.global_revision)
             {
                 return Err(
                     "Profiles changed; reopen the profile and confirm deletion again".into(),
@@ -65,7 +71,7 @@ impl Profiles {
 
         state.pending_delete = None;
         state.providers.reload()?;
-        state.project.reload()?;
+        state.reload_agents()?;
         let (label, description) = if command == "providers" {
             let provider = state
                 .providers
@@ -83,17 +89,23 @@ impl Profiles {
                 },
             )
         } else {
-            let agent = state.project.value.agents.get(id).ok_or("Unknown agent")?;
+            let agent = state.agent(id).ok_or("Unknown agent")?;
+            let others = state.agents();
             let next = if current.agent.as_str() != id {
                 "The active agent stays selected.".into()
-            } else if let Some(next) = state.project.value.agents.values().find(|a| a.id != id) {
+            } else if let Some((next, _)) = others.iter().find(|(a, _)| a.id != id) {
                 format!("Switch to {} ({}).", next.label, next.id)
             } else {
                 "Return to setup; add an agent to send new messages.".into()
             };
+            let reach = if state.scope(id) == Some(catalog::Scope::Global) {
+                "This global agent leaves every project. "
+            } else {
+                ""
+            };
             (
                 agent.label.clone(),
-                format!("Keep all conversation history. {next}"),
+                format!("{reach}Keep all conversation history. {next}"),
             )
         };
         let token = uuid::Uuid::new_v4().to_string();
@@ -105,6 +117,8 @@ impl Profiles {
             selected: current.agent.to_string(),
             providers_revision: state.providers.revision(),
             project_revision: state.project.revision(),
+            global_revision: state.global.revision(),
+            global: command == "agents" && state.scope(id) == Some(catalog::Scope::Global),
         });
         Ok(choices(
             &current,
@@ -125,23 +139,27 @@ impl Profiles {
         id: &str,
         mut current: SessionConfig,
     ) -> Result<CommandResult, String> {
-        let mut project = state.project.value.clone();
-        project.agents.remove(id).ok_or("Unknown agent")?;
+        state.scope(id).ok_or("Unknown agent")?;
+        let remaining: Vec<String> = state
+            .agents()
+            .into_iter()
+            .map(|(agent, _)| agent.id)
+            .filter(|agent| agent != id)
+            .collect();
         let selected = current.agent.as_str() == id;
         let next = if selected {
-            project.agents.keys().next().cloned()
+            remaining.first().cloned()
         } else {
-            Some(current.agent.to_string()).filter(|selected| project.agents.contains_key(selected))
+            Some(current.agent.to_string()).filter(|selected| remaining.contains(selected))
         };
-        project.selected = next.clone();
         let replacement = if selected {
             current.agent = ChannelId::new(next.as_deref().unwrap_or("code"))
                 .map_err(|_| "Invalid agent ID")?;
             state.ensure_slot(kit, current.agent.as_str())?;
             self.attach(kit, &current, terminal).await?;
-            match next.as_ref().and_then(|id| project.agents.get(id)) {
+            match next.as_ref().and_then(|id| state.agent(id)) {
                 Some(agent) => Some(match state.providers.value.profiles.get(&agent.provider) {
-                    Some(provider) => self.assemble(agent, provider).await,
+                    Some(provider) => self.assemble(&agent, provider).await,
                     None => Err("Configure the selected agent's provider with /agents".into()),
                 }),
                 None => None,
@@ -150,7 +168,7 @@ impl Profiles {
             None
         };
 
-        state.project.save(project)?;
+        state.remove_agent(id, next.as_deref())?;
         state.disable(id);
         if selected {
             state.disable(current.agent.as_str());
@@ -170,7 +188,16 @@ impl Profiles {
     /// Recheck every project under the shared edit lease at confirmation time.
     /// An unknown/corrupt profile file prevents deletion rather than orphaning it.
     fn check_provider_references(&self, state: &State, id: &str) -> Result<(), String> {
-        let mut references = Vec::new();
+        // Global agents are shared by every project; state.reload_agents()
+        // reread them under this lease.
+        let mut references: Vec<String> = state
+            .global
+            .value
+            .agents
+            .values()
+            .filter(|agent| agent.provider == id)
+            .map(|agent| format!("{} ({}), a global agent", agent.label, agent.id))
+            .collect();
         let entries = std::fs::read_dir(self.state_dir.join("projects"))
             .map_err(|_| "Cannot inspect project profiles before deleting this provider")?;
         for entry in entries {

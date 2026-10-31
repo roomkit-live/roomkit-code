@@ -73,6 +73,12 @@ impl<T: Serialize + DeserializeOwned + Default> Document<T> {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Whether the file still holds what was loaded, for a change that depends
+    /// on it and writes other files first.
+    pub fn is_current(&self) -> Result<bool, String> {
+        Ok(read(&self.path)?.map(|b| Sha256::digest(b).to_vec()) == self.revision)
+    }
     pub fn load(path: PathBuf) -> Result<Self, String> {
         let bytes = read(&path)?;
         let value = bytes
@@ -115,7 +121,7 @@ impl<T: Serialize + DeserializeOwned + Default> Document<T> {
             .map_err(|_| "Cannot open profile lock")?;
         let _lease = FileLease::exclusive(lock)
             .map_err(|_| "Profiles are being edited elsewhere; retry shortly")?;
-        if read(&self.path)?.map(|b| Sha256::digest(b).to_vec()) != self.revision {
+        if !self.is_current()? {
             return Err("Profiles changed in another instance; cancel and reopen the form".into());
         }
         let bytes = serde_json::to_vec_pretty(&value).map_err(|_| "Cannot encode profiles")?;

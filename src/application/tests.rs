@@ -1683,6 +1683,7 @@ mod catalogue;
 mod docs;
 mod exit_summary;
 mod files;
+mod global_agents;
 
 mod processes;
 
