@@ -8,7 +8,7 @@ timeout_seconds = 600 # total deadline per model request, including streaming
 # API keys are read only from ROOMKIT_API_KEY, never from this file.
 
 [agent]
-require_tool_intent = false # true requires a public description in model-facing tool schemas
+require_tool_intent = true # false makes the public description optional in model-facing tool schemas
 
 [permissions]
 mode = "ask" # ask, yolo; --mode overrides this explicit configuration

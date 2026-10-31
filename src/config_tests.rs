@@ -25,15 +25,22 @@ fn resume_options_exclude_provider_bootstrap_values() {
 }
 
 #[test]
-fn required_intents_are_opt_in_and_cli_overrides_survive_resume() {
+fn required_intents_default_on_and_cli_overrides_survive_resume() {
     let root = tempfile::tempdir().unwrap();
     let mut cli = cli(root.path());
-    assert!(!Settings::load(&cli).unwrap().require_tool_intent);
+    assert!(Settings::load(&cli).unwrap().require_tool_intent);
     let config = root.path().join("options.toml");
-    std::fs::write(&config, "[agent]\nrequire_tool_intent = true\n").unwrap();
+    std::fs::write(&config, "[agent]\n").unwrap();
     cli.config = Some(config.clone());
     assert!(Settings::load(&cli).unwrap().require_tool_intent);
+    std::fs::write(&config, "[agent]\nrequire_tool_intent = false\n").unwrap();
+    assert!(!Settings::load(&cli).unwrap().require_tool_intent);
     for required in [false, true] {
+        std::fs::write(
+            &config,
+            format!("[agent]\nrequire_tool_intent = {}\n", !required),
+        )
+        .unwrap();
         let flag = format!("--require-tool-intent={required}");
         let parsed = Cli::try_parse_from([
             "roomkit-code",

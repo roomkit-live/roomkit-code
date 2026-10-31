@@ -3,7 +3,7 @@ use super::*;
 use roomkit_tui::render::screen_with_options;
 
 fn assert_schemas(request: &Value, required: bool) {
-    // A schema alone does not ask the agent to use the optional display field.
+    // Keep the prompt's guidance alongside the schema's display field.
     // Check the instructions on the real request, including rebuilt agents.
     let instructions = request["messages"]
         .as_array()
@@ -42,7 +42,8 @@ async fn missing_public_intent_keeps_the_call_executable_and_displays_its_name()
     let state = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("listed-fixture.txt"), "fixture").unwrap();
     let mock = Mock::start(vec![("list", json!({"path":"."}))]).await;
-    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let mut settings = settings(root.path(), state.path(), &mock.base_url);
+    settings.require_tool_intent = false;
     let app = Application::open(&settings, String::new()).await.unwrap();
     let session = turn(&app).await;
     let text = screen_with_options(
@@ -76,7 +77,6 @@ async fn public_intents_reach_the_view_and_survive_profile_changes_and_restart()
     )])
     .await;
     let mut settings = settings(root.path(), state.path(), &mock.base_url);
-    settings.require_tool_intent = true;
     settings.mode = crate::permissions::Mode::Yolo;
     // Include stdout after the shell's command, exit status and archive metadata.
     settings.ui.tool_preview_lines = 6;

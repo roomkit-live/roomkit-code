@@ -100,10 +100,18 @@ struct FileConfig {
     integrations: Integrations,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct AgentOptions {
     require_tool_intent: bool,
+}
+
+impl Default for AgentOptions {
+    fn default() -> Self {
+        Self {
+            require_tool_intent: true,
+        }
+    }
 }
 
 #[derive(Deserialize)]

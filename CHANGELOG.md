@@ -2,12 +2,13 @@
 
 ## Unreleased
 
-- Add opt-in `[agent] require_tool_intent` and `--require-tool-intent` to require
-  public tool intentions in model-facing schemas across agent reconstruction.
+- Require public tool intentions in model-facing schemas by default, configurable
+  through `[agent] require_tool_intent` and `--require-tool-intent[=false]` across
+  agent reconstruction.
   Tool-owned parameters and missing-intent execution remain unchanged.
 
 - Simplify agent guidance to put routine progress in tool-call intentions and
-  reserve messages for findings and conversation, without making the field required.
+  reserve messages for findings and conversation.
 
 - Restore formatted tool previews below activity headings while retaining
   consecutive-call replacement and the full history behind F2 or click.
