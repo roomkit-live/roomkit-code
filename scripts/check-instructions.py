@@ -42,7 +42,7 @@ class App:
         env.update({"TERM": "xterm-256color", "HOME": str(storage / "home"), "XDG_DATA_HOME": str(storage / "data")})
         self.process = subprocess.Popen([str(binary), str(project), "--state-dir", str(storage), "--base-url", url,
             "--model", "fixture", "--session", "instructions", "--color", "never", "--no-animations", "--no-herdr", "--no-terminal-status"],
-            stdin=self.slave, stdout=self.slave, stderr=self.slave, env=env)
+            stdin=self.slave, stdout=self.slave, stderr=self.slave, start_new_session=True, env=env)
         self.output = bytearray()
 
     def send(self, data):

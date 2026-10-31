@@ -79,7 +79,7 @@ def scenario(project, state, base_url, resume=False, color="never"):
         args += ["--native-selection", "--no-logo"]
     else:
         args += ["--session", "fixture"]
-    process = subprocess.Popen(args, stdin=slave, stdout=slave, stderr=slave, env=env)
+    process = subprocess.Popen(args, stdin=slave, stdout=slave, stderr=slave, env=env, start_new_session=True)
     captured = bytearray()
 
     def wait_for(marker, after=0):

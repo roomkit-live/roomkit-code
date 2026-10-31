@@ -75,7 +75,7 @@ sys.exit(1)
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 140, 0, 0))
     original = termios.tcgetattr(slave)
     process = subprocess.Popen([str(entry), str(project), '--no-update-check', '--no-herdr', '--no-terminal-status', '--color', 'never'],
-                               stdin=slave, stdout=slave, stderr=slave, env=env)
+                               stdin=slave, stdout=slave, stderr=slave, start_new_session=True, env=env)
     output = bytearray()
     def wait(text, after=0):
         deadline=time.monotonic()+20

@@ -73,7 +73,7 @@ class App:
         self.master, self.slave = pty.openpty()
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 34, 130, 0, 0))
         self.original = termios.tcgetattr(self.slave)
-        self.process = subprocess.Popen(args, stdin=self.slave, stdout=self.slave, stderr=self.slave, env=env)
+        self.process = subprocess.Popen(args, stdin=self.slave, stdout=self.slave, stderr=self.slave, start_new_session=True, env=env)
         self.output = bytearray()
 
     def wait(self, condition):

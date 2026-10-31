@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
     original = termios.tcgetattr(slave)
     env = {key: value for key, value in os.environ.items() if not key.startswith(("ROOMKIT_", "HERDR_"))}
     env["TERM"] = "xterm-256color"
-    process = subprocess.Popen([str(binary), str(workspace), "--state-dir", str(state), "--no-animations"], stdin=slave, stdout=slave, stderr=slave, env=env)
+    process = subprocess.Popen([str(binary), str(workspace), "--state-dir", str(state), "--no-animations"], stdin=slave, stdout=slave, stderr=slave, start_new_session=True, env=env)
     captured = bytearray()
 
     def pump(duration=0.05):

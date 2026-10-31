@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
         str(binary), str(project), "--state-dir", str(base / "state"),
         "--base-url", f"http://127.0.0.1:{server.server_port}/v1", "--model", "fixture-model",
         "--color", "never", "--no-animations", "--no-logo",
-    ], stdin=slave, stdout=slave, stderr=slave, env=env)
+    ], stdin=slave, stdout=slave, stderr=slave, start_new_session=True, env=env)
     captured = bytearray()
 
     def wait_for(marker, after=0):

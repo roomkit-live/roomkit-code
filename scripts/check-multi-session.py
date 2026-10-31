@@ -30,7 +30,7 @@ class App:
             args.extend(["--session", session])
         env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
         env["TERM"] = "xterm-256color"
-        self.process = subprocess.Popen(args, stdin=self.slave, stdout=self.slave, stderr=self.slave, env=env)
+        self.process = subprocess.Popen(args, stdin=self.slave, stdout=self.slave, stderr=self.slave, start_new_session=True, env=env)
         self.output = bytearray()
 
     def send(self, text):

@@ -82,7 +82,7 @@ try:
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 35, 130, 0, 0))
         original = termios.tcgetattr(slave)
-        process = subprocess.Popen([str(binary), str(project), "--state-dir", str(state), "--base-url", f"http://127.0.0.1:{server.server_port}/v1", "--model", "vision-fixture", "--color", "never", "--no-animations"], env=env, stdin=slave, stdout=slave, stderr=slave)
+        process = subprocess.Popen([str(binary), str(project), "--state-dir", str(state), "--base-url", f"http://127.0.0.1:{server.server_port}/v1", "--model", "vision-fixture", "--color", "never", "--no-animations"], env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
         captured = bytearray()
 
         def wait_for(marker, after=0):

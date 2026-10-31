@@ -64,7 +64,7 @@ class App:
         self.original = termios.tcgetattr(self.slave)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
         env.update({"TERM": "xterm-256color", "HOME": str(storage / "home"), "XDG_DATA_HOME": str(storage / "data")})
-        self.process = subprocess.Popen(argv, stdin=self.slave, stdout=self.slave, stderr=self.slave, env=env)
+        self.process = subprocess.Popen(argv, stdin=self.slave, stdout=self.slave, stderr=self.slave, start_new_session=True, env=env)
         self.output = bytearray()
 
     def send(self, data):

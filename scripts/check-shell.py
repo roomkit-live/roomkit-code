@@ -26,7 +26,7 @@ def scenario(project, state, resume=False):
     process = subprocess.Popen([
         str(binary), str(project), "--state-dir", str(state), "--session", "shell-fixture",
         "--color", "never", "--no-animations", "--no-logo",
-    ], stdin=slave, stdout=slave, stderr=slave, env=env)
+    ], stdin=slave, stdout=slave, stderr=slave, start_new_session=True, env=env)
     captured = bytearray()
 
     def wait_for(marker, after=0):

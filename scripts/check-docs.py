@@ -61,7 +61,7 @@ class App:
         self.process = subprocess.Popen([str(binary), str(project), "--state-dir", str(storage), "--base-url", url,
             "--model", "fixture", "--session", "docs", "--mode", mode, "--color", "never", "--no-animations",
             "--no-herdr", "--no-terminal-status"],
-            stdin=self.slave, stdout=self.slave, stderr=self.slave, env=env)
+            stdin=self.slave, stdout=self.slave, stderr=self.slave, start_new_session=True, env=env)
         self.output = bytearray()
 
     def send(self, data):

@@ -60,7 +60,7 @@ def scenario(project, state, url):
     process = subprocess.Popen(
         [str(binary), str(project), "--state-dir", str(state), "--base-url", url,
          "--model", "fixture", "--color", "always", "--no-animations"],
-        stdin=slave, stdout=slave, stderr=slave, env=env,
+        stdin=slave, stdout=slave, stderr=slave, start_new_session=True, env=env,
     )
     captured = bytearray()
 
