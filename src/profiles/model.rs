@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Current `agents.json` version; older versions migrate through `Project::migrate`.
+pub(crate) const PROJECT_SCHEMA: u32 = 4;
+
 pub(crate) const TOOLS: &[&str] = &[
     "code_outline",
     "list",
@@ -26,6 +29,9 @@ pub(crate) const TOOLS: &[&str] = &[
     "plan_list",
     "plan_update",
     "plan_delete",
+    "docs_list",
+    "docs_search",
+    "docs_read",
 ];
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -110,43 +116,32 @@ pub(super) struct Project {
 impl Project {
     /// Upgrade only the original complete catalogue, once. Explicit subsets stay restricted.
     pub(super) fn migrate(&mut self) -> Result<bool, String> {
-        match self.schema {
-            3 => Ok(false),
-            2 => {
-                for agent in self.agents.values_mut() {
-                    if agent.tools.len() == 19
-                        && TOOLS[..19]
-                            .iter()
-                            .all(|name| agent.tools.iter().any(|tool| tool == name))
-                    {
-                        agent.tools = TOOLS.iter().map(|name| (*name).into()).collect();
-                    }
-                }
-                self.schema = 3;
-                Ok(true)
+        // Size of the complete catalogue that each earlier schema selected.
+        let complete = match self.schema {
+            PROJECT_SCHEMA => return Ok(false),
+            3 => 24,
+            2 => 19,
+            1 => 10,
+            _ => return Err("Unsupported profile file version".into()),
+        };
+        for agent in self.agents.values_mut() {
+            if agent.tools.len() == complete
+                && TOOLS[..complete]
+                    .iter()
+                    .all(|name| agent.tools.iter().any(|tool| tool == name))
+            {
+                agent.tools = TOOLS.iter().map(|name| (*name).into()).collect();
             }
-            1 => {
-                for agent in self.agents.values_mut() {
-                    if agent.tools.len() == 10
-                        && TOOLS[..10]
-                            .iter()
-                            .all(|name| agent.tools.iter().any(|tool| tool == name))
-                    {
-                        agent.tools = TOOLS.iter().map(|name| (*name).into()).collect();
-                    }
-                }
-                self.schema = 3;
-                Ok(true)
-            }
-            _ => Err("Unsupported profile file version".into()),
         }
+        self.schema = PROJECT_SCHEMA;
+        Ok(true)
     }
 }
 
 impl Default for Project {
     fn default() -> Self {
         Self {
-            schema: 3,
+            schema: PROJECT_SCHEMA,
             selected: None,
             agents: BTreeMap::new(),
         }

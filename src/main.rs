@@ -6,6 +6,7 @@ mod application;
 mod branding;
 mod config;
 mod diagnostics;
+mod docs;
 mod herdr;
 mod hooks;
 mod images;

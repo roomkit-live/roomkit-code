@@ -211,7 +211,7 @@ impl Profiles {
         state.pending_delete = None;
         state.project.reload()?;
         state.providers.reload()?;
-        if state.providers.value.schema != 1 || state.project.value.schema != 3 {
+        if state.providers.value.schema != 1 || state.project.value.schema != PROJECT_SCHEMA {
             return Err("Unsupported profile file version".into());
         }
         let mut agent = state

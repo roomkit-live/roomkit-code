@@ -1,6 +1,7 @@
 //! Development-tool presentation belongs to the product, not the generic TUI.
 
 mod changes;
+mod docs;
 mod plans;
 mod processes;
 mod skills;
@@ -53,6 +54,9 @@ pub(crate) fn renderers(workspace: &std::path::Path) -> Renderers {
         "plan_delete",
     ] {
         renderers.register(name, plans::Plans);
+    }
+    for name in ["docs_list", "docs_search", "docs_read"] {
+        renderers.register(name, docs::Docs);
     }
     renderers
 }

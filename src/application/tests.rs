@@ -335,7 +335,7 @@ async fn resumed_history_cannot_replace_the_current_wire_inventory_or_host_catal
     let wire = current.requests.lock().unwrap()[0].clone();
     let inventory = app.profiles.tools(app.view.agent.as_str()).await;
     let expected: BTreeSet<_> = inventory.iter().map(|tool| tool.name.as_str()).collect();
-    assert_eq!(expected.len(), 24);
+    assert_eq!(expected.len(), 27);
     let declared: BTreeSet<_> = wire["tools"]
         .as_array()
         .unwrap()
@@ -1680,6 +1680,7 @@ async fn stale_or_conflicting_forms_cannot_replace_a_working_agent() {
 }
 
 mod catalogue;
+mod docs;
 
 mod processes;
 

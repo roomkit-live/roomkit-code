@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Give agents this application's guide through `docs_search`, `docs_read` and
+  `docs_list`. The README is embedded, split per `##` section and published
+  read-only under `<state-dir>/docs/<revision>/`. The tools run without approval,
+  including in Plan mode. Complete schema-3 tool catalogues gain them once;
+  profiles are saved in schema 4.
+
 - Discover scoped AGENTS.md and AGENTS.override.md instructions, with global/root
   refresh per turn and progressive nested loading through file exploration and
   patch previews. Preserve system prompts and user messages; deduplicate unchanged

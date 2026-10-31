@@ -142,7 +142,8 @@ impl Policy {
                     return ToolUse::Allow;
                 }
             }
-            "plan_create" | "plan_read" | "plan_list" | "plan_update" | "plan_delete" => {
+            "plan_create" | "plan_read" | "plan_list" | "plan_update" | "plan_delete"
+            | "docs_list" | "docs_search" | "docs_read" => {
                 if review.is_none() {
                     return ToolUse::Allow;
                 }
@@ -269,6 +270,7 @@ fn plan_allowed(event: &ToolCallEvent) -> bool {
         "activate_skill" | "read_skill_reference" | "list" | "glob" | "grep" | "read" | "diff" | "code_outline"
         | "process_status" | "process_read" | "output_read"
         | "plan_create" | "plan_read" | "plan_list" | "plan_update" | "plan_delete"
+        | "docs_list" | "docs_search" | "docs_read"
         // Network reads retain Ask's explicit approval, even in Plan mode.
         | "web_fetch" | "web_search" => true,
         "patch" => event.call.arguments.get("dry_run").is_none_or(|v| v == true),

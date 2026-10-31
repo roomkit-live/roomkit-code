@@ -2063,6 +2063,7 @@ dependencies = [
  "roomkit-sqlite",
  "roomkit-tools-code",
  "roomkit-tools-core",
+ "roomkit-tools-docs",
  "roomkit-tools-fs",
  "roomkit-tools-plans",
  "roomkit-tools-process",
@@ -2183,6 +2184,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "roomkit-tools-docs"
+version = "0.1.0"
+source = "git+https://github.com/roomkit-live/roomkit-tools?rev=73dbc6ec9aed07fed34cba306f6b69d0f6ff502b#73dbc6ec9aed07fed34cba306f6b69d0f6ff502b"
+dependencies = [
+ "roomkit-tools-core",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "roomkit-tools-fs"
 version = "0.1.0"
 source = "git+https://github.com/roomkit-live/roomkit-tools?rev=73dbc6ec9aed07fed34cba306f6b69d0f6ff502b#73dbc6ec9aed07fed34cba306f6b69d0f6ff502b"
@@ -2244,6 +2259,7 @@ dependencies = [
  "roomkit-ai",
  "roomkit-tools-code",
  "roomkit-tools-core",
+ "roomkit-tools-docs",
  "roomkit-tools-fs",
  "roomkit-tools-plans",
  "roomkit-tools-process",

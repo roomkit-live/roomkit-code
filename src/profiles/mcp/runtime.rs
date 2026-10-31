@@ -211,7 +211,7 @@ impl Profiles {
         let mut state = self.state.lock().await;
         let _lease = store::edit_lease(&self.state_dir)?;
         state.project.reload()?;
-        if state.project.value.schema != 3 {
+        if state.project.value.schema != PROJECT_SCHEMA {
             return Err("Unsupported agent configuration version".into());
         }
         let Some(mut profile) = state

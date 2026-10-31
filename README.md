@@ -193,7 +193,7 @@ and the model's current capability inventory are derived from the same selected
 toolsets. Resuming keeps conversation history, but older assistant claims about
 missing tools do not change the currently registered capabilities.
 
-New agents initially select all 24 native coding tools:
+New agents initially select all 27 native tools:
 
 | Purpose | Tools |
 | --- | --- |
@@ -204,14 +204,25 @@ New agents initially select all 24 native coding tools:
 | Persistent commands and stdin | `process_start`, `process_status`, `process_read`, `process_write`, `process_stop` |
 | Recover long output | `output_read`, `output_forget` |
 | Maintain plans | `plan_create`, `plan_read`, `plan_list`, `plan_update`, `plan_delete` |
+| Read this guide | `docs_search`, `docs_read`, `docs_list` |
 
 These reuse the native `roomkit-tools` implementations and their RoomKit adapters.
 `/agents` can restrict each participant's comma-separated selection. On the first
-upgrade, schema-1 profiles with the full ten-tool catalogue and schema-2 profiles
-with the full nineteen-tool catalogue receive the new tools; existing subsets
-stay restricted. This migration is saved once in project schema 3. Later explicit
-selections, including an older complete catalogue, are preserved unchanged.
-Older application versions cannot read schema 3.
+upgrade, profiles with the complete catalogue of their schema (ten tools in
+schema 1, nineteen in schema 2, twenty-four in schema 3) receive the new tools;
+existing subsets stay restricted. This migration is saved once in project
+schema 4. Later explicit selections, including an older complete catalogue, are
+preserved unchanged. Older application versions cannot read schema 4.
+
+`docs_search`, `docs_read` and `docs_list` give agents this guide, for the
+installed version. The README is embedded in the binary, split into one document
+per `##` section and written once per content revision under
+`<state-dir>/docs/<revision>/`; earlier revisions stay for other running
+versions. Search matches literal terms, all required, and returns one excerpt
+per document; a read page holds up to 16 KiB. The guide is read-only reference
+data: its tools run without approval, also in Plan mode, and it never grants a
+tool or a permission. Only this local guide is served for now; project
+documentation is not indexed.
 
 `web_search` uses **Exa's anonymous service**, independently of the model's
 provider; no API key or model credential is sent to Exa. Availability and rate
@@ -295,8 +306,8 @@ can select a different starting mode. Project files never implicitly select it.
 ## Plans and progress
 
 Switch to **Plan** and ask the agent to prepare a plan. This mode allows project
-exploration, skill reading, patch previews, reading existing process output and
-the five plan tools. Web research still requires approval. File mutations,
+exploration, skill reading, patch previews, reading existing process output,
+the five plan tools and this guide's three documentation tools. Web research still requires approval. File mutations,
 arbitrary commands, process start/input/stop, archive cleanup and all MCP calls
 are blocked by the host, regardless of model instructions. MCP tools cannot yet
 be classified reliably as read-only. Already running jobs continue; you can

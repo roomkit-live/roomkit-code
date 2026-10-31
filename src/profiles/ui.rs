@@ -125,7 +125,8 @@ impl Profiles {
                 // never just before saving an older form's revision.
                 state.providers.reload()?;
                 state.project.reload()?;
-                if state.providers.value.schema != 1 || state.project.value.schema != 3 {
+                if state.providers.value.schema != 1 || state.project.value.schema != PROJECT_SCHEMA
+                {
                     return Err("Unsupported profile file version".into());
                 }
                 let mut parts = arguments.trim().splitn(3, ':');

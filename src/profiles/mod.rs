@@ -20,7 +20,7 @@ use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::sync::Mutex;
 
 use crate::{config::Settings, storage::Storage};
-use model::{Agent, Authentication, Project, Provider, Providers, TOOLS};
+use model::{Agent, Authentication, PROJECT_SCHEMA, Project, Provider, Providers, TOOLS};
 use slot::AgentSlot;
 use store::Document;
 

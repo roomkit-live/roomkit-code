@@ -4,6 +4,7 @@ use roomkit::model::ChannelId;
 use roomkit_ai::{SkillRegistry, ToolDefinition, Toolset};
 use roomkit_openai::{OpenAiAgent, OpenAiConfig};
 use roomkit_tools_code::CodeOutlineTool;
+use roomkit_tools_docs::{DocsBackend, DocsListTool, DocsReadTool, DocsSearchTool};
 use roomkit_tools_fs::{
     DiffTool, EditTool, GlobTool, GrepTool, ListTool, MutationWorkspace, PatchTool, ReadTool,
     WriteTool,
@@ -21,7 +22,8 @@ use roomkit_tools_roomkit::{
     WebFetchToolset, WebSearchToolset, WriteToolset,
 };
 use roomkit_tools_roomkit::{
-    PlanCreateToolset, PlanDeleteToolset, PlanListToolset, PlanReadToolset, PlanUpdateToolset,
+    DocsListToolset, DocsReadToolset, DocsSearchToolset, PlanCreateToolset, PlanDeleteToolset,
+    PlanListToolset, PlanReadToolset, PlanUpdateToolset,
 };
 use roomkit_tools_search::{ExaSearch, SearchHttpConfig, SearchLimits, WebSearchTool};
 use roomkit_tools_web::{WebFetchLimits, WebFetchTool};
@@ -38,6 +40,8 @@ Use this only for the field described as "Shown to the user; never passed to the
 pub(crate) struct Resources {
     pub instructions: Arc<crate::instructions::Instructions>,
     pub plans: Arc<crate::plans::Plans>,
+    /// The application's own guide, shared by every agent.
+    pub docs: Arc<dyn DocsBackend>,
     pub mutations: MutationWorkspace,
     pub processes: ProcessManager,
     pub outputs: OutputStore,
@@ -66,6 +70,7 @@ impl Resources {
         Ok(Self {
             instructions: crate::instructions::Instructions::new(root, global),
             plans: Arc::new(crate::plans::Plans::new(state.join("plans"))),
+            docs: crate::docs::guide(global)?,
             mutations,
             processes,
             outputs,
@@ -177,5 +182,8 @@ pub(crate) async fn create(
         plan_list = PlanListToolset::new(PlanListTool::new(resources.plans.clone())),
         plan_update = PlanUpdateToolset::new(PlanUpdateTool::new(resources.plans.clone())),
         plan_delete = PlanDeleteToolset::new(PlanDeleteTool::new(resources.plans.clone())),
+        docs_list = DocsListToolset::new(DocsListTool::new(resources.docs.clone())),
+        docs_search = DocsSearchToolset::new(DocsSearchTool::new(resources.docs.clone())),
+        docs_read = DocsReadToolset::new(DocsReadTool::new(resources.docs.clone())),
     )
 }
