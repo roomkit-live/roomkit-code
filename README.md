@@ -319,8 +319,9 @@ are scoped to the originating session and agent, survive reconfiguration, and
 `process_start`, `process_write`, `web_search` and `web_fetch` call waits for an
 explicit decision. The panel shows exact arguments and the kind of action;
 use PgUp/PgDn for longer details, **Ctrl+Y** to allow once or **Ctrl+N** to refuse.
-Read tools, `diff`, patch previews, process status/output, stopping owned jobs and
-releasing owned archives do not need approval. Requests expire after five minutes;
+Read tools, `diff`, patch previews, process status/output, plan and guide tools,
+skill activation, stopping owned jobs and releasing owned archives do not need
+approval. Requests expire after five minutes;
 disconnecting refuses pending actions. Actions too large to show in full
 (64 KiB of approval detail) are refused and must be split.
 
@@ -526,7 +527,7 @@ accounts, providers and agents without exposing credentials to the UI.
 `src/profiles/mcp/` owns MCP configuration and exposure; the engine's
 `roomkit-mcp` crate owns protocol calls, aliases and server process cleanup.
 `src/sessions.rs` routes application commands and owns the project session catalogue.
-`src/permissions.rs` owns the tool policy and hooks that await actual approval.
+`src/permissions/` owns the tool policy and the hook that awaits actual approval.
 The TUI receives only its generic client connection, preserving the boundary
 needed for a future remote host.
 

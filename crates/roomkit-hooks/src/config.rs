@@ -75,6 +75,10 @@ pub struct CommandHook {
 
 /// Seconds every handler of one event may take together, per source.
 pub const SOURCE_BUDGET_SECONDS: u64 = 60;
+/// The shortest timeout one handler may set, in seconds.
+pub const MIN_HANDLER_SECONDS: u64 = 1;
+/// The longest timeout one handler may set, in seconds.
+pub const MAX_HANDLER_SECONDS: u64 = 30;
 
 fn default_timeout() -> u64 {
     10
@@ -149,8 +153,10 @@ impl Configuration {
                     {
                         return Err("Hook command must contain 1–8192 bytes without NUL".into());
                     }
-                    if !(1..=30).contains(&hook.timeout) {
-                        return Err("Hook timeout must be 1–30 seconds".into());
+                    if !(MIN_HANDLER_SECONDS..=MAX_HANDLER_SECONDS).contains(&hook.timeout) {
+                        return Err(format!(
+                            "Hook timeout must be {MIN_HANDLER_SECONDS}–{MAX_HANDLER_SECONDS} seconds"
+                        ));
                     }
                     budget += hook.timeout;
                     if hook

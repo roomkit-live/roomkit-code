@@ -1,4 +1,5 @@
-//! The product's development instructions and selected tools.
+//! The tools an agent is assembled with, and their assembly; `preamble`
+//! builds its system prompt and measures what its requests carry.
 
 use roomkit::model::ChannelId;
 use roomkit_ai::{SkillRegistry, ToolDefinition, Toolset};

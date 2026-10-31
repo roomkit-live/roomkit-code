@@ -35,8 +35,6 @@ pub(super) async fn load(
     if starts_a_new_project(&documents, settings) {
         add_first_agent(&mut documents, settings, api_key)?;
     }
-    // A selection may name a global agent another project deleted: the
-    // project then opens with the global agent used last, or another one.
     Ok(documents)
 }
 

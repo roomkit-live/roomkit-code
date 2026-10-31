@@ -64,19 +64,26 @@ impl Catalogue {
         catalogue.reload();
         catalogue
     }
+    /// Reread the trust file and both sources. The new catalogue replaces the
+    /// old one whole, so a failure midway never leaves a partial list of
+    /// enabled hooks behind its lock.
     pub fn reload(&mut self) {
-        self.entries.clear();
-        self.problems.clear();
-        self.enabled.clear();
+        let mut next = Self {
+            entries: vec![],
+            problems: vec![],
+            paths: self.paths.clone(),
+            trust: self.trust.clone(),
+            enabled: BTreeSet::new(),
+        };
         match read(&self.trust, 131_072) {
             Ok(None) => {}
             Ok(Some(bytes)) => match serde_json::from_slice(&bytes) {
-                Ok(value) => self.enabled = value,
+                Ok(value) => next.enabled = value,
                 Err(_) => self
                     .problems
                     .push("Invalid hook trust file; all hooks require review".into()),
             },
-            Err(error) => self.problems.push(error),
+            Err(error) => next.problems.push(error),
         }
         for path in &self.paths {
             let configuration =
@@ -90,10 +97,10 @@ impl Catalogue {
                                     serde_json::to_vec(&(path, event, &group.matcher, hook))
                                         .unwrap_or_default();
                                 let id = format!("{:x}", Sha256::digest(definition));
-                                if self.entries.iter().any(|entry| entry.id == id) {
+                                if next.entries.iter().any(|entry| entry.id == id) {
                                     continue;
                                 }
-                                self.entries.push(Entry {
+                                next.entries.push(Entry {
                                     id,
                                     event,
                                     group: group.clone(),
@@ -105,9 +112,10 @@ impl Catalogue {
                     }
                 }
                 Ok(None) => {}
-                Err(error) => self.problems.push(format!("{}: {error}", path.display())),
+                Err(error) => next.problems.push(format!("{}: {error}", path.display())),
             }
         }
+        *self = next;
     }
 
     pub fn set_enabled(&mut self, id: &str, enabled: bool) -> Result<(), String> {

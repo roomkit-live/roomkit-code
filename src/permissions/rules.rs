@@ -17,8 +17,8 @@ pub(crate) struct Rule {
 
 const CHANGE: &str = "Proposed workspace change · exact tool arguments";
 
-/// Reads of the workspace, the agent's processes and archives, its plans,
-/// its skills and the guide.
+/// Reads of the workspace, the agent's processes and archives, its skills and
+/// the guide, and the agent's own plans, which it also writes.
 const READ: Rule = Rule {
     direct: true,
     plan: true,
@@ -48,7 +48,8 @@ const MCP: Rule = Rule {
     label: "MCP server tool · may access external resources or modify data; exact arguments",
 };
 
-/// Network reads keep Ask's approval, even in Plan.
+/// Every tool an agent can select, MCP tools and patch previews aside (see
+/// `rule_for`).
 const RULES: &[(&str, Rule)] = &[
     ("activate_skill", READ),
     ("read_skill_reference", READ),
@@ -71,7 +72,7 @@ const RULES: &[(&str, Rule)] = &[
     ("docs_read", READ),
     ("process_stop", CLEANUP),
     ("output_forget", CLEANUP),
-    // Runs as a read while it only previews; see `rule`.
+    // Runs as a read while it only previews; see `rule_for`.
     ("patch", MUTATION),
     ("write", MUTATION),
     ("edit", MUTATION),
@@ -85,6 +86,7 @@ const RULES: &[(&str, Rule)] = &[
             label: "Process input · may trigger further actions in the running command",
         },
     ),
+    // Network reads keep Ask's approval, even in Plan.
     (
         "web_fetch",
         Rule {
@@ -103,19 +105,23 @@ const RULES: &[(&str, Rule)] = &[
     ),
 ];
 
-/// The rules as the system prompt states them, so the prompt cannot drift
-/// from what the gate does.
+/// The rules as the system prompt states them: the lists come from the table,
+/// so the prompt follows it; the clauses on patch previews and MCP tools
+/// state `rule_for`.
 pub(crate) fn summary() -> String {
     let names = |keep: fn(&Rule) -> bool| {
-        RULES
+        let names: Vec<&str> = RULES
             .iter()
             .filter(|(_, rule)| keep(rule))
             .map(|(name, _)| *name)
-            .collect::<Vec<_>>()
-            .join(", ")
+            .collect();
+        match names.split_last() {
+            Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+            _ => names.join(""),
+        }
     };
     format!(
-        "In Ask mode these tools run without approval: {}, and patch while it only previews. Every other tool, MCP tools included, asks for approval before it runs. In Yolo mode selected tools run without prompts. Plan permits only these tools without approval: {}, and patch while it only previews; it also permits {}, with approval.",
+        "In Ask mode these tools run without approval: {}, as does patch while it only previews. Every other tool, MCP tools included, asks for approval before it runs. In Yolo mode selected tools run without prompts. Plan permits only these tools without approval: {}, plus patch while it only previews; it also permits {}, with approval. A command hook may still refuse a call or require its approval.",
         names(|rule| rule.direct),
         names(|rule| rule.direct && rule.plan),
         names(|rule| !rule.direct && rule.plan),

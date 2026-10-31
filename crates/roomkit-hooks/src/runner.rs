@@ -2,6 +2,9 @@ use std::{path::Path, time::Duration};
 
 use crate::CommandHook;
 
+/// How long a handler's output is still read after it exits or is killed.
+pub const OUTPUT_DRAIN_MILLIS: u64 = 250;
+
 /// Bounded subprocess outcome, separate from a policy decision.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RunStatus {
@@ -202,7 +205,9 @@ mod unix {
                 status = RunStatus::Failed;
             }
             if !io_done {
-                match tokio::time::timeout(Duration::from_millis(250), &mut io).await {
+                match tokio::time::timeout(Duration::from_millis(OUTPUT_DRAIN_MILLIS), &mut io)
+                    .await
+                {
                     Ok(Ok(())) => {}
                     Ok(Err(error)) => {
                         if matches!(status, RunStatus::Exited(_)) {

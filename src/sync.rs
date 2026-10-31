@@ -1,12 +1,16 @@
 //! Locks on the application's in-memory state, which keep their value when an
 //! earlier holder panicked.
 //!
-//! Every value behind these locks is state that later calls overwrite or
-//! rebuild: caches, per-conversation maps, the current agent, task handles,
-//! the update check. A panic while one is held is a bug of its own; turning
-//! it into a second panic in every later caller would close the session the
-//! user is working in for a value the next update replaces. Durable state is
-//! never behind them: it goes through revision-checked files and SQLite.
+//! Behind these locks are in-memory copies and caches: per-conversation maps,
+//! the current agent, task handles, the update check and the loaded hook
+//! catalogue. Each is replaced whole or rebuilt by later calls, the hook
+//! catalogue included (`hooks::catalogue::Catalogue::reload`), so what a panic
+//! left is overwritten rather than kept. A panic while one is held is a bug of
+//! its own; turning it into a second panic in every later caller would close
+//! the session the user is working in. Durable state lives in files and
+//! SQLite, written atomically. The session leases are the exception: claiming
+//! one refuses on a poisoned lock (`storage::SessionLeases`), and only closing
+//! recovers it, to release them.
 
 use std::sync::{Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
