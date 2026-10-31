@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add `make build`, `debug`, `clean`, `install` and `uninstall`. Installation
+  activates the production binary in the managed layout of `~/.local/bin`.
+
 - Allow multiple local instances on one project with separate conversations.
   Mark occupied sessions in `/resume`, retain ownership through engine shutdown,
   and coordinate draft selection, startup, hook preferences and diagnostic rotation.

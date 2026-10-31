@@ -1,4 +1,9 @@
 .PHONY: check fmt fmt-check clippy test doc package-check terminal-check msrv audit
+.PHONY: build debug clean install uninstall
+
+# Managed installation directory, shared with the release installer.
+BIN_DIR ?= $(HOME)/.local/bin
+TARGET_DIR := $(or $(CARGO_TARGET_DIR),target)
 
 check: fmt-check clippy test doc package-check terminal-check distribution-check
 
@@ -52,3 +57,32 @@ clipboard-check:
 distribution-check:
 	ROOMKIT_RELEASE_BUILD=1 cargo build --locked
 	python3 scripts/check-distribution.py
+
+# Production binary: release profile, with the distribution marker so that a
+# managed installation keeps update checks and rollback.
+build:
+	ROOMKIT_RELEASE_BUILD=1 cargo build --locked --release
+
+# Development binary in target/debug, without the distribution marker.
+debug:
+	cargo build --locked
+
+clean:
+	cargo clean
+
+# Activate the production binary in BIN_DIR as the release installer does.
+# An unrelated roomkit-code there is never replaced.
+install: build
+	"$(TARGET_DIR)/release/roomkit-code" --install-dir "$(BIN_DIR)"
+
+# Remove only a managed installation; application data and settings are kept.
+uninstall:
+	@entry="$(BIN_DIR)/roomkit-code"; \
+	if [ "$$(readlink "$$entry" 2>/dev/null)" = ".roomkit-code/current/roomkit-code" ]; then \
+		rm -f "$$entry" && rm -rf "$(BIN_DIR)/.roomkit-code" && \
+		echo "Removed RoomKit Code from $(BIN_DIR); application data is kept."; \
+	elif [ -e "$$entry" ] || [ -L "$$entry" ]; then \
+		echo "$$entry is not a managed installation; left unchanged." >&2; exit 1; \
+	else \
+		echo "No RoomKit Code installation in $(BIN_DIR)."; \
+	fi

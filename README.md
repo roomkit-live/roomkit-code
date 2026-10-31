@@ -459,6 +459,23 @@ make msrv
 make audit # requires cargo-deny
 ```
 
+Build and install from source:
+
+```sh
+make build      # production binary: target/release/roomkit-code
+make debug      # development binary: target/debug/roomkit-code
+make install    # build, then install it as a managed binary in ~/.local/bin
+make uninstall  # remove that managed installation; application data is kept
+make clean      # remove build outputs
+```
+
+`BIN_DIR=/your/bin` selects another directory for `install` and `uninstall`.
+`make install` uses the release installer's managed layout: it never replaces an
+unrelated `roomkit-code`, and keeps the previous binary for `--rollback`. Like a
+release binary, it checks for newer stable releases, which `/update` can install.
+`make uninstall` removes every managed version in that directory, and refuses to
+touch an unrelated `roomkit-code`.
+
 Tests use temporary projects, local HTTP fixtures and a stdio MCP fixture, with
 no model service or credentials. They exercise real file tools, streaming, persistence and terminal
 cleanup. See [CONTRIBUTING.md](CONTRIBUTING.md) for dependency and CI setup.
