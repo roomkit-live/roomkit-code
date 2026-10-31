@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Ask agents explicitly for a public activity sentence on supported tool calls
+  and use it for routine progress. Show the actual tool name when no intention
+  is supplied, while keeping arguments and output in the details view.
+
 - Show public intentions as updating activity lines instead of accumulating
   technical tool cards. Messages separate activity sequences; F2 or a click
   reveals technical details. Preserve approvals, failures and parallel work.

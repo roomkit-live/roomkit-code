@@ -3,6 +3,19 @@ use super::*;
 use roomkit_tui::render::{Renderers, screen_with_options};
 
 fn assert_schemas(request: &Value) {
+    // A schema alone does not ask the agent to use the optional display field.
+    // Check the instructions on the real request, including rebuilt agents.
+    let instructions = request["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["role"] == "system")
+        .unwrap()["content"]
+        .as_str()
+        .unwrap();
+    assert!(instructions.contains("for every tool call whose schema describes _roomkit_intent"));
+    assert!(instructions.contains("instead of sending a separate assistant message"));
+    assert!(instructions.contains("If a tool instead declares its own business parameter"));
     let tools = request["tools"].as_array().unwrap();
     assert!(!tools.is_empty());
     for tool in tools {
@@ -11,6 +24,31 @@ fn assert_schemas(request: &Value) {
             "string"
         );
     }
+}
+
+#[tokio::test]
+async fn missing_public_intent_keeps_the_call_executable_and_displays_its_name() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("private-fixture.txt"), "fixture").unwrap();
+    let mock = Mock::start(vec![("list", json!({"path":"."}))]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let session = turn(&app).await;
+    let text = screen_with_options(
+        &session,
+        100,
+        40,
+        &Renderers::default(),
+        &settings.ui,
+        Duration::ZERO,
+    )
+    .lines
+    .join("\n");
+    assert!(text.contains("✓ list · F2 details"), "{text}");
+    assert!(!text.contains("Action completed"));
+    assert!(!text.contains("private-fixture.txt"));
+    app.close().await.unwrap();
 }
 
 #[tokio::test]
