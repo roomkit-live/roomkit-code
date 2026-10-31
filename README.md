@@ -510,8 +510,11 @@ remain in the project and conversation.
 | [roomkit-tools](https://github.com/roomkit-live/roomkit-tools) | Independently reusable tools and their RoomKit adapters |
 | [roomkit-auth](https://github.com/roomkit-live/roomkit-auth) | OAuth, account identity, credential storage and renewal |
 
-`src/agent.rs` selects capabilities; `src/coding-agent.txt` supplies development
-instructions. `src/application.rs` assembles and closes the engine.
+`src/agent/` selects capabilities and builds each agent's system prompt from
+`src/agent/coding-agent.txt`, measuring what every request carries.
+`src/permissions/` decides, from one table, what each tool may do in each mode.
+`src/timeouts.rs` derives the host's deadlines from the limits they cover.
+`src/application.rs` assembles and closes the engine.
 `src/config.rs` and `src/storage.rs` own application settings and project state.
 `src/processes.rs` owns scoped process monitoring and human controls.
 `src/files.rs` records the files each conversation's agents change or read.

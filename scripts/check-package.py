@@ -14,7 +14,7 @@ names = result.stdout.splitlines()
 for name in names:
     if name not in allowed and PurePosixPath(name).parts[0] != "src":
         raise SystemExit(f"Unexpected package content: {name}")
-assert {"LICENSE", "src/main.rs", "src/coding-agent.txt"}.issubset(names)
+assert {"LICENSE", "src/main.rs", "src/agent/coding-agent.txt"}.issubset(names)
 with open("Cargo.toml", "rb") as manifest:
     for dependency in tomllib.load(manifest)["dependencies"].values():
         if isinstance(dependency, dict) and "git" in dependency:
