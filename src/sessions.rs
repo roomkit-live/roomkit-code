@@ -36,6 +36,12 @@ async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<bool> {
 pub(crate) fn commands() -> Vec<CommandSpec> {
     vec![
         CommandSpec {
+            name: "hooks".into(),
+            description: "Inspect, enable and diagnose configured command hooks".into(),
+            arguments: String::new(),
+            choices: Vec::new(),
+        },
+        CommandSpec {
             name: "plans".into(),
             description: "Follow this agent's plans and inspect their steps".into(),
             arguments: "[plan-id]".into(),
@@ -348,17 +354,22 @@ impl CommandHandler for Sessions {
         let profiles = self.profiles.clone();
         let mut sidebar_changes = profiles.sidebar_changes.subscribe();
         let mut plan_changes = profiles.resources.plans.subscribe();
+        let mut hook_changes = profiles.hooks.changes.subscribe();
         let (tx, rx) = tokio::sync::watch::channel(Vec::new());
         tokio::spawn(async move {
             loop {
                 let mut events = processes.borrow_and_update().clone();
                 events.extend(profiles.plans.updates(&current).await);
+                events.extend(profiles.hooks.updates(&current));
                 if let Some(event) = accounts.borrow_and_update().clone() {
                     // Panels carry their conversation and opaque instance ID;
                     // the UI ignores updates to a dismissed or different view.
                     events.push(event);
                 }
-                let (sidebar, poll_connections) = profiles.sidebar(&current).await;
+                let (mut sidebar, poll_connections) = profiles.sidebar(&current).await;
+                if let Some(section) = profiles.hooks.sidebar(&current) {
+                    sidebar.sections.push(section);
+                }
                 events.push(Event::SidebarChanged {
                     conversation: current.room.as_str().into(),
                     sidebar: Some(sidebar),
@@ -373,6 +384,7 @@ impl CommandHandler for Sessions {
                     changed = accounts.changed() => if changed.is_err() { break; },
                     changed = sidebar_changes.changed() => if changed.is_err() { break; },
                     changed = plan_changes.changed() => if changed.is_err() { break; },
+                    changed = hook_changes.changed() => if changed.is_err() { break; },
                     // MCP exposes connection liveness, but no disconnect stream.
                     // Only inspect configured connections; unchanged state never redraws the TUI.
                     () = tokio::time::sleep(std::time::Duration::from_secs(2)), if poll_connections => {},
@@ -385,7 +397,7 @@ impl CommandHandler for Sessions {
     fn allow_while_busy(&self, name: &str) -> bool {
         matches!(
             name,
-            "mode" | "tools" | "processes" | "diagnostics" | "plans"
+            "mode" | "tools" | "processes" | "diagnostics" | "plans" | "hooks"
         )
     }
 
@@ -428,6 +440,7 @@ impl CommandHandler for Sessions {
         };
         let arguments = arguments.trim();
         match name.as_str() {
+            "hooks" => self.profiles.hooks.panel(&current, arguments),
             "plans" => self.profiles.plans.handle(&current, arguments).await,
             "diagnostics" => Ok(self.profiles.diagnostics.panel(&current, arguments)),
             "processes" => {
@@ -530,6 +543,7 @@ impl CommandHandler for Sessions {
                 )
                 .await
                 .map_err(|_| "Could not create a new session".to_string())?;
+                self.profiles.hooks.note_source(room.as_str(), "new");
                 Ok(self.switched(current, room))
             }
             "new" => Err("Use /new without arguments".into()),
@@ -572,6 +586,7 @@ impl CommandHandler for Sessions {
                 self.profiles
                     .attach(&self.kit, &next, &self.channel)
                     .await?;
+                self.profiles.hooks.note_source(room.as_str(), "resume");
                 Ok(self.switched(next, room))
             }
             "resume" => Err("Invalid session id; use /resume to choose from the list".into()),

@@ -1,3 +1,7 @@
+[workspace]
+resolver = "3"
+members = [".", "crates/roomkit-hooks"]
+
 [package]
 name = "roomkit-code"
 version = "0.1.0"
@@ -10,6 +14,7 @@ publish = false
 include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
 
 [dependencies]
+roomkit-hooks = { path = "crates/roomkit-hooks", version = "0.1.0" }
 roomkit-auth = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-auth", rev = "e995fe8f14d2c2d40f7330cb925ce7ad78126b4c" }
 # Keep the engine source identical to the CLI and tools adapters.
 roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "dd6ab1b2186518d159b0f38c830a4307834bf199" }
@@ -17,8 +22,8 @@ roomkit-mcp = { version = "0.1.0", git = "https://github.com/roomkit-live/roomki
 roomkit-ai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "dd6ab1b2186518d159b0f38c830a4307834bf199" }
 roomkit-openai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "dd6ab1b2186518d159b0f38c830a4307834bf199" }
 roomkit-sqlite = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "dd6ab1b2186518d159b0f38c830a4307834bf199" }
-roomkit-cli-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "e55300d9c7c8341ad55a3b3b58dba03d086bfa48" }
-roomkit-tui = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "e55300d9c7c8341ad55a3b3b58dba03d086bfa48" }
+roomkit-cli-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "c9f9249ebec5eb1b9397805ccc1a62183abdaf1c" }
+roomkit-tui = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-cli", rev = "c9f9249ebec5eb1b9397805ccc1a62183abdaf1c" }
 roomkit-tools-code = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "73dbc6ec9aed07fed34cba306f6b69d0f6ff502b" }
 roomkit-tools-fs = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "73dbc6ec9aed07fed34cba306f6b69d0f6ff502b" }
 roomkit-tools-process = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "73dbc6ec9aed07fed34cba306f6b69d0f6ff502b" }

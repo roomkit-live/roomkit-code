@@ -31,6 +31,7 @@ pub(crate) struct Profiles {
     workspace: PathBuf,
     state_dir: PathBuf,
     pub(crate) diagnostics: Arc<crate::diagnostics::Diagnostics>,
+    pub(crate) hooks: Arc<crate::hooks::Hooks>,
     pub(crate) accounts: Arc<crate::accounts::Accounts>,
     pub(crate) resources: crate::agent::Resources,
     pub(crate) processes: Arc<crate::processes::Processes>,
@@ -162,6 +163,12 @@ impl Profiles {
         let skill_catalogue =
             skills::Catalogue::load(settings.workspace.clone(), settings.state_dir.clone()).await?;
         let policy = crate::permissions::Policy::new(settings.mode);
+        let hooks = crate::hooks::Hooks::load(
+            settings,
+            storage.database.parent().ok_or("Missing state directory")?,
+            policy.clone(),
+            diagnostics.clone(),
+        );
         Ok(Arc::new(Self {
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),
@@ -170,6 +177,7 @@ impl Profiles {
             images: crate::images::Images::new(storage.database.with_file_name("attachments")),
             shell: crate::shell::Shell::new(resources.processes.clone(), diagnostics.clone()),
             diagnostics,
+            hooks,
             workspace: settings.workspace.clone(),
             state_dir: settings.state_dir.clone(),
             accounts: crate::accounts::Accounts::new(&settings.state_dir.join("auth"))?,

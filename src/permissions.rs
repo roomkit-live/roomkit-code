@@ -106,7 +106,20 @@ impl Policy {
     }
 
     pub async fn gate(&self, channel: &ConversationChannel, event: ToolCallEvent) -> ToolUse {
-        if self.mode(event.room_id.as_str()) == Mode::Plan && !plan_allowed(&event) {
+        self.gate_with_review(channel, event, None).await
+    }
+
+    pub(crate) fn plan_blocks(&self, event: &ToolCallEvent) -> bool {
+        self.mode(event.room_id.as_str()) == Mode::Plan && !plan_allowed(event)
+    }
+
+    pub(crate) async fn gate_with_review(
+        &self,
+        channel: &ConversationChannel,
+        event: ToolCallEvent,
+        review: Option<String>,
+    ) -> ToolUse {
+        if self.plan_blocks(&event) {
             return ToolUse::block(
                 "Plan mode: explore and update the plan only. This action is disabled. Ask the user to switch to Ask or Yolo before implementing; do not retry or use another tool to bypass this restriction.",
             );
@@ -125,10 +138,14 @@ impl Policy {
             | "process_stop"
             | "output_read"
             | "output_forget" => {
-                return ToolUse::Allow;
+                if review.is_none() {
+                    return ToolUse::Allow;
+                }
             }
             "plan_create" | "plan_read" | "plan_list" | "plan_update" | "plan_delete" => {
-                return ToolUse::Allow;
+                if review.is_none() {
+                    return ToolUse::Allow;
+                }
             }
             // The tool's schema defines an omitted dry_run as true.
             "patch"
@@ -138,7 +155,9 @@ impl Policy {
                     .get("dry_run")
                     .is_none_or(|value| value == true) =>
             {
-                return ToolUse::Allow;
+                if review.is_none() {
+                    return ToolUse::Allow;
+                }
             }
             "write" | "edit" | "patch" | "shell" | "process_start" | "process_write"
             | "web_fetch" | "web_search" => {}
@@ -147,7 +166,7 @@ impl Policy {
         }
         // Changing modes never auto-accepts a pending approval. Recheck Plan
         // after approval; actions already dispatched are not revoked.
-        if self.mode(event.room_id.as_str()) == Mode::Yolo {
+        if review.is_none() && self.mode(event.room_id.as_str()) == Mode::Yolo {
             return ToolUse::Allow;
         }
         let Ok(arguments) = serde_json::to_string_pretty(&event.call.arguments) else {
@@ -183,6 +202,11 @@ impl Policy {
             }
         } else {
             format!("{label}:\n{arguments}")
+        };
+        let detail = if let Some(reason) = review {
+            format!("Hook requires review: {reason}\n\n{detail}")
+        } else {
+            detail
         };
         let target = ["command", "path", "url", "query", "process_id"]
             .iter()

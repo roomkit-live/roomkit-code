@@ -9,13 +9,13 @@ fmt-check:
 	cargo fmt --all --check
 
 clippy:
-	cargo clippy --locked --all-targets -- -D warnings
+	cargo clippy --locked --workspace --all-targets -- -D warnings
 
 test:
-	cargo test --locked
+	cargo test --locked --workspace
 
 doc:
-	RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
+	RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --no-deps
 
 package-check:
 	python3 scripts/check-package.py
@@ -31,9 +31,10 @@ terminal-check:
 	python3 scripts/check-herdr.py
 	python3 scripts/check-skills.py
 	python3 scripts/check-mcp.py
+	python3 scripts/check-hooks.py
 
 msrv:
-	cargo +1.94.0 test --locked
+	cargo +1.94.0 test --locked --workspace
 
 audit:
 	cargo deny $(DENY_FLAGS) check

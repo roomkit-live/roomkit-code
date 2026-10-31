@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add reviewed global/project command hooks and `/hooks`, with live sidebar
+  activity, bounded output inspection and correlated operational diagnostics.
+  Cover session start/end, prompt admission, complete agent turns and tool
+  outcomes. Hooks may deny or require review even in Yolo; they never bypass
+  the application's permissions. Plan execution requires an explicit hook opt-in.
+- Isolate hook configuration, subprocess execution and decision parsing in a
+  reusable `roomkit-hooks` crate, without engine or terminal dependencies.
+
 - Keep approval receipts with their tool calls when resuming a conversation,
   instead of appending them after the final answer. Restore older receipts
   within their original agent turn.

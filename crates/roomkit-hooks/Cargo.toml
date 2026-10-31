@@ -1,0 +1,31 @@
+[package]
+name = "roomkit-hooks"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+description = "Bounded command hooks with explicit JSON contracts, independent of an agent or UI"
+license = "MIT"
+publish = false
+include = ["src/**", "Cargo.toml", "README.md", "LICENSE"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+tokio = { version = "1", features = ["process", "io-util", "time", "macros", "rt"] }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["process"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"

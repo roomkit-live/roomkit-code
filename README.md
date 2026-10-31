@@ -767,3 +767,106 @@ the file setting. The option applies to all agents in that application
 instance, including after profile changes. It does not change tool-owned parameters
 of the same name. Providers may ignore schema requirements: a missing intention
 still uses the tool name, without blocking execution or triggering a retry.
+
+## Command hooks
+
+`/hooks` discovers global definitions in `<state-dir>/hooks.json` and project
+ones in `.roomkit/hooks.json`. Both sources are additive, global first. No command
+runs until you inspect it and choose **Enable this hook** in `/hooks`. Approval is
+stored privately for this project and exact definition. Use **Reload configuration**
+after editing; new or changed definitions need review again. Referenced script
+contents are not pinned: only enable commands and scripts you maintain or trust.
+Existing `.claude` and `.codex` configurations are not imported automatically.
+
+For example, put this in `.roomkit/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "^(write|edit|patch)$",
+      "hooks": [{
+        "type": "command",
+        "command": "python3 .roomkit/hooks/review.py",
+        "timeout": 10,
+        "statusMessage": "Check proposed changes"
+      }]
+    }]
+  }
+}
+```
+
+Then create `.roomkit/hooks/review.py`:
+
+```python
+import json
+import sys
+
+request = json.load(sys.stdin)
+print(json.dumps({
+    "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "ask",
+        "permissionDecisionReason": "Review this proposed change."
+    }
+}))
+```
+
+The hook requests human review even in Yolo. `deny` refuses the action; `allow`
+continues the application's normal policy, including any approval it requires.
+Hooks cannot override Plan restrictions. A `UserPromptSubmit` hook can instead
+return `{"decision":"block","reason":"Explain what is missing"}`. Exit code 2
+also blocks these two events, using stderr as the reason. Other nonzero exits,
+timeouts, malformed output and unsupported decisions fail closed before input or
+a tool. Successful stdout must be empty or supported JSON; use stderr for logs.
+Observation failures are reported but do not undo an action that already happened.
+
+| Event | Application behavior |
+| --- | --- |
+| `SessionStart` | First authorized attachment to a session in this application execution; `source` is `startup`, `new` or `resume`. |
+| `SessionEnd` | Application shutdown, for each session opened in this execution; `reason` is `shutdown`. |
+| `UserPromptSubmit` | Validated text/image prompt before entering engine history; `prompt` contains text, never image bytes or attachment references. |
+| `TurnStart` | One accepted logical agent turn, before the first model request. |
+| `TurnEnd` | After delivery, cancellation cleanup and pending tool hooks; `roomkit.outcome` is `completed`, `failed`, `cancelled` or `blocked`. |
+| `PreToolUse` | Before an eligible agent tool, including MCP, and before the application's approval. Hard Plan restrictions take precedence. |
+| `PostToolUse` | A successful tool outcome, observed asynchronously; the tool result remains unchanged. |
+| `PostToolUseFailure` | A refused, failed, blocked, unhandled or cancelled tool; exact engine outcome in `roomkit.outcome`. |
+
+A session remains open when switching views or agents; those actions do not fire
+`SessionEnd`. Returning to a session in the same execution does not fire another
+`SessionStart`. Reopening it after application restart opens a new execution.
+Enabling a hook never replays old events, including an already-fired session start.
+Abrupt process termination cannot guarantee cleanup hooks. `TurnStart`/`TurnEnd`
+are RoomKit extensions, not aliases for Claude/Codex `Stop` continuation.
+Manual `!` commands are user actions and do not fire agent-turn or tool hooks.
+
+Each command receives one JSON object on stdin, including `hook_event_name`,
+`session_id`, `cwd`, `permission_mode` and a `roomkit` object with `version: 1`,
+`execution_id`, `agent_id`, `origin` and, where applicable, `turn_id` and `hook_id`.
+Tool events additionally carry `tool_name`, `tool_use_id`, `tool_input`, and after
+execution `tool_response`. Matchers are case-sensitive regexes over canonical tool
+names (`shell`, not `Bash`), or session source/end reason. Empty or `*` matches all.
+Prompt and turn events accept only empty/`*` matchers. No payload translation for
+another application's tool schemas is implied.
+
+Handlers within an event run sequentially; a refusal stops a blocking chain.
+Independent tool outcomes may be observed concurrently. Configuration is fixed for
+a turn, and changing enabled hooks is refused while it runs. In Plan mode, commands
+are skipped unless their definition explicitly includes
+`"roomkit": {"run_in_plan": true}`. That option allows the script itself to run with
+your user permissions; it is not a read-only sandbox. Commands inherit the host's
+environment and run at the project root, also exposed as `ROOMKIT_PROJECT_DIR`.
+
+The reusable `crates/roomkit-hooks` component bounds stdin to 1 MiB, each output
+stream to 32 KiB and each command to 1–30 seconds (default 10). Each source allows
+at most 60 seconds of handlers per event. Timeout, cancellation and normal exit
+clean up the command's Unix process group, including remaining background members.
+
+The sidebar shows activity and the latest result; `/hooks` shows bounded recent
+output for explicit inspection. Private diagnostic logs store correlated identifiers,
+status and duration, not commands, prompts, tool arguments/results or script output.
+The last 100 executions are retained in memory; raw output is not restored on resume.
+
+This first version deliberately rejects unsupported events/fields: `Stop`
+continuation, `PermissionRequest` auto-approval, input rewriting, context injection,
+asynchronous command mode, HTTP/MCP handlers and prompt/agent handlers come later.

@@ -38,18 +38,36 @@ impl Application {
         let policy = profiles.policy.clone();
         let setup = async {
             profiles.diagnostics.install(&kit).await?;
+            profiles.hooks.install(&kit)?;
             let agent_id = profiles.initialize(&kit).await?;
             let channel = ConversationChannel::new(ChannelId::new("terminal")?);
             kit.register_channel(channel.clone())?;
             let gate_policy = policy.clone();
             let gate_channel = channel.clone();
+            let gate_hooks = profiles.hooks.clone();
             kit.before_tool_use(
                 roomkit::ToolHookSpec::new("code-permissions")
-                    .with_timeout(std::time::Duration::from_secs(310)),
+                    .with_timeout(std::time::Duration::from_secs(435)),
                 move |event, _| {
                     let policy = gate_policy.clone();
                     let channel = gate_channel.clone();
-                    async move { Ok(policy.gate(&channel, event).await) }
+                    let hooks = gate_hooks.clone();
+                    async move {
+                        if policy.plan_blocks(&event) {
+                            return Ok(policy.gate(&channel, event).await);
+                        }
+                        match hooks.before_tool(&event).await {
+                            roomkit_hooks::Decision::Deny(reason) => {
+                                Ok(roomkit::ToolUse::block(reason))
+                            }
+                            roomkit_hooks::Decision::Ask(reason) => {
+                                Ok(policy.gate_with_review(&channel, event, Some(reason)).await)
+                            }
+                            roomkit_hooks::Decision::Continue => {
+                                Ok(policy.gate(&channel, event).await)
+                            }
+                        }
+                    }
                 },
             )?;
             let room = crate::sessions::create(
@@ -71,6 +89,14 @@ impl Application {
             view.mode = Some(policy.state(view.room.as_str()));
             profiles.attach(&kit, &view, channel.id()).await?;
             profiles.configure_view(&mut view).await;
+            profiles.hooks.note_source(
+                view.room.as_str(),
+                if settings.session.is_some() {
+                    "resume"
+                } else {
+                    "startup"
+                },
+            );
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>((channel, view))
         }
         .await;
@@ -98,6 +124,7 @@ impl Application {
         self.profiles.accounts.close().await;
         self.profiles.mcp_runtime.close().await;
         let engine = self.kit.close().await;
+        self.profiles.hooks.close().await;
         let tools = self.profiles.resources.close().await;
         self.profiles.diagnostics.close().await;
         engine?;
@@ -109,6 +136,7 @@ impl Application {
 
     pub fn session(&self) -> LocalSession<SqliteStore> {
         LocalSession::new(self.kit.clone(), self.channel.clone(), self.view.clone())
+            .with_lifecycle(self.profiles.hooks.lifecycle())
     }
 }
 

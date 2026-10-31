@@ -7,6 +7,7 @@ mod branding;
 mod config;
 mod diagnostics;
 mod herdr;
+mod hooks;
 mod images;
 mod permissions;
 mod plans;
