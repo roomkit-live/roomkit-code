@@ -52,6 +52,26 @@ impl Processes {
         self.sidebar.borrow().1.clone()
     }
 
+    /// Closing the application stops every running process, whatever its
+    /// owner or conversation; the terminal states it before detaching.
+    async fn exit_warning(&self, conversation: &str) -> Event {
+        let running = self
+            .manager
+            .observe()
+            .await
+            .iter()
+            .filter(|process| process.status.state == ProcessState::Running)
+            .count();
+        Event::ExitWarning {
+            conversation: conversation.into(),
+            text: match running {
+                0 => None,
+                1 => Some("1 running process will be stopped".into()),
+                n => Some(format!("{n} running processes will be stopped")),
+            },
+        }
+    }
+
     /// The UI owns observation lifetime. No periodic work while panels are closed.
     pub fn subscribe(
         self: &Arc<Self>,
@@ -76,16 +96,19 @@ impl Processes {
                     .iter()
                     .filter(|j| j.process.status.state == ProcessState::Running)
                     .count();
-                let mut events = vec![Event::BackgroundChanged {
-                    conversation: current.room.as_str().into(),
-                    status: (running > 0).then(|| {
-                        BackgroundStatus::new(
-                            format!("Processes: {running} running"),
-                            "processes",
-                            "",
-                        )
-                    }),
-                }];
+                let mut events = vec![
+                    Event::BackgroundChanged {
+                        conversation: current.room.as_str().into(),
+                        status: (running > 0).then(|| {
+                            BackgroundStatus::new(
+                                format!("Processes: {running} running"),
+                                "processes",
+                                "",
+                            )
+                        }),
+                    },
+                    this.exit_warning(current.room.as_str()).await,
+                ];
                 if let Some(panel) = &panel {
                     events.push(Event::PanelUpdated {
                         conversation: current.room.as_str().into(),

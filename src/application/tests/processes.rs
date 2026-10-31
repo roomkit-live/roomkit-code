@@ -54,6 +54,24 @@ async fn badge(
     .unwrap()
 }
 
+/// Wait until the published exit warning reads `expected`. The observer may
+/// publish once per process start, so an earlier count can come first.
+async fn exit_warning(rx: &mut tokio::sync::watch::Receiver<Vec<Event>>, expected: &str) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let warned = rx.borrow_and_update().iter().any(|event| {
+                matches!(event, Event::ExitWarning { text: Some(text), .. } if text == expected)
+            });
+            if warned {
+                return;
+            }
+            rx.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+}
+
 async fn no_badge(rx: &mut tokio::sync::watch::Receiver<Vec<Event>>) {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -116,6 +134,8 @@ async fn monitor_observes_actual_lifecycle_filters_owners_and_rejects_old_action
         badge(&mut updates, "running").await.label,
         "Processes: 1 running"
     );
+    // Exiting stops every process, including one this view cannot see.
+    exit_warning(&mut updates, "2 running processes will be stopped").await;
     let sidebar = app.profiles.sidebar(&app.view).await.0;
     let processes = sidebar
         .sections
@@ -161,6 +181,7 @@ async fn monitor_observes_actual_lifecycle_filters_owners_and_rejects_old_action
     assert!(stopped.title.contains("stopped"));
     assert!(stopped.body.contains("stdout marker") && stopped.body.contains("stderr marker"));
     no_badge(&mut updates).await;
+    exit_warning(&mut updates, "1 running process will be stopped").await;
     let sidebar = app.profiles.sidebar(&app.view).await.0;
     let serialized = serde_json::to_string(&sidebar).unwrap();
     assert!(serialized.contains("No running processes"));
@@ -276,7 +297,11 @@ async fn monitor_pages_output_without_consuming_it_and_does_not_tick_when_closed
     // Wait until the observer acknowledges dismissal; thereafter no timer runs.
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
-            if updates.borrow_and_update().len() == 1 {
+            if !updates
+                .borrow_and_update()
+                .iter()
+                .any(|event| matches!(event, Event::PanelUpdated { .. }))
+            {
                 break;
             }
             updates.changed().await.unwrap();

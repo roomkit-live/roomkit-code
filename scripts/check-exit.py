@@ -131,6 +131,10 @@ try:
         offset = app.send("Start the server\r")
         app.wait("Exit fixture first.", offset)
         assert alive(), "The fixture process must run before exit"
+        # With a running process, the first Ctrl+D only states what exiting stops.
+        offset = app.send("\x04")
+        app.wait("Press Ctrl+D again to exit · 1 running process will be stopped", offset)
+        assert app.process.poll() is None and alive(), "The first Ctrl+D must only warn"
         lines = app.quit()
         session = next(line for line in lines if line.startswith("Session: "))[len("Session: "):]
         command = shlex.split(after(lines, "To continue this session, run:"))
@@ -147,10 +151,11 @@ try:
         lines = app.quit()
         assert f"Session: {session}" in lines, lines
         assert "Token usage: total=390 input=300 (+ 600 cached) output=90 · 2 turns" in lines, lines
+        # Without running processes, a single Ctrl+D detaches at once.
         assert not any("background process" in line for line in lines), lines
         assert len(requests) == 3
 finally:
     server.shutdown()
     server.server_close()
     thread.join(timeout=5)
-print("PTY exit passed: resume command reopens the session, usage spans launches, background process stopped.")
+print("PTY exit passed: Ctrl+D warns about running processes, resume command reopens the session, usage spans launches, background process stopped.")
