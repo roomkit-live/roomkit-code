@@ -10,6 +10,7 @@ use roomkit_tui_engine::{ConversationChannel, LocalSession, SessionConfig};
 
 use crate::{Result, config::Settings, profiles::Profiles, services::Services, storage::Storage};
 
+mod gate;
 mod integrations;
 
 pub(crate) struct Application {
@@ -41,73 +42,7 @@ impl Application {
         };
         let kit = RoomKit::new(RoomKitOptions::with_store(store));
         let policy = profiles.policy.clone();
-        let setup = async {
-            profiles.diagnostics.install(&kit).await?;
-            services.hooks.install(&kit)?;
-            profiles.resources.files.install(&kit);
-            let agent_id = profiles.initialize(&kit).await?;
-            let channel = ConversationChannel::new(ChannelId::new("terminal")?);
-            kit.register_channel(channel.clone())?;
-            let gate_policy = policy.clone();
-            let gate_channel = channel.clone();
-            let gate_hooks = services.hooks.clone();
-            kit.before_tool_use(
-                roomkit::ToolHookSpec::new("code-permissions")
-                    .with_timeout(crate::timeouts::PERMISSION_GATE),
-                move |event, _| {
-                    let policy = gate_policy.clone();
-                    let channel = gate_channel.clone();
-                    let hooks = gate_hooks.clone();
-                    async move {
-                        if policy.plan_blocks(&event) {
-                            return Ok(policy.gate(&channel, event).await);
-                        }
-                        match hooks.before_tool(&event).await {
-                            roomkit_hooks::Decision::Deny(reason) => {
-                                Ok(roomkit::ToolUse::block(reason))
-                            }
-                            roomkit_hooks::Decision::Ask(reason) => {
-                                Ok(policy.gate_with_review(&channel, event, Some(reason)).await)
-                            }
-                            roomkit_hooks::Decision::Continue => {
-                                Ok(policy.gate(&channel, event).await)
-                            }
-                        }
-                    }
-                },
-            )?;
-            let room = crate::sessions::create(
-                &kit,
-                &services.sessions,
-                channel.id(),
-                &agent_id,
-                settings.session.as_deref(),
-                settings.session.is_none(),
-            )
-            .await?;
-            let mut view = SessionConfig::new(room, agent_id, "local-user");
-            view.title = crate::sessions::title(&settings.workspace, &view.room);
-            view.commands = crate::sessions::commands();
-            view.input_actions = vec![roomkit_tui::protocol::InputAction::new(
-                '!',
-                "shell",
-                "Run a shell command in this project",
-            )];
-            view.mode = Some(policy.state(view.room.as_str()));
-            profiles.attach(&kit, &view, channel.id()).await?;
-            profiles.configure_view(&mut view).await;
-            services.hooks.note_source(
-                view.room.as_str(),
-                if settings.session.is_some() {
-                    "resume"
-                } else {
-                    "startup"
-                },
-            );
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>((channel, view))
-        }
-        .await;
-        match setup {
+        match setup(settings, &kit, &profiles, &services, &policy).await {
             Ok((channel, view)) => Ok(Self {
                 kit,
                 channel,
@@ -118,10 +53,7 @@ impl Application {
                 _storage: storage,
             }),
             Err(error) => {
-                let _ = kit.close().await;
-                profiles.mcp_runtime.close().await;
-                profiles.diagnostics.close().await;
-                let _ = profiles.resources.close().await;
+                abandon(&kit, &profiles).await;
                 Err(error)
             }
         }
@@ -154,6 +86,76 @@ impl Application {
         LocalSession::new(self.kit.clone(), self.channel.clone(), self.view.clone())
             .with_lifecycle(self.services.hooks.lifecycle())
     }
+}
+
+/// Install the application's hooks on the engine, then open the first
+/// session and the view on it.
+async fn setup(
+    settings: &Settings,
+    kit: &RoomKit<SqliteStore>,
+    profiles: &Profiles,
+    services: &Services,
+    policy: &crate::permissions::Policy,
+) -> Result<(ConversationChannel, SessionConfig)> {
+    profiles.diagnostics.install(kit).await?;
+    services.hooks.install(kit)?;
+    profiles.resources.files.install(kit);
+    let agent_id = profiles.initialize(kit).await?;
+    let channel = ConversationChannel::new(ChannelId::new("terminal")?);
+    kit.register_channel(channel.clone())?;
+    gate::install(kit, policy, &channel, &services.hooks)?;
+    let view = first_view(
+        settings, kit, profiles, services, policy, &channel, agent_id,
+    )
+    .await?;
+    Ok((channel, view))
+}
+
+/// The session the application opens with, resumed or new, and its view.
+async fn first_view(
+    settings: &Settings,
+    kit: &RoomKit<SqliteStore>,
+    profiles: &Profiles,
+    services: &Services,
+    policy: &crate::permissions::Policy,
+    channel: &ConversationChannel,
+    agent_id: ChannelId,
+) -> Result<SessionConfig> {
+    let room = crate::sessions::create(
+        kit,
+        &services.sessions,
+        channel.id(),
+        &agent_id,
+        settings.session.as_deref(),
+        settings.session.is_none(),
+    )
+    .await?;
+    let mut view = SessionConfig::new(room, agent_id, "local-user");
+    view.title = crate::sessions::title(&settings.workspace, &view.room);
+    view.commands = crate::sessions::commands();
+    view.input_actions = vec![roomkit_tui::protocol::InputAction::new(
+        '!',
+        "shell",
+        "Run a shell command in this project",
+    )];
+    view.mode = Some(policy.state(view.room.as_str()));
+    profiles.attach(kit, &view, channel.id()).await?;
+    profiles.configure_view(&mut view).await;
+    let source = if settings.session.is_some() {
+        "resume"
+    } else {
+        "startup"
+    };
+    services.hooks.note_source(view.room.as_str(), source);
+    Ok(view)
+}
+
+/// Release what a failed setup opened.
+async fn abandon(kit: &RoomKit<SqliteStore>, profiles: &Profiles) {
+    let _ = kit.close().await;
+    profiles.mcp_runtime.close().await;
+    profiles.diagnostics.close().await;
+    let _ = profiles.resources.close().await;
 }
 
 pub(crate) async fn run(settings: Settings) -> Result<()> {
