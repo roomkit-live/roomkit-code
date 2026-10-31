@@ -19,6 +19,7 @@ pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 pub const TARGET: &str = env!("ROOMKIT_BUILD_TARGET");
 const MAX_BINARY: u64 = 256 * 1024 * 1024;
 const INTERVAL: u64 = 24 * 60 * 60;
+const NO_UPDATE: &str = "No new version available.";
 
 fn version(raw: &str) -> Result<[u64; 3]> {
     let raw = raw.strip_prefix('v').unwrap_or(raw);
@@ -61,6 +62,7 @@ enum Action {
 }
 
 pub struct Updates {
+    diagnostics: Arc<crate::diagnostics::Diagnostics>,
     exe: PathBuf,
     installation: Option<Installation>,
     state: Mutex<State>,
@@ -70,10 +72,11 @@ pub struct Updates {
     busy: Arc<tokio::sync::Mutex<()>>,
 }
 impl Updates {
-    pub fn new() -> Arc<Self> {
+    pub fn new(diagnostics: Arc<crate::diagnostics::Diagnostics>) -> Arc<Self> {
         let exe = std::env::current_exe().unwrap_or_default();
         let installation = Installation::detect(&exe);
         Arc::new(Self {
+            diagnostics,
             exe,
             installation,
             state: Mutex::new(State::default()),
@@ -87,6 +90,21 @@ impl Updates {
         self.state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    fn record_failure(&self, error: &(dyn std::error::Error + Send + Sync + 'static)) {
+        let service = error.downcast_ref::<net::ServiceError>();
+        self.diagnostics.record(
+            "update_failed",
+            serde_json::json!({
+                "stage": match service {
+                    Some(e) if e.asset => "download",
+                    Some(_) => "check",
+                    None => "operation",
+                },
+                "http_status": service.and_then(|e| e.status),
+            }),
+            Some(&error.to_string()),
+        );
     }
     fn cache(&self) -> Option<PathBuf> {
         self.installation
@@ -139,14 +157,15 @@ impl Updates {
                 return;
             };
             let check = async { GitHub::new().await?.latest().await };
-            let result: Result<Release> =
+            let result: Result<Option<Release>> =
                 tokio::select! { r = check => r, () = this.stop.cancelled() => return };
             match result {
                 Ok(release) => {
-                    this.save_cache(Some(release.clone()));
-                    this.state().release = Some(release);
+                    this.save_cache(release.clone());
+                    this.state().release = release;
                 }
-                Err(_) => {
+                Err(error) => {
+                    this.record_failure(error.as_ref());
                     this.save_cache(this.state().release.clone());
                 }
             }
@@ -237,7 +256,14 @@ pub async fn cli(args: &crate::config::Cli) -> Result<bool> {
         }
     } else {
         let github = GitHub::new().await?;
-        let release = github.latest().await?;
+        let Some(release) = github.latest().await? else {
+            println!("{NO_UPDATE}");
+            return Ok(true);
+        };
+        if version(release.number())? <= version(CURRENT)? {
+            println!("{NO_UPDATE}");
+            return Ok(true);
+        }
         println!("Installed: {CURRENT}; latest stable: {}", release.number());
         if args.self_update && version(release.number())? > version(CURRENT)? && confirm(args.yes)?
         {

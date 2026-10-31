@@ -3,6 +3,22 @@ use super::*;
 use sha2::{Digest, Sha256};
 use std::io::Write;
 
+#[derive(Debug)]
+pub(super) struct ServiceError {
+    pub asset: bool,
+    pub status: Option<u16>,
+}
+impl std::fmt::Display for ServiceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.asset {
+            "Could not download the update. Please try again later."
+        } else {
+            "Could not check for updates right now. Please try again later."
+        })
+    }
+}
+impl std::error::Error for ServiceError {}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Asset {
     pub id: u64,
@@ -93,10 +109,10 @@ impl GitHub {
     async fn get(&self, path: &str, asset: bool) -> Result<reqwest::Response> {
         let mut request = self
             .client
-            .get(format!(
-                "{}/repos/roomkit-live/roomkit-code/{path}",
-                self.base
-            ))
+            .get(
+                format!("{}/repos/roomkit-live/roomkit-code/{path}", self.base)
+                    .trim_end_matches('/'),
+            )
             .header(
                 "Accept",
                 if asset {
@@ -112,10 +128,10 @@ impl GitHub {
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);
         }
-        let mut response = request
-            .send()
-            .await
-            .map_err(|_| "Could not reach GitHub releases")?;
+        let mut response = request.send().await.map_err(|_| ServiceError {
+            asset,
+            status: None,
+        })?;
         if asset && response.status().is_redirection() {
             let location = response
                 .headers()
@@ -143,16 +159,30 @@ impl GitHub {
                 .get(url)
                 .send()
                 .await
-                .map_err(|_| "Release download failed")?;
+                .map_err(|_| ServiceError {
+                    asset,
+                    status: None,
+                })?;
         }
         match response.status().as_u16() {
             200 => Ok(response),
-            401 | 403 | 404 => Err("GitHub release unavailable: verify the release exists and your repository access with `gh auth login`, or set ROOMKIT_UPDATE_TOKEN (Contents: read). GitHub may also be rate-limiting requests".into()),
-            _ => Err("GitHub could not provide the requested release".into()),
+            // Only the latest-release endpoint may legitimately have no result.
+            404 if !asset && path == "releases/latest" => Ok(response),
+            status => Err(ServiceError {
+                asset,
+                status: Some(status),
+            }
+            .into()),
         }
     }
-    pub async fn latest(&self) -> Result<Release> {
+    pub async fn latest(&self) -> Result<Option<Release>> {
         let mut response = self.get("releases/latest", false).await?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            // GitHub also hides inaccessible repositories behind 404. Confirm
+            // access before telling the user that no release is available.
+            self.get("", false).await?;
+            return Ok(None);
+        }
         let mut data = Vec::new();
         while let Some(chunk) = response
             .chunk()
@@ -167,7 +197,7 @@ impl GitHub {
         let release: Release =
             serde_json::from_slice(&data).map_err(|_| "Invalid release metadata")?;
         release.validate()?;
-        Ok(release)
+        Ok(Some(release))
     }
     pub async fn download(&self, release: &Release) -> Result<(tempfile::NamedTempFile, String)> {
         release.validate()?;

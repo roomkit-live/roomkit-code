@@ -1,6 +1,6 @@
 //! Immutable versions and atomic activation, confined to an explicitly managed install.
 use super::*;
-use fs2::FileExt;
+use crate::storage::FileLease;
 use sha2::{Digest, Sha256};
 use std::{
     fs,
@@ -87,7 +87,7 @@ impl Installation {
         install.version_at(exe.parent()?).ok()?;
         Some(install)
     }
-    fn lock(&self) -> Result<fs::File> {
+    fn lock(&self) -> Result<FileLease> {
         regular_dir(&self.root())?;
         regular_dir(&self.root().join("versions"))?;
         let path = self.root().join("install.lock");
@@ -103,9 +103,9 @@ impl Installation {
         if !file.metadata()?.is_file() {
             return Err("Invalid installation lock".into());
         }
-        file.try_lock_exclusive()
-            .map_err(|_| "Another installation or update is running")?;
-        Ok(file)
+        // Explicit unlock also releases transient copies inherited by a child
+        // between fork and exec, just like the application's storage lease.
+        FileLease::exclusive(file).map_err(|_| "Another installation or update is running".into())
     }
     fn version_at(&self, dir: &Path) -> Result<Receipt> {
         if fs::symlink_metadata(dir)?.file_type().is_symlink()

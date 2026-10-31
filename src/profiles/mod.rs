@@ -174,7 +174,7 @@ impl Profiles {
         );
         let instructions = resources.instructions.clone();
         Ok(Arc::new(Self {
-            updates: crate::updates::Updates::new(),
+            updates: crate::updates::Updates::new(diagnostics.clone()),
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),
             require_tool_intent: settings.require_tool_intent,

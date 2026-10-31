@@ -3,6 +3,73 @@ use super::*;
 use axum::{Router, routing::get};
 
 #[tokio::test]
+async fn missing_release_is_not_an_error_when_the_repository_is_accessible() {
+    use axum::http::StatusCode;
+    let router = Router::new()
+        .route("/repos/roomkit-live/roomkit-code", get(|| async { "{}" }))
+        .route(
+            "/repos/roomkit-live/roomkit-code/releases/latest",
+            get(|| async { StatusCode::NOT_FOUND }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let result = GitHub::with_source(url, None).unwrap().latest().await;
+    task.abort();
+    assert!(
+        result.is_ok(),
+        "no published release must be a normal result: {result:?}"
+    );
+    assert!(result.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn unavailable_service_is_not_reported_as_no_update() {
+    use axum::http::StatusCode;
+    for (latest, repository) in [
+        (401, 200),
+        (403, 200),
+        (429, 200),
+        (500, 200),
+        (404, 404),
+        (404, 403),
+    ] {
+        let router = Router::new()
+            .route(
+                "/repos/roomkit-live/roomkit-code",
+                get(move || async move { StatusCode::from_u16(repository).unwrap() }),
+            )
+            .route(
+                "/repos/roomkit-live/roomkit-code/releases/latest",
+                get(move || async move { StatusCode::from_u16(latest).unwrap() }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let github = GitHub::with_source(url, None).unwrap();
+        let error = github.latest().await.unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Could not check for updates right now. Please try again later."
+        );
+        assert_eq!(
+            error.downcast_ref::<ServiceError>().unwrap().status,
+            Some(if latest == 404 { repository } else { latest })
+        );
+        let download = github.get("releases/assets/999", true).await.unwrap_err();
+        assert_eq!(
+            download.to_string(),
+            "Could not download the update. Please try again later."
+        );
+        assert_eq!(
+            download.downcast_ref::<ServiceError>().unwrap().status,
+            Some(404)
+        );
+        task.abort();
+    }
+}
+
+#[tokio::test]
 async fn github_fixture_checks_pair_size_integrity_and_never_follows_untrusted_redirects() {
     let data = b"fixture release binary";
     let hash = format!("{:x}", Sha256::digest(data));
@@ -58,7 +125,7 @@ async fn github_fixture_checks_pair_size_integrity_and_never_follows_untrusted_r
         axum::serve(listener, router).await.unwrap();
     });
     let github = GitHub::with_source(url, Some("fixture-token".into())).unwrap();
-    let found = github.latest().await.unwrap();
+    let found = github.latest().await.unwrap().unwrap();
     let (file, got) = github.download(&found).await.unwrap();
     assert_eq!(got, hash);
     assert_eq!(std::fs::read(file.path()).unwrap(), data);

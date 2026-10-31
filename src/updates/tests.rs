@@ -148,6 +148,11 @@ async fn rollback_requires_a_fresh_confirmation_scoped_to_the_view() {
         .canonicalize()
         .unwrap();
     let updates = Arc::new(Updates {
+        diagnostics: crate::diagnostics::Diagnostics::open(
+            temp.path().join("diagnostics.jsonl"),
+            false,
+        )
+        .unwrap(),
         exe: exe.clone(),
         installation: Some(installation.clone()),
         state: Mutex::new(State::default()),

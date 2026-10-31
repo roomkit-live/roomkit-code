@@ -64,6 +64,7 @@ impl Updates {
             }
             Ok(None) => {}
             Err(e) => {
+                self.record_failure(e.as_ref());
                 panel.body = format!(
                     "Could not complete this operation.\n\n{e}\n\nYour current installation remains available. Use /update to try again."
                 );
@@ -90,7 +91,7 @@ impl Updates {
             return Ok(CommandResult::Events(vec![Event::Panel {
                 conversation: room.as_str().into(),
                 panel: panel(format!(
-                    "Version {CURRENT} · {TARGET}\n\nThis is a development or externally managed executable.\nInstall a release with the installer to enable updates and rollback.\nCargo and package-manager binaries are never replaced.\n\nRelease downloads: https://github.com/roomkit-live/roomkit-code/releases\nPrivate repository: authenticate with gh auth login."
+                    "Version {CURRENT}\n\nUpdates are managed by the method you used to install RoomKit Code."
                 )),
             }]));
         };
@@ -124,7 +125,7 @@ impl Updates {
             } else if argument == "rollback" {
                 "Inspecting the previous version…"
             } else {
-                "Checking GitHub releases…"
+                "Checking for updates…"
             }
             .into(),
         );
@@ -160,10 +161,14 @@ impl Updates {
                     }
                     None => {
                         let release = GitHub::new().await?.latest().await?;
-                        this.save_cache(Some(release.clone()));
-                        this.state().release = Some(release.clone());
+                        this.save_cache(release.clone());
+                        this.state().release = release.clone();
+                        let Some(release) = release else {
+                            opening.body = NO_UPDATE.into();
+                            return Ok(None);
+                        };
                         if version(release.number())? <= version(CURRENT)? {
-                            opening.body = format!("Running v{CURRENT} · {TARGET}\n\nYou are up to date with the latest stable release.");
+                            opening.body = NO_UPDATE.into();
                             Ok(None)
                         } else {
                             opening.body = format!("Current: v{CURRENT}\nAvailable: {}\nPlatform: {TARGET}\nDownload: {} bytes\nDestination: {}\n\nThe binary will be verified with the release SHA-256 checksum.\nYour conversation will continue; the new version takes effect on next launch.\n\nRelease notes: https://github.com/roomkit-live/roomkit-code/releases/tag/{}", release.tag_name, release.asset(false)?.size, installation.bin.display(), release.tag_name);

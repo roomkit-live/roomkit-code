@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Simplify update messages and handle an empty release catalogue without an error.
+  Keep network failures distinct, with HTTP status codes in local diagnostics.
+- Release installer locks explicitly so a concurrently starting subprocess cannot
+  cause a false "update is running" error.
+
 - Give agents this application's guide through `docs_search`, `docs_read` and
   `docs_list`. The README is embedded, split per `##` section and published
   read-only under `<state-dir>/docs/<revision>/`. The tools run without approval,
