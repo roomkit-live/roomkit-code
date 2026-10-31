@@ -33,6 +33,7 @@ async fn attach(
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
+        services: app.services.clone(),
     };
     let task = tokio::spawn(app.session().run_with_commands(host, handler));
     assert!(matches!(next(&client).await, Event::Snapshot(_)));

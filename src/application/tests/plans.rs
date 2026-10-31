@@ -11,6 +11,7 @@ fn handler(app: &Application, workspace: &std::path::Path) -> crate::sessions::S
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
+        services: app.services.clone(),
     }
 }
 fn panel(result: CommandResult) -> PanelSpec {

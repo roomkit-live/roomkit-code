@@ -8,6 +8,7 @@ fn handler(app: &Application, settings: &Settings) -> crate::sessions::Sessions 
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
+        services: app.services.clone(),
     }
 }
 
@@ -83,7 +84,7 @@ async fn independent_instances_share_a_project_without_sharing_a_conversation() 
             .await
             .is_err()
     );
-    assert!(first.profiles.sessions.claim("missing").unwrap().is_some());
+    assert!(first.services.sessions.claim("missing").unwrap().is_some());
     first.close().await.unwrap();
     let CommandResult::Switch(next) = command_handler
         .handle(
@@ -98,7 +99,7 @@ async fn independent_instances_share_a_project_without_sharing_a_conversation() 
     assert_eq!(next.room, first.view.room);
     assert!(
         first
-            .profiles
+            .services
             .sessions
             .claim(first.view.room.as_str())
             .is_err(),

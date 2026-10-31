@@ -106,6 +106,7 @@ async fn monitor_observes_actual_lifecycle_filters_owners_and_rejects_old_action
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
+        services: app.services.clone(),
     };
     assert!(handler.allow_while_busy("processes"));
     let mut updates = handler.subscribe(app.view.clone()).unwrap();

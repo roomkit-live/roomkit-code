@@ -6,6 +6,7 @@ pub(crate) mod model;
 pub(crate) mod sidebar;
 mod skills;
 mod slot;
+mod startup;
 mod store;
 mod ui;
 
@@ -26,23 +27,18 @@ use slot::AgentSlot;
 use store::Document;
 
 pub(crate) struct Profiles {
-    pub(crate) sessions: Arc<crate::storage::SessionLeases>,
-    pub(crate) updates: Arc<crate::updates::Updates>,
     pub(crate) policy: crate::permissions::Policy,
     pub(crate) plans: Arc<crate::plans::PlanView>,
     require_tool_intent: bool,
     workspace: PathBuf,
     state_dir: PathBuf,
     pub(crate) diagnostics: Arc<crate::diagnostics::Diagnostics>,
-    pub(crate) hooks: Arc<crate::hooks::Hooks>,
     pub(crate) accounts: Arc<crate::accounts::Accounts>,
     pub(crate) resources: crate::agent::Resources,
     pub(crate) processes: Arc<crate::processes::Processes>,
-    pub(crate) shell: Arc<crate::shell::Shell>,
     pub(crate) images: Arc<crate::images::Images>,
     skill_catalogue: tokio::sync::RwLock<skills::Catalogue>,
     pub(crate) mcp_runtime: mcp::Runtime,
-    pub(crate) sidebar_changes: tokio::sync::watch::Sender<()>,
     state: Mutex<State>,
 }
 
@@ -76,92 +72,12 @@ impl Profiles {
             settings.debug,
         )
         .map_err(|_| "Cannot open the private diagnostic log")?;
-        let edit_lease = store::load_lease(&settings.state_dir).await?;
-        let mcp = Document::<mcp::Servers>::load(storage.database.with_file_name("mcp.json"))?;
-        mcp.value.validate()?;
-        let mut providers =
-            Document::<Providers>::load(settings.state_dir.join("connections.json"))?;
-        let mut project =
-            Document::<Project>::load(storage.database.with_file_name("agents.json"))?;
-        let mut global = Document::<Project>::load(settings.state_dir.join("agents.json"))?;
-        if providers.value.schema != 1 {
-            return Err("Unsupported profile file version".into());
-        }
-        if providers.value.profiles.len() > 128
-            || project.value.agents.len() > catalog::MAX_AGENTS
-            || global.value.agents.len() > catalog::MAX_AGENTS
-        {
-            return Err("Too many provider or agent profiles".into());
-        }
-        for (id, provider) in &providers.value.profiles {
-            provider.validate()?;
-            if id != &provider.id {
-                return Err("Invalid provider identity".into());
-            }
-        }
-        for (id, agent) in project.value.agents.iter().chain(&global.value.agents) {
-            agent.validate()?;
-            if id != &agent.id {
-                return Err("Invalid agent identity".into());
-            }
-        }
-        for document in [&mut project, &mut global] {
-            let mut migrated = document.value.clone();
-            if migrated.migrate()? {
-                document.save(migrated)?;
-            }
-        }
-        // A configured connection starts a new project with its own agent,
-        // unless a global agent already lets it start.
-        if project.revision().is_none()
-            && project.value.agents.is_empty()
-            && global.value.agents.is_empty()
-            && !settings.base_url.is_empty()
-        {
-            let digest = format!(
-                "{:x}",
-                Sha256::digest(settings.workspace.as_os_str().as_encoded_bytes())
-            );
-            let id = format!("imported-{}", &digest[..12]);
-            if !providers.value.profiles.contains_key(&id) {
-                let provider = Provider {
-                    id: id.clone(),
-                    label: "Imported connection".into(),
-                    base_url: settings.base_url.clone(),
-                    authentication: if api_key.is_empty() {
-                        Authentication::None
-                    } else {
-                        Authentication::Stored { key: api_key }
-                    },
-                    timeout_seconds: settings.provider_timeout_seconds,
-                };
-                provider.validate()?;
-                let mut updated = providers.value.clone();
-                updated.profiles.insert(id.clone(), provider);
-                providers.save(updated)?;
-            }
-            let agent = Agent {
-                id: "code".into(),
-                label: "Code".into(),
-                provider: id,
-                model: settings.model.clone(),
-                reasoning_effort: None,
-                vision: false,
-                skills: Vec::new(),
-                mcp: BTreeMap::new(),
-                context_window: settings.context_window,
-                instructions: String::new(),
-                tools: TOOLS.iter().map(|s| (*s).into()).collect(),
-            };
-            agent.validate()?;
-            let mut updated = project.value.clone();
-            updated.selected = Some(agent.id.clone());
-            updated.agents.insert(agent.id.clone(), agent);
-            project.save(updated)?;
-        }
-        // A selection may name a global agent another project deleted: the
-        // project then opens with the global agent used last, or none.
-        drop(edit_lease);
+        let startup::Documents {
+            mcp,
+            providers,
+            project,
+            global,
+        } = startup::load(settings, storage, api_key).await?;
         let resources = match resources {
             Some(resources) => resources,
             None => crate::agent::Resources::new(
@@ -175,31 +91,20 @@ impl Profiles {
         let skill_catalogue =
             skills::Catalogue::load(settings.workspace.clone(), settings.state_dir.clone()).await?;
         let policy = crate::permissions::Policy::new(settings.mode);
-        let hooks = crate::hooks::Hooks::load(
-            settings,
-            storage.database.parent().ok_or("Missing state directory")?,
-            policy.clone(),
-            diagnostics.clone(),
-        );
         let instructions = resources.instructions.clone();
         Ok(Arc::new(Self {
-            sessions: storage.sessions.clone(),
-            updates: crate::updates::Updates::new(diagnostics.clone()),
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),
             require_tool_intent: settings.require_tool_intent,
             skill_catalogue: tokio::sync::RwLock::new(skill_catalogue),
             images: crate::images::Images::new(storage.database.with_file_name("attachments")),
-            shell: crate::shell::Shell::new(resources.processes.clone(), diagnostics.clone()),
             diagnostics,
-            hooks,
             workspace: settings.workspace.clone(),
             state_dir: settings.state_dir.clone(),
             accounts: crate::accounts::Accounts::new(&settings.state_dir.join("auth"))?,
             processes: crate::processes::Processes::new(resources.processes.clone()),
             resources,
             mcp_runtime: mcp::Runtime::default(),
-            sidebar_changes: tokio::sync::watch::channel(()).0,
             state: Mutex::new(State {
                 instructions,
                 policy,

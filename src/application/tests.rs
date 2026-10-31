@@ -365,6 +365,7 @@ async fn resumed_history_cannot_replace_the_current_wire_inventory_or_host_catal
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
+        services: app.services.clone(),
     };
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run_with_commands(host, handler));
@@ -488,6 +489,7 @@ async fn ask_gates_real_changes_and_yolo_never_auto_approves_an_existing_request
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
+        services: app.services.clone(),
     };
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run_with_commands(host, handler));
@@ -767,6 +769,7 @@ async fn histories_are_scoped_to_project_and_session_and_storage_has_one_owner()
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
+        services: app.services.clone(),
     };
     let request = Request::new(
         RequestId::new(1),
@@ -853,6 +856,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
+        services: app.services.clone(),
     };
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run_with_commands(host, handler));
@@ -958,6 +962,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
+        services: app.services.clone(),
     };
     let request = Request::new(
         RequestId::new(1),
@@ -1180,7 +1185,7 @@ async fn unused_automatic_drafts_are_reused_without_adopting_named_sessions() {
     let draft = app.view.room.clone();
     crate::sessions::create(
         &app.kit,
-        &app.profiles.sessions,
+        &app.services.sessions,
         app.channel.id(),
         &app.view.agent,
         Some("named-empty"),
@@ -1199,6 +1204,7 @@ async fn unused_automatic_drafts_are_reused_without_adopting_named_sessions() {
             channel: app.channel.id().clone(),
             policy: app.policy.clone(),
             profiles: app.profiles.clone(),
+            services: app.services.clone(),
         };
         let request = Request::new(
             RequestId::new(1),
@@ -1266,7 +1272,7 @@ async fn resume_skips_legacy_empty_sessions_before_applying_the_catalogue_limit(
     for index in 0..201 {
         current.room = crate::sessions::create(
             &app.kit,
-            &app.profiles.sessions,
+            &app.services.sessions,
             app.channel.id(),
             &app.view.agent,
             Some(&format!("legacy-empty-{index}")),
@@ -1281,6 +1287,7 @@ async fn resume_skips_legacy_empty_sessions_before_applying_the_catalogue_limit(
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
+        services: app.services.clone(),
     };
     let request = Request::new(
         RequestId::new(1),

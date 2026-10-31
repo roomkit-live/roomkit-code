@@ -8,7 +8,7 @@ use roomkit_sqlite::SqliteStore;
 use roomkit_tui::connection;
 use roomkit_tui_engine::{ConversationChannel, LocalSession, SessionConfig};
 
-use crate::{Result, config::Settings, profiles::Profiles, storage::Storage};
+use crate::{Result, config::Settings, profiles::Profiles, services::Services, storage::Storage};
 
 mod integrations;
 
@@ -18,6 +18,7 @@ pub(crate) struct Application {
     pub view: SessionConfig,
     pub policy: crate::permissions::Policy,
     pub profiles: std::sync::Arc<Profiles>,
+    pub services: std::sync::Arc<Services>,
     _storage: Storage,
 }
 
@@ -33,6 +34,7 @@ impl Application {
     ) -> Result<Self> {
         let storage = Storage::open(&settings.state_dir, &settings.workspace)?;
         let profiles = Profiles::load(settings, &storage, api_key, resources).await?;
+        let services = Services::new(settings, &storage, &profiles)?;
         let store = {
             let _initializing = storage.initialization_lease().await?;
             SqliteStore::open(&storage.database).await?
@@ -41,14 +43,14 @@ impl Application {
         let policy = profiles.policy.clone();
         let setup = async {
             profiles.diagnostics.install(&kit).await?;
-            profiles.hooks.install(&kit)?;
+            services.hooks.install(&kit)?;
             profiles.resources.files.install(&kit);
             let agent_id = profiles.initialize(&kit).await?;
             let channel = ConversationChannel::new(ChannelId::new("terminal")?);
             kit.register_channel(channel.clone())?;
             let gate_policy = policy.clone();
             let gate_channel = channel.clone();
-            let gate_hooks = profiles.hooks.clone();
+            let gate_hooks = services.hooks.clone();
             kit.before_tool_use(
                 roomkit::ToolHookSpec::new("code-permissions")
                     .with_timeout(crate::timeouts::PERMISSION_GATE),
@@ -76,7 +78,7 @@ impl Application {
             )?;
             let room = crate::sessions::create(
                 &kit,
-                &profiles.sessions,
+                &services.sessions,
                 channel.id(),
                 &agent_id,
                 settings.session.as_deref(),
@@ -94,7 +96,7 @@ impl Application {
             view.mode = Some(policy.state(view.room.as_str()));
             profiles.attach(&kit, &view, channel.id()).await?;
             profiles.configure_view(&mut view).await;
-            profiles.hooks.note_source(
+            services.hooks.note_source(
                 view.room.as_str(),
                 if settings.session.is_some() {
                     "resume"
@@ -112,6 +114,7 @@ impl Application {
                 view,
                 policy,
                 profiles,
+                services,
                 _storage: storage,
             }),
             Err(error) => {
@@ -125,8 +128,8 @@ impl Application {
     }
 
     pub async fn close(&self) -> Result<()> {
-        self.profiles.updates.close().await;
-        self.profiles.shell.close().await;
+        self.services.updates.close().await;
+        self.services.shell.close().await;
         self.profiles.accounts.close().await;
         self.profiles.mcp_runtime.close().await;
         let engine = self.kit.close().await;
@@ -136,20 +139,20 @@ impl Application {
             .files
             .settle(std::time::Duration::from_secs(10))
             .await;
-        self.profiles.hooks.close().await;
+        self.services.hooks.close().await;
         let tools = self.profiles.resources.close().await;
         self.profiles.diagnostics.close().await;
         engine?;
         if !tools {
             return Err("Workspace tool cleanup is still pending".into());
         }
-        self.profiles.sessions.close();
+        self.services.sessions.close();
         Ok(())
     }
 
     pub fn session(&self) -> LocalSession<SqliteStore> {
         LocalSession::new(self.kit.clone(), self.channel.clone(), self.view.clone())
-            .with_lifecycle(self.profiles.hooks.lifecycle())
+            .with_lifecycle(self.services.hooks.lifecycle())
     }
 }
 
@@ -161,7 +164,7 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
         let _ = app.close().await;
         return Err(error.into());
     }
-    app.profiles.updates.start(settings.update_check);
+    app.services.updates.start(settings.update_check);
     let (client, host) = connection(NonZeroUsize::new(256).ok_or("Invalid queue capacity")?);
     let handler = crate::sessions::Sessions {
         kit: app.kit.clone(),
@@ -169,6 +172,7 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
+        services: app.services.clone(),
     };
     let adapter = tokio::spawn(app.session().run_with_commands(host, handler));
     let renderers = crate::tool_views::renderers(&settings.workspace);

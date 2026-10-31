@@ -47,7 +47,7 @@ async fn exit_report_sums_every_turn_and_lists_processes_closing_will_stop() {
     // A fresh draft has nothing to resume, but processes are still reported.
     let draft = crate::sessions::create(
         &app.kit,
-        &app.profiles.sessions,
+        &app.services.sessions,
         app.channel.id(),
         &app.view.agent,
         None,

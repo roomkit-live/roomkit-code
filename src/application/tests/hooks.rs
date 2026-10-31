@@ -36,22 +36,22 @@ fn panel(result: CommandResult) -> PanelSpec {
 }
 
 fn enable_all(app: &Application) {
-    let list = panel(app.profiles.hooks.panel(&app.view, "").unwrap());
+    let list = panel(app.services.hooks.panel(&app.view, "").unwrap());
     let ids: Vec<_> = list
         .actions
         .iter()
         .filter_map(|a| a.value.split_once(":open:").map(|(_, id)| id.to_string()))
         .collect();
     for id in ids {
-        let list = panel(app.profiles.hooks.panel(&app.view, "").unwrap());
+        let list = panel(app.services.hooks.panel(&app.view, "").unwrap());
         let entry = panel(
-            app.profiles
+            app.services
                 .hooks
                 .panel(&app.view, &format!("{}:open:{id}", list.id))
                 .unwrap(),
         );
         let enabled = panel(
-            app.profiles
+            app.services
                 .hooks
                 .panel(&app.view, &format!("{}:enable", entry.id))
                 .unwrap(),
@@ -202,9 +202,9 @@ async fn unreviewed_definitions_do_not_run_and_changed_definitions_lose_trust() 
     enable_all(&app);
     turn_operation(&app, "enabled").await;
     assert_eq!(records(root.path()).len(), 1);
-    let list = panel(app.profiles.hooks.panel(&app.view, "").unwrap());
+    let list = panel(app.services.hooks.panel(&app.view, "").unwrap());
     let inspected = panel(
-        app.profiles
+        app.services
             .hooks
             .panel(&app.view, &list.actions[1].value)
             .unwrap(),
@@ -215,7 +215,7 @@ async fn unreviewed_definitions_do_not_run_and_changed_definitions_lose_trust() 
         .replace("python3 hook.py", "python3 hook.py; true");
     std::fs::write(path, changed).unwrap();
     assert!(
-        app.profiles
+        app.services
             .hooks
             .panel(&app.view, &format!("{}:enable", inspected.id))
             .is_err()
@@ -358,8 +358,8 @@ async fn plan_skips_commands_unless_explicit_and_still_blocks_mutations() {
     assert!(records(root.path()).is_empty());
     assert!(!root.path().join("denied").exists());
     configure(root.path(), &["TurnStart"], "", true);
-    let list = panel(app.profiles.hooks.panel(&app.view, "").unwrap());
-    app.profiles
+    let list = panel(app.services.hooks.panel(&app.view, "").unwrap());
+    app.services
         .hooks
         .panel(&app.view, &format!("{}:reload", list.id))
         .unwrap();
@@ -477,13 +477,13 @@ async fn timeout_refuses_tool_but_post_hook_error_cannot_undo_a_successful_write
             records(root.path()).last().unwrap()["hook_event_name"],
             "TurnEnd"
         );
-        let list = panel(app.profiles.hooks.panel(&app.view, "").unwrap());
+        let list = panel(app.services.hooks.panel(&app.view, "").unwrap());
         let hook = list
             .actions
             .iter()
             .find(|a| a.label == format!("Fixture {event}"))
             .unwrap();
-        let detail = panel(app.profiles.hooks.panel(&app.view, &hook.value).unwrap());
+        let detail = panel(app.services.hooks.panel(&app.view, &hook.value).unwrap());
         assert!(detail.body.contains("failed"));
         app.close().await.unwrap();
     }
@@ -505,14 +505,14 @@ async fn global_and_project_hooks_are_additive_and_invalid_config_is_visible_bef
     enable_all(&app);
     turn(&app).await;
     assert_eq!(records(root.path()).len(), 2);
-    let list = panel(app.profiles.hooks.panel(&app.view, "").unwrap());
+    let list = panel(app.services.hooks.panel(&app.view, "").unwrap());
     std::fs::write(
         root.path().join(".roomkit/hooks.json"),
         br#"{"hooks":{"Stop":[]}}"#,
     )
     .unwrap();
     let result = panel(
-        app.profiles
+        app.services
             .hooks
             .panel(&app.view, &format!("{}:reload", list.id))
             .unwrap(),
@@ -603,6 +603,7 @@ async fn changing_views_does_not_close_sessions_or_replay_their_start() {
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
+        services: app.services.clone(),
     };
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run_with_commands(host, h));

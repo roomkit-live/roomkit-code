@@ -78,6 +78,7 @@ async fn sidebar_lists_tool_and_shell_changes_and_they_return_with_the_session()
         channel: app.channel.id().clone(),
         policy: app.policy.clone(),
         profiles: app.profiles.clone(),
+        services: app.services.clone(),
     };
     let request = Request::new(
         RequestId::new(1),

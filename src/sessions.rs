@@ -235,6 +235,7 @@ pub(crate) struct Sessions {
     pub channel: roomkit::model::ChannelId,
     pub policy: crate::permissions::Policy,
     pub profiles: std::sync::Arc<crate::profiles::Profiles>,
+    pub services: std::sync::Arc<crate::services::Services>,
 }
 
 impl Sessions {
@@ -324,7 +325,7 @@ impl Sessions {
                     None
                 })
                 .unwrap_or_else(|| "Conversation".into());
-            let occupied = if self.profiles.sessions.busy(&id)? {
+            let occupied = if self.services.sessions.busy(&id)? {
                 "Open in another instance · "
             } else {
                 ""
@@ -380,28 +381,29 @@ impl CommandHandler for Sessions {
         );
         let mut accounts = self.profiles.accounts.subscribe();
         let profiles = self.profiles.clone();
-        let mut sidebar_changes = profiles.sidebar_changes.subscribe();
+        let services = self.services.clone();
+        let mut sidebar_changes = services.sidebar_changes.subscribe();
         let mut plan_changes = profiles.resources.plans.subscribe();
         let mut file_changes = profiles.resources.files.subscribe();
-        let mut update_changes = profiles.updates.changes.subscribe();
-        let mut hook_changes = profiles.hooks.changes.subscribe();
+        let mut update_changes = services.updates.changes.subscribe();
+        let mut hook_changes = services.hooks.changes.subscribe();
         let (tx, rx) = tokio::sync::watch::channel(Vec::new());
         tokio::spawn(async move {
             loop {
                 let mut events = processes.borrow_and_update().clone();
                 events.extend(profiles.plans.updates(&current).await);
-                events.extend(profiles.hooks.updates(&current));
-                events.extend(profiles.updates.events(&current));
+                events.extend(services.hooks.updates(&current));
+                events.extend(services.updates.events(&current));
                 if let Some(event) = accounts.borrow_and_update().clone() {
                     // Panels carry their conversation and opaque instance ID;
                     // the UI ignores updates to a dismissed or different view.
                     events.push(event);
                 }
                 let (mut sidebar, poll_connections) = profiles.sidebar(&current).await;
-                if let Some(section) = profiles.hooks.sidebar(&current) {
+                if let Some(section) = services.hooks.sidebar(&current) {
                     sidebar.sections.push(section);
                 }
-                sidebar.sections.push(profiles.updates.sidebar());
+                sidebar.sections.push(services.updates.sidebar());
                 events.push(Event::SidebarChanged {
                     conversation: current.room.as_str().into(),
                     sidebar: Some(sidebar),
@@ -462,7 +464,7 @@ impl Sessions {
         if matches!(&request.command, Command::Invoke { name, .. } | Command::SubmitForm { name, .. } if name == "mcp")
         {
             let result = self.profiles.mcp(&self.kit, request, current).await;
-            self.profiles.sidebar_changes.send_replace(());
+            self.services.sidebar_changes.send_replace(());
             return result;
         }
         if let Command::Invoke { name, arguments } = &request.command
@@ -475,7 +477,7 @@ impl Sessions {
                 return Err("Shell commands are disabled in Plan mode. Switch to Ask or Yolo to execute a command.".into());
             }
             return self
-                .profiles
+                .services
                 .shell
                 .prepare(&self.kit, &self.channel, &current, request)
                 .await;
@@ -493,7 +495,7 @@ impl Sessions {
         };
         let arguments = arguments.trim();
         match name.as_str() {
-            "update" => self.profiles.updates.handle(&current, arguments),
+            "update" => self.services.updates.handle(&current, arguments),
             "instructions" => {
                 self.profiles
                     .resources
@@ -501,7 +503,7 @@ impl Sessions {
                     .panel(&current, arguments)
                     .await
             }
-            "hooks" => self.profiles.hooks.panel(&current, arguments),
+            "hooks" => self.services.hooks.panel(&current, arguments),
             "plans" => self.profiles.plans.handle(&current, arguments).await,
             "files" => {
                 self.profiles
@@ -605,7 +607,7 @@ impl Sessions {
                 }
                 let room = create(
                     &self.kit,
-                    &self.profiles.sessions,
+                    &self.services.sessions,
                     &self.channel,
                     &current.agent,
                     Some(&name[..48]),
@@ -613,7 +615,7 @@ impl Sessions {
                 )
                 .await
                 .map_err(|error| error.to_string())?;
-                self.profiles.hooks.note_source(room.as_str(), "new");
+                self.services.hooks.note_source(room.as_str(), "new");
                 Ok(self.switched(current, room))
             }
             "new" => Err("Use /new without arguments".into()),
@@ -637,7 +639,7 @@ impl Sessions {
             "resume" if valid_session_name(arguments) => {
                 let room = RoomId::new(arguments).map_err(|_| "Invalid session id".to_string())?;
                 let claim = self
-                    .profiles
+                    .services
                     .sessions
                     .claim(room.as_str())
                     .map_err(|_| "Cannot check session ownership".to_string())?
@@ -662,11 +664,11 @@ impl Sessions {
                 self.profiles
                     .attach(&self.kit, &next, &self.channel)
                     .await?;
-                self.profiles
+                self.services
                     .sessions
                     .keep(claim)
                     .map_err(|_| "Cannot retain session ownership".to_string())?;
-                self.profiles.hooks.note_source(room.as_str(), "resume");
+                self.services.hooks.note_source(room.as_str(), "resume");
                 Ok(self.switched(next, room))
             }
             "resume" => Err("Invalid session id; use /resume to choose from the list".into()),
