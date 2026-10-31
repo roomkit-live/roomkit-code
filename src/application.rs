@@ -51,7 +51,7 @@ impl Application {
             let gate_hooks = profiles.hooks.clone();
             kit.before_tool_use(
                 roomkit::ToolHookSpec::new("code-permissions")
-                    .with_timeout(std::time::Duration::from_secs(435)),
+                    .with_timeout(crate::timeouts::PERMISSION_GATE),
                 move |event, _| {
                     let policy = gate_policy.clone();
                     let channel = gate_channel.clone();

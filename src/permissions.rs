@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use clap::ValueEnum;
 use roomkit::{ToolCallEvent, ToolUse};
@@ -236,7 +235,7 @@ impl Policy {
                 PermissionRequest::new(
                     format!("Allow {}?", event.call.name),
                     detail,
-                    Duration::from_secs(300),
+                    crate::timeouts::APPROVAL,
                 )
                 .with_summary(summary),
             )

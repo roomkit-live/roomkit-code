@@ -20,6 +20,7 @@ mod profiles;
 mod sessions;
 mod shell;
 mod storage;
+mod timeouts;
 mod tool_views;
 mod updates;
 

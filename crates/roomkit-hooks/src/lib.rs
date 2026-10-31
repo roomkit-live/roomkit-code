@@ -5,7 +5,7 @@ mod config;
 mod output;
 mod runner;
 
-pub use config::{CommandHook, Configuration, Event, HookGroup, Options};
+pub use config::{CommandHook, Configuration, Event, HookGroup, Options, SOURCE_BUDGET_SECONDS};
 pub use output::{Decision, interpret};
 pub use runner::{Report, RunStatus, run};
 

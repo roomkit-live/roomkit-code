@@ -73,6 +73,9 @@ pub struct CommandHook {
     pub roomkit: Options,
 }
 
+/// Seconds every handler of one event may take together, per source.
+pub const SOURCE_BUDGET_SECONDS: u64 = 60;
+
 fn default_timeout() -> u64 {
     10
 }
@@ -161,9 +164,9 @@ impl Configuration {
                     }
                 }
             }
-            if budget > 60 {
+            if budget > SOURCE_BUDGET_SECONDS {
                 return Err(format!(
-                    "{} handlers exceed the 60-second budget per source",
+                    "{} handlers exceed the {SOURCE_BUDGET_SECONDS}-second budget per source",
                     event.name()
                 ));
             }

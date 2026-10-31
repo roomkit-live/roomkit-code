@@ -15,7 +15,6 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
@@ -219,7 +218,7 @@ impl Hooks {
         let hooks = self.clone();
         kit.observe_tool_calls(
             roomkit::ToolHookSpec::new("code-command-hook-outcomes")
-                .with_timeout(Duration::from_secs(125)),
+                .with_timeout(crate::timeouts::HOOKS),
             move |event, _| {
                 // Capture correlation and register the task immediately, while the
                 // engine reports the call, not later after another turn has started.

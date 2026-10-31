@@ -191,7 +191,7 @@ macro_rules! assemble {
             composition.mcp.push((label.clone(), size));
             agent = agent.with_server_instructions(&label, server.instructions())?.with_tools(server)?;
         }
-        let agent = agent.with_tool_timeout(Some(std::time::Duration::from_secs(130)));
+        let agent = agent.with_tool_timeout(Some(crate::timeouts::TOOL_CALL));
         Ok((agent, Inventory { tools, composition }))
     }};
 }
@@ -255,6 +255,7 @@ pub(crate) async fn create(
     let mutations = resources.mutations.clone();
     let mut shell_limits = ShellLimits::default();
     shell_limits.max_output_bytes = 8192;
+    shell_limits.max_timeout_ms = crate::timeouts::SHELL_MAX_SECONDS * 1000;
     assemble!(ChannelId::new(&profile.id)?, profile, provider, skills, &skill_roots, mcp, resources.instructions, resources.files, intent_required;
         outline = CodeOutlineToolset::new(CodeOutlineTool::new(root).await?),
         list = ListToolset::new(ListTool::new(root).await?),
@@ -301,6 +302,12 @@ mod tests {
         // Characters are cut, bytes are counted, like every other part.
         let accented = instruction_chars("calc", Some(&"é".repeat(40_000)));
         assert_eq!(accented - long, SERVER_INSTRUCTIONS_MAX);
+    }
+
+    #[test]
+    fn the_prompt_states_the_shell_maximum_the_tool_enforces() {
+        let maximum = crate::timeouts::SHELL_MAX_SECONDS * 1000;
+        assert!(INSTRUCTIONS.contains(&format!("(maximum {maximum})")));
     }
 
     #[test]
