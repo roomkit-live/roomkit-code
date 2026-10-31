@@ -40,3 +40,7 @@ name = "RoomKit Code"
 
 [integrations]
 herdr = true # auto-detect Herdr TUI; --no-herdr disables this adapter
+
+# Managed installations check GitHub at most once per day. No automatic install.
+[updates]
+check = true

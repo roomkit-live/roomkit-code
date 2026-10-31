@@ -7,6 +7,8 @@
   read-only under `<state-dir>/docs/<revision>/`. The tools run without approval,
   including in Plan mode. Complete schema-3 tool catalogues gain them once;
   profiles are saved in schema 4.
+- Add managed Linux/macOS installation, checksummed GitHub releases, optional daily update notices, `/update` with version-specific confirmation, and binary rollback.
+- Add native four-platform release checks and a portable installer; Cargo executables are never replaced.
 
 - Discover scoped AGENTS.md and AGENTS.override.md instructions, with global/root
   refresh per turn and progressive nested loading through file exploration and

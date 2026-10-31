@@ -5,7 +5,7 @@ from pathlib import PurePosixPath
 import subprocess
 import tomllib
 
-allowed = {"Cargo.toml", "Cargo.toml.orig", "Cargo.lock", "README.md", "LICENSE", ".cargo_vcs_info.json"}
+allowed = {"build.rs", "Cargo.toml", "Cargo.toml.orig", "Cargo.lock", "README.md", "LICENSE", ".cargo_vcs_info.json"}
 result = subprocess.run(
     ["cargo", "package", "--locked", "--list", "--allow-dirty"],
     capture_output=True, text=True, check=True,

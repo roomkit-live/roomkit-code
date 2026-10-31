@@ -1,6 +1,6 @@
 .PHONY: check fmt fmt-check clippy test doc package-check terminal-check msrv audit
 
-check: fmt-check clippy test doc package-check terminal-check
+check: fmt-check clippy test doc package-check terminal-check distribution-check
 
 fmt:
 	cargo fmt --all
@@ -46,3 +46,8 @@ audit:
 clipboard-check:
 	cargo build --locked
 	python3 scripts/check-clipboard.py
+
+.PHONY: distribution-check
+distribution-check:
+	ROOMKIT_RELEASE_BUILD=1 cargo build --locked
+	python3 scripts/check-distribution.py

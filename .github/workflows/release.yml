@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable tag matching Cargo.toml (for example v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  CARGO_BUILD_JOBS: 4
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify tagged source and version
+        run: |
+          python3 - <<'PY'
+          import os, re
+          tag = os.environ['RELEASE_TAG']
+          assert re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', tag)
+          PY
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "$RELEASE_TAG^{commit}")"
+          git merge-base --is-ancestor HEAD origin/main
+      - name: Configure private dependency access
+        env:
+          ROOMKIT_DEPS_READ_CI: ${{ secrets.ROOMKIT_DEPS_READ_CI }}
+        run: bash scripts/ci-dependency-access.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Rust toolchains
+        run: |
+          rustup show active-toolchain
+          rustup toolchain install 1.94.0 --profile minimal
+      - name: Verify application and terminal on the native platform
+        run: make check && make msrv
+      - name: Build distribution binary
+        env:
+          ROOMKIT_RELEASE_BUILD: '1'
+          MACOSX_DEPLOYMENT_TARGET: '12.0'
+        run: cargo build --locked --release --target '${{ matrix.target }}'
+      - name: Apply ad-hoc signature on macOS
+        if: runner.os == 'macOS'
+        run: codesign --force --sign - 'target/${{ matrix.target }}/release/roomkit-code'
+      - name: Package and exercise the managed installer
+        run: |
+          python3 scripts/package-release.py '${{ matrix.target }}'
+          python3 scripts/check-distribution.py 'target/${{ matrix.target }}/release/roomkit-code'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+      - name: Remove temporary credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/roomkit-code-dependency-access/credentials"
+
+  audit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+        with:
+          credentials: https://x-access-token:${{ secrets.ROOMKIT_DEPS_READ_CI }}@github.com
+
+  publish:
+    needs: [build, audit]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Validate the complete asset set
+        run: |
+          python3 - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          root, tag = Path('dist'), os.environ['RELEASE_TAG']
+          targets = ['x86_64-unknown-linux-gnu','aarch64-unknown-linux-gnu','x86_64-apple-darwin','aarch64-apple-darwin']
+          names = {f'roomkit-code-{tag}-{t}{s}' for t in targets for s in ['', '.sha256']}
+          assert {p.name for p in root.iterdir()} == names
+          for t in targets:
+              name = f'roomkit-code-{tag}-{t}'
+              checksum, filename = (root / (name + '.sha256')).read_text().split()
+              assert filename == name
+              assert hashlib.sha256((root / name).read_bytes()).hexdigest() == checksum
+          PY
+          cp install.sh LICENSE README.md dist/
+      - name: Publish only after every platform and audit passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo 'A release already exists; refusing to overwrite published binaries.' >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" dist/* --verify-tag --draft --title "RoomKit Code $RELEASE_TAG" --generate-notes
+          gh release edit "$RELEASE_TAG" --draft=false --latest

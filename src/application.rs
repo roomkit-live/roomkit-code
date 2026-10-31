@@ -120,6 +120,7 @@ impl Application {
     }
 
     pub async fn close(&self) -> Result<()> {
+        self.profiles.updates.close().await;
         self.profiles.shell.close().await;
         self.profiles.accounts.close().await;
         self.profiles.mcp_runtime.close().await;
@@ -148,6 +149,7 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
         let _ = app.close().await;
         return Err(error.into());
     }
+    app.profiles.updates.start(settings.update_check);
     let (client, host) = connection(NonZeroUsize::new(256).ok_or("Invalid queue capacity")?);
     let handler = crate::sessions::Sessions {
         kit: app.kit.clone(),

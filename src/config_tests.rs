@@ -291,3 +291,24 @@ fn welcome_artwork_and_bottom_spacing_follow_host_configuration() {
     assert!(settings.ui.welcome.is_none());
     assert_eq!(settings.ui.bottom_margin, 0);
 }
+
+#[test]
+fn update_checks_can_be_disabled_and_that_choice_survives_resume() {
+    let root = tempfile::tempdir().unwrap();
+    let mut args = cli(root.path());
+    assert!(Settings::load(&args).unwrap().update_check);
+    args.no_update_check = true;
+    assert!(!Settings::load(&args).unwrap().update_check);
+    assert!(
+        resume_options(&args)
+            .unwrap()
+            .unwrap()
+            .contains(&"--no-update-check".into())
+    );
+    let file = root.path().join("options.toml");
+    std::fs::write(&file, "[updates]\ncheck = false\n").unwrap();
+    args.config = Some(file);
+    args.no_update_check = false;
+    assert!(!Settings::load(&args).unwrap().update_check);
+    assert!(Cli::try_parse_from(["roomkit-code", "--self-update", "--rollback"]).is_err());
+}

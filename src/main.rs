@@ -19,6 +19,7 @@ mod sessions;
 mod shell;
 mod storage;
 mod tool_views;
+mod updates;
 
 use clap::Parser;
 use std::{error::Error, io::IsTerminal, process::ExitCode};
@@ -38,6 +39,9 @@ async fn main() -> ExitCode {
 
 async fn launch() -> Result<()> {
     let cli = config::Cli::parse();
+    if updates::cli(&cli).await? {
+        return Ok(());
+    }
     let settings = config::Settings::load(&cli)?;
     if cli.check_config {
         println!("Launch configuration valid. Provider and agent profiles are loaded at startup.");

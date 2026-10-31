@@ -25,6 +25,7 @@ use slot::AgentSlot;
 use store::Document;
 
 pub(crate) struct Profiles {
+    pub(crate) updates: Arc<crate::updates::Updates>,
     pub(crate) policy: crate::permissions::Policy,
     pub(crate) plans: Arc<crate::plans::PlanView>,
     require_tool_intent: bool,
@@ -173,6 +174,7 @@ impl Profiles {
         );
         let instructions = resources.instructions.clone();
         Ok(Arc::new(Self {
+            updates: crate::updates::Updates::new(),
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),
             require_tool_intent: settings.require_tool_intent,

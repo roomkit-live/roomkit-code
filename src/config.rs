@@ -13,6 +13,24 @@ use crate::{Result, permissions::Mode};
 #[derive(Debug, Parser)]
 #[command(version, about = "Explore a project with a RoomKit coding assistant")]
 pub(crate) struct Cli {
+    /// Install this release binary in a managed directory (usually ~/.local/bin).
+    #[arg(long, conflicts_with_all = ["self_update", "rollback", "update_check"])]
+    pub install_dir: Option<PathBuf>,
+    /// Check for and install a newer stable release, with confirmation.
+    #[arg(long, conflicts_with_all = ["rollback", "update_check"])]
+    pub self_update: bool,
+    /// Restore the previous managed binary, with confirmation.
+    #[arg(long, conflicts_with = "update_check")]
+    pub rollback: bool,
+    /// Check releases without opening the UI or installing.
+    #[arg(long)]
+    pub update_check: bool,
+    /// Confirm an explicit --self-update or --rollback operation.
+    #[arg(long)]
+    pub yes: bool,
+    /// Disable automatic update checks (manual /update remains available).
+    #[arg(long, env = "ROOMKIT_NO_UPDATE_CHECK")]
+    pub no_update_check: bool,
     /// Project directory used by the coding tools.
     #[arg(default_value = ".")]
     pub workspace: PathBuf,
@@ -98,6 +116,18 @@ struct FileConfig {
     ui: Appearance,
     permissions: Permissions,
     integrations: Integrations,
+    updates: UpdateOptions,
+}
+
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct UpdateOptions {
+    check: bool,
+}
+impl Default for UpdateOptions {
+    fn default() -> Self {
+        Self { check: true }
+    }
 }
 
 #[derive(Deserialize)]
@@ -200,6 +230,7 @@ impl Default for Appearance {
 }
 
 pub(crate) struct Settings {
+    pub update_check: bool,
     pub require_tool_intent: bool,
     pub herdr: bool,
     pub resume_options: Option<Vec<String>>,
@@ -362,6 +393,7 @@ impl Settings {
             ..UiOptions::default()
         };
         Ok(Self {
+            update_check: file.updates.check && !cli.no_update_check,
             require_tool_intent: cli
                 .require_tool_intent
                 .unwrap_or(file.agent.require_tool_intent),
@@ -449,6 +481,7 @@ fn resume_options(cli: &Cli) -> Result<Option<Vec<String>>> {
         (cli.no_logo, "--no-logo"),
         (cli.no_terminal_status, "--no-terminal-status"),
         (cli.no_herdr, "--no-herdr"),
+        (cli.no_update_check, "--no-update-check"),
         (cli.debug, "--debug"),
     ] {
         if enabled {

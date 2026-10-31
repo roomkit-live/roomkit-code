@@ -36,6 +36,12 @@ async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<bool> {
 pub(crate) fn commands() -> Vec<CommandSpec> {
     vec![
         CommandSpec {
+            name: "update".into(),
+            description: "Check releases, install an update or restore the previous version".into(),
+            arguments: "[rollback]".into(),
+            choices: Vec::new(),
+        },
+        CommandSpec {
             name: "instructions".into(),
             description: "Inspect applicable AGENTS.md files and their scope".into(),
             arguments: "[project-relative path]".into(),
@@ -360,6 +366,7 @@ impl CommandHandler for Sessions {
         let profiles = self.profiles.clone();
         let mut sidebar_changes = profiles.sidebar_changes.subscribe();
         let mut plan_changes = profiles.resources.plans.subscribe();
+        let mut update_changes = profiles.updates.changes.subscribe();
         let mut hook_changes = profiles.hooks.changes.subscribe();
         let (tx, rx) = tokio::sync::watch::channel(Vec::new());
         tokio::spawn(async move {
@@ -367,6 +374,7 @@ impl CommandHandler for Sessions {
                 let mut events = processes.borrow_and_update().clone();
                 events.extend(profiles.plans.updates(&current).await);
                 events.extend(profiles.hooks.updates(&current));
+                events.extend(profiles.updates.events(&current));
                 if let Some(event) = accounts.borrow_and_update().clone() {
                     // Panels carry their conversation and opaque instance ID;
                     // the UI ignores updates to a dismissed or different view.
@@ -376,6 +384,7 @@ impl CommandHandler for Sessions {
                 if let Some(section) = profiles.hooks.sidebar(&current) {
                     sidebar.sections.push(section);
                 }
+                sidebar.sections.push(profiles.updates.sidebar());
                 events.push(Event::SidebarChanged {
                     conversation: current.room.as_str().into(),
                     sidebar: Some(sidebar),
@@ -390,6 +399,7 @@ impl CommandHandler for Sessions {
                     changed = accounts.changed() => if changed.is_err() { break; },
                     changed = sidebar_changes.changed() => if changed.is_err() { break; },
                     changed = plan_changes.changed() => if changed.is_err() { break; },
+                    changed = update_changes.changed() => if changed.is_err() { break; },
                     changed = hook_changes.changed() => if changed.is_err() { break; },
                     // MCP exposes connection liveness, but no disconnect stream.
                     // Only inspect configured connections; unchanged state never redraws the TUI.
@@ -446,6 +456,7 @@ impl CommandHandler for Sessions {
         };
         let arguments = arguments.trim();
         match name.as_str() {
+            "update" => self.profiles.updates.handle(&current, arguments),
             "instructions" => {
                 self.profiles
                     .resources

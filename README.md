@@ -938,3 +938,84 @@ silently fall back. Symlinks below the configured roots are not followed, nor
 are `..`, absolute target paths, or paths deeper than 32 components. Content is
 sent to the configured model, and nested snapshots are retained with tool results
 in the session history; keep credentials out of instruction files.
+
+
+## Binary installation and updates
+
+Releases provide Linux x86-64/ARM64 (glibc 2.35 or newer) and macOS Intel/Apple
+Silicon binaries (macOS 12 or newer). Rust and Cargo are not needed to use them.
+The release workflow validates each native platform before publishing all four
+binaries together. macOS builds have an ad-hoc signature, not an Apple Developer
+ID signature or notarization. Distribution builds do not contain local profiles,
+provider credentials, conversations or private planning files.
+
+While this repository is private, use GitHub CLI with repository **Contents:
+read** access. Download the installer from the release before running it:
+
+```sh
+gh auth login
+gh release download --repo roomkit-live/roomkit-code --pattern install.sh --dir /tmp/roomkit-code-install
+sh /tmp/roomkit-code-install/install.sh
+```
+
+For a public release, the installer can also download anonymously with curl.
+A specific stable version can be selected with `sh install.sh 0.1.0`. The
+installer uses `sha256sum` on Linux or `shasum` on macOS, verifies the binary's
+SHA-256 and version, and installs in `~/.local/bin`. Override this with
+`ROOMKIT_CODE_BIN_DIR=/your/bin`. It never invokes sudo or edits shell profiles;
+add the displayed directory to PATH if necessary. An existing unrelated binary
+is not overwritten. Checksums detect corruption; they are published in the same
+GitHub release and are not an independent signature or proof of authorship.
+
+Start `roomkit-code /path/to/project`. Configure a provider with `/providers`
+and an agent with `/agents`. The welcome screen shows the running version.
+Managed distribution installations check GitHub at most once per day in the
+background, with a local cache; failures do not prevent conversations. No project,
+conversation or provider information is sent. `/update` checks immediately and
+presents the exact version, platform and destination before confirmation.
+Installation never restarts or interrupts a conversation. Exit and relaunch to
+use the new binary. `/update rollback` reviews and restores the previous binary.
+
+Equivalent terminal commands:
+
+```sh
+roomkit-code --version
+roomkit-code --update-check
+roomkit-code --self-update
+roomkit-code --rollback
+```
+
+Use `--yes` to confirm an explicit self-update/rollback without a prompt.
+Disable automatic checks with `--no-update-check`, `ROOMKIT_NO_UPDATE_CHECK=true`,
+or `[updates] check = false` in an explicitly selected TOML config. Manual
+`/update` remains available. Private downloads reuse `gh auth token` locally, or
+use `ROOMKIT_UPDATE_TOKEN` with Contents: read. Tokens are not saved by the
+updater, sent to providers, or forwarded to the redirected asset host. The
+shell installer requires `gh` for private downloads; it accepts the same token.
+
+The managed entry point is a symlink to `.roomkit-code/current/roomkit-code`
+inside the chosen bin directory. Version directories are immutable; activation
+uses an atomic symlink replacement and an installation lock. The previous pointer
+allows rollback. Older directories remain available for running processes; do
+not edit managed files manually. Cargo/source builds and package-manager binaries
+are never self-modified; `/update` explains how to install a managed release.
+Rollback restores the binary only: it preserves application state and cannot undo
+an incompatible data migration in a future release. Back up state before such a
+migration as directed by that release's notes.
+
+### Publishing a release
+
+Bump the application version and lockfile, update the changelog, run the required
+checks, and push the source to main. Tag that reviewed commit with `vX.Y.Z`, matching
+Cargo.toml. The `Release` workflow runs checks, terminal scenarios, minimum Rust
+and the installer on all four native platforms, plus dependency audit, before
+building/publishing. The assets are raw executables named
+`roomkit-code-vX.Y.Z-<target>`, individual `.sha256` files, installer and license.
+An existing release is never overwritten. A workflow stopped after draft creation
+leaves a draft, which must be inspected before finishing publication. It is never
+visible to automatic update checks until published.
+
+Private dependencies require `ROOMKIT_DEPS_READ_CI` as for CI. Release jobs use
+the workflow token only to publish this repository's release. Failed or unavailable
+runners leave the release unpublished; rerun the workflow for the same existing
+tag after correcting the infrastructure. The updater follows stable releases only.
