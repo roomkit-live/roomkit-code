@@ -216,9 +216,8 @@ impl Policy {
             );
         }
         match channel
-            .ask_permission_with_summary(
-                &event.room_id,
-                &event.channel_id,
+            .ask_tool_permission(
+                &event,
                 format!("Allow {}?", event.call.name),
                 detail,
                 summary,

@@ -651,12 +651,8 @@ async fn ask_shell_and_patch_require_approval_but_patch_preview_does_not() {
         ("shell", json!({"command":"printf 'approved' > shell.txt"})),
     ])
     .await;
-    let app = Application::open(
-        &settings(project.path(), state.path(), &mock.base_url),
-        String::new(),
-    )
-    .await
-    .unwrap();
+    let settings = settings(project.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run(host));
     event(&client).await;
@@ -701,7 +697,7 @@ async fn ask_shell_and_patch_require_approval_but_patch_preview_does_not() {
         },
     );
     loop {
-        if matches!(event(&client).await, Event::RunFinished { .. }) {
+        if matches!(event(&client).await, Event::OperationFinished { .. }) {
             break;
         }
     }
@@ -712,6 +708,34 @@ async fn ask_shell_and_patch_require_approval_but_patch_preview_does_not() {
     );
     drop(client);
     task.await.unwrap().unwrap();
+    app.close().await.unwrap();
+    drop(app);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let snapshot = app.session().snapshot().await.unwrap();
+    let mut decisions = Vec::new();
+    for (index, item) in snapshot.items.iter().enumerate() {
+        if let Item::Approval(receipt) = item {
+            let Item::Tool { call, .. } = &snapshot.items[index - 1] else {
+                panic!("Restored decisions must remain beside their concrete tool calls");
+            };
+            decisions.push((call.name.as_str(), call.state, receipt.decision));
+        }
+    }
+    assert_eq!(
+        decisions,
+        [
+            ("patch", ToolState::Denied, Decision::Deny),
+            ("shell", ToolState::Succeeded, Decision::Allow),
+        ]
+    );
+    assert!(
+        matches!(snapshot.items.last(), Some(Item::Message(m)) if m.text == "Project inspection complete.")
+    );
+    assert_eq!(
+        mock.requests.lock().unwrap().len(),
+        4,
+        "Resuming must not execute tools again"
+    );
     app.close().await.unwrap();
 }
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Keep approval receipts with their tool calls when resuming a conversation,
+  instead of appending them after the final answer. Restore older receipts
+  within their original agent turn.
+
 - Add native persistent plan tools and `/plans`, with a live sidebar showing the
   followed plan, progress and active or blocked steps. Keep plans and selection
   across restarts, isolated by project, conversation and agent.
