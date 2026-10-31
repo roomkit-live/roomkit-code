@@ -8,6 +8,7 @@ mod config;
 mod diagnostics;
 mod docs;
 mod exit_summary;
+mod files;
 mod herdr;
 mod hooks;
 mod images;

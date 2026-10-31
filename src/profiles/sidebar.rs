@@ -45,6 +45,7 @@ impl Profiles {
                     ),
                     SidebarSection::new("Context", SidebarContent::Context),
                     self.plans.sidebar(current).await,
+                    self.resources.files.sidebar(current.room.as_str()).await,
                     mcp,
                     self.processes.sidebar(),
                 ],

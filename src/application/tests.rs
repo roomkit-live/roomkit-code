@@ -1681,6 +1681,7 @@ async fn stale_or_conflicting_forms_cannot_replace_a_working_agent() {
 mod catalogue;
 mod docs;
 mod exit_summary;
+mod files;
 
 mod processes;
 

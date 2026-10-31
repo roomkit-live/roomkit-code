@@ -86,6 +86,11 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "[process-id]",
         ),
         (
+            "files",
+            "List the files this conversation's agents changed or read",
+            "",
+        ),
+        (
             "providers",
             "List, configure or delete shared provider connections",
             "[list|delete <id>]",
@@ -377,6 +382,7 @@ impl CommandHandler for Sessions {
         let profiles = self.profiles.clone();
         let mut sidebar_changes = profiles.sidebar_changes.subscribe();
         let mut plan_changes = profiles.resources.plans.subscribe();
+        let mut file_changes = profiles.resources.files.subscribe();
         let mut update_changes = profiles.updates.changes.subscribe();
         let mut hook_changes = profiles.hooks.changes.subscribe();
         let (tx, rx) = tokio::sync::watch::channel(Vec::new());
@@ -410,6 +416,7 @@ impl CommandHandler for Sessions {
                     changed = accounts.changed() => if changed.is_err() { break; },
                     changed = sidebar_changes.changed() => if changed.is_err() { break; },
                     changed = plan_changes.changed() => if changed.is_err() { break; },
+                    changed = file_changes.changed() => if changed.is_err() { break; },
                     changed = update_changes.changed() => if changed.is_err() { break; },
                     changed = hook_changes.changed() => if changed.is_err() { break; },
                     // MCP exposes connection liveness, but no disconnect stream.
@@ -424,7 +431,14 @@ impl CommandHandler for Sessions {
     fn allow_while_busy(&self, name: &str) -> bool {
         matches!(
             name,
-            "mode" | "tools" | "processes" | "diagnostics" | "plans" | "hooks" | "instructions"
+            "mode"
+                | "tools"
+                | "processes"
+                | "files"
+                | "diagnostics"
+                | "plans"
+                | "hooks"
+                | "instructions"
         )
     }
 
@@ -489,6 +503,13 @@ impl Sessions {
             }
             "hooks" => self.profiles.hooks.panel(&current, arguments),
             "plans" => self.profiles.plans.handle(&current, arguments).await,
+            "files" => {
+                self.profiles
+                    .resources
+                    .files
+                    .panel(&current, arguments)
+                    .await
+            }
             "diagnostics" => Ok(self.profiles.diagnostics.panel(&current, arguments)),
             "processes" => {
                 self.profiles

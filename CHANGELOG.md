@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- List the files this conversation's agents created, modified, deleted or read
+  in a sidebar **Files** section and in `/files`. File tools report their own
+  changes; shell changes are found by comparing the project before and after
+  each command, also when it is cancelled, honoring `.gitignore` and ignoring
+  identical rewrites. The list returns with `/resume`.
+
 - Warn before exiting while processes run: Ctrl+D asks for a second press
   instead of detaching at once, and the exit hint states how many processes
   closing will stop, on every screen. The count covers every conversation,

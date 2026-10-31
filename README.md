@@ -426,6 +426,30 @@ line ranges before a targeted `read`. It does not resolve types or index an
 entire project. Outline cards show source ranges, syntax warnings and pagination;
 expansion reveals more symbols only when that result contains them.
 
+## Changed files
+
+The sidebar's **Files** section lists the files this conversation's agents
+created, modified or deleted, newest first, followed by how many files they only
+read. Click it or use **/files** for the complete list. `write`, `edit` and
+`patch` report their own changes. For a `shell` command, the application compares
+the project's files before and after it, honoring `.gitignore`, `.ignore` and
+global excludes even outside a Git repository; such changes are marked
+`· shell`. Files up to 1 MiB rewritten with identical content are not changes
+once their content is known; each comparison reads at most 64 MiB of new
+content, so a large project learns it over several commands. A command editing
+an ignore rule does not list the files it hides or reveals. Anything that
+changes while a command runs is credited to it, including a background process,
+an editor or another instance; between commands, background processes are not
+followed. A cancelled or timed-out command is still compared, and quitting waits
+up to ten seconds for those comparisons. A file created and then deleted leaves
+the list.
+
+A project with more than 50,000 files is not compared: the section then says
+shell changes are not tracked. The latest 500 changed and 500 read files are
+kept, and `/files` says when older ones were dropped. The list is stored with
+the conversation and returns with `/resume`; if a stored list cannot be read, it
+is left untouched and the section shows only what happened since.
+
 ## Context, consumption and request failures
 
 Context shares the model footer when it fits, and uses a separate row in narrow
@@ -466,6 +490,7 @@ remain in the project and conversation.
 instructions. `src/application.rs` assembles and closes the engine.
 `src/config.rs` and `src/storage.rs` own application settings and project state.
 `src/processes.rs` owns scoped process monitoring and human controls.
+`src/files.rs` records the files each conversation's agents change or read.
 `src/plans/` supplies durable storage through `roomkit-tools-plans::PlanBackend`
 and projects those records into generic CLI panels and sidebar entries. The
 CRUD schemas and tool implementations remain in `roomkit-tools`.
@@ -756,9 +781,10 @@ engine adapter's text/placeholder behavior.
 ## Session sidebar
 
 On wide terminals, a right sidebar displays the selected agent/model and provider
-connection, context occupancy with remaining percentage, configured MCP servers
-and running processes. It uses the reusable sidebar protocol from roomkit-tui;
-this application supplies its MCP and process sections. Provider credentials and
+connection, context occupancy with remaining percentage, the followed plan, the
+files this conversation changed, configured MCP servers and running processes.
+It uses the reusable sidebar protocol from roomkit-tui; this application supplies
+its plan, file, MCP and process sections. Provider credentials and
 endpoint settings are never included in the sidebar. Agent/model/effort appear
 only in the sidebar while it is open; the mode and shortcuts share one line below
 the composer when space permits. Shift+Tab still changes the mode without a

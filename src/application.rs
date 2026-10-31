@@ -42,6 +42,7 @@ impl Application {
         let setup = async {
             profiles.diagnostics.install(&kit).await?;
             profiles.hooks.install(&kit)?;
+            profiles.resources.files.install(&kit);
             let agent_id = profiles.initialize(&kit).await?;
             let channel = ConversationChannel::new(ChannelId::new("terminal")?);
             kit.register_channel(channel.clone())?;
@@ -129,6 +130,12 @@ impl Application {
         self.profiles.accounts.close().await;
         self.profiles.mcp_runtime.close().await;
         let engine = self.kit.close().await;
+        // Closing cancels running shell calls; record what they changed.
+        self.profiles
+            .resources
+            .files
+            .settle(std::time::Duration::from_secs(10))
+            .await;
         self.profiles.hooks.close().await;
         let tools = self.profiles.resources.close().await;
         self.profiles.diagnostics.close().await;
