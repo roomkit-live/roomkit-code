@@ -95,6 +95,21 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         offset = send(text + "\r")
         wait_for(marker, offset)
 
+    def answered(text, count, answer):
+        """Send `text`, then wait until the model received request `count` and
+        its answer shows below the message: a repaint can redraw an earlier,
+        identical answer before this one exists."""
+        send(text + "\r")
+        end = time.monotonic() + 12
+        while True:
+            drawn = screen()
+            below = drawn.rsplit(text, 1)[1] if text in drawn else ""
+            if len(requests) >= count and answer in below and "Working" not in below:
+                return
+            if time.monotonic() >= end or process.poll() is not None:
+                raise RuntimeError(f"No answer to {text!r}: {drawn}")
+            pump()
+
     def screen(rows=28, cols=110):
         """The screen as drawn so far, one string per row."""
         cells = [[" "] * cols for _ in range(rows)]
@@ -199,8 +214,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         wait_for(b"Select agent", offset)
         offset = send(b"\r")
         wait_for(b"Enter send", offset)
-        command("Hello again", b"Answer from fixture-a.")
-        wait_for(b"Execution Completed")
+        answered("Hello again", 3, "Answer from fixture-a.")
         assert [r["model"] for r in requests] == ["fixture-a", "fixture-b", "fixture-a"]
         assert "Answer from fixture-a." in json.dumps(requests[1]["messages"])
         assert all(len(r["tools"]) == 1 for r in requests)
