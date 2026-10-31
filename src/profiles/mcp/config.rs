@@ -208,7 +208,9 @@ impl Server {
         }
     }
 }
-#[derive(Clone, Serialize)]
+/// `mcp.json`, schema 2; `validate` refuses any other.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(in crate::profiles) struct Servers {
     pub schema: u32,
     pub servers: BTreeMap<String, Server>,
@@ -219,52 +221,6 @@ impl Default for Servers {
             schema: 2,
             servers: BTreeMap::new(),
         }
-    }
-}
-impl<'de> Deserialize<'de> for Servers {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Document {
-            schema: u32,
-            servers: BTreeMap<String, serde_json::Value>,
-        }
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Legacy {
-            id: String,
-            program: String,
-            args: Vec<String>,
-            environment: BTreeMap<String, String>,
-            timeout_seconds: u64,
-        }
-        let raw = Document::deserialize(deserializer)?;
-        let mut servers = BTreeMap::new();
-        if !matches!(raw.schema, 1 | 2) {
-            return Err(serde::de::Error::custom(
-                "Unsupported MCP configuration version",
-            ));
-        }
-        for (id, value) in raw.servers {
-            let server = if raw.schema == 1 {
-                let old: Legacy =
-                    serde_json::from_value(value).map_err(serde::de::Error::custom)?;
-                Server {
-                    id: old.id,
-                    timeout_seconds: old.timeout_seconds,
-                    transport: Transport::Stdio {
-                        program: old.program,
-                        args: old.args,
-                        environment: old.environment,
-                    },
-                }
-            } else {
-                serde_json::from_value(value).map_err(serde::de::Error::custom)?
-            };
-            servers.insert(id, server);
-        }
-        // Migration remains in memory until an ordinary revision-checked save.
-        Ok(Self { schema: 2, servers })
     }
 }
 impl Servers {
@@ -347,22 +303,10 @@ mod tests {
         }
     }
     #[test]
-    fn migrates_legacy_stdio_without_dropping_configuration() {
-        let old = serde_json::json!({"schema":1,"servers":{"fixture":{"id":"fixture","program":"python3","args":["mcp.py"],"environment":{"API_KEY":"MY_KEY"},"timeout_seconds":12}}});
+    fn a_configuration_of_another_schema_is_refused() {
+        let old = serde_json::json!({"schema": 1, "servers": {}});
         let config: Servers = serde_json::from_value(old).unwrap();
-        config.validate().unwrap();
-        let saved = serde_json::to_value(&config).unwrap();
-        assert_eq!(saved["schema"], 2);
-        assert_eq!(
-            saved["servers"]["fixture"]["transport"]["args"],
-            serde_json::json!(["mcp.py"])
-        );
-        assert_eq!(
-            saved["servers"]["fixture"]["transport"]["environment"]["API_KEY"],
-            "MY_KEY"
-        );
-        let roundtrip: Servers = serde_json::from_value(saved).unwrap();
-        roundtrip.validate().unwrap();
+        assert!(config.validate().is_err());
     }
     #[test]
     fn rejects_ambiguous_headers_and_literal_credentials() {

@@ -1259,7 +1259,7 @@ async fn unused_automatic_drafts_are_reused_without_adopting_named_sessions() {
 }
 
 #[tokio::test]
-async fn resume_skips_legacy_empty_sessions_before_applying_the_catalogue_limit() {
+async fn resume_skips_empty_named_sessions_before_applying_the_catalogue_limit() {
     use roomkit_tui_engine::{CommandHandler, CommandResult};
     let project = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
@@ -1275,7 +1275,7 @@ async fn resume_skips_legacy_empty_sessions_before_applying_the_catalogue_limit(
             &app.services.sessions,
             app.channel.id(),
             &app.view.agent,
-            Some(&format!("legacy-empty-{index}")),
+            Some(&format!("empty-{index}")),
             false,
         )
         .await

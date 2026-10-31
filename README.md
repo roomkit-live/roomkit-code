@@ -66,8 +66,6 @@ picker marks conversations open in another instance; those cannot be resumed
 until that instance closes. Switching views does not close a conversation's
 engine, hooks or background processes, so ownership lasts until application
 shutdown. After a crash, the operating system releases ownership automatically.
-When upgrading from a version with a project-wide lock, close its running
-instances once before starting concurrent sessions.
 
 `--check-config` validates launch options and the workspace without loading
 saved profiles, contacting a provider or creating state. `--help` lists all options. Terminal controls
@@ -252,12 +250,7 @@ New agents initially select all 27 native tools:
 | Read this guide | `docs_search`, `docs_read`, `docs_list` |
 
 These reuse the native `roomkit-tools` implementations and their RoomKit adapters.
-`/agents` can restrict each participant's comma-separated selection. On the first
-upgrade, profiles with the complete catalogue of their schema (ten tools in
-schema 1, nineteen in schema 2, twenty-four in schema 3) receive the new tools;
-existing subsets stay restricted. This migration is saved once in project
-schema 4. Later explicit selections, including an older complete catalogue, are
-preserved unchanged. Older application versions cannot read schema 4.
+`/agents` can restrict each participant's comma-separated selection.
 
 `docs_search`, `docs_read` and `docs_list` give agents this guide, for the
 installed version. The README is embedded in the binary, split into one document

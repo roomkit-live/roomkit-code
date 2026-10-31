@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Drop compatibility with state nobody runs anymore: profile schemas 1–3,
+  the first MCP configuration format, and the project-wide lock of binaries
+  from before concurrent sessions. Schema 4 profiles still move to schema 5.
+
 - Record internal errors (panics) in the diagnostic log, with their place and
   kind of failure but never their message, and say at exit how many occurred
   and where the log is: the terminal's screen used to hide them.

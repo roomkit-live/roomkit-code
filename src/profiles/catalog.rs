@@ -263,7 +263,7 @@ impl State {
                     path.display()
                 )
             })?;
-            if !matches!(document.value.schema, 1..=PROJECT_SCHEMA) {
+            if !matches!(document.value.schema, 4 | PROJECT_SCHEMA) {
                 return Err(format!(
                     "{} has an unknown version; cannot share an agent",
                     path.display()

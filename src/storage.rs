@@ -17,9 +17,6 @@ use crate::Result;
 pub(crate) struct Storage {
     pub database: PathBuf,
     pub sessions: Arc<SessionLeases>,
-    // Shared by current instances; conflicts with the exclusive project lease
-    // used by older binaries, which do not know about conversation ownership.
-    _lease: FileLease,
 }
 
 /// Release the lock explicitly: a concurrently spawned child's transient
@@ -29,11 +26,6 @@ pub(crate) struct FileLease(File);
 impl FileLease {
     pub fn exclusive(file: File) -> std::io::Result<Self> {
         FileExt::try_lock_exclusive(&file)?;
-        Ok(Self(file))
-    }
-
-    pub fn shared(file: File) -> io::Result<Self> {
-        FileExt::try_lock_shared(&file)?;
         Ok(Self(file))
     }
 
@@ -93,10 +85,6 @@ impl Storage {
         builder.create(&directory)?;
         let sessions = directory.join("session-locks");
         builder.create(&sessions)?;
-        let lease = private_file(&directory.join("session.lock"))?;
-        let lease = FileLease::shared(lease).map_err(
-            |_| "This project is open in an older RoomKit Code instance. Close it once to enable concurrent sessions",
-        )?;
         let database = directory.join("history.sqlite3");
         private_file(&database)?;
         Ok(Self {
@@ -105,7 +93,6 @@ impl Storage {
                 directory: sessions,
                 leases: Mutex::new(Some(HashMap::new())),
             }),
-            _lease: lease,
         })
     }
 
@@ -205,21 +192,6 @@ pub(crate) fn private_file(path: &Path) -> std::io::Result<File> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
-
-    #[test]
-    fn legacy_project_owner_and_shared_instances_cannot_overlap() -> Result<()> {
-        let root = tempfile::tempdir()?;
-        let state = tempfile::tempdir()?;
-        let storage = Storage::open(state.path(), root.path())?;
-        let path = storage.database.with_file_name("session.lock");
-        assert!(FileLease::exclusive(private_file(&path)?).is_err());
-        drop(storage);
-        let legacy = FileLease::exclusive(private_file(&path)?)?;
-        assert!(Storage::open(state.path(), root.path()).is_err());
-        drop(legacy);
-        Storage::open(state.path(), root.path())?;
-        Ok(())
-    }
 
     #[test]
     fn persistence_is_private_and_lock_releases_with_owner() -> Result<()> {

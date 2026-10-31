@@ -37,41 +37,37 @@ fn tool_result(session: &Session, name: &str) -> Value {
 }
 
 #[tokio::test]
-async fn legacy_default_catalogue_migrates_once_but_custom_selections_stay_restricted() {
-    for (schema, old_count) in [(1, 10), (2, 19), (3, 24)] {
-        let root = tempfile::tempdir().unwrap();
-        let state = tempfile::tempdir().unwrap();
-        let mock = Mock::start(vec![]).await;
-        let settings = settings(root.path(), state.path(), &mock.base_url);
-        let app = Application::open(&settings, String::new()).await.unwrap();
-        let path = app._storage.database.with_file_name("agents.json");
-        app.close().await.unwrap();
-        drop(app);
-        let mut document: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        document["schema"] = json!(schema);
-        document["agents"]["code"]["tools"] = json!(&crate::profiles::model::TOOLS[..old_count]);
-        let mut restricted = document["agents"]["code"].clone();
-        restricted["id"] = json!("reader");
-        restricted["tools"] = json!(["read"]);
-        document["agents"]["reader"] = restricted;
-        std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
-        let mut app = Application::open(&settings, String::new()).await.unwrap();
-        assert_eq!(app.profiles.tools("code").await.len(), 27);
-        let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(saved["schema"], crate::profiles::model::PROJECT_SCHEMA);
-        assert_eq!(saved["agents"]["reader"]["tools"], json!(["read"]));
-        let original = crate::profiles::model::TOOLS[..10].join(", ");
-        edit_profile(&mut app, "agents", "edit:code", &[("tools", &original)]).await;
-        app.close().await.unwrap();
-        drop(app);
-        let app = Application::open(&settings, String::new()).await.unwrap();
-        assert_eq!(
-            app.profiles.tools("code").await.len(),
-            10,
-            "Explicit current selections must not migrate again"
-        );
-        app.close().await.unwrap();
-    }
+async fn a_schema_4_project_moves_to_the_current_schema_with_its_selections() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let path = app._storage.database.with_file_name("agents.json");
+    app.close().await.unwrap();
+    drop(app);
+    let mut document: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    document["schema"] = json!(4);
+    let mut restricted = document["agents"]["code"].clone();
+    restricted["id"] = json!("reader");
+    restricted["tools"] = json!(["read"]);
+    document["agents"]["reader"] = restricted;
+    std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved["schema"], crate::profiles::model::PROJECT_SCHEMA);
+    assert_eq!(
+        app.profiles.tools("code").await.len(),
+        crate::profiles::model::TOOLS.len()
+    );
+    assert_eq!(saved["agents"]["reader"]["tools"], json!(["read"]));
+    app.close().await.unwrap();
+    drop(app);
+    // An earlier schema is refused rather than guessed.
+    let mut older = saved.clone();
+    older["schema"] = json!(3);
+    std::fs::write(&path, serde_json::to_vec(&older).unwrap()).unwrap();
+    assert!(Application::open(&settings, String::new()).await.is_err());
 }
 
 #[tokio::test]

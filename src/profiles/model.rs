@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Current `agents.json` version; older versions migrate through `Project::migrate`.
+/// Current `agents.json` version; schema 4 files migrate through `Project::migrate`.
 pub(crate) const PROJECT_SCHEMA: u32 = 5;
 
 pub(crate) const TOOLS: &[&str] = &[
@@ -130,29 +130,17 @@ pub(super) struct Project {
     pub extensions: BTreeMap<String, Extension>,
 }
 impl Project {
-    /// Upgrade only the original complete catalogue, once. Explicit subsets stay restricted.
+    /// Bring a schema 4 file to the current schema, which only adds global
+    /// agents' extensions; whether it changed.
     pub(super) fn migrate(&mut self) -> Result<bool, String> {
-        // Size of the complete catalogue that each earlier schema selected.
-        let complete = match self.schema {
-            PROJECT_SCHEMA => return Ok(false),
-            // Schema 5 adds global agents' extensions; the catalogue is unchanged.
-            4 => TOOLS.len(),
-            3 => 24,
-            2 => 19,
-            1 => 10,
-            _ => return Err("Unsupported profile file version".into()),
-        };
-        for agent in self.agents.values_mut() {
-            if agent.tools.len() == complete
-                && TOOLS[..complete]
-                    .iter()
-                    .all(|name| agent.tools.iter().any(|tool| tool == name))
-            {
-                agent.tools = TOOLS.iter().map(|name| (*name).into()).collect();
+        match self.schema {
+            PROJECT_SCHEMA => Ok(false),
+            4 => {
+                self.schema = PROJECT_SCHEMA;
+                Ok(true)
             }
+            _ => Err("Unsupported profile file version".into()),
         }
-        self.schema = PROJECT_SCHEMA;
-        Ok(true)
     }
 }
 
