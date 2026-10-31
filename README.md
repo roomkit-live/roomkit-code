@@ -313,6 +313,10 @@ Set `ui.markdown`, `ui.message_gap` and `ui.tool_preview_lines` in explicit TOML
 configuration to control formatting and density. Message source and stored
 tool results remain unchanged.
 
+Your submitted messages use the input background without an author heading;
+other participants keep their names. Set `ui.highlight_own_messages = false`
+to show author headings for all messages instead.
+
 History lives in the platform's per-user application data directory, under
 `projects/<workspace-path-hash>/history.sqlite3`. `--state-dir` or
 `ROOMKIT_CODE_STATE_DIR` overrides that location. The canonical workspace path

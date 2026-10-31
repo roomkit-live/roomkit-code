@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Show submitted messages on the input-colored surface, without the technical
+  local author label. Preserve other participants' names; configure this with
+  `ui.highlight_own_messages`.
+
 - Require public tool intentions in model-facing schemas by default, configurable
   through `[agent] require_tool_intent` and `--require-tool-intent[=false]` across
   agent reconstruction.

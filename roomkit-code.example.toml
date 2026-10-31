@@ -28,6 +28,7 @@ native_selection = false
 terminal_status = true # OSC 7501 status; --no-terminal-status disables it
 markdown = true # false keeps the model's literal Markdown syntax
 message_gap = 1 # blank lines between transcript items, 0 to 3
+highlight_own_messages = true # input-colored sent messages, without an author heading
 tool_preview_lines = 4 # maximum collapsed tool detail rows, 1 to 8
 input_min_lines = 1 # editable rows in the filled composer, 1 to 5
 input_padding = 1 # filled rows above/below the draft, 0 to 2

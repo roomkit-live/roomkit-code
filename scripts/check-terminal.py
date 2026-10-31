@@ -124,6 +124,7 @@ def scenario(project, state, base_url, resume=False, color="never"):
             wait_for(b"Filter: fixture", offset)
             os.write(master, b"\r")
         wait_for(b"Fixture inspection complete.")
+        assert b"person:local-user" not in captured, "Own messages must not expose the technical author label"
         # The first exchange leaves welcome and exposes the sidebar. Hide it
         # for the existing full-width history/footer checks; keep that preference
         # through /new and /resume.

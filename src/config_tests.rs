@@ -116,6 +116,7 @@ fn explicit_configuration_and_cli_overrides_control_appearance_without_creating_
     assert_eq!(loaded.ui.branding.logo, ["AB"]);
     assert_eq!(loaded.ui.theme, Theme::light());
     assert!(!loaded.ui.animations);
+    assert!(loaded.ui.highlight_own_messages);
     cli.model = None;
     cli.base_url = None;
     cli.theme = Some(Palette::Terminal);
@@ -128,6 +129,12 @@ fn explicit_configuration_and_cli_overrides_control_appearance_without_creating_
     assert!(loaded.ui.branding.logo.is_empty());
     assert_eq!(loaded.ui.selection, SelectionMode::Native);
     assert!(!loaded.state_dir.exists());
+    std::fs::write(
+        cli.config.as_ref().unwrap(),
+        "[ui]\nhighlight_own_messages = false\n",
+    )
+    .unwrap();
+    assert!(!Settings::load(&cli).unwrap().ui.highlight_own_messages);
 }
 
 #[test]

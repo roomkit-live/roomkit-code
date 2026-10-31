@@ -33,6 +33,7 @@ fn setup() -> (tempfile::TempDir, Resume, Session) {
     let settings = Settings::load(&cli).unwrap();
     let mut session = Session::default();
     session.apply(Event::Snapshot(Snapshot {
+        local_actor: None,
         conversation: "first".into(),
         title: "Project title".into(),
         actors: vec![Actor {
