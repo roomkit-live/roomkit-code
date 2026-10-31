@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::sync::Mutex;
 
-use crate::{config::Settings, storage::Storage};
+use crate::{agent::Inventory, config::Settings, storage::Storage};
 use model::{Agent, Authentication, PROJECT_SCHEMA, Project, Provider, Providers, TOOLS};
 use slot::AgentSlot;
 use store::Document;
@@ -54,6 +54,8 @@ struct State {
     project: Document<Project>,
     slots: BTreeMap<String, AgentSlot>,
     tools: BTreeMap<String, Vec<ToolDefinition>>,
+    /// What each configured agent's requests carry before their messages.
+    compositions: BTreeMap<String, crate::agent::Composition>,
     pending: Option<ui::Pending>,
     pending_delete: Option<deletion::Pending>,
     setup_error: Option<String>,
@@ -201,6 +203,7 @@ impl Profiles {
                 project,
                 slots: BTreeMap::new(),
                 tools: BTreeMap::new(),
+                compositions: BTreeMap::new(),
                 pending: None,
                 pending_delete: None,
                 setup_error: None,
@@ -236,7 +239,8 @@ impl Profiles {
         } else {
             None
         };
-        let (agent, tools) = assembled.map_or((None, Vec::new()), |(a, t)| (Some(a), t));
+        let (agent, inventory) =
+            assembled.map_or((None, Inventory::default()), |(a, i)| (Some(a), i));
         let configured = agent.is_some();
         let slot = AgentSlot::new(
             channel.clone(),
@@ -248,7 +252,8 @@ impl Profiles {
             .map_err(|_| "Could not register the agent")?;
         state.slots.insert(id.clone(), slot);
         if configured {
-            state.tools.insert(id, tools);
+            state.compositions.insert(id.clone(), inventory.composition);
+            state.tools.insert(id, inventory.tools);
         }
         Ok(channel)
     }
@@ -257,7 +262,7 @@ impl Profiles {
         &self,
         profile: &Agent,
         provider: &Provider,
-    ) -> Result<(OpenAiAgent, Vec<ToolDefinition>), String> {
+    ) -> Result<(OpenAiAgent, Inventory), String> {
         profile.validate()?;
         provider.validate()?;
         let config = match &provider.authentication {
@@ -307,28 +312,25 @@ impl Profiles {
                 catalogue.roots().to_vec(),
             )
         };
+        let extensions = crate::agent::Extensions {
+            skills,
+            skill_roots,
+            mcp: self.mcp_runtime.selected(profile).await?,
+            intent_required: self.require_tool_intent,
+        };
         crate::agent::create(
             &self.workspace,
             &self.resources,
             profile,
             config,
-            skills,
-            &skill_roots,
-            self.mcp_runtime.selected(profile).await?,
+            extensions,
         )
         .await
         .map_err(
             |_| "Could not configure this agent; verify its provider, credential and workspace",
         )
         .map_err(String::from)
-        .map(|(agent, tools)| {
-            (
-                agent
-                    .with_tool_call_intents_required(self.require_tool_intent)
-                    .with_image_resolver(self.images.clone()),
-                tools,
-            )
-        })
+        .map(|(agent, tools)| (agent.with_image_resolver(self.images.clone()), tools))
     }
 
     pub async fn configure_view(&self, view: &mut SessionConfig) {
@@ -433,7 +435,7 @@ impl State {
         kit: &RoomKit<SqliteStore>,
         id: &str,
         agent: OpenAiAgent,
-        tools: Vec<ToolDefinition>,
+        inventory: Inventory,
     ) -> Result<(), String> {
         if let Some(slot) = self.slots.get(id) {
             slot.replace(agent);
@@ -448,7 +450,8 @@ impl State {
                 .map_err(|_| "Could not register agent")?;
             self.slots.insert(id.into(), slot);
         }
-        self.tools.insert(id.into(), tools);
+        self.compositions.insert(id.into(), inventory.composition);
+        self.tools.insert(id.into(), inventory.tools);
         self.setup_error = None;
         Ok(())
     }

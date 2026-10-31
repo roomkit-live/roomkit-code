@@ -90,6 +90,17 @@ async fn deletion_handles_active_inactive_and_last_agents_without_erasing_histor
     assert!(app.view.model.is_none());
     assert!(app.view.submission_error.is_some());
     assert!(app.profiles.tools("code").await.is_empty());
+    // A deleted agent leaves no breakdown of its requests behind.
+    let (sidebar, _) = app.profiles.sidebar(&app.view).await;
+    let context = sidebar
+        .sections
+        .iter()
+        .find(|s| s.title == "Context")
+        .unwrap();
+    assert_eq!(
+        context.content,
+        roomkit_tui::protocol::SidebarContent::Context
+    );
     assert_eq!(app.view.room, room);
     let history = app.session().snapshot().await.unwrap();
     assert!(

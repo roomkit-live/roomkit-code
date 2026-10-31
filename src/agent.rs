@@ -35,6 +35,74 @@ const INSTRUCTIONS: &str = include_str!("coding-agent.txt");
 const ACTIVITY_INSTRUCTIONS: &str = r#"For every tool call, include a short description of your next action in _roomkit_intent, in the user's language. Put action announcements there, not in a separate message. Keep messages for findings, questions, explanations and the final answer.
 Use this only for the field described as "Shown to the user; never passed to the tool"; respect any tool-owned parameter of the same name. Never add an absent field."#;
 
+/// What every request of an agent carries before its messages, in characters.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Composition {
+    /// The application's instructions, the agent's own and the tool inventory.
+    pub system: usize,
+    /// Native tool schemas.
+    pub tools: usize,
+    /// The skills manifest, its discovery context and the skill tools.
+    pub skills: usize,
+    /// Per MCP server, by label: its instructions and tool schemas.
+    pub mcp: Vec<(String, usize)>,
+}
+
+/// The tools an agent exposes, and what every one of its requests carries.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Inventory {
+    pub tools: Vec<ToolDefinition>,
+    pub composition: Composition,
+}
+
+/// Bytes the engine adds to the system prompt, with their separating blank
+/// lines: roomkit-ai's `skills::texts::PREAMBLE` and the heading and
+/// introduction of its `server_instructions` block, which are not public.
+/// `application::tests::breakdown` compares them with a request.
+const SKILLS_PREAMBLE: usize = 309 + 4;
+const SERVERS_BLOCK: usize = 345 + 6;
+/// The engine keeps at most this many characters of a server's instructions.
+const SERVER_INSTRUCTIONS_MAX: usize = 8192;
+
+/// Tools as an OpenAI-compatible request sends them: with the reserved intent
+/// property the engine adds, required when the application requires it, each
+/// wrapped as a function.
+fn schema_chars(tools: &[ToolDefinition], intent_required: bool) -> usize {
+    tools
+        .iter()
+        .map(|tool| {
+            let parameters = roomkit::tool_intent::presented_parameters_with_requirement(
+                &tool.parameters,
+                intent_required,
+            )
+            .unwrap_or_else(|| tool.parameters.clone());
+            serde_json::json!({
+                "type": "function",
+                "function": {"name": tool.name, "description": tool.description, "parameters": parameters}
+            })
+            .to_string()
+            .len()
+        })
+        .sum()
+}
+
+/// A server's instructions as the engine keeps them, trimmed and cut at
+/// `SERVER_INSTRUCTIONS_MAX` characters, fenced under a heading naming it and
+/// apart from the next server's; nothing for a blank text. In bytes.
+fn instruction_chars(label: &str, instructions: Option<&str>) -> usize {
+    let text = instructions.map_or("", str::trim);
+    if text.is_empty() {
+        return 0;
+    }
+    let heading = "## MCP server: \n".len() + label.len();
+    let fence = "<server_instructions>\n".len() + "\n</server_instructions>".len();
+    let kept = text
+        .char_indices()
+        .nth(SERVER_INSTRUCTIONS_MAX)
+        .map_or(text.len(), |(end, _)| end);
+    heading + fence + "\n\n".len() + kept
+}
+
 /// Application-scoped resources survive turn, agent and connection changes.
 /// Tool adapters derive archive/process ownership from the room and agent IDs.
 pub(crate) struct Resources {
@@ -96,21 +164,35 @@ impl Resources {
 
 /// Inventory and registration are derived from the same selected toolsets.
 macro_rules! assemble {
-    ($id:expr, $profile:expr, $provider:expr, $skills:expr, $skill_roots:expr, $mcp:expr, $instructions:expr, $files:expr; $($binding:ident = $tool:expr),+ $(,)?) => {{
+    ($id:expr, $profile:expr, $provider:expr, $skills:expr, $skill_roots:expr, $mcp:expr, $instructions:expr, $files:expr, $intent_required:expr; $($binding:ident = $tool:expr),+ $(,)?) => {{
         $(let $binding = $tool;)+
-        let mut tools = [$($binding.tools()),+].concat().into_iter().filter(|tool| $profile.tools.contains(&tool.name)).collect::<Vec<_>>();
+        let native = [$($binding.tools()),+].concat().into_iter().filter(|tool| $profile.tools.contains(&tool.name)).collect::<Vec<_>>();
+        let mut tools = native.clone();
         tools.extend($skills.tool_definitions());
         for (_, server) in &$mcp { tools.extend(server.tools()); }
         let inventory = tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>().join(", ");
         let prompt = format!("{INSTRUCTIONS}\nCurrent agent: {} (ID: {}). Answer as this selected participant. Other participants may have different tools and providers.\nAgent instructions:\n{}\nCurrent capability inventory (provided by the application for this run):\n{inventory}\nOnly tools in this inventory are available to you. Apply tool-specific guidance only when that tool is present.\n", $profile.label, $profile.id, $profile.instructions);
-        let prompt = format!("{prompt}\n{}\n{ACTIVITY_INSTRUCTIONS}", skill_context(&$skills, $skill_roots));
-        let mut agent = OpenAiAgent::new($id, $provider.with_system_prompt(prompt))?.with_tool_call_intents(true).with_skills($skills)?;
+        let context = skill_context(&$skills, $skill_roots);
+        let preamble = if $skills.is_empty() { 0 } else { SKILLS_PREAMBLE };
+        let mut composition = Composition {
+            system: prompt.len() + ACTIVITY_INSTRUCTIONS.len(),
+            tools: schema_chars(&native, $intent_required),
+            skills: context.len() + preamble + $skills.to_prompt_xml().len() + schema_chars(&$skills.tool_definitions(), $intent_required),
+            mcp: Vec::new(),
+        };
+        if $mcp.iter().any(|(label, server)| instruction_chars(label, server.instructions()) > 0) {
+            composition.system += SERVERS_BLOCK;
+        }
+        let prompt = format!("{prompt}\n{context}\n{ACTIVITY_INSTRUCTIONS}");
+        let mut agent = OpenAiAgent::new($id, $provider.with_system_prompt(prompt))?.with_tool_call_intents(true).with_tool_call_intents_required($intent_required).with_skills($skills)?;
         $(if $binding.tools().iter().any(|tool| $profile.tools.contains(&tool.name)) { agent = agent.with_tools($files.wrap($instructions.wrap($binding)))?; })+
         for (label, server) in $mcp {
+            let size = instruction_chars(&label, server.instructions()) + schema_chars(&server.tools(), $intent_required);
+            composition.mcp.push((label.clone(), size));
             agent = agent.with_server_instructions(&label, server.instructions())?.with_tools(server)?;
         }
         let agent = agent.with_tool_timeout(Some(std::time::Duration::from_secs(130)));
-        Ok((agent, tools))
+        Ok((agent, Inventory { tools, composition }))
     }};
 }
 
@@ -147,20 +229,33 @@ fn skill_context(skills: &SkillRegistry, roots: &[std::path::PathBuf]) -> String
     )
 }
 
+/// What an agent receives beyond the application's own tools.
+pub(crate) struct Extensions {
+    pub skills: SkillRegistry,
+    pub skill_roots: Vec<std::path::PathBuf>,
+    pub mcp: Vec<(String, roomkit_mcp::McpServer)>,
+    /// Whether every tool call must carry an intent.
+    pub intent_required: bool,
+}
+
 pub(crate) async fn create(
     root: &std::path::Path,
     resources: &Resources,
     profile: &Agent,
     provider: OpenAiConfig,
-    skills: SkillRegistry,
-    skill_roots: &[std::path::PathBuf],
-    mcp: Vec<(String, roomkit_mcp::McpServer)>,
-) -> Result<(OpenAiAgent, Vec<ToolDefinition>)> {
+    extensions: Extensions,
+) -> Result<(OpenAiAgent, Inventory)> {
     profile.validate()?;
+    let Extensions {
+        skills,
+        skill_roots,
+        mcp,
+        intent_required,
+    } = extensions;
     let mutations = resources.mutations.clone();
     let mut shell_limits = ShellLimits::default();
     shell_limits.max_output_bytes = 8192;
-    assemble!(ChannelId::new(&profile.id)?, profile, provider, skills, skill_roots, mcp, resources.instructions, resources.files;
+    assemble!(ChannelId::new(&profile.id)?, profile, provider, skills, &skill_roots, mcp, resources.instructions, resources.files, intent_required;
         outline = CodeOutlineToolset::new(CodeOutlineTool::new(root).await?),
         list = ListToolset::new(ListTool::new(root).await?),
         glob = GlobToolset::new(GlobTool::new(root).await?),
@@ -189,4 +284,34 @@ pub(crate) async fn create(
         docs_search = DocsSearchToolset::new(DocsSearchTool::new(resources.docs.clone())),
         docs_read = DocsReadToolset::new(DocsReadTool::new(resources.docs.clone())),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_instructions_count_as_the_engine_keeps_them() {
+        assert_eq!(instruction_chars("calc", None), 0);
+        assert_eq!(instruction_chars("calc", Some("  \n ")), 0);
+        let short = instruction_chars("calc", Some("  Use add.  "));
+        assert_eq!(short, instruction_chars("calc", Some("Use add.")));
+        let long = instruction_chars("calc", Some(&"x".repeat(40_000)));
+        assert_eq!(long - short, SERVER_INSTRUCTIONS_MAX - "Use add.".len());
+        // Characters are cut, bytes are counted, like every other part.
+        let accented = instruction_chars("calc", Some(&"é".repeat(40_000)));
+        assert_eq!(accented - long, SERVER_INSTRUCTIONS_MAX);
+    }
+
+    #[test]
+    fn tool_schemas_count_the_intent_property_and_the_function_wrapper() {
+        let tool = ToolDefinition::new(
+            "add",
+            "Add two numbers",
+            serde_json::json!({"type": "object", "properties": {"a": {"type": "number"}}}),
+        );
+        let bare = tool.name.len() + tool.description.len() + tool.parameters.to_string().len();
+        let sent = schema_chars(std::slice::from_ref(&tool), false);
+        assert!(sent > bare + "_roomkit_intent".len() + r#"{"type":"function"}"#.len());
+    }
 }

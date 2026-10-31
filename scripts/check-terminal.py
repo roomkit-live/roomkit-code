@@ -129,7 +129,8 @@ def scenario(project, state, base_url, resume=False, color="never"):
         # for the existing full-width history/footer checks; keep that preference
         # through /new and /resume.
         wait_for(b"F7 hide")
-        wait_for(b"No servers configured")
+        # Lower sections scroll on a 30-row terminal; the context legend shows.
+        wait_for(b"System prompt")
         offset = len(captured)
         os.write(master, b"\x1b[18~")
         wait_for(b"F7 sidebar", offset)

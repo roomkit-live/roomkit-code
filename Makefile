@@ -42,6 +42,7 @@ terminal-check:
 	python3 scripts/check-docs.py
 	python3 scripts/check-exit.py
 	python3 scripts/check-files.py
+	python3 scripts/check-context.py
 
 msrv:
 	cargo +1.94.0 test --locked --workspace

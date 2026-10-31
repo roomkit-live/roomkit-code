@@ -236,5 +236,6 @@ impl State {
             slot.disable();
         }
         self.tools.remove(id);
+        self.compositions.remove(id);
     }
 }

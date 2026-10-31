@@ -461,6 +461,18 @@ While awaiting a new report, that earlier context remains visible with the
 explicit `last report` label. This is the last measured exchange, not a
 prediction including an unsent message or new tool definitions.
 
+The sidebar's **Context** section splits that measurement. A stacked bar and
+its legend show what every request of the selected agent carries before its
+messages: the **System prompt** (application and agent instructions, tool
+inventory), the **Instructions** each turn adds (the mode rule and the project's
+`AGENTS.md`), the native **Tools** schemas, the **Skills** manifest and tools,
+and one **MCP** part per server with its instructions and tool schemas; beyond
+sixteen parts, the smallest servers are summed into one. **Messages** is what
+remains of the measurement, including the instructions of skills activated in
+the conversation. The parts are estimates, at four characters per token, marked
+`≈`; when they exceed the measurement the section says so. A server whose
+schemas fill the window shows up at once.
+
 The separate **turn** counter totals all reported input/output tokens across
 that execution's model calls. Cached input is counted once. Missing measurements
 or a failed generation mark totals partial. These are neither session-wide
@@ -781,7 +793,7 @@ engine adapter's text/placeholder behavior.
 ## Session sidebar
 
 On wide terminals, a right sidebar displays the selected agent/model and provider
-connection, context occupancy with remaining percentage, the followed plan, the
+connection, context occupancy split by what fills it, the followed plan, the
 files this conversation changed, configured MCP servers and running processes.
 It uses the reusable sidebar protocol from roomkit-tui; this application supplies
 its plan, file, MCP and process sections. Provider credentials and

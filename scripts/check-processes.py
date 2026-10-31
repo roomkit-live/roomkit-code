@@ -14,6 +14,7 @@ import tempfile
 import termios
 import threading
 import time
+import unicodedata
 
 metadata = json.loads(subprocess.check_output(
     ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True
@@ -76,6 +77,40 @@ def scenario(project, state, url):
             if select.select([master], [], [], 0.1)[0]:
                 captured.extend(os.read(master, 65536))
 
+    def settle():
+        """Read until the screen has been quiet for a moment."""
+        while select.select([master], [], [], 0.2)[0]:
+            captured.extend(os.read(master, 65536))
+
+    def grid(rows=30, cols=120):
+        """The screen as drawn so far, one string per row."""
+        cells = [[" "] * cols for _ in range(rows)]
+        row = col = 0
+        data = captured.decode(errors="replace")
+        index = 0
+        while index < len(data):
+            osc = re.match(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", data[index:])
+            if osc:
+                index += len(osc.group(0))
+                continue
+            csi = re.match(r"\x1b\[([0-9;?<]*)([A-Za-z])", data[index:])
+            if csi:
+                args, command = csi.groups()
+                if command == "H":
+                    position = [int(x) for x in args.split(";") if x.isdigit()] or [1, 1]
+                    row, col = position[0] - 1, (position[1] - 1 if len(position) > 1 else 0)
+                elif command == "K" and args == "2":
+                    cells[row] = [" "] * cols
+                index += len(csi.group(0))
+                continue
+            char = data[index]
+            index += 1
+            if char == "\x1b" or char in "\r\n" or not (0 <= row < rows and 0 <= col < cols):
+                continue
+            cells[row][col] = char
+            col += 2 if unicodedata.east_asian_width(char) in "WF" else 1
+        return ["".join(line) for line in cells]
+
     def click(label, column):
         marker = captured.rfind(label)
         positions = re.findall(rb"\x1b\[(\d+);(\d+)H", captured[:marker])
@@ -89,8 +124,26 @@ def scenario(project, state, url):
         wait_for(b"Background fixture started.")
         wait_for(b"Processes: 1 running")
         offset = len(captured)
-        wait_for("› Processes".encode())
-        click("› Processes".encode(), 110)
+        # On 30 rows the section sits below the context breakdown: scroll the
+        # sidebar one wheel step at a time until its heading is on screen.
+        def heading():
+            return next((n for n, line in enumerate(grid(), 1) if line.rstrip().endswith("│ › Processes")), None)
+
+        row = None
+        for _ in range(20):
+            settle()
+            row = heading()
+            # A late frame of an earlier wheel step may show a row the app has
+            # already scrolled past: click only a row that stays put.
+            if row:
+                settle()
+                if heading() == row:
+                    break
+                row = None
+                continue
+            os.write(master, b"\x1b[<65;110;10M")
+        assert row, "The Processes heading never scrolled into view"
+        os.write(master, f"\x1b[<0;110;{row}M\x1b[<0;110;{row}m".encode())
         wait_for(b"Background processes", offset)
         wait_for(b"owner code", offset)
         offset = len(captured)

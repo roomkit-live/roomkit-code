@@ -260,6 +260,8 @@ async fn saving_mcp_connects_and_enables_tools_with_permissions_and_durable_sele
     let request = mock.requests.lock().unwrap()[0].clone();
     assert!(request.to_string().contains("MCP-SERVER-INSTRUCTIONS"));
     assert!(request.to_string().contains("server_instructions"));
+    // The breakdown counts the server's instructions and schemas as sent.
+    super::breakdown::fixed_parts_match(&app, &request).await;
     drop(client);
     task.await.unwrap().unwrap();
     app.close().await.unwrap();

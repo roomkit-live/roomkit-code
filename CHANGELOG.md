@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Split the sidebar's context gauge into what every request carries: the system
+  prompt, per-turn instructions, tool schemas, skills and each MCP server,
+  estimated at four characters per token, with the measured remainder as
+  messages. Requires roomkit-tui fdae52a.
+
 - List the files this conversation's agents created, modified, deleted or read
   in a sidebar **Files** section and in `/files`. File tools report their own
   changes; shell changes are found by comparing the project before and after

@@ -1678,6 +1678,7 @@ async fn stale_or_conflicting_forms_cannot_replace_a_working_agent() {
     app.close().await.unwrap();
 }
 
+mod breakdown;
 mod catalogue;
 mod docs;
 mod exit_summary;
