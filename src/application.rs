@@ -165,22 +165,42 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
     };
     let adapter = tokio::spawn(app.session().run_with_commands(host, handler));
     let renderers = crate::tool_views::renderers(&settings.workspace);
+    // The final observation outlives the view: it names the conversation to resume.
+    let observer = roomkit_tui::SessionObserver::default();
+    let resume = integrations::Resume::new(&settings);
     let integrations =
-        integrations::Integration::start(&settings, app.profiles.diagnostics.clone());
-    let observer = integrations.observer.clone();
-    let terminal = tokio::task::spawn_blocking(move || match observer {
-        Some(observer) => roomkit_tui::run_with_observer(client, renderers, settings.ui, observer),
-        None => roomkit_tui::run_with_options(client, renderers, settings.ui),
+        integrations::Integration::start(&settings, app.profiles.diagnostics.clone(), &observer);
+    let view = observer.clone();
+    let terminal = tokio::task::spawn_blocking(move || {
+        roomkit_tui::run_with_observer(client, renderers, settings.ui, view)
     })
     .await;
     integrations.freeze();
     let attached = adapter.await;
+    let summary = summarize(&app, observer.latest(), &resume).await;
     let closed = app.close().await;
     integrations.close().await;
+    summary.print(closed.is_ok());
     terminal??;
     attached??;
     closed?;
     Ok(())
+}
+
+/// Gather the exit report while the store and the processes are still open.
+async fn summarize(
+    app: &Application,
+    view: Option<roomkit_tui::SessionObservation>,
+    resume: &integrations::Resume,
+) -> crate::exit_summary::Summary {
+    let shown = view.map(|view| {
+        let command = view
+            .mode
+            .as_ref()
+            .and_then(|mode| resume.command(&view.conversation.0, mode.selected.as_str()));
+        (view.conversation.0, command)
+    });
+    crate::exit_summary::collect(&app.kit, &app.profiles.resources.processes, shown).await
 }
 
 #[cfg(test)]

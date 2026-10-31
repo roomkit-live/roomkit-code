@@ -18,7 +18,7 @@ const DRAFT_MARKER: &str = "roomkit_code_draft";
 
 // Bindings are infrastructure, not conversation history. Even blocked messages
 // prevent reuse: an attempted conversation must never become another draft.
-async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<bool> {
+pub(crate) async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<bool> {
     Ok(kit
         .store()
         .get_event_count(

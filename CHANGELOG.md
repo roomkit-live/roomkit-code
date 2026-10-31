@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Print an exit report once the view closes: the command that reopens the
+  displayed conversation, its token usage summed over every turn and launch,
+  and the background processes that closing stopped. Herdr and the report share
+  one resume command builder.
+
 - Add `make build`, `debug`, `clean`, `install` and `uninstall`. Installation
   activates the production binary in the managed layout of `~/.local/bin`.
 

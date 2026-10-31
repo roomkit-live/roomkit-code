@@ -7,26 +7,23 @@ use crate::{
 use roomkit_tui::{SessionObservation, SessionObserver};
 
 pub(super) struct Integration {
-    pub observer: Option<SessionObserver>,
     reporter: Option<herdr::Reporter>,
 }
 
 impl Integration {
+    /// Report the observed view to Herdr when its endpoint is detected.
     pub fn start(
         settings: &Settings,
         diagnostics: std::sync::Arc<crate::diagnostics::Diagnostics>,
+        observer: &SessionObserver,
     ) -> Self {
         let endpoint = settings
             .herdr
             .then(|| herdr::Endpoint::detect(crate::config::default_state_dir()))
             .flatten();
         let Some(endpoint) = endpoint else {
-            return Self {
-                observer: None,
-                reporter: None,
-            };
+            return Self { reporter: None };
         };
-        let observer = SessionObserver::default();
         let source = observer.clone();
         let resume = Resume::new(settings);
         let reporter = herdr::Reporter::start(
@@ -37,7 +34,6 @@ impl Integration {
             },
         );
         Self {
-            observer: Some(observer),
             reporter: Some(reporter),
         }
     }
@@ -54,13 +50,15 @@ impl Integration {
     }
 }
 
-struct Resume {
+/// The command line that reopens a conversation of this project with the
+/// launch's explicit options. Herdr and the exit summary share it.
+pub(super) struct Resume {
     prefix: Option<Vec<String>>,
     options: Option<Vec<String>>,
 }
 
 impl Resume {
-    fn new(settings: &Settings) -> Self {
+    pub(super) fn new(settings: &Settings) -> Self {
         let prefix = settings
             .workspace
             .to_str()
@@ -76,22 +74,28 @@ impl Resume {
         }
     }
 
+    /// Arguments reopening `conversation` in `mode`, or None when they cannot
+    /// be expressed safely (unknown mode, non-UTF-8 path, quote in a path).
+    pub(super) fn command(&self, conversation: &str, mode: &str) -> Option<Vec<String>> {
+        if !matches!(mode, "ask" | "plan" | "yolo") {
+            return None;
+        }
+        let mut args = self.prefix.clone()?;
+        args.extend([
+            "--session".into(),
+            conversation.into(),
+            "--mode".into(),
+            mode.into(),
+        ]);
+        args.extend(self.options.clone()?);
+        herdr::valid_resume(&args).then_some(args)
+    }
+
     fn report(&self, observation: SessionObservation) -> Report {
-        let resume = (|| {
-            let mut args = self.prefix.clone()?;
-            let mode = observation.mode.as_ref()?.selected.as_str();
-            if !matches!(mode, "ask" | "plan" | "yolo") {
-                return None;
-            }
-            args.extend([
-                "--session".into(),
-                observation.conversation.0.clone(),
-                "--mode".into(),
-                mode.into(),
-            ]);
-            args.extend(self.options.clone()?);
-            herdr::valid_resume(&args).then_some(args)
-        })();
+        let resume = observation
+            .mode
+            .as_ref()
+            .and_then(|mode| self.command(&observation.conversation.0, mode.selected.as_str()));
         let state = if !observation.permissions.is_empty() {
             State::Blocked
         } else if observation

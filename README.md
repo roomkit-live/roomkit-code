@@ -81,6 +81,27 @@ work; a second press within two seconds exits. Typing or pasting disarms exit.
 Interruption waits for engine cleanup, preserves completed tool effects and
 leaves the conversation ready to continue.
 
+Once the view has closed, the terminal prints a short report:
+
+```text
+Session: 8275ad8052ba446aa433e9bade3f744d
+To continue this session, run:
+  roomkit-code /path/to/project --state-dir /path/to/state --session 8275ad8052ba446aa433e9bade3f744d --mode ask
+Token usage: total=245120 input=188331 (+ 1204553 cached) output=56789 · 19 turns
+Stopped 1 background process:
+  p1 · npm run dev · 4m 12s
+```
+
+The command reopens the conversation shown at exit, in its current mode, with
+the launch's explicit options such as `--config` and display flags. With
+`cargo run`, replace `roomkit-code` by `cargo run --locked --`. An unused draft
+has no resume line. Token usage covers every turn of the conversation, across
+launches and agents: `input` excludes the cached input shown in parentheses and
+`total` is input plus output. A turn without a complete provider report marks
+the line `(partial)`. Closing stops every running process of this application,
+whether an agent or a `!` command started it. The report lists them, or says
+they may still be running when cleanup could not be confirmed.
+
 Type **!command** (for example `!git status`) to run a command directly in the
 project directory without invoking the model. `/shell command` is equivalent.
 The composer shows a command hint; Enter runs, Alt+Enter adds a line, and `\!`
