@@ -3,9 +3,9 @@
 ## Unreleased
 
 - Warn before exiting while processes run: Ctrl+D asks for a second press
-  instead of detaching at once, and in the conversation view the exit hint
-  states how many processes closing will stop. The count covers every
-  conversation, not only the current view.
+  instead of detaching at once, and the exit hint states how many processes
+  closing will stop, on every screen. The count covers every conversation,
+  not only the current view.
 
 - Move to roomkit-tui, formerly roomkit-cli, and its public API: constructors for
   its non-exhaustive types, session accessors and `Rejection` for refused

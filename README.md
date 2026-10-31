@@ -76,9 +76,9 @@ disclosure does the same, and dragging text requests clipboard copying through
 OSC 52 when supported by the terminal. `--native-selection` delegates selection
 to the terminal and disables application mouse interactions. Ctrl+D detaches;
 this local application then closes its owned engine. While processes run, the
-first Ctrl+D does not exit: press it again within two seconds. In the
-conversation view, the exit hint states how many processes closing will stop,
-also after Ctrl+C; panels, forms and approval cards do not show it yet. Esc
+first Ctrl+D does not exit: press it again within two seconds. The exit hint
+states how many processes closing will stop, also over panels, forms and
+approval cards, and after Ctrl+C. Esc
 closes the current menu or panel, otherwise it interrupts the active
 execution while keeping the draft. Ctrl+C clears the draft and interrupts active
 work; a second press within two seconds exits. Typing or pasting disarms exit.

@@ -137,6 +137,12 @@ try:
         offset = app.send("\x04")
         app.wait("Press Ctrl+D again to exit · 1 running process will be stopped", offset)
         assert app.process.poll() is None and alive(), "The first Ctrl+D must only warn"
+        # F6 disarms the exit and opens the Processes panel, which states the warning too.
+        offset = app.send("\x1b[17~")
+        app.wait("Background processes", offset)
+        offset = app.send("\x04")
+        app.wait("Press Ctrl+D again to exit · 1 running process will be stopped", offset)
+        assert app.process.poll() is None and alive(), "Ctrl+D over a panel must only warn"
         lines = app.quit()
         session = next(line for line in lines if line.startswith("Session: "))[len("Session: "):]
         command = shlex.split(after(lines, "To continue this session, run:"))
@@ -160,4 +166,4 @@ finally:
     server.shutdown()
     server.server_close()
     thread.join(timeout=5)
-print("PTY exit passed: Ctrl+D warns about running processes, resume command reopens the session, usage spans launches, background process stopped.")
+print("PTY exit passed: Ctrl+D warns about running processes in the conversation and over a panel, resume command reopens the session, usage spans launches, background process stopped.")
