@@ -221,12 +221,9 @@ impl Sessions {
         let Command::Invoke { name, arguments } = &request.command else {
             return Err("Unsupported application request".into());
         };
-        // Skills parse their own arguments, untrimmed.
-        if name == "skills" {
-            return self.profiles.skills(&self.kit, current, arguments).await;
-        }
         let arguments = arguments.trim();
         match name.as_str() {
+            "skills" => self.profiles.skills(&self.kit, current, arguments).await,
             "update" => self.services.updates.handle(&current, arguments),
             "instructions" => {
                 self.profiles

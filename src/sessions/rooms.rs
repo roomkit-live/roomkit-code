@@ -141,7 +141,7 @@ async fn unused_draft(
 }
 
 impl Sessions {
-    pub(super) fn switched(&self, mut config: SessionConfig, room: RoomId) -> CommandResult {
+    fn switched(&self, mut config: SessionConfig, room: RoomId) -> CommandResult {
         config.title = title(&self.workspace, &room);
         config.mode = Some(self.policy.state(room.as_str()));
         config.room = room;
@@ -237,14 +237,14 @@ impl Sessions {
             .await
             .map_err(|_| "Could not list this project's sessions".to_string())?;
         let title = if choices.len() == LISTED {
-            "Resume session · latest 200"
+            format!("Resume session · latest {LISTED}")
         } else {
-            "Resume session"
+            "Resume session".into()
         };
         Ok(CommandResult::Events(vec![Event::Choices {
             conversation: current.room.as_str().into(),
             command: "resume".into(),
-            title: title.into(),
+            title,
             choices,
         }]))
     }
@@ -374,7 +374,7 @@ impl Sessions {
         )))
     }
 
-    /// The start of the viewer's latest visible message, on one line.
+    /// The start of the viewer's first visible message, on one line.
     fn label(&self, context: &RoomContext, current: &SessionConfig) -> String {
         roomkit::visible_events(context, &self.channel)
             .iter()

@@ -527,7 +527,7 @@ CRUD schemas and tool implementations remain in `roomkit-tools`.
 accounts, providers and agents without exposing credentials to the UI.
 `src/profiles/mcp/` owns MCP configuration and exposure; the engine's
 `roomkit-mcp` crate owns protocol calls, aliases and server process cleanup.
-`src/sessions.rs` routes application commands and owns the project session catalogue.
+`src/sessions/` routes application commands and owns the project session catalogue.
 The TUI receives only its generic client connection, preserving the boundary
 needed for a future remote host.
 
@@ -608,8 +608,8 @@ outcomes and safe error classifications. They never include prompts, tool
 arguments/results, credentials, encrypted reasoning or raw provider error bodies.
 The panel shows recent records for the current launch; files also cover previous
 launches. File write failures are shown in the panel and do not stop the agent.
-An internal error (a panic) is recorded with where it happened and what kind it
-is, never its full message, which can quote your text; the session goes on, and
+An internal error (a panic) is recorded with where it happened and its kind of
+failure, never its message, which can quote your text; the session goes on, and
 the exit report says how many occurred and where the log is.
 These operational logs are intended for troubleshooting, not as a tamper-proof
 audit trail. Raw dependency `tracing` output is not enabled by `--debug`.

@@ -83,7 +83,7 @@ impl Application {
     }
 
     /// The router of the terminal's commands on this application.
-    fn commands(&self, workspace: &std::path::Path) -> crate::sessions::Sessions {
+    fn router(&self, workspace: &std::path::Path) -> crate::sessions::Sessions {
         crate::sessions::Sessions {
             kit: self.kit.clone(),
             workspace: workspace.to_path_buf(),
@@ -184,7 +184,7 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
     let (client, host) = connection(NonZeroUsize::new(256).ok_or("Invalid queue capacity")?);
     let adapter = tokio::spawn(
         app.session()
-            .run_with_commands(host, app.commands(&settings.workspace)),
+            .run_with_commands(host, app.router(&settings.workspace)),
     );
     let renderers = crate::tool_views::renderers(&settings.workspace);
     // The final observation outlives the view: it names the conversation to resume.

@@ -3,8 +3,8 @@
 ## Unreleased
 
 - Record internal errors (panics) in the diagnostic log, with their place and
-  kind but not their message, and say at exit how many occurred: the
-  terminal's screen used to hide them.
+  kind of failure but never their message, and say at exit how many occurred
+  and where the log is: the terminal's screen used to hide them.
 
 - State in the system prompt, from the permission rules themselves, which
   tools run without approval in Ask and which Plan permits; the hand-written

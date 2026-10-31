@@ -1,7 +1,7 @@
 //! Panics, recorded in the diagnostic log. While the terminal runs, its
 //! screen hides the message the default hook prints, and the session goes
 //! on (`crate::sync`), so without a record a panic would leave no trace. A
-//! record keeps where the panic happened and what kind it is, never its full
+//! record keeps where the panic happened and its kind of failure, never its
 //! message, which can quote the user's text.
 
 use std::{
@@ -74,25 +74,53 @@ impl Diagnostics {
         let plural = if count == 1 { "" } else { "s" };
         (count > 0).then(|| {
             format!(
-                "RoomKit Code hit {count} internal error{plural}; see /diagnostics or {}",
+                "RoomKit Code hit {count} internal error{plural}; see the diagnostic log: {}",
                 self.path.display()
             )
         })
     }
 }
 
-/// What a panic message reports, without what it quotes: its text before
-/// the first ": ", "; " or line break, at most 80 characters.
-pub(super) fn kind(message: &str) -> String {
-    let head = [": ", "; ", "\n"]
+/// Kinds of failure the standard library and the async runtime report, by
+/// the start of their message. Anything else is "other": a message can
+/// begin with any value, the user's text included.
+const KINDS: &[&str] = &[
+    "index out of bounds",
+    "byte index",
+    "begin <= end",
+    "range start index",
+    "range end index",
+    "slice index starts at",
+    "attempt to add with overflow",
+    "attempt to subtract with overflow",
+    "attempt to multiply with overflow",
+    "attempt to negate with overflow",
+    "attempt to shift left with overflow",
+    "attempt to shift right with overflow",
+    "attempt to divide by zero",
+    "attempt to calculate the remainder with a divisor of zero",
+    "called `Option::unwrap()` on a `None` value",
+    "called `Result::unwrap()` on an `Err` value",
+    "called `Result::unwrap_err()` on an `Ok` value",
+    "already borrowed",
+    "already mutably borrowed",
+    "capacity overflow",
+    "assertion failed",
+    "assertion `left == right` failed",
+    "assertion `left != right` failed",
+    "removal index",
+    "insertion index",
+    "swap_remove index",
+    "Cannot start a runtime from within a runtime",
+    "Cannot drop a runtime in a context where blocking is not allowed",
+    "there is no reactor running",
+];
+
+/// What kind of failure a panic message reports, never its text.
+pub(super) fn kind(message: &str) -> &'static str {
+    KINDS
         .iter()
-        .filter_map(|separator| message.find(separator))
-        .min()
-        .map_or(message, |end| &message[..end]);
-    head.chars()
-        .filter(|c| !c.is_control())
-        .take(80)
-        .collect::<String>()
-        .trim()
-        .to_owned()
+        .find(|kind| message.starts_with(*kind))
+        .copied()
+        .unwrap_or("other")
 }

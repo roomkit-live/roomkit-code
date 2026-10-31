@@ -94,7 +94,7 @@ fn write_failures_remain_visible_in_the_diagnostic_panel() -> crate::Result<()> 
 }
 
 #[test]
-fn a_panic_kind_keeps_what_failed_never_what_it_quotes() {
+fn a_panic_kind_names_a_known_failure_never_its_text() {
     let kind = super::panics::kind;
     assert_eq!(
         kind("index out of bounds: the len is 3 but the index is 5"),
@@ -104,16 +104,22 @@ fn a_panic_kind_keeps_what_failed_never_what_it_quotes() {
         kind("called `Result::unwrap()` on an `Err` value: Os { code: 2 }"),
         "called `Result::unwrap()` on an `Err` value"
     );
+    // Older toolchains quote the string in slicing messages.
     assert_eq!(
-        kind("byte index 5 is not a char boundary; it is inside 'é' of `secret text`"),
-        "byte index 5 is not a char boundary"
+        kind("byte index 40 is out of bounds of `my password is hunter2`"),
+        "byte index"
+    );
+    assert_eq!(
+        kind("begin <= end (10 <= 3) when slicing `secret`"),
+        "begin <= end"
     );
     assert_eq!(
         kind("assertion `left == right` failed\n  left: 1"),
         "assertion `left == right` failed"
     );
-    assert_eq!(kind(&"x".repeat(200)).len(), 80);
-    assert_eq!(kind(""), "");
+    // A message that starts with a value is never kept.
+    assert_eq!(kind("hunter2 is not a valid key"), "other");
+    assert_eq!(kind(""), "other");
 }
 
 #[test]
@@ -128,17 +134,29 @@ fn panics_are_recorded_and_counted_without_waiting_on_the_log() -> crate::Result
         .name("panic-probe".into())
         .spawn(|| std::panic::panic_any("index out of bounds: the len is 3 but the index is 5"))?
         .join();
-    // A panic while this thread writes a record must not wait for the log.
-    let nested = std::thread::Builder::new()
-        .name("nested-probe".into())
-        .spawn(|| {
-            let _recording = super::panics::Recording::start();
-            std::panic::panic_any("inside a record")
-        })?
-        .join();
+    // A panic while this thread holds the log's lock must not wait for it.
+    let (done, finished) = std::sync::mpsc::channel();
+    let holder = log.clone();
+    std::thread::Builder::new()
+        .name("locked-probe".into())
+        .spawn(move || {
+            let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let (_state, _recording) = holder.locked();
+                std::panic::panic_any("inside the log's lock")
+            }));
+            let _ = done.send(unwound.is_err());
+        })?;
+    let locked = finished.recv_timeout(std::time::Duration::from_secs(5));
+    if locked.is_err() {
+        // The hook is stuck on the log's lock: restoring the hook or failing
+        // here would wait on it too.
+        eprintln!("A panic under the log's lock waited for it");
+        std::process::abort();
+    }
     // Restore the default hook; other tests may panic on purpose meanwhile.
     drop(std::panic::take_hook());
-    assert!(failed.is_err() && nested.is_err());
+    assert!(failed.is_err());
+    assert_eq!(locked, Ok(true));
     let records: Vec<Value> = std::fs::read_to_string(&path)?
         .lines()
         .filter_map(|line| serde_json::from_str(line).ok())
@@ -158,10 +176,20 @@ fn panics_are_recorded_and_counted_without_waiting_on_the_log() -> crate::Result
     assert!(
         !records
             .iter()
-            .any(|record| record["thread"] == "nested-probe")
+            .any(|record| record["thread"] == "locked-probe")
     );
     let notice = log.panic_notice().ok_or("No notice")?;
     assert!(notice.starts_with("RoomKit Code hit ") && notice.contains("internal error"));
     assert!(notice.ends_with(&path.display().to_string()));
+    // The panel still shows the records after a panic under its lock.
+    let current = SessionConfig::new(
+        roomkit::model::RoomId::new("test")?,
+        roomkit::model::ChannelId::new("agent")?,
+        "user",
+    );
+    let CommandResult::Events(events) = log.panel(&current, "") else {
+        return Err("Expected the panel".into());
+    };
+    assert!(!format!("{events:?}").contains("WRITE FAILED"));
     Ok(())
 }

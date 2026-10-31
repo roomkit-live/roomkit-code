@@ -67,8 +67,7 @@ impl Diagnostics {
             fields["code"] = json!(diagnostic.code);
             fields["summary"] = json!(diagnostic.summary);
         }
-        let _recording = panics::Recording::start();
-        let mut state = crate::sync::lock(&self.state);
+        let (mut state, _recording) = self.locked();
         let line = format!("{fields}\n");
         if state.recent.len() == 100 {
             state.recent.pop_front();
@@ -224,27 +223,22 @@ impl Diagnostics {
         self.record("application_stopped", json!({}), None);
     }
 
+    /// The log's state, with this thread marked as holding it: a panic while
+    /// it is held is counted, not recorded, rather than waiting for it.
+    fn locked(&self) -> (std::sync::MutexGuard<'_, State>, panics::Recording) {
+        let recording = panics::Recording::start();
+        (crate::sync::lock(&self.state), recording)
+    }
+
     pub fn panel(&self, current: &SessionConfig, action: &str) -> CommandResult {
         if action == "dismiss" {
             return CommandResult::Events(vec![]);
         }
-        let (recent, failed) = self
-            .state
-            .lock()
-            .map(|state| {
-                (
-                    state
-                        .recent
-                        .iter()
-                        .rev()
-                        .take(20)
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                    state.write_failed,
-                )
-            })
-            .unwrap_or_else(|_| (String::new(), true));
+        let (recent, failed) = {
+            let (state, _recording) = self.locked();
+            let recent = state.recent.iter().rev().take(20).cloned();
+            (recent.collect::<Vec<_>>().join("\n"), state.write_failed)
+        };
         CommandResult::Events(vec![Event::Panel {
             conversation: current.room.as_str().into(),
             panel: PanelSpec::new(
