@@ -700,7 +700,8 @@ The generated Rust strings live in `src/branding.rs`; Python is not required to
 build or run the application.
 
 Tool activity is shown as a short public sentence in the conversation's language,
-without arguments or output. Consecutive calls update the same line;
+with a formatted preview of the current call below it. Consecutive calls replace
+both the heading and preview, using the existing `ui.tool_preview_lines` limit;
 an agent message starts a new sequence. F2 or a click opens the technical history,
 and F2 returns to the conversation view. Approvals and unsuccessful outcomes remain
 visible. Set `[ui] tool_activity = false` to keep individual tool cards instead.

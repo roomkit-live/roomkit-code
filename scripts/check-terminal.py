@@ -133,13 +133,14 @@ def scenario(project, state, base_url, resume=False, color="never"):
         os.write(master, b"\x1b[18~")
         wait_for(b"F7 sidebar", offset)
         wait_for(b"Read-only")
-        # Activity keeps public intent visible and hides technical output until F2.
+        # Activity keeps its heading and formatted preview; F2 reveals the full result.
         os.write(master, b"\x1b[5~\x1b[1;3A")
         wait_for(b"Reading the fixture document")
+        wait_for('fixture.txt · lines 1–4'.encode())
+        wait_for(b"A fictional project fixture.")
         assert b"Expanded fixture line" not in captured
         offset = len(captured)
         os.write(master, b"\x1bOQ")
-        wait_for('fixture.txt · lines 1–4'.encode(), offset)
         wait_for(b"F2 collapse", offset)
         wait_for(b"Expanded fixture line", offset)
         assert b'"data":' not in captured, "The file card leaked its raw JSON envelope"

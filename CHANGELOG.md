@@ -2,9 +2,12 @@
 
 ## Unreleased
 
+- Restore formatted tool previews below activity headings while retaining
+  consecutive-call replacement and the full history behind F2 or click.
+
 - Ask agents explicitly for a public activity sentence on supported tool calls
   and use it for routine progress. Show the actual tool name when no intention
-  is supplied, while keeping arguments and output in the details view.
+  is supplied, with full output available in the details view.
 
 - Show public intentions as updating activity lines instead of accumulating
   technical tool cards. Messages separate activity sequences; F2 or a click

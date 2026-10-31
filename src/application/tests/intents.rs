@@ -1,6 +1,6 @@
 //! Prove the selected agent, engine, real tool, projection and UI as one path.
 use super::*;
-use roomkit_tui::render::{Renderers, screen_with_options};
+use roomkit_tui::render::screen_with_options;
 
 fn assert_schemas(request: &Value) {
     // A schema alone does not ask the agent to use the optional display field.
@@ -30,7 +30,7 @@ fn assert_schemas(request: &Value) {
 async fn missing_public_intent_keeps_the_call_executable_and_displays_its_name() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
-    std::fs::write(root.path().join("private-fixture.txt"), "fixture").unwrap();
+    std::fs::write(root.path().join("listed-fixture.txt"), "fixture").unwrap();
     let mock = Mock::start(vec![("list", json!({"path":"."}))]).await;
     let settings = settings(root.path(), state.path(), &mock.base_url);
     let app = Application::open(&settings, String::new()).await.unwrap();
@@ -39,7 +39,7 @@ async fn missing_public_intent_keeps_the_call_executable_and_displays_its_name()
         &session,
         100,
         40,
-        &Renderers::default(),
+        &crate::tool_views::renderers(root.path()),
         &settings.ui,
         Duration::ZERO,
     )
@@ -47,7 +47,8 @@ async fn missing_public_intent_keeps_the_call_executable_and_displays_its_name()
     .join("\n");
     assert!(text.contains("✓ list · F2 details"), "{text}");
     assert!(!text.contains("Action completed"));
-    assert!(!text.contains("private-fixture.txt"));
+    assert!(text.contains("listed-fixture.txt"));
+    assert!(!text.contains("\"data\":"));
     app.close().await.unwrap();
 }
 
@@ -65,6 +66,8 @@ async fn public_intents_reach_the_view_and_survive_profile_changes_and_restart()
     .await;
     let mut settings = settings(root.path(), state.path(), &mock.base_url);
     settings.mode = crate::permissions::Mode::Yolo;
+    // Include stdout after the shell's command, exit status and archive metadata.
+    settings.ui.tool_preview_lines = 6;
     let mut app = Application::open(&settings, String::new()).await.unwrap();
     let session = turn(&app).await;
     let call = session
@@ -87,14 +90,16 @@ async fn public_intents_reach_the_view_and_survive_profile_changes_and_restart()
         &session,
         100,
         40,
-        &Renderers::default(),
+        &crate::tool_views::renderers(root.path()),
         &settings.ui,
         Duration::ZERO,
     );
     let text = frame.lines.join("\n");
     assert!(text.contains("Je vérifie le projet 文档"));
-    assert!(!text.contains("printf fixture-result"));
-    assert!(!text.contains("fixture-result"));
+    assert!(text.contains("$ printf fixture-result"));
+    assert!(text.contains("exit 0"));
+    assert!(text.contains("│ fixture-result"), "{text}");
+    assert!(!text.contains("\"data\":"));
     // Editing the profile reconstructs its agent through the same factory.
     edit_profile(&mut app, "agents", "edit:code", &[("label", "Reviewer")]).await;
     turn_operation(&app, "after-profile-edit").await;
@@ -111,7 +116,7 @@ async fn public_intents_reach_the_view_and_survive_profile_changes_and_restart()
         &resumed,
         100,
         40,
-        &Renderers::default(),
+        &crate::tool_views::renderers(root.path()),
         &settings.ui,
         Duration::ZERO,
     );
