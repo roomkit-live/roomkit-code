@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- State in the system prompt, from the permission rules themselves, which
+  tools run without approval in Ask and which Plan permits; the hand-written
+  list had omitted the plan and skill tools.
+
 - Add global agents, the default scope in `/agents`: created once and available
   in every project, which opens with the global agent used last. MCP servers and
   skills stay per project. Existing agents stay in their project; changing the
