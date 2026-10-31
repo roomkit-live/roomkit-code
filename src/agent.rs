@@ -24,6 +24,8 @@ use std::{path::Path, sync::Arc};
 use crate::{Result, profiles::model::Agent};
 
 const INSTRUCTIONS: &str = include_str!("coding-agent.txt");
+const ACTIVITY_INSTRUCTIONS: &str = r#"For every tool call, include a short description of your next action in _roomkit_intent, in the user's language. Put action announcements there, not in a separate message. Keep messages for findings, questions, explanations and the final answer.
+Use this only for the field described as "Shown to the user; never passed to the tool"; respect any tool-owned parameter of the same name. Never add an absent field."#;
 
 /// Application-scoped resources survive turn, agent and connection changes.
 /// Tool adapters derive archive/process ownership from the room and agent IDs.
@@ -82,7 +84,7 @@ macro_rules! assemble {
         for (_, server) in &$mcp { tools.extend(server.tools()); }
         let inventory = tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>().join(", ");
         let prompt = format!("{INSTRUCTIONS}\nCurrent agent: {} (ID: {}). Answer as this selected participant. Other participants may have different tools and providers.\nAgent instructions:\n{}\nCurrent capability inventory (provided by the application for this run):\n{inventory}\nOnly tools in this inventory are available to you. Apply tool-specific guidance only when that tool is present.\n", $profile.label, $profile.id, $profile.instructions);
-        let prompt = format!("{prompt}\n{}", skill_context(&$skills, $skill_roots));
+        let prompt = format!("{prompt}\n{}\n{ACTIVITY_INSTRUCTIONS}", skill_context(&$skills, $skill_roots));
         let mut agent = OpenAiAgent::new($id, $provider.with_system_prompt(prompt))?.with_tool_call_intents(true).with_skills($skills)?;
         $(if $binding.tools().iter().any(|tool| $profile.tools.contains(&tool.name)) { agent = agent.with_tools($binding)?; })+
         for (label, server) in $mcp {

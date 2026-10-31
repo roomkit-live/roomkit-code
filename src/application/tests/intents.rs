@@ -13,9 +13,15 @@ fn assert_schemas(request: &Value) {
         .unwrap()["content"]
         .as_str()
         .unwrap();
-    assert!(instructions.contains("for every tool call whose schema describes _roomkit_intent"));
-    assert!(instructions.contains("instead of sending a separate assistant message"));
-    assert!(instructions.contains("If a tool instead declares its own business parameter"));
+    assert!(instructions.contains(
+        "For every tool call, include a short description of your next action in _roomkit_intent"
+    ));
+    assert!(instructions.contains("not in a separate message"));
+    assert!(instructions.contains("respect any tool-owned parameter of the same name"));
+    assert!(
+        instructions.find("For every tool call, include").unwrap()
+            > instructions.find("Current capability inventory").unwrap()
+    );
     let tools = request["tools"].as_array().unwrap();
     assert!(!tools.is_empty());
     for tool in tools {

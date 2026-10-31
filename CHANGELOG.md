@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Simplify agent guidance to put routine progress in tool-call intentions and
+  reserve messages for findings and conversation, without making the field required.
+
 - Restore formatted tool previews below activity headings while retaining
   consecutive-call replacement and the full history behind F2 or click.
 
