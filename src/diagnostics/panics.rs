@@ -15,12 +15,12 @@ use serde_json::json;
 use super::Diagnostics;
 
 thread_local! {
-    /// Set while this thread writes a record: a panic there must not wait
-    /// for the log's lock it already holds.
+    /// Set while this thread holds the log's lock: a panic there must not
+    /// wait for the lock it already holds.
     static RECORDING: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Marks this thread as writing a record until dropped.
+/// Marks this thread as holding the log's lock until dropped.
 pub(super) struct Recording;
 
 impl Recording {
@@ -82,10 +82,14 @@ impl Diagnostics {
 }
 
 /// Kinds of failure the standard library and the async runtime report, by
-/// the start of their message. Anything else is "other": a message can
-/// begin with any value, the user's text included.
+/// the start of their message on the pinned toolchain and on the oldest
+/// supported one. Anything else is "other": a message can begin with any
+/// value, the user's text included.
 const KINDS: &[&str] = &[
     "index out of bounds",
+    "start byte index",
+    "end byte index",
+    "byte range starts at",
     "byte index",
     "begin <= end",
     "range start index",
@@ -102,8 +106,8 @@ const KINDS: &[&str] = &[
     "called `Option::unwrap()` on a `None` value",
     "called `Result::unwrap()` on an `Err` value",
     "called `Result::unwrap_err()` on an `Ok` value",
-    "already borrowed",
-    "already mutably borrowed",
+    "RefCell already borrowed",
+    "RefCell already mutably borrowed",
     "capacity overflow",
     "assertion failed",
     "assertion `left == right` failed",

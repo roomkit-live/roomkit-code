@@ -104,7 +104,21 @@ fn a_panic_kind_names_a_known_failure_never_its_text() {
         kind("called `Result::unwrap()` on an `Err` value: Os { code: 2 }"),
         "called `Result::unwrap()` on an `Err` value"
     );
-    // Older toolchains quote the string in slicing messages.
+    // String slicing, as the pinned toolchain reports it.
+    assert_eq!(
+        kind("end byte index 40 is out of bounds for string of length 22"),
+        "end byte index"
+    );
+    assert_eq!(
+        kind("start byte index 1 is not a char boundary; it is inside 'é' (bytes 0..2 of string)"),
+        "start byte index"
+    );
+    assert_eq!(
+        kind("byte range starts at 10 but ends at 3"),
+        "byte range starts at"
+    );
+    assert_eq!(kind("RefCell already borrowed"), "RefCell already borrowed");
+    // The oldest supported toolchain quotes the string in slicing messages.
     assert_eq!(
         kind("byte index 40 is out of bounds of `my password is hunter2`"),
         "byte index"
@@ -181,6 +195,8 @@ fn panics_are_recorded_and_counted_without_waiting_on_the_log() -> crate::Result
     let notice = log.panic_notice().ok_or("No notice")?;
     assert!(notice.starts_with("RoomKit Code hit ") && notice.contains("internal error"));
     assert!(notice.ends_with(&path.display().to_string()));
+    // The panel only shows the current launch, so the notice names the file.
+    assert!(!notice.contains(" /diagnostics"), "{notice}");
     // The panel still shows the records after a panic under its lock.
     let current = SessionConfig::new(
         roomkit::model::RoomId::new("test")?,

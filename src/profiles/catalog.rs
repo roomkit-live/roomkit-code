@@ -265,7 +265,7 @@ impl State {
             })?;
             if !matches!(document.value.schema, 4 | PROJECT_SCHEMA) {
                 return Err(format!(
-                    "{} has an unknown version; cannot share an agent",
+                    "{} has an unsupported version; cannot share an agent",
                     path.display()
                 ));
             }

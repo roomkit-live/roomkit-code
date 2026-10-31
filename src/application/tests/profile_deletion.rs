@@ -325,3 +325,33 @@ async fn an_open_agent_form_cannot_restore_a_deleted_provider_reference_and_edit
     a.close().await.unwrap();
     b.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn provider_deletion_refuses_a_project_file_of_an_unsupported_version() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let mut app = Application::open(&settings, String::new()).await.unwrap();
+    let provider = saved_provider_id(&settings);
+    remove(&mut app, "agents", "code").await;
+    // Another project's file from before schema 4 cannot be checked for
+    // references: the deletion is refused rather than guessed.
+    let old = state.path().join("projects/old/agents.json");
+    std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+    std::fs::write(&old, r#"{"schema":3,"selected":null,"agents":{}}"#).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let error = invoke(&app, "providers", &format!("delete {provider}"))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("projects/old/agents.json") && error.contains("unsupported version"),
+        "{error}"
+    );
+    app.close().await.unwrap();
+}

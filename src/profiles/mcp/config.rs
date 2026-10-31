@@ -208,10 +208,12 @@ impl Server {
         }
     }
 }
-/// `mcp.json`, schema 2; `validate` refuses any other.
+/// `mcp.json`, schema 2: another schema is refused when the file is read,
+/// before it replaces the loaded configuration.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(in crate::profiles) struct Servers {
+    #[serde(deserialize_with = "current_schema")]
     pub schema: u32,
     pub servers: BTreeMap<String, Server>,
 }
@@ -223,6 +225,16 @@ impl Default for Servers {
         }
     }
 }
+fn current_schema<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+    let schema = u32::deserialize(deserializer)?;
+    if schema != 2 {
+        return Err(serde::de::Error::custom(
+            "Unsupported MCP configuration version",
+        ));
+    }
+    Ok(schema)
+}
+
 impl Servers {
     pub fn validate(&self) -> Result<(), String> {
         if self.schema != 2 || self.servers.len() > 32 {
@@ -303,10 +315,13 @@ mod tests {
         }
     }
     #[test]
-    fn a_configuration_of_another_schema_is_refused() {
-        let old = serde_json::json!({"schema": 1, "servers": {}});
-        let config: Servers = serde_json::from_value(old).unwrap();
-        assert!(config.validate().is_err());
+    fn a_configuration_of_another_schema_is_refused_when_read() {
+        for schema in [1, 3] {
+            let file = serde_json::json!({"schema": schema, "servers": {}});
+            assert!(serde_json::from_value::<Servers>(file).is_err());
+        }
+        let current = serde_json::json!({"schema": 2, "servers": {}});
+        assert!(serde_json::from_value::<Servers>(current).is_ok());
     }
     #[test]
     fn rejects_ambiguous_headers_and_literal_credentials() {
