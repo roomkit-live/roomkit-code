@@ -15,6 +15,7 @@ use serde::Deserialize;
 pub(crate) enum Mode {
     #[default]
     Ask,
+    Plan,
     Yolo,
 }
 
@@ -22,6 +23,7 @@ impl Mode {
     fn value(self) -> &'static str {
         match self {
             Self::Ask => "ask",
+            Self::Plan => "plan",
             Self::Yolo => "yolo",
         }
     }
@@ -41,7 +43,7 @@ impl Policy {
         }
     }
 
-    fn mode(&self, room: &str) -> Mode {
+    pub(crate) fn mode(&self, room: &str) -> Mode {
         self.modes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -61,6 +63,12 @@ impl Policy {
                     description: "Approve changes, commands, process input and web requests".into(),
                 },
                 Choice {
+                    value: "plan".into(),
+                    label: "Plan".into(),
+                    description:
+                        "Explore and maintain plans; no project changes or command execution".into(),
+                },
+                Choice {
                     value: "yolo".into(),
                     label: "Yolo".into(),
                     description: "Run selected tools without asking".into(),
@@ -69,11 +77,26 @@ impl Policy {
         }
     }
 
+    pub(crate) fn instruction(&self, room: &str) -> &'static str {
+        match self.mode(room) {
+            Mode::Plan => {
+                "Application mode: Plan. Respond to the latest user message by exploring and preparing or refining a plan with the available plan tools. Do not implement project changes, execute commands, stop processes, or call MCP tools. Web research still requires approval. Read an existing plan before updating it; list plans first when resuming. Keep concrete steps and declared progress accurate. When the plan is ready, explain it and wait for the user to switch to Ask or Yolo and request implementation. Never switch modes yourself."
+            }
+            Mode::Ask => {
+                "Application mode: Ask. Respond to the latest user message. Changes and execution require the application's approval. Use existing plan tools to track substantial work when useful; read or list the plan before continuing it. A mode change alone is not an instruction to execute a plan."
+            }
+            Mode::Yolo => {
+                "Application mode: Yolo. Respond to the latest user message within its scope; selected tools can run without individual approvals. Use existing plan tools to track substantial work when useful; read or list the plan before continuing it. A mode change alone is not an instruction to execute a plan."
+            }
+        }
+    }
+
     pub fn set(&self, room: &str, value: &str) -> Result<ModeState, String> {
         let mode = match value {
             "ask" => Mode::Ask,
+            "plan" => Mode::Plan,
             "yolo" => Mode::Yolo,
-            _ => return Err("Use /mode ask or /mode yolo".into()),
+            _ => return Err("Use /mode ask, /mode plan or /mode yolo".into()),
         };
         self.modes
             .lock()
@@ -83,6 +106,11 @@ impl Policy {
     }
 
     pub async fn gate(&self, channel: &ConversationChannel, event: ToolCallEvent) -> ToolUse {
+        if self.mode(event.room_id.as_str()) == Mode::Plan && !plan_allowed(&event) {
+            return ToolUse::block(
+                "Plan mode: explore and update the plan only. This action is disabled. Ask the user to switch to Ask or Yolo before implementing; do not retry or use another tool to bypass this restriction.",
+            );
+        }
         match event.call.name.as_str() {
             "activate_skill"
             | "read_skill_reference"
@@ -97,6 +125,9 @@ impl Policy {
             | "process_stop"
             | "output_read"
             | "output_forget" => {
+                return ToolUse::Allow;
+            }
+            "plan_create" | "plan_read" | "plan_list" | "plan_update" | "plan_delete" => {
                 return ToolUse::Allow;
             }
             // The tool's schema defines an omitted dry_run as true.
@@ -114,8 +145,8 @@ impl Policy {
             name if name.starts_with("mcp__") => {}
             _ => return ToolUse::block("This tool has no application permission policy."),
         }
-        // Decide once for this call. Changing modes never auto-accepts an
-        // already pending approval, or cancels an action already authorized.
+        // Changing modes never auto-accepts a pending approval. Recheck Plan
+        // after approval; actions already dispatched are not revoked.
         if self.mode(event.room_id.as_str()) == Mode::Yolo {
             return ToolUse::Allow;
         }
@@ -195,10 +226,30 @@ impl Policy {
             )
             .await
         {
+            Decision::Allow
+                if self.mode(event.room_id.as_str()) == Mode::Plan && !plan_allowed(&event) =>
+            {
+                ToolUse::block(
+                    "The mode changed to Plan while approval was pending; this action was not executed.",
+                )
+            }
             Decision::Allow => ToolUse::Allow,
             Decision::Deny => ToolUse::block(
                 "The action was not approved (refused, expired or view disconnected). Do not retry it without a new user instruction.",
             ),
         }
+    }
+}
+
+fn plan_allowed(event: &ToolCallEvent) -> bool {
+    match event.call.name.as_str() {
+        "activate_skill" | "read_skill_reference" | "list" | "glob" | "grep" | "read" | "diff" | "code_outline"
+        | "process_status" | "process_read" | "output_read"
+        | "plan_create" | "plan_read" | "plan_list" | "plan_update" | "plan_delete"
+        // Network reads retain Ask's explicit approval, even in Plan mode.
+        | "web_fetch" | "web_search" => true,
+        "patch" => event.call.arguments.get("dry_run").is_none_or(|v| v == true),
+        // No arbitrary shell or unclassified MCP tools, even when named "read".
+        _ => false,
     }
 }

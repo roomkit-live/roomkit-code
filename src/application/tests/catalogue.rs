@@ -39,38 +39,40 @@ fn tool_result(session: &Session, name: &str) -> Value {
 
 #[tokio::test]
 async fn legacy_default_catalogue_migrates_once_but_custom_selections_stay_restricted() {
-    let root = tempfile::tempdir().unwrap();
-    let state = tempfile::tempdir().unwrap();
-    let mock = Mock::start(vec![]).await;
-    let settings = settings(root.path(), state.path(), &mock.base_url);
-    let app = Application::open(&settings, String::new()).await.unwrap();
-    let path = app._storage.database.with_file_name("agents.json");
-    app.close().await.unwrap();
-    drop(app);
-    let mut document: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    document["schema"] = json!(1);
-    document["agents"]["code"]["tools"] = json!(&crate::profiles::model::TOOLS[..10]);
-    let mut restricted = document["agents"]["code"].clone();
-    restricted["id"] = json!("reader");
-    restricted["tools"] = json!(["read"]);
-    document["agents"]["reader"] = restricted;
-    std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
-    let mut app = Application::open(&settings, String::new()).await.unwrap();
-    assert_eq!(app.profiles.tools("code").await.len(), 19);
-    let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    assert_eq!(saved["schema"], 2);
-    assert_eq!(saved["agents"]["reader"]["tools"], json!(["read"]));
-    let original = crate::profiles::model::TOOLS[..10].join(", ");
-    edit_profile(&mut app, "agents", "edit:code", &[("tools", &original)]).await;
-    app.close().await.unwrap();
-    drop(app);
-    let app = Application::open(&settings, String::new()).await.unwrap();
-    assert_eq!(
-        app.profiles.tools("code").await.len(),
-        10,
-        "Explicit current selections must not migrate again"
-    );
-    app.close().await.unwrap();
+    for (schema, old_count) in [(1, 10), (2, 19)] {
+        let root = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let mock = Mock::start(vec![]).await;
+        let settings = settings(root.path(), state.path(), &mock.base_url);
+        let app = Application::open(&settings, String::new()).await.unwrap();
+        let path = app._storage.database.with_file_name("agents.json");
+        app.close().await.unwrap();
+        drop(app);
+        let mut document: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        document["schema"] = json!(schema);
+        document["agents"]["code"]["tools"] = json!(&crate::profiles::model::TOOLS[..old_count]);
+        let mut restricted = document["agents"]["code"].clone();
+        restricted["id"] = json!("reader");
+        restricted["tools"] = json!(["read"]);
+        document["agents"]["reader"] = restricted;
+        std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+        let mut app = Application::open(&settings, String::new()).await.unwrap();
+        assert_eq!(app.profiles.tools("code").await.len(), 24);
+        let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["schema"], 3);
+        assert_eq!(saved["agents"]["reader"]["tools"], json!(["read"]));
+        let original = crate::profiles::model::TOOLS[..10].join(", ");
+        edit_profile(&mut app, "agents", "edit:code", &[("tools", &original)]).await;
+        app.close().await.unwrap();
+        drop(app);
+        let app = Application::open(&settings, String::new()).await.unwrap();
+        assert_eq!(
+            app.profiles.tools("code").await.len(),
+            10,
+            "Explicit current selections must not migrate again"
+        );
+        app.close().await.unwrap();
+    }
 }
 
 #[tokio::test]

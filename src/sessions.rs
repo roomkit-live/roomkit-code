@@ -36,6 +36,12 @@ async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<bool> {
 pub(crate) fn commands() -> Vec<CommandSpec> {
     vec![
         CommandSpec {
+            name: "plans".into(),
+            description: "Follow this agent's plans and inspect their steps".into(),
+            arguments: "[plan-id]".into(),
+            choices: Vec::new(),
+        },
+        CommandSpec {
             name: "mcp".into(),
             description: "Configure MCP servers and choose tools for this agent".into(),
             arguments: "[list|add|connect <id>|disconnect <id>|enable <id>|disable <id>]".into(),
@@ -92,8 +98,8 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         CommandSpec {
             name: "mode".into(),
             description: "Change permissions (also Shift+Tab)".into(),
-            arguments: "[ask|yolo]".into(),
-            choices: vec!["ask".into(), "yolo".into()],
+            arguments: "[ask|plan|yolo]".into(),
+            choices: vec!["ask".into(), "plan".into(), "yolo".into()],
         },
         CommandSpec {
             name: "new".into(),
@@ -341,10 +347,12 @@ impl CommandHandler for Sessions {
         let mut accounts = self.profiles.accounts.subscribe();
         let profiles = self.profiles.clone();
         let mut sidebar_changes = profiles.sidebar_changes.subscribe();
+        let mut plan_changes = profiles.resources.plans.subscribe();
         let (tx, rx) = tokio::sync::watch::channel(Vec::new());
         tokio::spawn(async move {
             loop {
                 let mut events = processes.borrow_and_update().clone();
+                events.extend(profiles.plans.updates(&current).await);
                 if let Some(event) = accounts.borrow_and_update().clone() {
                     // Panels carry their conversation and opaque instance ID;
                     // the UI ignores updates to a dismissed or different view.
@@ -364,6 +372,7 @@ impl CommandHandler for Sessions {
                     changed = processes.changed() => if changed.is_err() { break; },
                     changed = accounts.changed() => if changed.is_err() { break; },
                     changed = sidebar_changes.changed() => if changed.is_err() { break; },
+                    changed = plan_changes.changed() => if changed.is_err() { break; },
                     // MCP exposes connection liveness, but no disconnect stream.
                     // Only inspect configured connections; unchanged state never redraws the TUI.
                     () = tokio::time::sleep(std::time::Duration::from_secs(2)), if poll_connections => {},
@@ -374,7 +383,10 @@ impl CommandHandler for Sessions {
     }
 
     fn allow_while_busy(&self, name: &str) -> bool {
-        matches!(name, "mode" | "tools" | "processes" | "diagnostics")
+        matches!(
+            name,
+            "mode" | "tools" | "processes" | "diagnostics" | "plans"
+        )
     }
 
     async fn handle(
@@ -394,6 +406,9 @@ impl CommandHandler for Sessions {
             return self.profiles.skills(&self.kit, current, arguments).await;
         }
         if matches!(&request.command, Command::Invoke { name, .. } if name == "shell") {
+            if self.policy.mode(current.room.as_str()) == crate::permissions::Mode::Plan {
+                return Err("Shell commands are disabled in Plan mode. Switch to Ask or Yolo to execute a command.".into());
+            }
             return self
                 .profiles
                 .shell
@@ -413,6 +428,7 @@ impl CommandHandler for Sessions {
         };
         let arguments = arguments.trim();
         match name.as_str() {
+            "plans" => self.profiles.plans.handle(&current, arguments).await,
             "diagnostics" => Ok(self.profiles.diagnostics.panel(&current, arguments)),
             "processes" => {
                 self.profiles

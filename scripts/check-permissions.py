@@ -78,6 +78,8 @@ def scenario(project, state, url):
         wait_for(b"Preserved draft")
         offset = len(captured)
         os.write(master, b"\x1b[Z")  # Shift+Tab
+        wait_for(b"[Plan]", offset)
+        os.write(master, b"\x1b[Z")
         wait_for(b"[Yolo]", offset)
         os.write(master, b"!")
         wait_for(b"Preserved draft!", offset)
@@ -96,6 +98,8 @@ def scenario(project, state, url):
         wait_for(b"old_text")
         assert (project / "source.txt").read_text() == "before\n"
         offset = len(captured)
+        os.write(master, b"\x1b[Z")
+        wait_for(b"[Plan]", offset)
         os.write(master, b"\x1b[Z")
         wait_for(b"[Yolo]", offset)
         wait_for(b"Allow edit?")

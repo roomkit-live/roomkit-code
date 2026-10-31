@@ -25,6 +25,8 @@ use slot::AgentSlot;
 use store::Document;
 
 pub(crate) struct Profiles {
+    pub(crate) policy: crate::permissions::Policy,
+    pub(crate) plans: Arc<crate::plans::PlanView>,
     require_tool_intent: bool,
     workspace: PathBuf,
     state_dir: PathBuf,
@@ -41,6 +43,7 @@ pub(crate) struct Profiles {
 }
 
 struct State {
+    policy: crate::permissions::Policy,
     mcp: Document<mcp::Servers>,
     pending_mcp: Option<mcp::Pending>,
     providers: Document<Providers>,
@@ -158,7 +161,10 @@ impl Profiles {
         };
         let skill_catalogue =
             skills::Catalogue::load(settings.workspace.clone(), settings.state_dir.clone()).await?;
+        let policy = crate::permissions::Policy::new(settings.mode);
         Ok(Arc::new(Self {
+            policy: policy.clone(),
+            plans: crate::plans::PlanView::new((*resources.plans).clone()),
             require_tool_intent: settings.require_tool_intent,
             skill_catalogue: tokio::sync::RwLock::new(skill_catalogue),
             images: crate::images::Images::new(storage.database.with_file_name("attachments")),
@@ -172,6 +178,7 @@ impl Profiles {
             mcp_runtime: mcp::Runtime::default(),
             sidebar_changes: tokio::sync::watch::channel(()).0,
             state: Mutex::new(State {
+                policy,
                 mcp,
                 pending_mcp: None,
                 providers,
@@ -215,7 +222,7 @@ impl Profiles {
         };
         let (agent, tools) = assembled.map_or((None, Vec::new()), |(a, t)| (Some(a), t));
         let configured = agent.is_some();
-        let slot = AgentSlot::new(channel.clone(), agent);
+        let slot = AgentSlot::new(channel.clone(), agent, self.policy.clone());
         kit.register_channel(slot.clone())
             .map_err(|_| "Could not register the agent")?;
         state.slots.insert(id.clone(), slot);
@@ -389,7 +396,11 @@ impl State {
 
     fn ensure_slot(&mut self, kit: &RoomKit<SqliteStore>, id: &str) -> Result<(), String> {
         if !self.slots.contains_key(id) {
-            let slot = AgentSlot::new(ChannelId::new(id).map_err(|_| "Invalid agent ID")?, None);
+            let slot = AgentSlot::new(
+                ChannelId::new(id).map_err(|_| "Invalid agent ID")?,
+                None,
+                self.policy.clone(),
+            );
             kit.register_channel(slot.clone())
                 .map_err(|_| "Could not register agent")?;
             self.slots.insert(id.into(), slot);
@@ -410,6 +421,7 @@ impl State {
             let slot = AgentSlot::new(
                 ChannelId::new(id).map_err(|_| "Invalid agent ID")?,
                 Some(agent),
+                self.policy.clone(),
             );
             kit.register_channel(slot.clone())
                 .map_err(|_| "Could not register agent")?;

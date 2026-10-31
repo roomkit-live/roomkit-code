@@ -68,7 +68,7 @@ pub(super) async fn list(
         ));
     }
     panel(current, format!("MCP · agent {}", current.agent),
-        "Connect local stdio or remote Streamable HTTP servers. Local servers run with your user permissions, in this workspace. Saving connects the server and enables its tools for the current agent. Existing selections, including disabled tools, are preserved. Connections last until disconnect or application exit. Ask approves every MCP tool call; Yolo runs selected tools without asking. Servers and tools are independent of the agent's model provider.".into(), actions)
+        "Connect local stdio or remote Streamable HTTP servers. Local servers run with your user permissions, in this workspace. Saving connects the server and enables its tools for the current agent. Existing selections, including disabled tools, are preserved. Connections last until disconnect or application exit. Ask approves every MCP tool call; Plan blocks MCP calls; Yolo runs selected tools without asking. Servers and tools are independent of the agent's model provider.".into(), actions)
 }
 
 pub(super) fn available(id: &str, server: &roomkit_mcp::McpServer) -> Vec<ToolDefinition> {

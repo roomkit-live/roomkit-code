@@ -195,6 +195,9 @@ fn permission_mode_defaults_to_ask_and_only_explicit_settings_enable_yolo() {
     assert_eq!(Settings::load(&cli).unwrap().mode, Mode::Yolo);
     cli.mode = Some(Mode::Ask);
     assert_eq!(Settings::load(&cli).unwrap().mode, Mode::Ask);
+    cli.mode = None;
+    std::fs::write(&path, "[permissions]\nmode = 'plan'\n").unwrap();
+    assert_eq!(Settings::load(&cli).unwrap().mode, Mode::Plan);
     std::fs::write(&path, "[permissions]\nmode = 'unknown'\n").unwrap();
     assert!(Settings::load(&cli).is_err());
 }

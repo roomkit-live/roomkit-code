@@ -1,6 +1,7 @@
 //! Development-tool presentation belongs to the product, not the generic TUI.
 
 mod changes;
+mod plans;
 mod processes;
 mod skills;
 mod web;
@@ -43,6 +44,15 @@ pub(crate) fn renderers(workspace: &std::path::Path) -> Renderers {
     }
     for name in ["activate_skill", "read_skill_reference"] {
         renderers.register(name, skills::Skills);
+    }
+    for name in [
+        "plan_create",
+        "plan_read",
+        "plan_list",
+        "plan_update",
+        "plan_delete",
+    ] {
+        renderers.register(name, plans::Plans);
     }
     renderers
 }

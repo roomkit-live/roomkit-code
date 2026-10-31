@@ -11,7 +11,7 @@ timeout_seconds = 600 # total deadline per model request, including streaming
 require_tool_intent = true # false makes the public description optional in model-facing tool schemas
 
 [permissions]
-mode = "ask" # ask, yolo; --mode overrides this explicit configuration
+mode = "ask" # ask, plan, yolo; --mode overrides this explicit configuration
 
 [ui]
 welcome = true # centered composer for empty conversations

@@ -9,6 +9,7 @@ mod diagnostics;
 mod herdr;
 mod images;
 mod permissions;
+mod plans;
 mod processes;
 mod profiles;
 mod sessions;

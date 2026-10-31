@@ -211,7 +211,7 @@ impl Profiles {
         state.pending_delete = None;
         state.project.reload()?;
         state.providers.reload()?;
-        if state.providers.value.schema != 1 || state.project.value.schema != 2 {
+        if state.providers.value.schema != 1 || state.project.value.schema != 3 {
             return Err("Unsupported profile file version".into());
         }
         let mut agent = state
@@ -355,7 +355,7 @@ impl Profiles {
             for root in &catalogue.roots {
                 body.push_str(&format!("  {}\n", root.display()));
             }
-            body.push_str("\nSkills start disabled. Inspect and enable them per agent.\nOnly metadata is advertised until the model calls activate_skill.\nReferences use read_skill_reference; scripts are not automatically executed.\nPermissions remain Ask/Yolo. Provider-specific skill sidecars are not supported.\nReload after changing files. Existing active instructions use the new version after reload/restart.\n\n");
+            body.push_str("\nSkills start disabled. Inspect and enable them per agent.\nOnly metadata is advertised until the model calls activate_skill.\nReferences use read_skill_reference; scripts are not automatically executed.\nSkills never override Ask/Plan/Yolo permissions. Provider-specific skill sidecars are not supported.\nReload after changing files. Existing active instructions use the new version after reload/restart.\n\n");
             body.push_str(&catalogue.notes.join("\n"));
             return Ok(CommandResult::Events(vec![Event::Panel {
                 conversation: current.room.as_str().into(),

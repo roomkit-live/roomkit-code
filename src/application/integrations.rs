@@ -80,7 +80,7 @@ impl Resume {
         let resume = (|| {
             let mut args = self.prefix.clone()?;
             let mode = observation.mode.as_ref()?.selected.as_str();
-            if !matches!(mode, "ask" | "yolo") {
+            if !matches!(mode, "ask" | "plan" | "yolo") {
                 return None;
             }
             args.extend([

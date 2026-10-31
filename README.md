@@ -5,7 +5,7 @@ owns development behavior, configuration and workspace choices. The reusable
 terminal interface, conversation engine, authentication and tool implementations live in their
 own repositories.
 
-This version can **explore, edit and test projects**, with Ask/Yolo permissions.
+This version can **explore, plan, edit and test projects**, with Ask/Plan/Yolo permissions.
 It supports OpenAI-compatible Chat Completions endpoints and Sign in with
 ChatGPT through Responses, with streamed answers, tool details,
 activity timing, mouse selection, configurable appearance and SQLite history.
@@ -77,6 +77,7 @@ project directory without invoking the model. `/shell command` is equivalent.
 The composer shows a command hint; Enter runs, Alt+Enter adds a line, and `\!`
 sends a literal leading exclamation mark to the agent. Explicit commands execute
 in both Ask and Yolo; those modes govern commands proposed by the agent.
+Plan mode also disables manual `!` and `/shell` commands until you switch modes.
 
 Commands use `/bin/sh -c` without a login shell or PTY, with stdin closed and a
 five-minute lifetime. Each starts in the project directory: `cd` affects that
@@ -128,7 +129,7 @@ releases the agent.
 Herdr's published resume command uses `roomkit-code` from `PATH`. Install it there
 before relying on pane restoration. The command preserves the absolute workspace,
 state directory, explicit config file, appearance flags, currently displayed
-conversation and host-confirmed Ask/Yolo mode. Saved profiles supply the provider
+conversation and host-confirmed Ask/Plan/Yolo mode. Saved profiles supply the provider
 and selected agent; bootstrap model options and credentials are not copied into
 the command. Session changes update the command only after successful navigation.
 Resuming restores history without replaying model requests or tools.
@@ -191,7 +192,7 @@ and the model's current capability inventory are derived from the same selected
 toolsets. Resuming keeps conversation history, but older assistant claims about
 missing tools do not change the currently registered capabilities.
 
-New agents initially select all 19 native coding tools:
+New agents initially select all 24 native coding tools:
 
 | Purpose | Tools |
 | --- | --- |
@@ -201,13 +202,15 @@ New agents initially select all 19 native coding tools:
 | Public web sources | `web_search`, `web_fetch` |
 | Persistent commands and stdin | `process_start`, `process_status`, `process_read`, `process_write`, `process_stop` |
 | Recover long output | `output_read`, `output_forget` |
+| Maintain plans | `plan_create`, `plan_read`, `plan_list`, `plan_update`, `plan_delete` |
 
 These reuse the native `roomkit-tools` implementations and their RoomKit adapters.
 `/agents` can restrict each participant's comma-separated selection. On the first
-upgrade, profiles with exactly the original ten-tool catalogue receive the new
-catalogue; existing subsets stay restricted. This migration is saved once in
-project schema 2. Later explicit selections, including the original ten tools,
-are preserved unchanged. Older application versions cannot read schema 2.
+upgrade, schema-1 profiles with the full ten-tool catalogue and schema-2 profiles
+with the full nineteen-tool catalogue receive the new tools; existing subsets
+stay restricted. This migration is saved once in project schema 3. Later explicit
+selections, including an older complete catalogue, are preserved unchanged.
+Older application versions cannot read schema 3.
 
 `web_search` uses **Exa's anonymous service**, independently of the model's
 provider; no API key or model credential is sent to Exa. Availability and rate
@@ -275,16 +278,55 @@ and action. It is saved when the turn settles and returns with `/resume`.
 Timeouts, disconnections and automatic Yolo actions never claim that a person
 approved or denied something. Approval remains distinct from tool success.
 
-Press **Shift+Tab** to cycle between **Ask** and **Yolo**, including while an
-agent is working. The status line shows the host-confirmed mode. `/mode ask` and
-`/mode yolo` select directly; `/mode` offers choices. Changing modes preserves
-the draft and does not settle an already pending request or stop an action that
-was already authorized. Yolo permits subsequent selected tool calls without
-asking; tool path, revision, timeout and size checks still apply.
+Press **Shift+Tab** to cycle **Ask → Plan → Yolo → Ask**, including while an
+agent is working. The status line shows the host-confirmed mode. `/mode ask`,
+`/mode plan` and `/mode yolo` select directly; `/mode` offers choices. Changing
+modes preserves the draft and never starts a model turn or accepts a pending
+approval. Entering Plan refuses a pending mutation even if its old approval is
+subsequently accepted. Actions already dispatched are not revoked. Yolo permits
+subsequent selected tool calls without asking; tool path, revision, timeout and
+size checks still apply.
 
 Modes are kept per conversation for this process. Restart defaults to Ask;
-`--mode yolo` or `[permissions] mode = "yolo"` in an explicitly loaded TOML file
+`--mode plan`, `--mode yolo` or `[permissions] mode = "plan"` (or `"yolo"`) in an explicitly loaded TOML file
 can select a different starting mode. Project files never implicitly select it.
+
+## Plans and progress
+
+Switch to **Plan** and ask the agent to prepare a plan. This mode allows project
+exploration, skill reading, patch previews, reading existing process output and
+the five plan tools. Web research still requires approval. File mutations,
+arbitrary commands, process start/input/stop, archive cleanup and all MCP calls
+are blocked by the host, regardless of model instructions. MCP tools cannot yet
+be classified reliably as read-only. Already running jobs continue; you can
+still stop them explicitly from `/processes`.
+
+The sidebar follows the first plan automatically. It shows its title, completed
+step count, and up to three active or blocked steps; otherwise it shows the next
+pending step. Click the section or use **/plans** to inspect all steps and the
+objective. With several plans, open one and choose **Follow in sidebar**. The
+panel and sidebar update when a tool changes the saved record, including while
+the agent works. Each step has a colored status and a description preview of up
+to three lines; the detail panel retains its full text. Statuses represent the agent's report, not proof
+that tests ran. Cancelled steps are counted separately from completed steps.
+
+Switch back to Ask or Yolo and explicitly request implementation when ready.
+The same plan remains available, and the agent is instructed to update it as
+work progresses. Changing modes, viewing a plan or selecting one to follow never
+executes its steps. Plans are useful in Ask/Yolo too; Plan mode is an execution
+restriction, not a separate kind of document.
+
+Plans and sidebar selection survive `/resume` and application restarts. They are
+scoped to the project, conversation and agent; another agent or conversation
+has its own plans. Records live in the project's private application state under
+`plans/`, outside the workspace and Git. The backend uses atomic replacement,
+private permissions and revision checks under the project's exclusive storage
+lease. Updates and deletes require the current revision; no-op updates retain it.
+On an interrupted call with an unknown outcome, read/list before retrying.
+Limits are 64 retained plans per conversation/agent, 64 steps per plan and 64 KiB
+per plan (5 MiB per scope file). Reaching a limit fails explicitly; nothing is
+silently evicted. Finishing a plan does not delete it. Removing the followed plan
+clears selection rather than choosing a different plan automatically.
 
 `write`, `edit` and `patch` share a mutation lock. The agent is instructed to
 read before modifying and pass content revisions to write/edit. Patch previews
@@ -328,7 +370,7 @@ refused. Files are created with private permissions on Linux and macOS.
 The engine owns persistence and bounded context restoration. The terminal
 adapter displays up to 500 stored events; the current provider uses the engine's
 bounded message/tool history, not the entire on-screen conversation. Model
-changes apply to future turns. Effort selection, automatic compaction
+changes apply to future turns. Automatic compaction
 and a remote-engine transport are not implemented in this version.
 
 `code_outline` uses Tree-sitter to locate Rust/Python definitions, signatures and
@@ -376,11 +418,14 @@ remain in the project and conversation.
 instructions. `src/application.rs` assembles and closes the engine.
 `src/config.rs` and `src/storage.rs` own application settings and project state.
 `src/processes.rs` owns scoped process monitoring and human controls.
+`src/plans/` supplies durable storage through `roomkit-tools-plans::PlanBackend`
+and projects those records into generic CLI panels and sidebar entries. The
+CRUD schemas and tool implementations remain in `roomkit-tools`.
 `src/accounts.rs` owns account menus and browser launching; `src/profiles/` links
 accounts, providers and agents without exposing credentials to the UI.
 `src/profiles/mcp/` owns MCP configuration and exposure; the engine's
 `roomkit-mcp` crate owns protocol calls, aliases and server process cleanup.
-`src/sessions.rs` owns new/resume/mode/tools/processes commands and the project session catalogue.
+`src/sessions.rs` routes application commands and owns the project session catalogue.
 `src/permissions.rs` owns the tool policy and hooks that await actual approval.
 The TUI receives only its generic client connection, preserving the boundary
 needed for a future remote host.
@@ -545,7 +590,7 @@ Supported format: a UTF-8 manifest, required `name` and `description`, optional
 kebab-case and match the directory. Manifests and each reference are bounded to
 256 KiB. References are plain filenames directly under `references/`. The
 loader does not execute bundled scripts; an agent can use separately enabled
-execution tools subject to Ask/Yolo, with relative paths based on the package
+execution tools subject to Ask/Plan/Yolo, with relative paths based on the package
 directory. Enabling a skill never grants additional tools or permissions.
 
 Foreign tool-gating and invocation-policy fields, and `agents/openai.yaml`
@@ -609,7 +654,7 @@ status without exposing response bodies or credential values. OAuth login and
 refresh are not part of this transport yet.
 
 In **Ask**, every MCP call requires approval, including tools advertised as
-read-only. **Yolo** executes selected tools without asking. Server instructions
+read-only. **Plan** blocks MCP calls. **Yolo** executes selected tools without asking. Server instructions
 are framed as external content by the engine and grant no permission. Tool
 results use the CLI's generic expandable presentation. **Esc** requests MCP
 cancellation of a running call; the server must honor the protocol cancellation. This
@@ -664,7 +709,7 @@ conversation), the sidebar hides and usage returns to the footer. Forms, menus
 that require focus, and approval views retain their normal interactions.
 No background refresh redraws an unchanged screen. MCP liveness is checked
 every two seconds while servers are configured; process changes use the existing
-lifecycle observer. Clicking configuration during a running turn remains subject
+lifecycle observer. Plans refresh from committed storage changes, without polling. Clicking configuration during a running turn remains subject
 to the host's existing busy-state rules.
 
 ## Welcome screen
@@ -673,7 +718,7 @@ New empty conversations open with a centered RoomKit wordmark and composer.
 One compact footer shows the mode, agent, model, effort and command shortcut.
 It omits the technical provider protocol, project path and session identifier;
 menus and command input replace it with contextual keyboard help.
-Typing `/` still opens commands; multiline input, image attachments and Ask/Yolo
+Typing `/` still opens commands; multiline input, image attachments and Ask/Plan/Yolo
 keep their normal behavior. The first exchange displays the conversation and
 sidebar. `/new` restores welcome; `/resume` opens the selected history. Forms,
 approvals and errors remain visible in their usual views.

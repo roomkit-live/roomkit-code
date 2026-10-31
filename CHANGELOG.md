@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add native persistent plan tools and `/plans`, with a live sidebar showing the
+  followed plan, progress and active or blocked steps. Keep plans and selection
+  across restarts, isolated by project, conversation and agent.
+- Add Plan to Shift+Tab and `/mode`: allow exploration and plan updates while
+  blocking project mutations, commands and MCP calls; web research retains
+  explicit approval. Mode changes preserve the draft and never execute a plan.
+- Upgrade complete default agent catalogues to include the five plan tools;
+  preserve custom tool selections. Project profiles now use schema 3.
+
 - Give sent messages the same prompt arrow as the input, with a filled blank
   row above and below the text for a three-row minimum.
 

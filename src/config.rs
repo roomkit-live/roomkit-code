@@ -34,7 +34,7 @@ pub(crate) struct Cli {
     /// Open or create a named conversation; without this, start a new session.
     #[arg(long)]
     pub session: Option<String>,
-    /// Permission mode; ask approves each mutation/command, yolo runs directly.
+    /// Permission mode: ask approves effects, plan explores, yolo runs directly.
     #[arg(long, value_enum)]
     pub mode: Option<Mode>,
     /// Storage directory; defaults to the user's application data directory.

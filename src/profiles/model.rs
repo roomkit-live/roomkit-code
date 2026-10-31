@@ -21,6 +21,11 @@ pub(crate) const TOOLS: &[&str] = &[
     "process_stop",
     "output_read",
     "output_forget",
+    "plan_create",
+    "plan_read",
+    "plan_list",
+    "plan_update",
+    "plan_delete",
 ];
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -106,7 +111,20 @@ impl Project {
     /// Upgrade only the original complete catalogue, once. Explicit subsets stay restricted.
     pub(super) fn migrate(&mut self) -> Result<bool, String> {
         match self.schema {
-            2 => Ok(false),
+            3 => Ok(false),
+            2 => {
+                for agent in self.agents.values_mut() {
+                    if agent.tools.len() == 19
+                        && TOOLS[..19]
+                            .iter()
+                            .all(|name| agent.tools.iter().any(|tool| tool == name))
+                    {
+                        agent.tools = TOOLS.iter().map(|name| (*name).into()).collect();
+                    }
+                }
+                self.schema = 3;
+                Ok(true)
+            }
             1 => {
                 for agent in self.agents.values_mut() {
                     if agent.tools.len() == 10
@@ -117,7 +135,7 @@ impl Project {
                         agent.tools = TOOLS.iter().map(|name| (*name).into()).collect();
                     }
                 }
-                self.schema = 2;
+                self.schema = 3;
                 Ok(true)
             }
             _ => Err("Unsupported profile file version".into()),
@@ -128,7 +146,7 @@ impl Project {
 impl Default for Project {
     fn default() -> Self {
         Self {
-            schema: 2,
+            schema: 3,
             selected: None,
             agents: BTreeMap::new(),
         }

@@ -54,6 +54,7 @@ impl Profiles {
                         action: None,
                         content: SidebarContent::Context,
                     },
+                    self.plans.sidebar(current).await,
                     mcp,
                     self.processes.sidebar(),
                 ],

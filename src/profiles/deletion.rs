@@ -190,7 +190,7 @@ impl Profiles {
             let path = entry.path().join("agents.json");
             let project = Document::<Project>::load(path.clone())
                 .map_err(|_| "Cannot read a project's agent profiles; repair them before deleting this provider")?;
-            if !matches!(project.value.schema, 1 | 2) {
+            if !matches!(project.value.schema, 1..=3) {
                 return Err(
                     "Unknown project profile version; cannot verify provider references".into(),
                 );

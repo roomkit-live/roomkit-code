@@ -8,6 +8,9 @@ use roomkit_tools_fs::{
     DiffTool, EditTool, GlobTool, GrepTool, ListTool, MutationWorkspace, PatchTool, ReadTool,
     WriteTool,
 };
+use roomkit_tools_plans::{
+    PlanCreateTool, PlanDeleteTool, PlanListTool, PlanReadTool, PlanUpdateTool,
+};
 use roomkit_tools_process::{
     OutputLimits, OutputStore, ProcessLimits, ProcessManager, ShellLimits, ShellTool,
 };
@@ -16,6 +19,9 @@ use roomkit_tools_roomkit::{
     OutputForgetToolset, OutputReadToolset, PatchToolset, ProcessReadToolset, ProcessStartToolset,
     ProcessStatusToolset, ProcessStopToolset, ProcessWriteToolset, ReadToolset, ShellToolset,
     WebFetchToolset, WebSearchToolset, WriteToolset,
+};
+use roomkit_tools_roomkit::{
+    PlanCreateToolset, PlanDeleteToolset, PlanListToolset, PlanReadToolset, PlanUpdateToolset,
 };
 use roomkit_tools_search::{ExaSearch, SearchHttpConfig, SearchLimits, WebSearchTool};
 use roomkit_tools_web::{WebFetchLimits, WebFetchTool};
@@ -30,6 +36,7 @@ Use this only for the field described as "Shown to the user; never passed to the
 /// Application-scoped resources survive turn, agent and connection changes.
 /// Tool adapters derive archive/process ownership from the room and agent IDs.
 pub(crate) struct Resources {
+    pub plans: Arc<crate::plans::Plans>,
     pub mutations: MutationWorkspace,
     pub processes: ProcessManager,
     pub outputs: OutputStore,
@@ -56,6 +63,7 @@ impl Resources {
         let mut fetch_limits = WebFetchLimits::default();
         fetch_limits.max_output_bytes = 8192;
         Ok(Self {
+            plans: Arc::new(crate::plans::Plans::new(state.join("plans"))),
             mutations,
             processes,
             outputs,
@@ -69,9 +77,10 @@ impl Resources {
     }
 
     pub async fn close(&self) -> bool {
+        let plans = self.plans.close().await;
         let processes = self.processes.close().await;
         let outputs = self.outputs.close().await;
-        processes && outputs
+        plans && processes && outputs
     }
 }
 
@@ -161,5 +170,10 @@ pub(crate) async fn create(
         stop = ProcessStopToolset::new(resources.processes.clone()),
         output_read = OutputReadToolset::new(resources.outputs.clone()),
         forget = OutputForgetToolset::new(resources.outputs.clone()),
+        plan_create = PlanCreateToolset::new(PlanCreateTool::new(resources.plans.clone())),
+        plan_read = PlanReadToolset::new(PlanReadTool::new(resources.plans.clone())),
+        plan_list = PlanListToolset::new(PlanListTool::new(resources.plans.clone())),
+        plan_update = PlanUpdateToolset::new(PlanUpdateTool::new(resources.plans.clone())),
+        plan_delete = PlanDeleteToolset::new(PlanDeleteTool::new(resources.plans.clone())),
     )
 }

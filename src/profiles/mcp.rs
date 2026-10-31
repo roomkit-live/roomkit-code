@@ -62,7 +62,7 @@ impl Profiles {
         state.mcp.reload()?;
         state.mcp.value.validate()?;
         state.project.reload()?;
-        if state.project.value.schema != 2 {
+        if state.project.value.schema != 3 {
             return Err("Unsupported agent configuration version".into());
         }
         if action == "close" {

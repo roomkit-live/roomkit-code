@@ -35,7 +35,7 @@ impl Application {
         let profiles = Profiles::load(settings, &storage, api_key, resources).await?;
         let store = SqliteStore::open(&storage.database).await?;
         let kit = RoomKit::new(RoomKitOptions::with_store(store));
-        let policy = crate::permissions::Policy::new(settings.mode);
+        let policy = profiles.policy.clone();
         let setup = async {
             profiles.diagnostics.install(&kit).await?;
             let agent_id = profiles.initialize(&kit).await?;
