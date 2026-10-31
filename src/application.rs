@@ -33,7 +33,10 @@ impl Application {
     ) -> Result<Self> {
         let storage = Storage::open(&settings.state_dir, &settings.workspace)?;
         let profiles = Profiles::load(settings, &storage, api_key, resources).await?;
-        let store = SqliteStore::open(&storage.database).await?;
+        let store = {
+            let _initializing = storage.initialization_lease().await?;
+            SqliteStore::open(&storage.database).await?
+        };
         let kit = RoomKit::new(RoomKitOptions::with_store(store));
         let policy = profiles.policy.clone();
         let setup = async {
@@ -72,6 +75,7 @@ impl Application {
             )?;
             let room = crate::sessions::create(
                 &kit,
+                &profiles.sessions,
                 channel.id(),
                 &agent_id,
                 settings.session.as_deref(),
@@ -132,6 +136,7 @@ impl Application {
         if !tools {
             return Err("Workspace tool cleanup is still pending".into());
         }
+        self.profiles.sessions.close();
         Ok(())
     }
 

@@ -61,6 +61,14 @@ including the former default `main`, remain available through `/resume` or
 nonempty sessions, with timestamps in
 UTC; an older known identifier can be opened with `/resume ID`.
 
+Several instances can use the same project with different conversations. The
+picker marks conversations open in another instance; those cannot be resumed
+until that instance closes. Switching views does not close a conversation's
+engine, hooks or background processes, so ownership lasts until application
+shutdown. After a crash, the operating system releases ownership automatically.
+When upgrading from a version with a project-wide lock, close its running
+instances once before starting concurrent sessions.
+
 `--check-config` validates launch options and the workspace without loading
 saved profiles, contacting a provider or creating state. `--help` lists all options. Terminal controls
 are provided by `roomkit-tui`: F2 expands tool details, clicking a tool's
@@ -332,7 +340,7 @@ Plans and sidebar selection survive `/resume` and application restarts. They are
 scoped to the project, conversation and agent; another agent or conversation
 has its own plans. Records live in the project's private application state under
 `plans/`, outside the workspace and Git. The backend uses atomic replacement,
-private permissions and revision checks under the project's exclusive storage
+private permissions and revision checks under the conversation's exclusive storage
 lease. Updates and deletes require the current revision; no-op updates retain it.
 On an interrupted call with an unknown outcome, read/list before retrying.
 Limits are 64 retained plans per conversation/agent, 64 steps per plan and 64 KiB
@@ -375,9 +383,10 @@ History lives in the platform's per-user application data directory, under
 `projects/<workspace-path-hash>/history.sqlite3`. `--state-dir` or
 `ROOMKIT_CODE_STATE_DIR` overrides that location. The canonical workspace path
 determines the project identity: symlink aliases share history, moving a project
-starts a separate history. Each project storage has an
-exclusive process lock; simultaneous local instances for that project are
-refused. Files are created with private permissions on Linux and macOS.
+starts a separate history. SQLite is shared by local instances; each open
+conversation has an exclusive process lock. Short locks protect initialization
+and shared configuration/log writes. Files are created with private permissions
+on Linux and macOS.
 
 The engine owns persistence and bounded context restoration. The terminal
 adapter displays up to 500 stored events; the current provider uses the engine's
@@ -492,7 +501,9 @@ must be supported by the chosen model. Changing effort keeps the current session
 
 `/diagnostics` shows recent operational records and the exact log location. Each
 project's private state directory contains `diagnostics.jsonl` and, after rotation,
-`diagnostics.previous.jsonl` (at most 1 MiB each). Errors and tool outcomes are
+`diagnostics.previous.jsonl` (at most 1 MiB each). Records include an instance ID;
+concurrent writers coordinate append and rotation. The panel shows the current
+instance's recent activity. Errors and tool outcomes are
 recorded automatically using RoomKit's `ON_ERROR`, `ON_TOOL_CALL` and framework
 events. Run `roomkit-code --debug` for additional lifecycle and delivery records.
 Records include timestamps, room/event/channel identifiers, known tool names,

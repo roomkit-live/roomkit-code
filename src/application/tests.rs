@@ -1181,6 +1181,7 @@ async fn unused_automatic_drafts_are_reused_without_adopting_named_sessions() {
     let draft = app.view.room.clone();
     crate::sessions::create(
         &app.kit,
+        &app.profiles.sessions,
         app.channel.id(),
         &app.view.agent,
         Some("named-empty"),
@@ -1266,6 +1267,7 @@ async fn resume_skips_legacy_empty_sessions_before_applying_the_catalogue_limit(
     for index in 0..201 {
         current.room = crate::sessions::create(
             &app.kit,
+            &app.profiles.sessions,
             app.channel.id(),
             &app.view.agent,
             Some(&format!("legacy-empty-{index}")),
@@ -1759,4 +1761,5 @@ mod mcp;
 mod hooks;
 mod instructions;
 mod intents;
+mod multi_session;
 mod plans;

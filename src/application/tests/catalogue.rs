@@ -314,6 +314,20 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
         .await
         .unwrap();
     let state_path = app._storage.database.parent().unwrap().to_owned();
+    let archives: Vec<_> = std::fs::read_dir(state_path)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("roomkit-output-")
+        })
+        .collect();
+    assert!(
+        !archives.is_empty(),
+        "Output archive storage exists before shutdown"
+    );
     app.close().await.unwrap();
     assert!(
         observer
@@ -322,11 +336,7 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
             .is_err()
     );
     assert!(
-        std::fs::read_dir(state_path).unwrap().all(|entry| !entry
-            .unwrap()
-            .file_type()
-            .unwrap()
-            .is_dir()),
+        archives.iter().all(|path| !path.exists()),
         "Temporary output archives are removed at shutdown"
     );
 }

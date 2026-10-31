@@ -146,21 +146,15 @@ pub(crate) fn title(workspace: &std::path::Path, room: &RoomId) -> String {
 
 pub(crate) async fn create(
     kit: &RoomKit<SqliteStore>,
+    leases: &crate::storage::SessionLeases,
     channel: &roomkit::model::ChannelId,
     agent: &roomkit::model::ChannelId,
     name: Option<&str>,
     draft: bool,
 ) -> Result<RoomId> {
-    let id = name.map(RoomId::new).transpose()?;
-    if let Some(id) = &id {
-        match kit.get_room(id, GetRoomOptions::default()).await {
-            Ok(_) => return Ok(id.clone()),
-            Err(roomkit::RoomKitError::RoomNotFound(_)) => {}
-            Err(error) => return Err(error.into()),
-        }
-    } else if draft {
-        // The application holds an exclusive lease for this project's store.
-        // Reuse only app-owned, unused drafts; named sessions stay untouched.
+    if name.is_none() && draft {
+        // Claim an unused draft before inspecting it. Another process may own
+        // an apparently empty room or still be initializing its bindings.
         let mut rooms = kit
             .store()
             .list_rooms(&RoomFilter {
@@ -181,8 +175,13 @@ pub(crate) async fn create(
                     .get(DRAFT_MARKER)
                     .and_then(serde_json::Value::as_bool)
                     != Some(true)
-                || !empty(kit, &room.id).await?
             {
+                continue;
+            }
+            let Some(claim) = leases.claim(room.id.as_str())? else {
+                continue;
+            };
+            if !empty(kit, &room.id).await? {
                 continue;
             }
             let bindings = kit
@@ -195,13 +194,29 @@ pub(crate) async fn create(
                     .iter()
                     .any(|b| b.channel_id == *agent && b.access == Access::ReadWrite)
             {
+                leases.keep(claim)?;
                 return Ok(room.id);
             }
         }
     }
+    let id = RoomId::new(name.map_or_else(
+        || format!("session-{}", uuid::Uuid::new_v4()),
+        str::to_owned,
+    ))?;
+    let claim = leases
+        .claim(id.as_str())?
+        .ok_or(crate::storage::SESSION_BUSY)?;
+    match kit.get_room(&id, GetRoomOptions::default()).await {
+        Ok(_) => {
+            leases.keep(claim)?;
+            return Ok(id);
+        }
+        Err(roomkit::RoomKitError::RoomNotFound(_)) => {}
+        Err(error) => return Err(error.into()),
+    }
     let room = kit
         .create_room(CreateRoomOptions {
-            room_id: id,
+            room_id: Some(id),
             metadata: if draft {
                 [(DRAFT_MARKER.into(), serde_json::Value::Bool(true))]
                     .into_iter()
@@ -215,6 +230,7 @@ pub(crate) async fn create(
     for id in [channel, agent] {
         kit.attach_channel(&room.id, id, Default::default()).await?;
     }
+    leases.keep(claim)?;
     Ok(room.id)
 }
 
@@ -313,10 +329,15 @@ impl Sessions {
                     None
                 })
                 .unwrap_or_else(|| "Conversation".into());
+            let occupied = if self.profiles.sessions.busy(&id)? {
+                "Open in another instance · "
+            } else {
+                ""
+            };
             choices.push(Choice {
                 value: id.clone(),
                 label,
-                description: format!("{date} UTC · {count} events · {id}"),
+                description: format!("{occupied}{date} UTC · {count} events · {id}"),
             });
         }
         Ok(choices)
@@ -560,13 +581,14 @@ impl CommandHandler for Sessions {
                 }
                 let room = create(
                     &self.kit,
+                    &self.profiles.sessions,
                     &self.channel,
                     &current.agent,
                     Some(&name[..48]),
                     true,
                 )
                 .await
-                .map_err(|_| "Could not create a new session".to_string())?;
+                .map_err(|error| error.to_string())?;
                 self.profiles.hooks.note_source(room.as_str(), "new");
                 Ok(self.switched(current, room))
             }
@@ -590,6 +612,12 @@ impl CommandHandler for Sessions {
             }
             "resume" if valid_session_name(arguments) => {
                 let room = RoomId::new(arguments).map_err(|_| "Invalid session id".to_string())?;
+                let claim = self
+                    .profiles
+                    .sessions
+                    .claim(room.as_str())
+                    .map_err(|_| "Cannot check session ownership".to_string())?
+                    .ok_or_else(|| crate::storage::SESSION_BUSY.to_string())?;
                 // Never create on resume. The adapter rechecks read access and
                 // the selected agent before committing the replacement view.
                 let found = self
@@ -610,6 +638,10 @@ impl CommandHandler for Sessions {
                 self.profiles
                     .attach(&self.kit, &next, &self.channel)
                     .await?;
+                self.profiles
+                    .sessions
+                    .keep(claim)
+                    .map_err(|_| "Cannot retain session ownership".to_string())?;
                 self.profiles.hooks.note_source(room.as_str(), "resume");
                 Ok(self.switched(next, room))
             }

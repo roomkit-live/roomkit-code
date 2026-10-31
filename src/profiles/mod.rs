@@ -25,6 +25,7 @@ use slot::AgentSlot;
 use store::Document;
 
 pub(crate) struct Profiles {
+    pub(crate) sessions: Arc<crate::storage::SessionLeases>,
     pub(crate) updates: Arc<crate::updates::Updates>,
     pub(crate) policy: crate::permissions::Policy,
     pub(crate) plans: Arc<crate::plans::PlanView>,
@@ -70,7 +71,7 @@ impl Profiles {
             settings.debug,
         )
         .map_err(|_| "Cannot open the private diagnostic log")?;
-        let edit_lease = store::edit_lease(&settings.state_dir)?;
+        let edit_lease = store::load_lease(&settings.state_dir).await?;
         let mcp = Document::<mcp::Servers>::load(storage.database.with_file_name("mcp.json"))?;
         mcp.value.validate()?;
         let mut providers =
@@ -174,6 +175,7 @@ impl Profiles {
         );
         let instructions = resources.instructions.clone();
         Ok(Arc::new(Self {
+            sessions: storage.sessions.clone(),
             updates: crate::updates::Updates::new(diagnostics.clone()),
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),

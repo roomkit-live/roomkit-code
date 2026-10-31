@@ -23,6 +23,7 @@ package-check:
 terminal-check:
 	cargo build --locked
 	python3 scripts/check-terminal.py
+	python3 scripts/check-multi-session.py
 	python3 scripts/check-permissions.py
 	python3 scripts/check-plans.py
 	python3 scripts/check-profiles.py

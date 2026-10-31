@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Allow multiple local instances on one project with separate conversations.
+  Mark occupied sessions in `/resume`, retain ownership through engine shutdown,
+  and coordinate draft selection, startup, hook preferences and diagnostic rotation.
+
 - Simplify update messages and handle an empty release catalogue without an error.
   Keep network failures distinct, with HTTP status codes in local diagnostics.
 - Release installer locks explicitly so a concurrently starting subprocess cannot

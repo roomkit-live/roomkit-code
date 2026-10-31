@@ -21,6 +21,7 @@ const LIMIT: u64 = 1024 * 1024;
 
 pub(crate) struct Diagnostics {
     path: PathBuf,
+    instance: String,
     debug: bool,
     state: Mutex<State>,
     stop: CancellationToken,
@@ -28,22 +29,18 @@ pub(crate) struct Diagnostics {
 }
 
 struct State {
-    file: File,
-    bytes: u64,
     recent: VecDeque<String>,
     write_failed: bool,
 }
 
 impl Diagnostics {
     pub fn open(path: PathBuf, debug: bool) -> std::io::Result<Arc<Self>> {
-        let file = private_file(&path)?;
-        let bytes = file.metadata()?.len();
+        private_file(&path)?;
         let diagnostics = Arc::new(Self {
             path,
+            instance: uuid::Uuid::new_v4().to_string(),
             debug,
             state: Mutex::new(State {
-                file,
-                bytes,
                 recent: VecDeque::new(),
                 write_failed: false,
             }),
@@ -61,6 +58,7 @@ impl Diagnostics {
             .as_millis();
         fields["timestamp_ms"] = json!(now);
         fields["event"] = json!(kind);
+        fields["instance"] = json!(self.instance);
         if let Some(error) = error {
             let diagnostic = Diagnostic::classify(error);
             fields["code"] = json!(diagnostic.code);
@@ -75,15 +73,17 @@ impl Diagnostics {
         }
         state.recent.push_back(line.clone());
         let written = (|| -> std::io::Result<()> {
-            if state.bytes.saturating_add(line.len() as u64) > LIMIT {
-                // One current and one previous file, both private. The project
-                // storage lease prevents another application rotating this log.
+            let _lease = crate::storage::FileLease::exclusive_wait(crate::storage::private_file(
+                &self.path.with_extension("lock"),
+            )?)?;
+            // Always reopen under the short log lock: another instance may have
+            // rotated the file since our previous record.
+            let mut file = private_file(&self.path)?;
+            if file.metadata()?.len().saturating_add(line.len() as u64) > LIMIT {
                 std::fs::rename(&self.path, self.path.with_extension("previous.jsonl"))?;
-                state.file = private_file(&self.path)?;
-                state.bytes = 0;
+                file = private_file(&self.path)?;
             }
-            state.file.write_all(line.as_bytes())?;
-            state.bytes += line.len() as u64;
+            file.write_all(line.as_bytes())?;
             Ok(())
         })();
         state.write_failed = written.is_err();

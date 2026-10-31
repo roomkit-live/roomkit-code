@@ -15,6 +15,7 @@ pub(super) struct Entry {
     pub hook: CommandHook,
     pub source: PathBuf,
 }
+
 impl Entry {
     pub fn label(&self) -> &str {
         self.hook
@@ -110,6 +111,11 @@ impl Catalogue {
     }
 
     pub fn set_enabled(&mut self, id: &str, enabled: bool) -> Result<(), String> {
+        let _lease = crate::storage::FileLease::exclusive_wait(
+            crate::storage::private_file(&self.trust.with_extension("lock"))
+                .map_err(|_| "Cannot open hook preferences lock")?,
+        )
+        .map_err(|_| "Hook preferences are being edited elsewhere; retry shortly")?;
         // Review applies to the exact loaded command/options and source. Re-read
         // before granting trust so a stale panel cannot approve a changed definition.
         self.reload();
@@ -145,5 +151,51 @@ impl Catalogue {
             .filter(|entry| self.enabled.contains(&entry.id))
             .cloned()
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simultaneous_trust_edits_preserve_both_choices() -> crate::Result<()> {
+        let workspace = tempfile::tempdir()?;
+        let state = tempfile::tempdir()?;
+        let private = tempfile::tempdir()?;
+        std::fs::write(
+            state.path().join("hooks.json"),
+            serde_json::json!({"hooks": {
+                "TurnStart": [{"hooks": [
+                    {"type":"command", "command":"echo first"},
+                    {"type":"command", "command":"echo second"}
+                ]}]
+            }})
+            .to_string(),
+        )?;
+        let one = Catalogue::load(workspace.path(), state.path(), private.path());
+        let two = Catalogue::load(workspace.path(), state.path(), private.path());
+        assert_eq!(one.entries.len(), 2);
+        let first = one.entries[0].id.clone();
+        let second = two.entries[1].id.clone();
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|threads| {
+            let jobs = [(one, first.clone()), (two, second.clone())]
+                .into_iter()
+                .map(|(mut catalogue, id)| {
+                    let barrier = &barrier;
+                    threads.spawn(move || {
+                        barrier.wait();
+                        catalogue.set_enabled(&id, true)
+                    })
+                })
+                .collect::<Vec<_>>();
+            for job in jobs {
+                assert!(matches!(job.join(), Ok(Ok(()))));
+            }
+        });
+        let actual = Catalogue::load(workspace.path(), state.path(), private.path());
+        assert!(actual.enabled.contains(&first) && actual.enabled.contains(&second));
+        Ok(())
     }
 }
