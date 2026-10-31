@@ -118,8 +118,9 @@ fn base_prompt(profile: &Agent, tools: &[ToolDefinition]) -> String {
         .map(|tool| tool.name.as_str())
         .collect::<Vec<_>>()
         .join(", ");
+    let instructions = INSTRUCTIONS.replacen("{permissions}", &crate::permissions::summary(), 1);
     format!(
-        "{INSTRUCTIONS}\nCurrent agent: {} (ID: {}). Answer as this selected participant. Other participants may have different tools and providers.\nAgent instructions:\n{}\nCurrent capability inventory (provided by the application for this run):\n{inventory}\nOnly tools in this inventory are available to you. Apply tool-specific guidance only when that tool is present.\n",
+        "{instructions}\nCurrent agent: {} (ID: {}). Answer as this selected participant. Other participants may have different tools and providers.\nAgent instructions:\n{}\nCurrent capability inventory (provided by the application for this run):\n{inventory}\nOnly tools in this inventory are available to you. Apply tool-specific guidance only when that tool is present.\n",
         profile.label, profile.id, profile.instructions
     )
 }
@@ -195,6 +196,7 @@ fn skill_context(skills: &SkillRegistry, roots: &[PathBuf]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, reason = "An invalid fixture fails the test")]
     use super::*;
 
     #[test]
@@ -214,6 +216,19 @@ mod tests {
     fn the_prompt_states_the_shell_maximum_the_tool_enforces() {
         let maximum = crate::timeouts::SHELL_MAX_SECONDS * 1000;
         assert!(INSTRUCTIONS.contains(&format!("(maximum {maximum})")));
+    }
+
+    #[test]
+    fn the_prompt_states_the_permission_rules_the_gate_applies() {
+        assert_eq!(INSTRUCTIONS.matches("{permissions}").count(), 1);
+        let profile: Agent = serde_json::from_value(serde_json::json!({
+            "id": "code", "label": "Code", "provider": "local", "model": "m",
+            "instructions": "", "tools": [],
+        }))
+        .unwrap();
+        let prompt = base_prompt(&profile, &[]);
+        assert!(prompt.contains(&crate::permissions::summary()));
+        assert!(!prompt.contains("{permissions}"));
     }
 
     #[test]

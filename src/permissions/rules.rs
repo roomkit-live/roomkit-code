@@ -103,6 +103,25 @@ const RULES: &[(&str, Rule)] = &[
     ),
 ];
 
+/// The rules as the system prompt states them, so the prompt cannot drift
+/// from what the gate does.
+pub(crate) fn summary() -> String {
+    let names = |keep: fn(&Rule) -> bool| {
+        RULES
+            .iter()
+            .filter(|(_, rule)| keep(rule))
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!(
+        "In Ask mode these tools run without approval: {}, and patch while it only previews. Every other tool, MCP tools included, asks for approval before it runs. In Yolo mode selected tools run without prompts. Plan permits only these tools without approval: {}, and patch while it only previews; it also permits {}, with approval.",
+        names(|rule| rule.direct),
+        names(|rule| rule.direct && rule.plan),
+        names(|rule| !rule.direct && rule.plan),
+    )
+}
+
 /// The rule for this call, or none: such a tool is blocked.
 pub(crate) fn rule(event: &ToolCallEvent) -> Option<Rule> {
     rule_for(event.call.name.as_str(), &event.call.arguments)

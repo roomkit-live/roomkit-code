@@ -12,6 +12,8 @@ use serde::Deserialize;
 mod card;
 mod rules;
 
+pub(crate) use rules::summary;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum Mode {
