@@ -79,7 +79,7 @@ impl Catalogue {
             Ok(None) => {}
             Ok(Some(bytes)) => match serde_json::from_slice(&bytes) {
                 Ok(value) => next.enabled = value,
-                Err(_) => self
+                Err(_) => next
                     .problems
                     .push("Invalid hook trust file; all hooks require review".into()),
             },
@@ -165,6 +165,26 @@ impl Catalogue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_unreadable_file_is_reported_after_a_reload() -> crate::Result<()> {
+        let workspace = tempfile::tempdir()?;
+        let state = tempfile::tempdir()?;
+        let private = tempfile::tempdir()?;
+        // A damaged trust file disables every hook: the user must be told.
+        std::fs::write(private.path().join("hooks-trust.json"), "{not json")?;
+        let catalogue = Catalogue::load(workspace.path(), state.path(), private.path());
+        assert_eq!(
+            catalogue.problems,
+            ["Invalid hook trust file; all hooks require review"]
+        );
+        std::fs::remove_file(private.path().join("hooks-trust.json"))?;
+        std::fs::create_dir(private.path().join("hooks-trust.json"))?;
+        std::fs::write(state.path().join("hooks.json"), "{not json")?;
+        let catalogue = Catalogue::load(workspace.path(), state.path(), private.path());
+        assert_eq!(catalogue.problems.len(), 2, "{:?}", catalogue.problems);
+        Ok(())
+    }
 
     #[test]
     fn simultaneous_trust_edits_preserve_both_choices() -> crate::Result<()> {

@@ -513,7 +513,8 @@ remain in the project and conversation.
 
 `src/agent/` selects capabilities and builds each agent's system prompt from
 `src/agent/coding-agent.txt`, measuring what every request carries.
-`src/permissions/` decides, from one table, what each tool may do in each mode.
+`src/permissions/` decides, from one table, what each tool may do in each mode,
+and owns the hook that awaits actual approval.
 `src/timeouts.rs` derives the host's deadlines from the limits they cover.
 `src/application.rs` assembles and closes the engine.
 `src/config.rs` and `src/storage.rs` own application settings and project state.
@@ -527,7 +528,6 @@ accounts, providers and agents without exposing credentials to the UI.
 `src/profiles/mcp/` owns MCP configuration and exposure; the engine's
 `roomkit-mcp` crate owns protocol calls, aliases and server process cleanup.
 `src/sessions.rs` routes application commands and owns the project session catalogue.
-`src/permissions/` owns the tool policy and the hook that awaits actual approval.
 The TUI receives only its generic client connection, preserving the boundary
 needed for a future remote host.
 
