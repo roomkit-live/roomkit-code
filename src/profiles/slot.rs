@@ -41,16 +41,10 @@ impl AgentSlot {
         }
     }
     pub fn replace(&self, agent: OpenAiAgent) {
-        *self
-            .current
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(agent));
+        *crate::sync::write(&self.current) = Some(Arc::new(agent));
     }
     pub fn disable(&self) {
-        *self
-            .current
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *crate::sync::write(&self.current) = None;
     }
 }
 impl Channel for AgentSlot {
@@ -78,10 +72,7 @@ impl Channel for AgentSlot {
         {
             return Ok(ChannelOutput::default());
         }
-        let agent = self
-            .current
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        let agent = crate::sync::read(&self.current)
             .clone()
             .ok_or("Configure a provider and agent first")?;
         // Keep the delivered user event intact, including images and its durable
@@ -115,11 +106,7 @@ impl Channel for AgentSlot {
         agent.on_event(input, binding, context).await
     }
     async fn close(&self) {
-        let agent = self
-            .current
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let agent = crate::sync::read(&self.current).clone();
         if let Some(agent) = agent {
             agent.close().await;
         }

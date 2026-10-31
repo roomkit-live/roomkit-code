@@ -99,10 +99,7 @@ impl Instructions {
 
     /// Do not carry disclosure state across turns, participants or restarts.
     pub fn begin(&self, room: &str, agent: &str) {
-        let mut cache = self
-            .emitted
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut cache = crate::sync::lock(&self.emitted);
         cache.retain(|entry| entry.room != room || entry.agent != agent);
         if cache.len() >= 64 {
             cache.pop_front();
@@ -121,10 +118,7 @@ impl Instructions {
             Sha256::digest(serde_json::json!(report.checked_scopes).to_string())
         );
         let signature = format!("{:x}", Sha256::digest(report.scoped()));
-        let mut cache = self
-            .emitted
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut cache = crate::sync::lock(&self.emitted);
         let Some(entry) = cache
             .iter_mut()
             .find(|entry| entry.room == room && entry.agent == agent)

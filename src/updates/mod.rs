@@ -87,9 +87,7 @@ impl Updates {
         })
     }
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        crate::sync::lock(&self.state)
     }
     fn record_failure(&self, error: &(dyn std::error::Error + Send + Sync + 'static)) {
         let service = error.downcast_ref::<net::ServiceError>();
@@ -173,18 +171,11 @@ impl Updates {
         });
     }
     fn spawn(&self, future: impl std::future::Future<Output = ()> + Send + 'static) {
-        *self
-            .task
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(tokio::spawn(future));
+        *crate::sync::lock(&self.task) = Some(tokio::spawn(future));
     }
     pub async fn close(&self) {
         self.stop.cancel();
-        let task = self
-            .task
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
+        let task = crate::sync::lock(&self.task).take();
         if let Some(task) = task {
             let _ = task.await;
         }

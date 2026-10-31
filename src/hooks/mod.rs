@@ -147,9 +147,7 @@ impl Hooks {
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        crate::sync::lock(&self.state)
     }
 
     pub fn note_source(&self, room: &str, source: &str) {
@@ -159,10 +157,7 @@ impl Hooks {
     fn session(&self, view: &SessionConfig) -> Arc<Session> {
         let mut state = self.state();
         if let Some(session) = state.sessions.get(view.room.as_str()) {
-            *session
-                .agent
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = view.agent.to_string();
+            *crate::sync::lock(&session.agent) = view.agent.to_string();
             return session.clone();
         }
         let source = state
@@ -401,11 +396,7 @@ impl Hooks {
         self.background.wait().await;
         let sessions: Vec<_> = self.state().sessions.values().cloned().collect();
         for session in sessions {
-            let agent = session
-                .agent
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone();
+            let agent = crate::sync::lock(&session.agent).clone();
             let mut context = self.context(&session, &agent, None);
             context.payload["reason"] = json!("shutdown");
             self.dispatch(HookEvent::SessionEnd, "shutdown", &context)

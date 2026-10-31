@@ -180,10 +180,7 @@ impl SessionLeases {
     }
 
     pub fn close(&self) {
-        self.leases
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
+        crate::sync::lock(&self.leases).take();
     }
 }
 

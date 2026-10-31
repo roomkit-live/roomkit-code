@@ -90,9 +90,7 @@ impl Files {
         let root = self.root.clone();
         let digests = self.digests.clone();
         tokio::task::spawn_blocking(move || {
-            let mut digests = digests
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut digests = crate::sync::lock(&digests);
             snapshot::take(&root, &mut digests)
         })
         .await
@@ -142,9 +140,7 @@ impl Files {
     }
 
     fn slot(&self, room: &str) -> Slot {
-        self.rooms
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        crate::sync::lock(&self.rooms)
             .entry(room.to_owned())
             .or_default()
             .clone()

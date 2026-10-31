@@ -48,9 +48,7 @@ impl Policy {
     }
 
     pub(crate) fn mode(&self, room: &str) -> Mode {
-        self.modes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        crate::sync::lock(&self.modes)
             .get(room)
             .copied()
             .unwrap_or(self.initial)
@@ -92,10 +90,7 @@ impl Policy {
             "yolo" => Mode::Yolo,
             _ => return Err("Use /mode ask, /mode plan or /mode yolo".into()),
         };
-        self.modes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(room.into(), mode);
+        crate::sync::lock(&self.modes).insert(room.into(), mode);
         Ok(self.state(room))
     }
 
