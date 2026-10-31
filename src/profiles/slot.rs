@@ -9,6 +9,7 @@ use std::sync::{Arc, RwLock};
 
 #[derive(Clone)]
 pub(super) struct AgentSlot {
+    instructions: Arc<crate::instructions::Instructions>,
     policy: crate::permissions::Policy,
     declaration: ChannelDeclaration,
     current: Arc<RwLock<Option<Arc<OpenAiAgent>>>>,
@@ -18,6 +19,7 @@ impl AgentSlot {
         id: ChannelId,
         agent: Option<OpenAiAgent>,
         policy: crate::permissions::Policy,
+        instructions: Arc<crate::instructions::Instructions>,
     ) -> Self {
         let mut declaration = ChannelDeclaration::new(
             id,
@@ -32,6 +34,7 @@ impl AgentSlot {
             .insert(roomkit::model::ChannelMediaType::Media);
         declaration.capabilities.supports_media = true;
         Self {
+            instructions,
             policy,
             declaration,
             current: Arc::new(RwLock::new(agent.map(Arc::new))),
@@ -90,10 +93,17 @@ impl Channel for AgentSlot {
             if !context.recent_events.iter().any(|past| past.id == event.id) {
                 context.recent_events.push(event.clone());
             }
+            self.instructions
+                .begin(event.room_id.as_str(), self.declaration.channel_id.as_str());
+            let project = self.instructions.load(vec![], true).await;
             let mut input = RoomEvent::new(
                 event.room_id.clone(),
                 event.source.clone(),
-                TextContent::new(self.policy.instruction(event.room_id.as_str())),
+                TextContent::new(format!(
+                    "{}\n\n{}",
+                    self.policy.instruction(event.room_id.as_str()),
+                    project.render()
+                )),
             );
             input.r#type = EventType::Instruction;
             input.addressed_to = event.addressed_to.clone();

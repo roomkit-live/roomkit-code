@@ -1756,5 +1756,6 @@ mod skills;
 mod mcp;
 
 mod hooks;
+mod instructions;
 mod intents;
 mod plans;

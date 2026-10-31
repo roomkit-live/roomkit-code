@@ -32,6 +32,7 @@ terminal-check:
 	python3 scripts/check-skills.py
 	python3 scripts/check-mcp.py
 	python3 scripts/check-hooks.py
+	python3 scripts/check-instructions.py
 
 msrv:
 	cargo +1.94.0 test --locked --workspace

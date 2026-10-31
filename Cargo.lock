@@ -2070,6 +2070,7 @@ dependencies = [
  "roomkit-tools-search",
  "roomkit-tools-web",
  "roomkit-tui",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

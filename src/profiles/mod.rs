@@ -44,6 +44,7 @@ pub(crate) struct Profiles {
 }
 
 struct State {
+    instructions: Arc<crate::instructions::Instructions>,
     policy: crate::permissions::Policy,
     mcp: Document<mcp::Servers>,
     pending_mcp: Option<mcp::Pending>,
@@ -156,6 +157,7 @@ impl Profiles {
             None => crate::agent::Resources::new(
                 &settings.workspace,
                 storage.database.parent().ok_or("Missing state directory")?,
+                &settings.state_dir,
             )
             .await
             .map_err(|_| "Could not initialize workspace tools")?,
@@ -169,6 +171,7 @@ impl Profiles {
             policy.clone(),
             diagnostics.clone(),
         );
+        let instructions = resources.instructions.clone();
         Ok(Arc::new(Self {
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),
@@ -186,6 +189,7 @@ impl Profiles {
             mcp_runtime: mcp::Runtime::default(),
             sidebar_changes: tokio::sync::watch::channel(()).0,
             state: Mutex::new(State {
+                instructions,
                 policy,
                 mcp,
                 pending_mcp: None,
@@ -230,7 +234,12 @@ impl Profiles {
         };
         let (agent, tools) = assembled.map_or((None, Vec::new()), |(a, t)| (Some(a), t));
         let configured = agent.is_some();
-        let slot = AgentSlot::new(channel.clone(), agent, self.policy.clone());
+        let slot = AgentSlot::new(
+            channel.clone(),
+            agent,
+            self.policy.clone(),
+            state.instructions.clone(),
+        );
         kit.register_channel(slot.clone())
             .map_err(|_| "Could not register the agent")?;
         state.slots.insert(id.clone(), slot);
@@ -408,6 +417,7 @@ impl State {
                 ChannelId::new(id).map_err(|_| "Invalid agent ID")?,
                 None,
                 self.policy.clone(),
+                self.instructions.clone(),
             );
             kit.register_channel(slot.clone())
                 .map_err(|_| "Could not register agent")?;
@@ -430,6 +440,7 @@ impl State {
                 ChannelId::new(id).map_err(|_| "Invalid agent ID")?,
                 Some(agent),
                 self.policy.clone(),
+                self.instructions.clone(),
             );
             kit.register_channel(slot.clone())
                 .map_err(|_| "Could not register agent")?;

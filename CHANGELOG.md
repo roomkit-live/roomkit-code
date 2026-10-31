@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Discover scoped AGENTS.md and AGENTS.override.md instructions, with global/root
+  refresh per turn and progressive nested loading through file exploration and
+  patch previews. Preserve system prompts and user messages; deduplicate unchanged
+  scopes within each agent turn. Add /instructions to inspect sources and errors.
+
 - Add reviewed global/project command hooks and `/hooks`, with live sidebar
   activity, bounded output inspection and correlated operational diagnostics.
   Cover session start/end, prompt admission, complete agent turns and tool

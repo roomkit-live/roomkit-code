@@ -34,7 +34,8 @@ be included in those requests.
 Alternatively, copy `roomkit-code.example.toml` to `roomkit-code.local.toml` and
 pass `--config roomkit-code.local.toml`. CLI values override environment values,
 which override the explicit TOML file. Project configuration and `.env` files
-are never loaded automatically. These connection values initialize the project's first agent once. Thereafter,
+are never loaded automatically as connection settings. Project `AGENTS.md`
+instructions are discovered separately as described below. These connection values initialize the project's first agent once. Thereafter,
 saved profiles take precedence so an old launch command cannot undo UI edits.
 Appearance and permission flags still apply at every launch. A supplied
 `ROOMKIT_API_KEY` is imported into the protected local connection profile.
@@ -870,3 +871,59 @@ The last 100 executions are retained in memory; raw output is not restored on re
 This first version deliberately rejects unsupported events/fields: `Stop`
 continuation, `PermissionRequest` auto-approval, input rewriting, context injection,
 asynchronous command mode, HTTP/MCP handlers and prompt/agent handlers come later.
+
+## Project instructions: AGENTS.md
+
+RoomKit Code automatically supplies global and project instructions to the
+selected agent. Create `AGENTS.md` at the workspace root for shared conventions,
+and place another in a subdirectory for rules scoped to that directory and its
+descendants. More specific rules take precedence on conflicts; direct user
+requests and application permissions remain authoritative.
+
+Discovery order is:
+
+1. `<state-dir>/AGENTS.override.md`, or `<state-dir>/AGENTS.md`.
+2. `<workspace>/AGENTS.override.md`, or `<workspace>/AGENTS.md`.
+3. The corresponding files along an explored path, from parent to child.
+
+A nonempty `AGENTS.override.md` replaces `AGENTS.md` in the same directory;
+an empty override falls back to `AGENTS.md`. The explicitly selected workspace
+is the boundary, even when it is inside a larger Git repository. Ancestors above
+that boundary, sibling directories and other assistants' configuration directories
+are not searched. Names are case-sensitive; `CLAUDE.md`, `AGENTS.local.md` and
+remote includes are not aliases in this version.
+
+Global and root files are read before each agent turn, including after resume
+or switching agents. They enter an application instruction after the user's
+message, preserving the system prompt and the user's original text and images.
+The host does not rewrite earlier conversation rows. Nested rules are loaded
+progressively alongside `read`, `code_outline`, `list`, `grep`, `glob` and `diff`.
+Only the supplied target paths' ancestor chains are inspected, not every search
+match or every directory under the project. A `patch` dry-run also loads scopes
+for every source and destination, including both sides of moves.
+
+Exploration results retain their existing fields and add `project_instructions`
+when needed. Unchanged scope snapshots are deduplicated within a turn, separately
+for each session and agent. Changed or removed rules are reported on subsequent
+exploration; each new turn starts fresh. The agent is instructed to read existing
+files, inspect the nearest existing parent before creating files, and preview
+patches before applying them. These are model instructions, not an enforced
+proof of compliance: an arbitrary shell command, running process or remote MCP
+tool can affect paths the application cannot infer. The agent must inspect those
+scopes first. No file instruction grants tools, changes Ask/Plan/Yolo or executes
+a hook automatically.
+
+Use **/instructions** to inspect global/root sources, precedence and loading
+errors, or **/instructions src/api/file.rs** for one file or directory. Paths
+are workspace-relative; spaces are accepted without shell quoting. The panel
+reads current files and does not modify a running turn. No reload command or
+restart is needed; edits to global/root instructions take effect on the next
+turn, while nested edits are picked up on the next exploration of their scope.
+
+Files must be regular UTF-8 files, at most 16 KiB each, with a 32 KiB budget per
+loaded chain (including source metadata). Oversized or unreadable files produce
+diagnostics instead of silently truncated rules. A failed override does not
+silently fall back. Symlinks below the configured roots are not followed, nor
+are `..`, absolute target paths, or paths deeper than 32 components. Content is
+sent to the configured model, and nested snapshots are retained with tool results
+in the session history; keep credentials out of instruction files.

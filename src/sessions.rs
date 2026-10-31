@@ -36,6 +36,12 @@ async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<bool> {
 pub(crate) fn commands() -> Vec<CommandSpec> {
     vec![
         CommandSpec {
+            name: "instructions".into(),
+            description: "Inspect applicable AGENTS.md files and their scope".into(),
+            arguments: "[project-relative path]".into(),
+            choices: Vec::new(),
+        },
+        CommandSpec {
             name: "hooks".into(),
             description: "Inspect, enable and diagnose configured command hooks".into(),
             arguments: String::new(),
@@ -397,7 +403,7 @@ impl CommandHandler for Sessions {
     fn allow_while_busy(&self, name: &str) -> bool {
         matches!(
             name,
-            "mode" | "tools" | "processes" | "diagnostics" | "plans" | "hooks"
+            "mode" | "tools" | "processes" | "diagnostics" | "plans" | "hooks" | "instructions"
         )
     }
 
@@ -440,6 +446,13 @@ impl CommandHandler for Sessions {
         };
         let arguments = arguments.trim();
         match name.as_str() {
+            "instructions" => {
+                self.profiles
+                    .resources
+                    .instructions
+                    .panel(&current, arguments)
+                    .await
+            }
             "hooks" => self.profiles.hooks.panel(&current, arguments),
             "plans" => self.profiles.plans.handle(&current, arguments).await,
             "diagnostics" => Ok(self.profiles.diagnostics.panel(&current, arguments)),

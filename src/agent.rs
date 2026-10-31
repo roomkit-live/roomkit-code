@@ -36,6 +36,7 @@ Use this only for the field described as "Shown to the user; never passed to the
 /// Application-scoped resources survive turn, agent and connection changes.
 /// Tool adapters derive archive/process ownership from the room and agent IDs.
 pub(crate) struct Resources {
+    pub instructions: Arc<crate::instructions::Instructions>,
     pub plans: Arc<crate::plans::Plans>,
     pub mutations: MutationWorkspace,
     pub processes: ProcessManager,
@@ -45,7 +46,7 @@ pub(crate) struct Resources {
 }
 
 impl Resources {
-    pub async fn new(root: &Path, state: &Path) -> Result<Self> {
+    pub async fn new(root: &Path, state: &Path, global: &Path) -> Result<Self> {
         let mutations = MutationWorkspace::new(root).await?;
         // Small immediate pages leave room for the JSON envelope in the bounded
         // terminal projection. Large captures remain in separately paged archives.
@@ -63,6 +64,7 @@ impl Resources {
         let mut fetch_limits = WebFetchLimits::default();
         fetch_limits.max_output_bytes = 8192;
         Ok(Self {
+            instructions: crate::instructions::Instructions::new(root, global),
             plans: Arc::new(crate::plans::Plans::new(state.join("plans"))),
             mutations,
             processes,
@@ -86,7 +88,7 @@ impl Resources {
 
 /// Inventory and registration are derived from the same selected toolsets.
 macro_rules! assemble {
-    ($id:expr, $profile:expr, $provider:expr, $skills:expr, $skill_roots:expr, $mcp:expr; $($binding:ident = $tool:expr),+ $(,)?) => {{
+    ($id:expr, $profile:expr, $provider:expr, $skills:expr, $skill_roots:expr, $mcp:expr, $instructions:expr; $($binding:ident = $tool:expr),+ $(,)?) => {{
         $(let $binding = $tool;)+
         let mut tools = [$($binding.tools()),+].concat().into_iter().filter(|tool| $profile.tools.contains(&tool.name)).collect::<Vec<_>>();
         tools.extend($skills.tool_definitions());
@@ -95,7 +97,7 @@ macro_rules! assemble {
         let prompt = format!("{INSTRUCTIONS}\nCurrent agent: {} (ID: {}). Answer as this selected participant. Other participants may have different tools and providers.\nAgent instructions:\n{}\nCurrent capability inventory (provided by the application for this run):\n{inventory}\nOnly tools in this inventory are available to you. Apply tool-specific guidance only when that tool is present.\n", $profile.label, $profile.id, $profile.instructions);
         let prompt = format!("{prompt}\n{}\n{ACTIVITY_INSTRUCTIONS}", skill_context(&$skills, $skill_roots));
         let mut agent = OpenAiAgent::new($id, $provider.with_system_prompt(prompt))?.with_tool_call_intents(true).with_skills($skills)?;
-        $(if $binding.tools().iter().any(|tool| $profile.tools.contains(&tool.name)) { agent = agent.with_tools($binding)?; })+
+        $(if $binding.tools().iter().any(|tool| $profile.tools.contains(&tool.name)) { agent = agent.with_tools($instructions.wrap($binding))?; })+
         for (label, server) in $mcp {
             agent = agent.with_server_instructions(&label, server.instructions())?.with_tools(server)?;
         }
@@ -150,7 +152,7 @@ pub(crate) async fn create(
     let mutations = resources.mutations.clone();
     let mut shell_limits = ShellLimits::default();
     shell_limits.max_output_bytes = 8192;
-    assemble!(ChannelId::new(&profile.id)?, profile, provider, skills, skill_roots, mcp;
+    assemble!(ChannelId::new(&profile.id)?, profile, provider, skills, skill_roots, mcp, resources.instructions;
         outline = CodeOutlineToolset::new(CodeOutlineTool::new(root).await?),
         list = ListToolset::new(ListTool::new(root).await?),
         glob = GlobToolset::new(GlobTool::new(root).await?),
