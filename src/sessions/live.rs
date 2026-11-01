@@ -1,5 +1,6 @@
 //! The live events a view receives: process and account panels, plan, hook
-//! and update notices, and the sidebar, sent again whenever a source changes.
+//! and update notices, the sidebar and the mode, sent again whenever a source
+//! changes.
 
 use std::sync::Arc;
 

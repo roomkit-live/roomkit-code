@@ -116,17 +116,24 @@ impl Plans {
         .map_err(|_| unavailable())?
     }
 
-    /// Plan `id` in `scope`, or the one the conversation follows when no ID
-    /// is given: the last created or updated.
+    /// Plan `id` in `scope`, or with no ID the conversation's only plan:
+    /// with several, which one is meant must be said.
     pub(crate) async fn plan(&self, scope: &PlanScope, id: Option<&str>) -> Result<Plan, Error> {
         let document = self.snapshot(scope).await?;
-        let id = id.map(str::to_owned).or(document.selected);
-        id.and_then(|id| document.plans.get(&id).cloned())
-            .ok_or_else(|| {
-                Error::InvalidInput(
-                    "No such plan in this conversation; create it with plan_create".into(),
-                )
-            })
+        let plan = match id {
+            Some(id) => document.plans.get(id),
+            None if document.plans.len() > 1 => {
+                return Err(Error::InvalidInput(
+                    "This conversation has several plans; give plan_id (see plan_list)".into(),
+                ));
+            }
+            None => document.plans.values().next(),
+        };
+        plan.cloned().ok_or_else(|| {
+            Error::InvalidInput(
+                "No such plan in this conversation; create it with plan_create".into(),
+            )
+        })
     }
 
     pub(super) async fn snapshot(&self, scope: &PlanScope) -> Result<Document, Error> {

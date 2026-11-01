@@ -374,18 +374,20 @@ that tests ran. Cancelled steps are counted separately from completed steps.
 
 Switch back to Ask or Yolo and explicitly request implementation when ready.
 The same plan remains available, and the agent is instructed to update it as
-work progresses.
+work progresses. Changing modes, viewing a plan or selecting one to follow
+never executes its steps. Plans are useful in Ask/Yolo too; Plan mode is an
+execution restriction, not a separate kind of document.
 
 An agent that can write plans can also ask for these switches itself. Before
 substantial or ambiguous work, `plan_mode_enter` asks you to move the
-conversation to Plan, with its reason; in Yolo it moves without asking, like any
-selected tool. Once a plan is ready, `plan_mode_exit` shows you the stored plan,
-its title, objective and steps, not the agent's summary of it: approving moves
-the conversation to **Ask**, where the agent implements it and each change still
-asks for approval; refusing keeps Plan and asks the agent to refine the plan.
-The agent never moves to Yolo, and never leaves Plan unless you approve. Changing modes, viewing a plan or selecting one to follow never
-executes its steps. Plans are useful in Ask/Yolo too; Plan mode is an execution
-restriction, not a separate kind of document.
+conversation to Plan, with its reason; in Yolo it moves without asking, like
+any selected tool. Once a plan is ready, `plan_mode_exit` shows you the stored
+plan, its title, objective and steps, not the agent's summary of it; with
+several plans the agent must name one. Approving moves the conversation to
+**Ask**, where the agent implements that plan and each change still asks for
+approval; a plan changed while you were deciding is not approved. Refusing
+keeps Plan. The agent never moves to Yolo, and never leaves Plan unless you
+approve.
 
 Plans and sidebar selection survive `/resume` and application restarts. They are
 scoped to the project, conversation and agent; another agent or conversation

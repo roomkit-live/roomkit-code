@@ -1,4 +1,5 @@
-//! Product-owned policy. The terminal only displays and requests mode changes.
+//! Product-owned policy. The terminal displays the mode and requests changes;
+//! the user switches it, and the mode tools ask the user to.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -43,8 +44,8 @@ impl Mode {
 pub(crate) struct Policy {
     initial: Mode,
     modes: Arc<Mutex<BTreeMap<String, Mode>>>,
-    /// Signals a mode set by a mode tool rather than a `/mode` command, so
-    /// the view learns it.
+    /// Signals every mode change, so the view's live updates carry the
+    /// latest.
     pub changes: Arc<tokio::sync::watch::Sender<()>>,
 }
 
@@ -100,16 +101,15 @@ impl Policy {
             "yolo" => Mode::Yolo,
             _ => return Err("Use /mode ask, /mode plan or /mode yolo".into()),
         };
-        crate::sync::lock(&self.modes).insert(room.into(), mode);
+        self.apply(room, mode);
         Ok(self.state(room))
     }
 
-    /// Set `room`'s mode from a mode tool, and tell the view: no `/mode`
-    /// command reports it.
-    pub(crate) fn set_by_tool(&self, room: &str, mode: Mode) -> ModeState {
+    /// Set `room`'s mode, and signal it: the view's live updates carry the
+    /// mode, and must not keep one a later change replaced.
+    pub(crate) fn apply(&self, room: &str, mode: Mode) {
         crate::sync::lock(&self.modes).insert(room.into(), mode);
         self.changes.send_replace(());
-        self.state(room)
     }
 
     pub async fn gate(&self, channel: &ConversationChannel, event: ToolCallEvent) -> ToolUse {

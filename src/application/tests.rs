@@ -474,16 +474,19 @@ async fn approval(client: &roomkit_tui::Client) -> roomkit_tui::protocol::Permis
     }
 }
 
-/// Whether request `id` was refused. Progress items sent meanwhile, such as a
-/// call shown again once its decision is asked, are skipped; nothing else is.
+/// Whether request `id` was refused. State the live updates restate, and
+/// progress items such as a call shown again once its decision is asked, are
+/// skipped; a reply to another request, or an action going on, is not.
 async fn refused(client: &roomkit_tui::Client, id: u64) -> bool {
     loop {
         match event(client).await {
-            Event::Item { .. } => {}
             Event::Reply { request, error, .. } => {
                 return request == RequestId::new(id) && error.is_some();
             }
-            _ => return false,
+            Event::PermissionRequested { .. }
+            | Event::RunStarted { .. }
+            | Event::RunFinished { .. } => return false,
+            _ => {}
         }
     }
 }
@@ -564,9 +567,11 @@ async fn ask_gates_real_changes_and_yolo_never_auto_approves_an_existing_request
             arguments: "yolo".into(),
         },
     );
+    // The command's report, or the live updates restating the new mode.
     loop {
-        if let Event::ModeChanged { mode, .. } = event(&client).await {
-            assert_eq!(mode.selected, "yolo");
+        if let Event::ModeChanged { mode, .. } = event(&client).await
+            && mode.selected == "yolo"
+        {
             break;
         }
     }
@@ -631,8 +636,9 @@ async fn ask_gates_real_changes_and_yolo_never_auto_approves_an_existing_request
         },
     );
     loop {
-        if let Event::ModeChanged { mode, .. } = event(&client).await {
-            assert_eq!(mode.selected, "ask");
+        if let Event::ModeChanged { mode, .. } = event(&client).await
+            && mode.selected == "ask"
+        {
             break;
         }
     }
