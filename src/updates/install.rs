@@ -219,23 +219,47 @@ impl Installation {
             fs::File::open(self.root().join("versions"))?.sync_all()?;
         }
         self.version_at(&dir)?;
-        if old.as_ref() == Some(&dir) {
-            return Ok(());
+        if old.as_ref() != Some(&dir) {
+            if let Some(old) = old {
+                pointer(&self.root(), "previous", old.strip_prefix(self.root())?)?;
+            }
+            // Activation is last. Before it, crashes leave the old current version intact.
+            pointer(
+                &self.root(),
+                "current",
+                Path::new("versions").join(name).as_path(),
+            )?;
+            if !exists {
+                symlink(".roomkit-code/current/roomkit-code", &entry)?;
+            }
+            fs::File::open(&self.bin)?.sync_all()?;
         }
-        if let Some(old) = old {
-            pointer(&self.root(), "previous", old.strip_prefix(self.root())?)?;
-        }
-        // Activation is last. Before it, crashes leave the old current version intact.
-        pointer(
-            &self.root(),
-            "current",
-            Path::new("versions").join(name).as_path(),
-        )?;
-        if !exists {
-            symlink(".roomkit-code/current/roomkit-code", &entry)?;
-        }
-        fs::File::open(&self.bin)?.sync_all()?;
+        self.prune();
         Ok(())
+    }
+
+    /// Remove every version but the current and previous ones, and staging
+    /// left by an interrupted installation: each update adds up to
+    /// `MAX_BINARY`. Runs under the installation lock, once the pointers
+    /// moved. A running process keeps its binary open; a version that cannot
+    /// be removed now is removed by a later update.
+    fn prune(&self) {
+        let versions = self.root().join("versions");
+        let kept: Vec<PathBuf> = ["current", "previous"]
+            .iter()
+            .filter_map(|name| fs::read_link(self.root().join(name)).ok())
+            .map(|link| self.root().join(link))
+            .collect();
+        let Ok(entries) = fs::read_dir(&versions) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let directory = entry.file_type().is_ok_and(|kind| kind.is_dir());
+            if directory && !kept.contains(&path) {
+                let _ = fs::remove_dir_all(&path);
+            }
+        }
     }
     pub fn rollback(&self, exe: &Path, expected: &str) -> Result<()> {
         let _lock = self.lock()?;

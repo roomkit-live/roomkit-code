@@ -207,3 +207,41 @@ async fn rollback_requires_a_fresh_confirmation_scoped_to_the_view() {
     assert!(updates.handle(&view, &format!("confirm {token}")).is_err());
     updates.close().await;
 }
+
+#[test]
+fn updates_keep_only_the_current_and_previous_versions() {
+    let temp = tempfile::tempdir().unwrap();
+    let bin = temp.path().join("bin");
+    let installation = Installation { bin: bin.clone() };
+    let versions = installation.root().join("versions");
+    let listed = || {
+        let mut names: Vec<String> = fs::read_dir(&versions)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    };
+    for (index, release) in ["0.1.0", "0.2.0", "0.3.0"].into_iter().enumerate() {
+        let binary = temp.path().join(release);
+        fs::write(&binary, format!("binary {index}")).unwrap();
+        if index == 2 {
+            // An interrupted installation's staging goes with the next update.
+            fs::create_dir_all(versions.join(".stage-interrupted")).unwrap();
+        }
+        installation
+            .activate(&binary, release, &install::digest(&binary).unwrap(), None)
+            .unwrap();
+    }
+    let names = listed();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!(
+        names.iter().all(|name| !name.starts_with("0.1.0")),
+        "{names:?}"
+    );
+    // The kept previous version still rolls back.
+    let current = bin.join("roomkit-code").canonicalize().unwrap();
+    assert_eq!(installation.previous().unwrap(), "0.2.0");
+    installation.rollback(&current, "0.2.0").unwrap();
+    assert_eq!(fs::read(bin.join("roomkit-code")).unwrap(), b"binary 1");
+}

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep only the current and previous versions in a managed installation:
+  each update used to add up to 256 MiB that was never removed.
+
 - Drop compatibility with state nobody runs anymore: profile schemas 1–3,
   the first MCP configuration format, and the project-wide lock of binaries
   from before concurrent sessions. Schema 4 profiles still move to schema 5.
