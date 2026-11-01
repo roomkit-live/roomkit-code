@@ -300,11 +300,14 @@ a password), the certificate bundles (`SSL_CERT_FILE`, `SSL_CERT_DIR`,
 your shell, stays out of commands (`src/command_env.rs`).
 
 Add the variables your environment needs, for example those direnv, a Nix shell
-or conda export: `--inherit-env LD_LIBRARY_PATH,NIX_*`, `ROOMKIT_INHERIT_ENV`
+or conda export: `--inherit-env 'LD_LIBRARY_PATH,NIX_*'`, `ROOMKIT_INHERIT_ENV`
 (handy in an `.envrc`), or `inherit_env` under `[shell]` in the `--config`
-file; the command line replaces the file's list. A name ending in `*` passes
-every variable with that prefix that is set when RoomKit Code starts. A lone
-`*` is refused: it would pass your API keys too. Each added variable is
+file. The flag replaces the variable, which replaces the file; a resume command
+repeats only the flag, so a resumed session reads the variable anew. A name
+ending in `*` passes every variable with that prefix that is set when RoomKit
+Code starts, except names that read as credentials (containing `KEY`, `TOKEN`,
+`SECRET`, `PASSWORD`, `PASSWD` or `CREDENTIAL`, such as `ROOMKIT_API_KEY`); an
+exact name passes as written. A lone `*` is refused. Each added variable is
 readable by the agent's commands, and so by the model.
 
 Persistent processes use pipes, not a PTY, and survive tool calls and profile

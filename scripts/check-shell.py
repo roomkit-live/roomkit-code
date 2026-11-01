@@ -27,7 +27,7 @@ def scenario(project, state, resume=False):
     # variable such as a key.
     env.update(SSH_AUTH_SOCK="/roomkit-fixture/agent.sock", FIXTURE_API_KEY="leaked",
                ROOMKIT_INHERIT_ENV="FIXTURE_EXTRA,FIXTURE_NIX_*",
-               FIXTURE_EXTRA="extra", FIXTURE_NIX_FLAGS="nix")
+               FIXTURE_EXTRA="extra", FIXTURE_NIX_FLAGS="nix", FIXTURE_NIX_TOKEN="leaked")
     process = subprocess.Popen([
         str(binary), str(project), "--state-dir", str(state), "--session", "shell-fixture",
         "--color", "never", "--no-animations", "--no-logo",
@@ -62,8 +62,8 @@ def scenario(project, state, resume=False):
             wait_for(b"Execution Failed", offset)
             wait_for(b"quoted two words", offset)
             offset = len(captured)
-            os.write(master, b"!printf '[%s|%s|%s|%s]\\n' \"$SSH_AUTH_SOCK\" \"$FIXTURE_EXTRA\" \"$FIXTURE_NIX_FLAGS\" \"${FIXTURE_API_KEY-unset}\"\r")
-            wait_for(b"[/roomkit-fixture/agent.sock|extra|nix|unset]", offset)
+            os.write(master, b"!printf '[%s|%s|%s|%s|%s]\\n' \"$SSH_AUTH_SOCK\" \"$FIXTURE_EXTRA\" \"$FIXTURE_NIX_FLAGS\" \"${FIXTURE_NIX_TOKEN-unset}\" \"${FIXTURE_API_KEY-unset}\"\r")
+            wait_for(b"[/roomkit-fixture/agent.sock|extra|nix|unset|unset]", offset)
             wait_for(b"Execution Completed", offset)
             # The conversation stays busy a moment after the end is shown, and
             # refuses a command sent in that window: send it again.

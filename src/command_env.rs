@@ -72,14 +72,26 @@ pub(crate) fn command_env(extra: &[String]) -> CommandEnv {
     env
 }
 
-/// `requested` with each `PREFIX*` replaced by the `host` names it starts.
+/// Words that mark a variable as a credential. A prefix never passes such a
+/// variable, the application's own ROOMKIT_API_KEY included; only its exact
+/// name does.
+const CREDENTIAL_WORDS: [&str; 6] = ["KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL"];
+
+/// Whether `name` reads as a credential.
+fn credential(name: &str) -> bool {
+    let upper = name.to_uppercase();
+    CREDENTIAL_WORDS.iter().any(|word| upper.contains(word))
+}
+
+/// `requested` with each `PREFIX*` replaced by the `host` names it starts,
+/// credentials left out.
 fn expand(requested: &[String], host: &[String]) -> Vec<String> {
     requested
         .iter()
         .flat_map(|name| match name.strip_suffix('*') {
             Some(prefix) => host
                 .iter()
-                .filter(|candidate| candidate.starts_with(prefix))
+                .filter(|candidate| candidate.starts_with(prefix) && !credential(candidate))
                 .cloned()
                 .collect(),
             None => vec![name.clone()],
@@ -97,7 +109,8 @@ pub(crate) fn validate(names: &[String]) -> Result<(), String> {
             || stem.contains(char::is_whitespace)
         {
             return Err(format!(
-                "inherit_env takes variable names or prefixes such as NIX_*; {name:?} is neither"
+                "--inherit-env, ROOMKIT_INHERIT_ENV and [shell] inherit_env take variable \
+                 names or prefixes such as NIX_*; {name:?} is neither"
             ));
         }
     }
@@ -110,12 +123,27 @@ mod tests {
 
     #[test]
     fn added_names_pass_as_given_and_prefixes_match_the_host_names() {
-        let host = ["NIX_CFLAGS", "NIX_LDFLAGS", "NIXOS", "PATH"].map(String::from);
+        let host = [
+            "NIX_CFLAGS",
+            "NIX_LDFLAGS",
+            "NIXOS",
+            "PATH",
+            "AWS_REGION",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "ROOMKIT_API_KEY",
+            "ROOMKIT_UPDATE_TOKEN",
+        ]
+        .map(String::from);
         let requested = ["LD_LIBRARY_PATH", "NIX_*"].map(String::from);
         assert_eq!(
             expand(&requested, &host),
             ["LD_LIBRARY_PATH", "NIX_CFLAGS", "NIX_LDFLAGS"]
         );
+        // A prefix leaves credentials out, the application's own included; an
+        // exact name is the user's explicit choice.
+        let requested = ["AWS_*", "ROOMKIT_*", "GITHUB_TOKEN"].map(String::from);
+        assert_eq!(expand(&requested, &host), ["AWS_REGION", "GITHUB_TOKEN"]);
         assert!(validate(&requested).is_ok());
         for refused in ["", "*", "A=B", "A*B", "TWO WORDS"] {
             assert!(validate(&[refused.into()]).is_err(), "{refused:?}");
@@ -126,13 +154,8 @@ mod tests {
     fn the_development_variables_are_valid_names_and_no_credential() {
         let env = command_env(&[]);
         assert!(env.validate().is_ok());
-        let credential = ["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"];
         for name in &env.inherit_env {
-            let upper = name.to_uppercase();
-            assert!(
-                !credential.iter().any(|word| upper.contains(word)),
-                "{name} looks like a credential"
-            );
+            assert!(!credential(name), "{name} looks like a credential");
         }
     }
 }

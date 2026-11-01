@@ -28,8 +28,8 @@ calls = {
     1: ("edit", {"path": "source.txt", "old_text": "before", "new_text": "after"}),
     2: ("shell", {"command": "printf 'shell result' > shell.txt; printf 'shell passed'"}),
     4: ("shell", {"command": "printf 'yolo result' > yolo.txt; "
-                  "printf '%s|%s|%s|%s' \"$SSH_AUTH_SOCK\" \"$FIXTURE_EXTRA\" \"$FIXTURE_NIX_FLAGS\" "
-                  "\"${FIXTURE_API_KEY-unset}\" > env.txt; printf 'yolo passed'"}),
+                  "printf '%s|%s|%s|%s|%s' \"$SSH_AUTH_SOCK\" \"$FIXTURE_EXTRA\" \"$FIXTURE_NIX_FLAGS\" "
+                  "\"${FIXTURE_NIX_TOKEN-unset}\" \"${FIXTURE_API_KEY-unset}\" > env.txt; printf 'yolo passed'"}),
 }
 answers = {3: "Permission fixture complete.", 5: "Yolo fixture complete."}
 
@@ -68,7 +68,7 @@ def scenario(project, state, url):
     # variable such as a key.
     env.update(SSH_AUTH_SOCK="/roomkit-fixture/agent.sock", FIXTURE_API_KEY="leaked",
                ROOMKIT_INHERIT_ENV="FIXTURE_EXTRA,FIXTURE_NIX_*",
-               FIXTURE_EXTRA="extra", FIXTURE_NIX_FLAGS="nix")
+               FIXTURE_EXTRA="extra", FIXTURE_NIX_FLAGS="nix", FIXTURE_NIX_TOKEN="leaked")
     process = subprocess.Popen(
         [str(binary), str(project), "--state-dir", str(state), "--base-url", url,
          "--model", "fixture", "--color", "always", "--no-animations"],
@@ -151,7 +151,7 @@ def scenario(project, state, url):
         os.write(master, b"Run it in Yolo\r")
         wait_for(b"Yolo fixture complete.", offset)
         assert (project / "yolo.txt").read_text() == "yolo result"
-        assert (project / "env.txt").read_text() == "/roomkit-fixture/agent.sock|extra|nix|unset"
+        assert (project / "env.txt").read_text() == "/roomkit-fixture/agent.sock|extra|nix|unset|unset"
         assert not shown(b"Allow shell?", offset), "Yolo must not ask before a shell call"
         assert len(requests) == 6
         offset = len(captured)

@@ -322,38 +322,54 @@ fn a_missing_workspace_is_named() {
 }
 
 #[test]
-fn added_shell_variables_come_from_the_cli_or_the_file_and_are_checked() {
+fn added_shell_variables_come_from_the_flag_the_variable_or_the_file() {
+    let names = |list: &[&str]| {
+        list.iter()
+            .map(|name| (*name).to_owned())
+            .collect::<Vec<_>>()
+    };
+    let file = names(&["LD_LIBRARY_PATH", "NIX_*"]);
+    // The flag replaces the variable, which replaces the file.
+    assert_eq!(choose_inherit_env(&[], None, file.clone()).unwrap(), file);
+    assert_eq!(
+        choose_inherit_env(&[], Some("CONDA_*, PKG_CONFIG_PATH,".into()), file.clone()).unwrap(),
+        names(&["CONDA_*", "PKG_CONFIG_PATH"])
+    );
+    assert_eq!(
+        choose_inherit_env(&names(&["CC"]), Some("CONDA_*".into()), file.clone()).unwrap(),
+        names(&["CC"])
+    );
+    // An empty variable or entry is unset, not an error.
+    assert_eq!(
+        choose_inherit_env(&[], Some(String::new()), file.clone()).unwrap(),
+        file
+    );
+    // A lone `*` would pass every variable, keys included, from any source.
+    assert!(choose_inherit_env(&names(&["*"]), None, vec![]).is_err());
+    assert!(choose_inherit_env(&[], Some("*".into()), vec![]).is_err());
+    assert!(choose_inherit_env(&names(&["CC"]), None, names(&["*"])).is_err());
+}
+
+#[test]
+fn the_file_list_loads_and_a_resume_replays_only_the_flag() {
     let root = tempfile::tempdir().unwrap();
-    let mut cli = cli(root.path());
-    assert!(Settings::load(&cli).unwrap().inherit_env.is_empty());
     let config = root.path().join("shell.toml");
     std::fs::write(
         &config,
         "[shell]\ninherit_env = ['LD_LIBRARY_PATH', 'NIX_*']\n",
     )
     .unwrap();
+    let mut cli = cli(root.path());
     cli.config = Some(config);
-    assert_eq!(
-        Settings::load(&cli).unwrap().inherit_env,
-        ["LD_LIBRARY_PATH", "NIX_*"]
-    );
-    // The command line replaces the file's list, and the resume command keeps it.
-    let mut cli = Cli::try_parse_from([
-        "roomkit-code",
-        root.path().to_str().unwrap(),
-        "--inherit-env",
-        "CONDA_*, PKG_CONFIG_PATH",
-    ])
-    .unwrap();
-    assert_eq!(
-        Settings::load(&cli).unwrap().inherit_env,
-        ["CONDA_*", "PKG_CONFIG_PATH"]
-    );
+    cli.inherit_env = vec!["CC".into()];
+    assert_eq!(Settings::load(&cli).unwrap().inherit_env, ["CC"]);
     assert_eq!(
         resume_options(&cli).unwrap().unwrap(),
-        ["--inherit-env", "CONDA_*, PKG_CONFIG_PATH"]
+        [
+            "--inherit-env",
+            "CC",
+            "--config",
+            cli.config.as_ref().unwrap().to_str().unwrap()
+        ]
     );
-    // A lone `*` would pass every variable, keys included.
-    cli.inherit_env = vec!["*".into()];
-    assert!(Settings::load(&cli).is_err());
 }

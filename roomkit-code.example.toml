@@ -40,7 +40,8 @@ name = "RoomKit Code"
 
 [shell]
 # Host variables shell commands receive beyond the built-in development list;
-# NAME_* passes every variable with that prefix. The model can read them.
+# NAME_* passes every variable with that prefix except names that read as
+# credentials (KEY, TOKEN, SECRET…). The model can read them.
 # inherit_env = ["LD_LIBRARY_PATH", "PKG_CONFIG_PATH", "NIX_*"]
 
 [integrations]

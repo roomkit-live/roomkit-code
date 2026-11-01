@@ -8,7 +8,7 @@ mod skills;
 mod web;
 
 use roomkit_tools_code::{CodeLanguage, CodeOutlinePage};
-use roomkit_tools_fs::{GrepPage, PathKind, PathPage, ReadPage};
+use roomkit_tools_fs::{GrepMatch, GrepPage, PathKind, PathPage, ReadLine, ReadPage};
 use roomkit_tui::{
     content,
     protocol::{ToolCall, ToolState},
@@ -178,8 +178,9 @@ fn paths(page: PathPage, expanded: bool) -> Vec<Line> {
         Span::new(page.path, Tone::Code),
         Span::new(
             format!(
-                " · {} entries{}",
+                " · {} entries{}{}",
                 page.entries.len(),
+                skipped_total(&[(page.skipped_entries, NON_UTF8_NAMES)]),
                 if page.truncated {
                     " · more available"
                 } else {
@@ -211,10 +212,7 @@ fn paths(page: PathPage, expanded: bool) -> Vec<Line> {
             Tone::Muted,
         )]);
     }
-    skipped(
-        &mut lines,
-        &[(page.skipped_entries, "non-UTF-8 names skipped")],
-    );
+    skipped(&mut lines, &[(page.skipped_entries, NON_UTF8_NAMES)]);
     continuation(&mut lines, page.truncated, page.next_offset);
     lines
 }
@@ -264,13 +262,19 @@ fn grep(page: GrepPage, call: &ToolCall, expanded: bool) -> Vec<Line> {
         .get("pattern")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("");
+    let left_out = [
+        (page.skipped_files, BINARY_FILES),
+        (page.skipped_entries, NON_UTF8_NAMES),
+        (page.skipped_lines, LONG_LINES),
+    ];
     let mut lines = vec![vec![
         Span::new(format!("{pattern:?}"), Tone::Code),
         Span::new(
             format!(
-                " · {} matches in {}{}",
+                " · {} matches in {}{}{}",
                 page.matches.len(),
                 page.path,
+                skipped_total(&left_out),
                 if page.truncated {
                     " · more available"
                 } else {
@@ -282,42 +286,7 @@ fn grep(page: GrepPage, call: &ToolCall, expanded: bool) -> Vec<Line> {
     ]];
     let limit = if expanded { 48 } else { 2 };
     for found in page.matches.iter().take(limit) {
-        let context_before = if expanded {
-            found.context_before.as_slice()
-        } else {
-            &[]
-        };
-        let context_after = if expanded {
-            found.context_after.as_slice()
-        } else {
-            &[]
-        };
-        for line in context_before {
-            lines.push(vec![Span::new(
-                format!("{}:{}  {}", found.path, line.number, line.text),
-                Tone::Muted,
-            )]);
-        }
-        let mut row = vec![Span::new(
-            format!("{}:{}  ", found.path, found.line),
-            Tone::Code,
-        )];
-        row.extend(
-            content::code(&found.text, language(&found.path))
-                .into_iter()
-                .next()
-                .unwrap_or_default(),
-        );
-        if found.clipped {
-            row.push(Span::new(" … clipped to fit the page", Tone::Warning));
-        }
-        lines.push(row);
-        for line in context_after {
-            lines.push(vec![Span::new(
-                format!("{}:{}  {}", found.path, line.number, line.text),
-                Tone::Muted,
-            )]);
-        }
+        lines.extend(match_lines(found, expanded));
     }
     if page.matches.len() > limit {
         lines.push(vec![Span::new(
@@ -328,24 +297,68 @@ fn grep(page: GrepPage, call: &ToolCall, expanded: bool) -> Vec<Line> {
             Tone::Muted,
         )]);
     }
-    skipped(
-        &mut lines,
-        &[
-            (page.skipped_files, "binary or non-UTF-8 files skipped"),
-            (page.skipped_entries, "non-UTF-8 names skipped"),
-            (page.skipped_lines, "lines too long to search skipped"),
-        ],
-    );
+    skipped(&mut lines, &left_out);
     continuation(&mut lines, page.truncated, page.next_offset);
     lines
 }
 
+/// One match: its row, with its context when expanded.
+fn match_lines(found: &GrepMatch, expanded: bool) -> Vec<Line> {
+    let (before, after): (&[ReadLine], &[ReadLine]) = if expanded {
+        (&found.context_before, &found.context_after)
+    } else {
+        (&[], &[])
+    };
+    let context = |line: &ReadLine| {
+        vec![Span::new(
+            format!("{}:{}  {}", found.path, line.number, line.text),
+            Tone::Muted,
+        )]
+    };
+    let mut lines: Vec<Line> = before.iter().map(context).collect();
+    let mut row = vec![Span::new(
+        format!("{}:{}  ", found.path, found.line),
+        Tone::Code,
+    )];
+    // The mark leads: a clipped match is long, and the card cuts its end.
+    if found.clipped {
+        row.push(Span::new("clipped to fit the page · ", Tone::Warning));
+    }
+    row.extend(
+        content::code(&found.text, language(&found.path))
+            .into_iter()
+            .next()
+            .unwrap_or_default(),
+    );
+    lines.push(row);
+    lines.extend(after.iter().map(context));
+    lines
+}
+
+/// What a scan can leave out, in the singular and the plural.
+type LeftOut = (&'static str, &'static str);
+const BINARY_FILES: LeftOut = ("binary or non-UTF-8 file", "binary or non-UTF-8 files");
+const NON_UTF8_NAMES: LeftOut = ("non-UTF-8 name", "non-UTF-8 names");
+const LONG_LINES: LeftOut = ("line too long to search", "lines too long to search");
+
 /// What a scan left out, so a card never reads as complete when it is not.
-fn skipped(lines: &mut Vec<Line>, counts: &[(usize, &str)]) {
-    for &(count, what) in counts {
+fn skipped(lines: &mut Vec<Line>, counts: &[(usize, LeftOut)]) {
+    for &(count, (one, many)) in counts {
         if count > 0 {
-            lines.push(vec![Span::new(format!("{count} {what}"), Tone::Warning)]);
+            let what = if count == 1 { one } else { many };
+            lines.push(vec![Span::new(
+                format!("{count} {what} skipped"),
+                Tone::Warning,
+            )]);
         }
+    }
+}
+
+/// The header's note of what was left out, so a collapsed card shows it.
+fn skipped_total(counts: &[(usize, LeftOut)]) -> String {
+    match counts.iter().map(|&(count, _)| count).sum::<usize>() {
+        0 => String::new(),
+        total => format!(" · {total} skipped"),
     }
 }
 
@@ -520,25 +533,33 @@ mod tests {
         );
         let grep = call(
             "grep",
-            json!({"path":".","matches":[{"path":"src/lib.rs","line":7,"text":"pub fn answer() -> u8 { 42 }","context_before":[{"number":6,"text":"// explanation"}]},{"path":"src/big.rs","line":1,"text":"const DATA: &str = \"","clipped":true}],"truncated":false,"next_offset":null,"skipped_files":1,"skipped_entries":2,"skipped_lines":3}),
+            json!({"path":".","matches":[{"path":"src/lib.rs","line":7,"text":"pub fn answer() -> u8 { 42 }","context_before":[{"number":6,"text":"// explanation"}]},{"path":"src/big.rs","line":1,"text":format!("const DATA: &str = \"{}", "x".repeat(50_000)),"clipped":true}],"truncated":false,"next_offset":null,"skipped_files":1,"skipped_entries":2,"skipped_lines":3}),
         );
         let rendered = Files::default().render_styled(&grep, true);
         assert!(
             plain(&rendered).contains("src/lib.rs:7") && plain(&rendered).contains("src/lib.rs:6")
         );
-        assert!(plain(&rendered).contains("1 binary or non-UTF-8 files skipped"));
+        assert!(plain(&rendered).contains("1 binary or non-UTF-8 file skipped"));
         // A scan that left names or long lines out says so, as for files.
         assert!(plain(&rendered).contains("2 non-UTF-8 names skipped"));
         assert!(plain(&rendered).contains("3 lines too long to search skipped"));
-        assert!(plain(&rendered).contains("src/big.rs:1") && plain(&rendered).contains("clipped"));
+        // The clipped mark leads its row: the card cuts a 50 KB match's end.
+        let clipped = rendered.iter().any(|line| {
+            line.first()
+                .is_some_and(|span| span.text.starts_with("src/big.rs:1"))
+                && line
+                    .get(1)
+                    .is_some_and(|span| span.text.contains("clipped"))
+        });
+        assert!(clipped, "{}", plain(&rendered));
+        // A collapsed card, which shows two matches, still says what was left out.
+        assert!(plain(&Files::default().render_styled(&grep, false)).contains("· 6 skipped"));
         let listed = call(
             "list",
             json!({"path":".","entries":[{"name":"a","path":"a","kind":"file"}],"truncated":false,"next_offset":null,"skipped_entries":4}),
         );
-        assert!(
-            plain(&Files::default().render_styled(&listed, false))
-                .contains("4 non-UTF-8 names skipped")
-        );
+        let listed = plain(&Files::default().render_styled(&listed, false));
+        assert!(listed.contains("4 non-UTF-8 names skipped") && listed.contains("· 4 skipped"));
     }
 
     #[test]

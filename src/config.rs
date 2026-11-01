@@ -89,8 +89,9 @@ pub(crate) struct Cli {
     #[arg(long)]
     pub no_herdr: bool,
     /// More host variables for shell commands, comma-separated; `NIX_*`
-    /// passes every variable with that prefix.
-    #[arg(long, env = "ROOMKIT_INHERIT_ENV", value_delimiter = ',')]
+    /// passes every variable with that prefix, credentials left out.
+    /// Replaces ROOMKIT_INHERIT_ENV, which replaces `[shell] inherit_env`.
+    #[arg(long, value_delimiter = ',')]
     pub inherit_env: Vec<String>,
 }
 
@@ -451,20 +452,51 @@ pub(crate) fn default_state_dir() -> Option<PathBuf> {
     }
 }
 
-/// Retain explicit UI/configuration choices; provider secrets and bootstrap
-/// options are deliberately absent. Persisted profiles restore agent/model.
-/// The `--inherit-env` names, else the configuration file's, checked.
+/// The added shell variables: `--inherit-env`, else ROOMKIT_INHERIT_ENV,
+/// else the configuration file's. The variable is read here rather than by
+/// clap, so a resume command replays only the flag: a resumed session reads
+/// the variable anew, as direnv sets it.
 fn inherit_env(cli: &Cli, file: ShellOptions) -> Result<Vec<String>> {
-    let names = if cli.inherit_env.is_empty() {
-        file.inherit_env
-    } else {
-        cli.inherit_env.clone()
-    };
-    let names: Vec<String> = names.iter().map(|name| name.trim().to_owned()).collect();
-    crate::command_env::validate(&names)?;
-    Ok(names)
+    choose_inherit_env(
+        &cli.inherit_env,
+        std::env::var("ROOMKIT_INHERIT_ENV").ok(),
+        file.inherit_env,
+    )
 }
 
+/// Every source is checked, even one a higher source replaces; empty entries
+/// (an empty variable, a trailing comma) are dropped.
+fn choose_inherit_env(
+    flag: &[String],
+    variable: Option<String>,
+    file: Vec<String>,
+) -> Result<Vec<String>> {
+    let clean = |names: Vec<String>| -> Result<Vec<String>> {
+        let names: Vec<String> = names
+            .iter()
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+            .collect();
+        crate::command_env::validate(&names)?;
+        Ok(names)
+    };
+    let flag = clean(flag.to_vec())?;
+    let variable = clean(
+        variable
+            .unwrap_or_default()
+            .split(',')
+            .map(str::to_owned)
+            .collect(),
+    )?;
+    let file = clean(file)?;
+    Ok([flag, variable, file]
+        .into_iter()
+        .find(|names| !names.is_empty())
+        .unwrap_or_default())
+}
+
+/// Retain explicit UI/configuration choices; provider secrets and bootstrap
+/// options are deliberately absent. Persisted profiles restore agent/model.
 fn resume_options(cli: &Cli) -> Result<Option<Vec<String>>> {
     let mut args = vec![];
     if !cli.inherit_env.is_empty() {
