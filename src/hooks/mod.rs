@@ -15,6 +15,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
@@ -382,18 +383,24 @@ impl Hooks {
     }
 
     pub async fn close(&self) {
+        self.close_within(crate::timeouts::SETTLE).await;
+    }
+
+    /// `close`, waiting at most `wait` for turns and hook tasks.
+    async fn close_within(&self, wait: Duration) {
         if self.closing.swap(true, Ordering::AcqRel) {
             return;
         }
         self.stopping.cancel();
-        let mut changed = self.changes.subscribe();
-        while !self.state().turns.is_empty() {
-            if changed.changed().await.is_err() {
-                break;
-            }
+        // Turns end once the engine reports them, and hook tasks stop with
+        // `stopping`; a turn the engine never finished must not hold the exit.
+        let settled = tokio::time::timeout(wait, self.settle()).await;
+        if settled.is_err() {
+            self.background.close();
+            let turns = self.state().turns.len();
+            self.diagnostics
+                .record("hooks_close_timeout", json!({ "turns": turns }), None);
         }
-        self.background.close();
-        self.background.wait().await;
         let sessions: Vec<_> = self.state().sessions.values().cloned().collect();
         for session in sessions {
             let agent = crate::sync::lock(&session.agent).clone();
@@ -402,6 +409,20 @@ impl Hooks {
             self.dispatch(HookEvent::SessionEnd, "shutdown", &context)
                 .await;
         }
+    }
+}
+
+impl Hooks {
+    /// Wait until every turn ended and every hook task finished.
+    async fn settle(&self) {
+        let mut changed = self.changes.subscribe();
+        while !self.state().turns.is_empty() {
+            if changed.changed().await.is_err() {
+                break;
+            }
+        }
+        self.background.close();
+        self.background.wait().await;
     }
 }
 
@@ -557,5 +578,46 @@ fn prompt_text(content: &roomkit::model::EventContent) -> String {
             .collect::<Vec<_>>()
             .join("\n"),
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, reason = "Invalid fixtures fail the test")]
+    use super::*;
+    use clap::Parser;
+
+    #[tokio::test]
+    async fn closing_gives_up_on_a_turn_the_engine_never_finished() {
+        let workspace = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let cli = crate::config::Cli::try_parse_from([
+            "roomkit-code",
+            workspace.path().to_str().unwrap(),
+            "--state-dir",
+            state.path().to_str().unwrap(),
+        ])
+        .unwrap();
+        let settings = crate::config::Settings::load(&cli).unwrap();
+        let path = state.path().join("diagnostics.jsonl");
+        let log = crate::diagnostics::Diagnostics::open(path.clone(), false).unwrap();
+        let policy = crate::permissions::Policy::new(crate::permissions::Mode::Ask);
+        let hooks = Hooks::load(&settings, state.path(), policy, log);
+        let orphan = Arc::new(Turn {
+            context: Context {
+                payload: json!({}),
+                entries: Vec::new(),
+            },
+            begun: AtomicBool::new(false),
+            posts: TaskTracker::new(),
+        });
+        let key = ("room".into(), "agent".into(), "operation".into());
+        hooks.state().turns.insert(key, orphan);
+        hooks.close_within(Duration::from_millis(50)).await;
+        let records = std::fs::read_to_string(path).unwrap();
+        assert!(
+            records.contains("hooks_close_timeout") && records.contains("\"turns\":1"),
+            "{records}"
+        );
     }
 }

@@ -69,7 +69,7 @@ impl Application {
         self.profiles
             .resources
             .files
-            .settle(std::time::Duration::from_secs(10))
+            .settle(crate::timeouts::SETTLE)
             .await;
         self.services.hooks.close().await;
         let tools = self.profiles.resources.close().await;

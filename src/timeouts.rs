@@ -29,6 +29,10 @@ const HOOK_SOURCES: u64 = 2;
 pub(crate) const HOOKS: Duration = Duration::from_millis(HOOKS_MILLIS);
 const HOOKS_MILLIS: u64 = HOOK_SOURCES * roomkit_hooks::SOURCE_DEADLINE_MILLIS + MARGIN_MILLIS;
 
+/// Closing waits this long for work that stops with the application: hook
+/// turns and tasks, file comparisons. Only work that never ends waits it out.
+pub(crate) const SETTLE: Duration = Duration::from_millis(MARGIN_MILLIS);
+
 /// The permission gate runs the tool's hooks, then waits for an approval.
 pub(crate) const PERMISSION_GATE: Duration =
     Duration::from_millis(HOOKS_MILLIS + APPROVAL_MILLIS + MARGIN_MILLIS);
