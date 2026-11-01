@@ -11,7 +11,7 @@ use roomkit_tui::protocol::{Choice, Event};
 use roomkit_tui_engine::{CommandResult, SessionConfig};
 use sha2::{Digest, Sha256};
 
-use super::{Sessions, title};
+use super::{Sessions, names, title};
 use crate::{Result, config::valid_session_name};
 
 /// Sessions `/resume` lists, newest first.
@@ -141,8 +141,9 @@ async fn unused_draft(
 }
 
 impl Sessions {
-    fn switched(&self, mut config: SessionConfig, room: RoomId) -> CommandResult {
-        config.title = title(&self.workspace, &room);
+    async fn switched(&self, mut config: SessionConfig, room: RoomId) -> CommandResult {
+        let name = names::name(&self.kit, &room).await;
+        config.title = title(&self.workspace, &room, name.as_deref());
         config.mode = Some(self.policy.state(room.as_str()));
         config.room = room;
         CommandResult::Switch(Box::new(config))
@@ -165,7 +166,7 @@ impl Sessions {
         let name = format!("session-{:x}", Sha256::digest(identity));
         let draft_key = format!("roomkit_code:new-draft:{name}");
         if self.kept_draft(&current.room, &draft_key).await? {
-            return Ok(self.switched(current.clone(), current.room));
+            return Ok(self.switched(current.clone(), current.room).await);
         }
         if empty(&self.kit, &current.room)
             .await
@@ -174,7 +175,7 @@ impl Sessions {
             // Remember a no-op too: a delayed retry after the first
             // message must not unexpectedly create another session.
             self.keep_draft(&current.room, &draft_key).await?;
-            return Ok(self.switched(current.clone(), current.room));
+            return Ok(self.switched(current.clone(), current.room).await);
         }
         let room = create(
             &self.kit,
@@ -187,7 +188,7 @@ impl Sessions {
         .await
         .map_err(|error| error.to_string())?;
         self.services.hooks.note_source(room.as_str(), "new");
-        Ok(self.switched(current, room))
+        Ok(self.switched(current, room).await)
     }
 
     /// Whether an earlier `/new` from this session kept it as the draft.
@@ -210,6 +211,24 @@ impl Sessions {
             .set_private_state(room, key, Some(kept))
             .await
             .map_err(|_| "Could not retain the current draft".to_string())
+    }
+
+    /// `/rename`: name this conversation. An empty one has nothing to name
+    /// yet: it is reused as the next draft and by `/new`.
+    pub(super) async fn rename(
+        &self,
+        current: SessionConfig,
+        arguments: &str,
+    ) -> std::result::Result<CommandResult, String> {
+        let name = names::parse(arguments)?;
+        if empty(&self.kit, &current.room)
+            .await
+            .map_err(|_| "Could not inspect the current session".to_string())?
+        {
+            return Err("Send a first message before naming this conversation".into());
+        }
+        names::set(&self.kit, &current.room, &name).await?;
+        Ok(self.switched(current.clone(), current.room).await)
     }
 
     /// `/resume`: the sessions to choose from, or the chosen one.
@@ -286,7 +305,7 @@ impl Sessions {
             .keep(claim)
             .map_err(|_| "Cannot retain session ownership".to_string())?;
         self.services.hooks.note_source(room.as_str(), "resume");
-        Ok(self.switched(next, room))
+        Ok(self.switched(next, room).await)
     }
 
     /// The other active sessions this view can read, newest first.
@@ -357,7 +376,10 @@ impl Sessions {
         let mut context = RoomContext::new(room);
         context.bindings = bindings;
         context.recent_events = rows;
-        let label = self.label(&context, current);
+        let label = match names::name(&self.kit, &context.room.id).await {
+            Some(name) => name,
+            None => self.label(&context, current),
+        };
         let occupied = if self.services.sessions.busy(&id)? {
             "Open in another instance · "
         } else {

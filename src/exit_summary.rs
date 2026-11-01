@@ -65,7 +65,11 @@ pub(crate) async fn collect(
         return summary;
     }
     summary.usage = usage(kit, &room).await.ok();
-    summary.session = Some(session);
+    // The ID still reopens it; a name only helps recognize it.
+    summary.session = Some(match crate::sessions::name(kit, &room).await {
+        Some(name) => format!("{name} · {session}"),
+        None => session,
+    });
     summary.resume = resume;
     summary
 }

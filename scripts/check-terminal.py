@@ -154,6 +154,11 @@ def scenario(project, state, base_url, resume=False, color="never"):
         os.write(master, b"\x1b[1;5F")
         if not resume:
             wait_for(b"Execution Completed")
+            # A name replaces the session ID in the header; the resume
+            # picker below finds it by that name.
+            offset = len(captured)
+            os.write(master, b"/rename fixture review\r")
+            wait_for("· fixture review".encode(), offset)
 
         os.write(master, b"Unsent draft\x1b[1;5F")
         wait_for(b"Latest answer marker.")
@@ -275,4 +280,4 @@ finally:
     server.server_close()
     thread.join(timeout=5)
 
-print("PTY checks passed: tools, Markdown, composer, history navigation, fresh launch, new/resume/filter/cancel, empty-draft filtering, working context report, Esc interruption and continuation, double Ctrl+C, preserved draft, colors, restart and terminal restoration.")
+print("PTY checks passed: tools, Markdown, composer, history navigation, fresh launch, rename, new/resume/filter/cancel, empty-draft filtering, working context report, Esc interruption and continuation, double Ctrl+C, preserved draft, colors, restart and terminal restoration.")

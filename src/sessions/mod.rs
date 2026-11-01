@@ -9,8 +9,10 @@ use roomkit_tui::protocol::{Choice, Command, CommandSpec, Event, Rejection, Requ
 use roomkit_tui_engine::{CommandHandler, CommandResult, SessionConfig};
 
 mod live;
+mod names;
 mod rooms;
 
+pub(crate) use names::name;
 pub(crate) use rooms::{create, empty};
 
 pub(crate) fn commands() -> Vec<CommandSpec> {
@@ -91,6 +93,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "[ask|plan|yolo]",
         ),
         ("new", "Start a new conversation in this project", ""),
+        ("rename", "Name this conversation", "<name>"),
         (
             "resume",
             "Choose a previous project session",
@@ -109,12 +112,14 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
     .collect()
 }
 
-pub(crate) fn title(workspace: &std::path::Path, room: &RoomId) -> String {
+/// The view's title: the workspace, then the conversation's name, or the
+/// start of its ID.
+pub(crate) fn title(workspace: &std::path::Path, room: &RoomId, name: Option<&str>) -> String {
     let id = room.as_str();
-    let label = if id.len() > 20 {
-        format!("{}…", id.chars().take(16).collect::<String>())
-    } else {
-        id.into()
+    let label = match name {
+        Some(name) => name.into(),
+        None if id.len() > 20 => format!("{}…", id.chars().take(16).collect::<String>()),
+        None => id.into(),
     };
     format!("{} · {label}", workspace.display())
 }
@@ -255,6 +260,7 @@ impl Sessions {
                     .await
             }
             "resume" => self.resume(current, arguments).await,
+            "rename" => self.rename(current, arguments).await,
             _ => Err("Unknown application command".into()),
         }
     }

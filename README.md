@@ -55,6 +55,13 @@ current draft if it is already empty. These commands
 are local navigation and never call the model; wait for an active response to
 finish before switching.
 
+**/rename NAME** names the current conversation: one line of at most 80
+characters. The name replaces the session ID in the header and in the Herdr
+pane title, labels the session in `/resume`, and precedes the ID in the exit
+report. The ID stays its identity: `/resume ID`, `--session` and the resume
+command still use it. An empty conversation cannot be named, since it is
+reused as the next draft; renaming waits for an active response to finish.
+
 `--session NAME` explicitly opens or creates a named session. Existing sessions,
 including the former default `main`, remain available through `/resume` or
 `--session main`. The picker hides empty drafts and shows up to 200 recent

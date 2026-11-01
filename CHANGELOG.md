@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add `/rename NAME` to name a conversation: the name shows in the header,
+  the Herdr pane title, the `/resume` list and the exit report; the session
+  ID still reopens it.
+
 - Copy an answer longer than the screen with the mouse: keep the button held
   and turn the wheel, or hold the pointer above or below the conversation, and
   the selection follows while it scrolls; the copy holds the lines no longer

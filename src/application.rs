@@ -143,7 +143,8 @@ async fn first_view(
     )
     .await?;
     let mut view = SessionConfig::new(room, agent_id, "local-user");
-    view.title = crate::sessions::title(&settings.workspace, &view.room);
+    let name = crate::sessions::name(kit, &view.room).await;
+    view.title = crate::sessions::title(&settings.workspace, &view.room, name.as_deref());
     view.commands = crate::sessions::commands();
     view.input_actions = vec![roomkit_tui::protocol::InputAction::new(
         '!',
