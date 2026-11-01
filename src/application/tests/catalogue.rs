@@ -58,7 +58,7 @@ async fn a_schema_4_project_moves_to_the_current_schema_with_its_selections() {
     assert_eq!(saved["schema"], crate::profiles::model::PROJECT_SCHEMA);
     assert_eq!(
         app.profiles.tools("code").await.len(),
-        crate::profiles::model::TOOLS.len()
+        crate::profiles::model::TOOLS.len() + crate::permissions::MODE_TOOLS.len()
     );
     assert_eq!(saved["agents"]["reader"]["tools"], json!(["read"]));
     app.close().await.unwrap();

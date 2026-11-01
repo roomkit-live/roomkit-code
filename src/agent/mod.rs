@@ -102,9 +102,14 @@ impl Resources {
 macro_rules! assemble {
     ($id:expr, $profile:expr, $provider:expr, $extensions:expr, $instructions:expr, $files:expr; $($binding:ident = $tool:expr),+ $(,)?) => {{
         $(let $binding = $tool;)+
-        let selected = |tool: &ToolDefinition| $profile.tools.contains(&tool.name);
+        // The mode tools come with plan writing: leaving Plan approves a plan.
+        let plans = $profile.tools.iter().any(|tool| tool == "plan_create");
+        let selected = |tool: &ToolDefinition| {
+            $profile.tools.contains(&tool.name)
+                || (plans && crate::permissions::MODE_TOOLS.contains(&tool.name.as_str()))
+        };
         let native: Vec<ToolDefinition> = [$($binding.tools()),+].concat().into_iter().filter(selected).collect();
-        let Extensions { skills, skill_roots, mcp, intent_required } = $extensions;
+        let Extensions { skills, skill_roots, mcp, intent_required, .. } = $extensions;
         let preamble = preamble($profile, native, &skills, &skill_roots, &mcp, intent_required);
         let mut agent = OpenAiAgent::new($id, $provider.with_system_prompt(preamble.prompt))?
             .with_tool_call_intents(true)
@@ -128,6 +133,8 @@ pub(crate) struct Extensions {
     pub mcp: Vec<(String, roomkit_mcp::McpServer)>,
     /// Whether every tool call must carry an intent.
     pub intent_required: bool,
+    /// The mode policy the mode tools change.
+    pub policy: crate::permissions::Policy,
 }
 
 pub(crate) async fn create(
@@ -170,5 +177,6 @@ pub(crate) async fn create(
         docs_list = DocsListToolset::new(DocsListTool::new(resources.docs.clone())),
         docs_search = DocsSearchToolset::new(DocsSearchTool::new(resources.docs.clone())),
         docs_read = DocsReadToolset::new(DocsReadTool::new(resources.docs.clone())),
+        modes = crate::permissions::ModeTools::new(extensions.policy.clone(), resources.plans.clone()),
     )
 }

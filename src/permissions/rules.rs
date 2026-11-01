@@ -86,6 +86,23 @@ const RULES: &[(&str, Rule)] = &[
             label: "Process input · may trigger further actions in the running command",
         },
     ),
+    (
+        "plan_mode_enter",
+        Rule {
+            direct: false,
+            plan: false,
+            label: "Mode change · this conversation moves to Plan: no project changes or commands until you approve a plan",
+        },
+    ),
+    // Its card shows the stored plan (`modes::approve_exit`).
+    (
+        "plan_mode_exit",
+        Rule {
+            direct: false,
+            plan: true,
+            label: "Plan approval",
+        },
+    ),
     // Network reads keep Ask's approval, even in Plan.
     (
         "web_fetch",
@@ -159,8 +176,13 @@ mod tests {
 
     #[test]
     fn every_tool_an_agent_can_select_has_a_rule() {
-        let skills = ["activate_skill", "read_skill_reference"];
-        for name in crate::profiles::model::TOOLS.iter().chain(&skills) {
+        let others = [
+            "activate_skill",
+            "read_skill_reference",
+            "plan_mode_enter",
+            "plan_mode_exit",
+        ];
+        for name in crate::profiles::model::TOOLS.iter().chain(&others) {
             assert!(rule_for(name, &Map::new()).is_some(), "{name} has no rule");
         }
     }

@@ -115,7 +115,13 @@ async fn setup(
     let agent_id = profiles.initialize(kit).await?;
     let channel = ConversationChannel::new(ChannelId::new("terminal")?);
     kit.register_channel(channel.clone())?;
-    gate::install(kit, policy, &channel, &services.hooks)?;
+    let gate = gate::Gate {
+        policy: policy.clone(),
+        channel: channel.clone(),
+        hooks: services.hooks.clone(),
+        plans: profiles.resources.plans.clone(),
+    };
+    gate::install(kit, gate)?;
     let view = first_view(
         settings, kit, profiles, services, policy, &channel, agent_id,
     )

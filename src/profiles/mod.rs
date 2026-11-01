@@ -224,6 +224,7 @@ impl Profiles {
             skill_roots,
             mcp: self.mcp_runtime.selected(profile).await?,
             intent_required: self.require_tool_intent,
+            policy: self.policy.clone(),
         };
         crate::agent::create(
             &self.workspace,

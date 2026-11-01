@@ -10,7 +10,13 @@ use roomkit_tui_engine::ConversationChannel;
 use serde::Deserialize;
 
 mod card;
+mod modes;
 mod rules;
+
+pub(crate) use modes::{EXIT as PLAN_EXIT, ModeTools, approve_exit};
+
+/// The mode tools' names.
+pub(crate) const MODE_TOOLS: [&str; 2] = [modes::ENTER, modes::EXIT];
 
 pub(crate) use rules::summary;
 
@@ -37,6 +43,9 @@ impl Mode {
 pub(crate) struct Policy {
     initial: Mode,
     modes: Arc<Mutex<BTreeMap<String, Mode>>>,
+    /// Signals a mode set by a mode tool rather than a `/mode` command, so
+    /// the view learns it.
+    pub changes: Arc<tokio::sync::watch::Sender<()>>,
 }
 
 impl Policy {
@@ -44,6 +53,7 @@ impl Policy {
         Self {
             initial,
             modes: Arc::default(),
+            changes: Arc::new(tokio::sync::watch::channel(()).0),
         }
     }
 
@@ -72,7 +82,7 @@ impl Policy {
     pub(crate) fn instruction(&self, room: &str) -> &'static str {
         match self.mode(room) {
             Mode::Plan => {
-                "Application mode: Plan. Respond to the latest user message by exploring and preparing or refining a plan with the available plan tools. Do not implement project changes, execute commands, stop processes, or call MCP tools. Web research still requires approval. Read an existing plan before updating it; list plans first when resuming. Keep concrete steps and declared progress accurate. When the plan is ready, explain it and wait for the user to switch to Ask or Yolo and request implementation. Never switch modes yourself."
+                "Application mode: Plan. Respond to the latest user message by exploring and preparing or refining a plan with the available plan tools. Do not implement project changes, execute commands, stop processes, or call MCP tools. Web research still requires approval. Read an existing plan before updating it; list plans first when resuming. Keep concrete steps and declared progress accurate. When the plan is ready, call plan_mode_exit if it is available so the user can approve it; otherwise explain it and wait for the user to switch to Ask or Yolo and request implementation."
             }
             Mode::Ask => {
                 "Application mode: Ask. Respond to the latest user message. Changes and execution require the application's approval. Use existing plan tools to track substantial work when useful; read or list the plan before continuing it. A mode change alone is not an instruction to execute a plan."
@@ -92,6 +102,14 @@ impl Policy {
         };
         crate::sync::lock(&self.modes).insert(room.into(), mode);
         Ok(self.state(room))
+    }
+
+    /// Set `room`'s mode from a mode tool, and tell the view: no `/mode`
+    /// command reports it.
+    pub(crate) fn set_by_tool(&self, room: &str, mode: Mode) -> ModeState {
+        crate::sync::lock(&self.modes).insert(room.into(), mode);
+        self.changes.send_replace(());
+        self.state(room)
     }
 
     pub async fn gate(&self, channel: &ConversationChannel, event: ToolCallEvent) -> ToolUse {

@@ -19,6 +19,8 @@ struct Sources {
     files: watch::Receiver<()>,
     updates: watch::Receiver<()>,
     hooks: watch::Receiver<()>,
+    /// A mode set by a mode tool, outside `/mode`.
+    modes: watch::Receiver<()>,
 }
 
 pub(super) fn subscribe(
@@ -37,12 +39,19 @@ pub(super) fn subscribe(
         files: sessions.profiles.resources.files.subscribe(),
         updates: sessions.services.updates.changes.subscribe(),
         hooks: sessions.services.hooks.changes.subscribe(),
+        modes: sessions.policy.changes.subscribe(),
     };
     let (profiles, services) = (sessions.profiles.clone(), sessions.services.clone());
+    let policy = sessions.policy.clone();
     let (tx, rx) = watch::channel(Vec::new());
     tokio::spawn(async move {
         loop {
-            let (events, poll) = events(&profiles, &services, &current, &mut sources).await;
+            let (mut events, poll) = events(&profiles, &services, &current, &mut sources).await;
+            // The view always shows the mode the policy applies, whoever set it.
+            events.push(Event::ModeChanged {
+                conversation: current.room.as_str().into(),
+                mode: policy.state(current.room.as_str()),
+            });
             if *tx.borrow() != events && tx.send(events).is_err() {
                 break;
             }
@@ -95,6 +104,7 @@ impl Sources {
             changed = self.files.changed() => changed.is_ok(),
             changed = self.updates.changed() => changed.is_ok(),
             changed = self.hooks.changed() => changed.is_ok(),
+            changed = self.modes.changed() => changed.is_ok(),
             // MCP exposes connection liveness, but no disconnect stream. Only
             // configured connections are inspected; unchanged state never
             // redraws the TUI.

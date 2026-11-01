@@ -293,9 +293,14 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
         .iter()
         .map(|tool| tool["function"]["name"].as_str().unwrap())
         .collect();
+    // The mode tools come with the plan tools.
     assert_eq!(
         names,
-        crate::profiles::model::TOOLS.iter().copied().collect()
+        crate::profiles::model::TOOLS
+            .iter()
+            .chain(&crate::permissions::MODE_TOOLS)
+            .copied()
+            .collect()
     );
     assert!(
         requests[4]["messages"]
@@ -335,7 +340,10 @@ async fn resumed_history_cannot_replace_the_current_wire_inventory_or_host_catal
     let wire = current.requests.lock().unwrap()[0].clone();
     let inventory = app.profiles.tools(app.view.agent.as_str()).await;
     let expected: BTreeSet<_> = inventory.iter().map(|tool| tool.name.as_str()).collect();
-    assert_eq!(expected.len(), 27);
+    assert_eq!(
+        expected.len(),
+        crate::profiles::model::TOOLS.len() + crate::permissions::MODE_TOOLS.len()
+    );
     let declared: BTreeSet<_> = wire["tools"]
         .as_array()
         .unwrap()
@@ -1778,6 +1786,7 @@ mod hooks;
 mod instructions;
 mod intents;
 mod multi_session;
+mod plan_modes;
 mod plans;
 mod rename;
 mod routing;

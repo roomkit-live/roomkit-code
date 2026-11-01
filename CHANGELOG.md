@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Let an agent that writes plans ask to enter Plan mode (`plan_mode_enter`) and,
+  once its plan is written, ask you to approve it (`plan_mode_exit`): the card
+  shows the stored plan, and approving moves the conversation to Ask. The agent
+  never moves to Yolo.
+
 - Add `/rename NAME` to name a conversation: the name leads the header and
   the Herdr pane title, labels the `/resume` list and shows in the exit
   report; the session ID still reopens it.
