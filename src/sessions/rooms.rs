@@ -351,13 +351,7 @@ impl Sessions {
                 },
             )
             .await?;
-        let date = room
-            .updated_at
-            .to_string()
-            .chars()
-            .take(16)
-            .collect::<String>()
-            .replace('T', " ");
+        let date = utc_minute(room.updated_at.as_unix_millis());
         let id = room.id.to_string();
         let count = room.event_count;
         let mut context = RoomContext::new(room);
@@ -392,5 +386,46 @@ impl Sessions {
                 None
             })
             .unwrap_or_else(|| "Conversation".into())
+    }
+}
+
+/// `YYYY-MM-DD HH:MM` in UTC for a Unix time in milliseconds, computed
+/// rather than cut from a text whose format the store owns.
+fn utc_minute(millis: i64) -> String {
+    let minutes = millis.div_euclid(60_000);
+    let (days, minute) = (minutes.div_euclid(1440), minutes.rem_euclid(1440));
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let shifted = days + 719_468;
+    let era = shifted.div_euclid(146_097);
+    let day_of_era = shifted.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}",
+        minute / 60,
+        minute % 60
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::utc_minute;
+
+    #[test]
+    fn dates_are_computed_in_utc_to_the_minute() {
+        assert_eq!(utc_minute(0), "1970-01-01 00:00");
+        assert_eq!(utc_minute(1_761_951_959_000), "2025-10-31 23:05");
+        assert_eq!(utc_minute(1_709_164_800_000), "2024-02-29 00:00");
+        assert_eq!(utc_minute(951_782_400_000), "2000-02-29 00:00");
+        assert_eq!(utc_minute(-60_000), "1969-12-31 23:59");
     }
 }

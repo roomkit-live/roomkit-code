@@ -311,7 +311,7 @@ impl Settings {
         let workspace = cli
             .workspace
             .canonicalize()
-            .map_err(|_| "Workspace does not exist")?;
+            .map_err(|_| format!("Workspace does not exist: {}", cli.workspace.display()))?;
         if !workspace.is_dir() {
             return Err("Workspace must be a directory".into());
         }

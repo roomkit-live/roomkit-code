@@ -85,6 +85,12 @@ impl Storage {
         builder.create(&directory)?;
         let sessions = directory.join("session-locks");
         builder.create(&sessions)?;
+        // An existing directory keeps its mode through create: restore it.
+        #[cfg(unix)]
+        for private in [&directory, &sessions] {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(private, std::fs::Permissions::from_mode(0o700))?;
+        }
         let database = directory.join("history.sqlite3");
         private_file(&database)?;
         Ok(Self {
@@ -209,7 +215,14 @@ mod tests {
                 & 0o777,
             0o700
         );
+        // Directories created loosely by another tool are made private again.
+        let locks = storage.database.with_file_name("session-locks");
+        std::fs::set_permissions(&locks, std::fs::Permissions::from_mode(0o755))?;
         let second = Storage::open(state.path(), root.path())?;
+        assert_eq!(
+            std::fs::metadata(&locks)?.permissions().mode() & 0o777,
+            0o700
+        );
         let claim = storage.sessions.claim("one")?.ok_or("Missing claim")?;
         storage.sessions.keep(claim)?;
         assert!(second.sessions.claim("one")?.is_none());

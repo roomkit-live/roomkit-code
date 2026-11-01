@@ -170,6 +170,9 @@ async fn abandon(kit: &RoomKit<SqliteStore>, profiles: &Profiles) {
     let _ = profiles.resources.close().await;
 }
 
+/// Events the terminal and the engine may queue for each other.
+const QUEUE: NonZeroUsize = NonZeroUsize::new(256).unwrap();
+
 pub(crate) async fn run(settings: Settings) -> Result<()> {
     let api_key = std::env::var("ROOMKIT_API_KEY").unwrap_or_default();
     let app = Application::open(&settings, api_key).await?;
@@ -181,7 +184,7 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
     // From here the terminal's screen hides the default hook's message.
     crate::diagnostics::report_panics(app.profiles.diagnostics.clone());
     app.services.updates.start(settings.update_check);
-    let (client, host) = connection(NonZeroUsize::new(256).ok_or("Invalid queue capacity")?);
+    let (client, host) = connection(QUEUE);
     let adapter = tokio::spawn(
         app.session()
             .run_with_commands(host, app.router(&settings.workspace)),

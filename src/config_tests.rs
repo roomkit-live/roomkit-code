@@ -312,3 +312,11 @@ fn update_checks_can_be_disabled_and_that_choice_survives_resume() {
     assert!(!Settings::load(&args).unwrap().update_check);
     assert!(Cli::try_parse_from(["roomkit-code", "--self-update", "--rollback"]).is_err());
 }
+
+#[test]
+fn a_missing_workspace_is_named() {
+    let root = tempfile::tempdir().unwrap();
+    let missing = root.path().join("missing-project");
+    let error = Settings::load(&cli(&missing)).err().unwrap().to_string();
+    assert!(error.contains("missing-project"), "{error}");
+}

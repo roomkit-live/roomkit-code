@@ -432,6 +432,9 @@ fn tool_payload(payload: &mut Value, event: &ToolCallEvent) {
     payload["tool_input"] = json!(event.call.arguments);
 }
 
+/// At most `limit` bytes of `text`, cut at a character boundary, without
+/// control characters other than newlines and tabs. Taking `limit`
+/// characters first only bounds the copy of a long text: no more can fit.
 fn bounded(text: &str, limit: usize) -> String {
     let mut text: String = text
         .chars()
