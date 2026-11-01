@@ -66,6 +66,7 @@ impl Resources {
         let processes = ProcessManager::new(root)
             .await?
             .with_limits(process_limits)?
+            .with_env(crate::command_env::command_env())?
             .with_output_store(outputs.clone())?;
         let mut search_limits = SearchLimits::default();
         search_limits.max_output_bytes = 48 * 1024;
@@ -159,7 +160,7 @@ pub(crate) async fn create(
         write = WriteToolset::new(WriteTool::from_workspace(mutations.clone())),
         edit = EditToolset::new(EditTool::from_workspace(mutations.clone())),
         patch = PatchToolset::new(PatchTool::from_workspace(mutations)),
-        shell = ShellToolset::new(ShellTool::new(root).await?.with_limits(shell_limits)?.with_output_store(resources.outputs.clone())),
+        shell = ShellToolset::new(ShellTool::new(root).await?.with_limits(shell_limits)?.with_env(crate::command_env::command_env())?.with_output_store(resources.outputs.clone())),
         fetch = WebFetchToolset::new(resources.fetch.clone()),
         search = WebSearchToolset::new(resources.search.clone()),
         start = ProcessStartToolset::new(resources.processes.clone()),

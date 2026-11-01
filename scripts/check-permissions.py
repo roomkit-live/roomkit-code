@@ -27,7 +27,8 @@ calls = {
     0: ("write", {"path": "denied.txt", "content": "should not exist"}),
     1: ("edit", {"path": "source.txt", "old_text": "before", "new_text": "after"}),
     2: ("shell", {"command": "printf 'shell result' > shell.txt; printf 'shell passed'"}),
-    4: ("shell", {"command": "printf 'yolo result' > yolo.txt; printf 'yolo passed'"}),
+    4: ("shell", {"command": "printf 'yolo result' > yolo.txt; "
+                  "printf '%s|%s' \"$SSH_AUTH_SOCK\" \"${FIXTURE_API_KEY-unset}\" > env.txt; printf 'yolo passed'"}),
 }
 answers = {3: "Permission fixture complete.", 5: "Yolo fixture complete."}
 
@@ -62,6 +63,8 @@ def scenario(project, state, url):
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 120, 0, 0))
     original = termios.tcgetattr(slave)
     env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+    # Commands get the SSH agent but no other host variable, such as a key.
+    env.update(SSH_AUTH_SOCK="/roomkit-fixture/agent.sock", FIXTURE_API_KEY="leaked")
     process = subprocess.Popen(
         [str(binary), str(project), "--state-dir", str(state), "--base-url", url,
          "--model", "fixture", "--color", "always", "--no-animations"],
@@ -144,6 +147,7 @@ def scenario(project, state, url):
         os.write(master, b"Run it in Yolo\r")
         wait_for(b"Yolo fixture complete.", offset)
         assert (project / "yolo.txt").read_text() == "yolo result"
+        assert (project / "env.txt").read_text() == "/roomkit-fixture/agent.sock|unset"
         assert not shown(b"Allow shell?", offset), "Yolo must not ask before a shell call"
         assert len(requests) == 6
         offset = len(captured)
@@ -175,4 +179,4 @@ finally:
     server.server_close()
     thread.join(timeout=5)
 
-print("PTY permissions passed: Shift+Tab, preserved draft, armed denial and approvals, mode kept during a decision, Yolo and actual file/shell effects.")
+print("PTY permissions passed: Shift+Tab, preserved draft, armed denial and approvals, mode kept during a decision, Yolo, actual file/shell effects and the shell environment.")

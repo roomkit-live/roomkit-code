@@ -32,7 +32,7 @@ type Slot = Arc<Mutex<Option<Record>>>;
 
 pub(crate) struct Files {
     root: PathBuf,
-    /// The root as tools may resolve it, to relate their absolute paths.
+    /// The root as tools may resolve it, to relate absolute paths to it.
     resolved: Option<PathBuf>,
     kit: OnceLock<RoomKit<SqliteStore>>,
     rooms: std::sync::Mutex<HashMap<String, Slot>>,
@@ -129,8 +129,9 @@ impl Files {
         .await;
     }
 
-    /// Workspace-relative, as `write` and `edit` report it; `read` reports
-    /// absolute paths. A path outside the workspace stays as reported.
+    /// Workspace-relative, as the file tools report it; an absolute path
+    /// under the root is made relative. A path outside the workspace stays as
+    /// reported.
     fn relative(&self, path: &str) -> String {
         let path = Path::new(path);
         std::iter::once(self.root.as_path())

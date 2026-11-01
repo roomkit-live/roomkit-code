@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Give shell commands, processes and `!` commands only the variables
+  development tools need: the defaults of roomkit-tools (`PATH`, `HOME`, user,
+  locale…) plus the SSH agent, desktop session, terminal, editors, proxies,
+  certificate bundles and toolchain homes. Other variables, such as API keys
+  exported in your shell, no longer reach them. Each command now runs detached
+  from the terminal, so one that prompts there fails at once instead of waiting
+  for its timeout (roomkit-tools 8d96ec3).
+
+- Name files relative to the project in `read`, `list`, `glob`, `grep` and
+  `code_outline` results instead of by their absolute path (roomkit-tools
+  8d96ec3). `list`, `glob` and `grep` results stored before this version show
+  as raw text.
+
+- Update roomkit-tui to e8c1167: the terminal keeps only a mode it accepts and
+  refuses a replacement view whose modes do not fit.
+
 - Let an agent that writes plans ask to enter Plan mode (`plan_mode_enter`) and,
   once its plan is written, ask you to approve it (`plan_mode_exit`): the card
   shows the stored plan, and approving moves the conversation to Ask. The agent

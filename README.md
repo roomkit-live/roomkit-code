@@ -120,8 +120,8 @@ sends a literal leading exclamation mark to the agent. Explicit commands execute
 in both Ask and Yolo; those modes govern commands proposed by the agent.
 Plan mode also disables manual `!` and `/shell` commands until you switch modes.
 
-Commands use `/bin/sh -c` without a login shell or PTY, with stdin closed and a
-five-minute lifetime. Each starts in the project directory: `cd` affects that
+Commands use `/bin/sh -c` without a login shell or PTY, with stdin closed, a
+five-minute lifetime and the environment described under the shell tool below. Each starts in the project directory: `cd` affects that
 command only. Stdout/stderr, exit status and duration appear in the conversation;
 Esc interrupts and waits for cleanup. F6 or **/processes** inspects or stops the
 process. Finished commands automatically leave the live list and footer.
@@ -282,9 +282,22 @@ content is untrusted data. Web-service configuration in the UI is not yet expose
 Returned pages and scans are bounded by the tools' defaults. Hidden files are
 included and ignore files are not applied; choose a workspace appropriate to
 share with the configured model. Filesystem tools check paths under the configured
-root. Shell uses `/bin/sh -c` with your user permissions and environment; its
-initial workspace directory is **not a sandbox**. It has closed stdin, bounded
+root. Shell uses `/bin/sh -c` with your user permissions; its initial
+workspace directory is **not a sandbox**. It has closed stdin, bounded
 output (8 KiB per stream in the immediate result), a default 10-second runtime and a maximum requested runtime of 120 seconds.
+Each command runs in its own session, without the terminal: a command that
+prompts on the terminal fails at once.
+
+Shell commands, persistent processes and `!` commands receive only part of your
+environment: `PATH`, `HOME`, the user, shell, locale, time zone and temporary
+directory variables, plus those development tools look for: `SSH_AUTH_SOCK`,
+the desktop session (`DISPLAY`, `XAUTHORITY`, `WAYLAND_DISPLAY`, D-Bus) and XDG
+directories, `TERM`, `COLORTERM`, the editors, the proxies (whose URL may embed
+a password), the certificate bundles (`SSL_CERT_FILE`, `SSL_CERT_DIR`,
+`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`), and `CARGO_HOME`, `RUSTUP_HOME`,
+`JAVA_HOME`, `ANDROID_HOME`, `NVM_DIR`, `VIRTUAL_ENV`, `GOPATH`. Every other
+variable, such as an API key exported in your shell or one set by direnv or a
+Nix shell, stays out of commands (`src/command_env.rs`).
 
 Persistent processes use pipes, not a PTY, and survive tool calls and profile
 changes while the app runs. They default to a five-minute lifetime (up to one

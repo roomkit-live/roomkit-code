@@ -419,11 +419,11 @@ mod tests {
         for (name, data) in [
             (
                 "glob",
-                json!({"path":".","entries":[],"truncated":false,"next_offset":null}),
+                json!({"path":".","entries":[],"truncated":false,"next_offset":null,"skipped_entries":0}),
             ),
             (
                 "list",
-                json!({"path":".","entries":[{"name":"a","path":"a","kind":"file"}],"truncated":true,"next_offset":1}),
+                json!({"path":".","entries":[{"name":"a","path":"a","kind":"file"}],"truncated":true,"next_offset":1,"skipped_entries":0}),
             ),
             (
                 "read",
@@ -435,7 +435,7 @@ mod tests {
             ),
             (
                 "grep",
-                json!({"path":".","matches":[],"truncated":false,"next_offset":null,"skipped_files":0}),
+                json!({"path":".","matches":[],"truncated":false,"next_offset":null,"skipped_files":0,"skipped_entries":0,"skipped_lines":0}),
             ),
         ] {
             let call = call(name, data);
@@ -450,7 +450,7 @@ mod tests {
         }
         let found = call(
             "grep",
-            json!({"path":".","matches":[{"path":"file","line":2,"text":"match","context_before":[{"number":1,"text":"context"}]}],"truncated":false,"next_offset":null,"skipped_files":0}),
+            json!({"path":".","matches":[{"path":"file","line":2,"text":"match","context_before":[{"number":1,"text":"context"}]}],"truncated":false,"next_offset":null,"skipped_files":0,"skipped_entries":0,"skipped_lines":0}),
         );
         assert!(files.has_expanded_details(&found));
     }
@@ -463,7 +463,7 @@ mod tests {
             {"name":"src","path":"src","kind":"directory"},
             {"name":"Cargo.toml","path":"Cargo.toml","kind":"file"},
             {"name":"README.md","path":"README.md","kind":"file"}
-        ],"truncated":true,"next_offset":4}),
+        ],"truncated":true,"next_offset":4,"skipped_entries":0}),
         );
         let source = call.text.clone();
         assert!(Files::default().has_expanded_details(&call));
@@ -502,7 +502,7 @@ mod tests {
         );
         let grep = call(
             "grep",
-            json!({"path":".","matches":[{"path":"src/lib.rs","line":7,"text":"pub fn answer() -> u8 { 42 }","context_before":[{"number":6,"text":"// explanation"}]}],"truncated":false,"next_offset":null,"skipped_files":1}),
+            json!({"path":".","matches":[{"path":"src/lib.rs","line":7,"text":"pub fn answer() -> u8 { 42 }","context_before":[{"number":6,"text":"// explanation"}]}],"truncated":false,"next_offset":null,"skipped_files":1,"skipped_entries":0,"skipped_lines":0}),
         );
         let rendered = Files::default().render_styled(&grep, true);
         assert!(

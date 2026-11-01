@@ -4,6 +4,7 @@ mod accounts;
 mod agent;
 mod application;
 mod branding;
+mod command_env;
 mod config;
 mod diagnostics;
 mod docs;
