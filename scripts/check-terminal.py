@@ -100,7 +100,7 @@ def scenario(project, state, base_url, resume=False, color="never"):
             offset = len(captured)
             os.write(master, b"/tools\r")
             wait_for(b"Tools available to code", offset)
-            wait_for(b"27 registered", offset)
+            wait_for(b"29 registered", offset)
             os.write(master, b"shell")
             wait_for(b"Filter: shell", offset)
             os.write(master, b"\r")
