@@ -3,8 +3,8 @@
 //!
 //! Behind these locks are in-memory copies and caches: per-conversation maps,
 //! the current agent, task handles, the update check, the diagnostic log's
-//! recent records and the loaded hook catalogue. Each is replaced whole or
-//! rebuilt by later calls, the hook catalogue included
+//! recent records, the shell's start order and the loaded hook catalogue. Each
+//! is replaced whole or rebuilt by later calls, the hook catalogue included
 //! (`hooks::catalogue::Catalogue::reload`), so what a panic left is overwritten
 //! rather than kept. A panic while one is held is a bug of its own; turning it
 //! into a second panic in every later caller would close the session the user

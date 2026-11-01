@@ -274,3 +274,56 @@ async fn repeated_manual_commands_reclaim_completed_slots_and_bound_output() {
     task.await.unwrap().unwrap();
     app.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn the_oldest_finished_command_is_reclaimed_not_the_longest() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let app = Application::open(
+        &settings(root.path(), state.path(), "http://127.0.0.1:1/v1"),
+        String::new(),
+    )
+    .await
+    .unwrap();
+    let (client, task) = attach(&app, root.path()).await;
+    // The first command is the oldest; the second runs the longest.
+    let commands = ["printf first", "sleep 0.4; printf long"]
+        .into_iter()
+        .chain(std::iter::repeat_n("printf ok", 6));
+    for (index, text) in commands.enumerate() {
+        client
+            .try_send(command(&app, &format!("keep-{index}"), text))
+            .unwrap();
+        assert_eq!(finish(&client).await.1, RunOutcome::Completed);
+    }
+    let id = |jobs: &[roomkit_tools_process::ObservedProcess], text: &str| {
+        jobs.iter()
+            .find(|job| job.command == text)
+            .map(|job| job.status.process_id.clone())
+    };
+    let jobs = app.profiles.resources.processes.observe().await;
+    let (first, long) = (
+        id(&jobs, "printf first"),
+        id(&jobs, "sleep 0.4; printf long"),
+    );
+    assert!(first.is_some() && long.is_some());
+    // An eighth retained command makes room for the ninth.
+    client
+        .try_send(command(&app, "ninth", "printf nine"))
+        .unwrap();
+    assert_eq!(finish(&client).await.1, RunOutcome::Completed);
+    let kept: Vec<_> = app
+        .profiles
+        .resources
+        .processes
+        .observe()
+        .await
+        .into_iter()
+        .map(|job| job.status.process_id)
+        .collect();
+    assert!(!kept.contains(&first.unwrap()), "{kept:?}");
+    assert!(kept.contains(&long.unwrap()), "{kept:?}");
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.close().await.unwrap();
+}
