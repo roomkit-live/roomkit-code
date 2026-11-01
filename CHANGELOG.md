@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Show what a file search left out: `grep`, `list` and `glob` cards now count
+  names that are not UTF-8 and lines too long to search, as they already
+  counted binary files, and mark a match clipped to fit its page.
+
 - Compile one HTTP stack and one SHA-256 implementation: roomkit-rs,
   roomkit-auth and this application move to reqwest 0.13 and sha2 0.11 with
   roomkit-tools, and keep rustls with the ring provider and the webpki roots.
