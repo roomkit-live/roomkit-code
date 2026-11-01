@@ -1,5 +1,6 @@
 //! `/rename` names a conversation; its ID stays its identity.
 use super::*;
+use roomkit::ConversationStore;
 use roomkit_tui_engine::{CommandHandler, CommandResult};
 
 async fn invoke(
@@ -56,6 +57,23 @@ async fn a_named_conversation_keeps_its_name_in_the_title_the_picker_and_the_exi
     // The engine refuses commands while a response runs, before this
     // handler: a rename then never stores a name it cannot show.
     assert!(!app.router(&settings.workspace).allow_while_busy("rename"));
+    // A stored name this version would refuse reads as no name.
+    let key = "roomkit_code:name";
+    let invalid = [("name".into(), json!("a\u{202E}b"))].into_iter().collect();
+    app.kit
+        .store()
+        .set_private_state(&room, key, Some(invalid))
+        .await
+        .unwrap();
+    assert_eq!(crate::sessions::name(&app.kit, &room).await, None);
+    let valid = [("name".into(), json!("Release notes"))]
+        .into_iter()
+        .collect();
+    app.kit
+        .store()
+        .set_private_state(&room, key, Some(valid))
+        .await
+        .unwrap();
     let summary = crate::exit_summary::collect(
         &app.kit,
         &app.profiles.resources.processes,

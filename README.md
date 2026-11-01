@@ -62,7 +62,7 @@ labels the session in `/resume`, which keeps the first message in the
 description, and precedes the ID in the exit report. The ID stays its
 identity: `/resume ID`, `--session` and the resume command still use it. An
 empty conversation cannot be named, since it is reused as the next draft.
-Renaming is refused while a response runs: send it again once it finished.
+Renaming is refused while a response runs: send it again once it has finished.
 
 `--session NAME` explicitly opens or creates a named session. Existing sessions,
 including the former default `main`, remain available through `/resume` or

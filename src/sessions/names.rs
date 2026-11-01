@@ -42,8 +42,11 @@ pub(super) fn parse(arguments: &str) -> Result<String, String> {
     if name.is_empty() {
         return Err("Use /rename <name>".into());
     }
-    if name.chars().any(|c| c.is_control() || invisible(c)) {
-        return Err("A conversation's name is a single line of visible text".into());
+    if name.chars().any(|c| c.is_control() || reorders(c)) {
+        return Err("A conversation's name is a single line of plain text".into());
+    }
+    if name.chars().all(|c| c.is_whitespace() || zero_width(c)) {
+        return Err("A conversation's name needs a visible character".into());
     }
     if name.chars().count() > MAX_NAME {
         return Err(format!(
@@ -53,18 +56,19 @@ pub(super) fn parse(arguments: &str) -> Result<String, String> {
     Ok(name.into())
 }
 
-/// Characters that draw nothing or reorder what follows: zero-width
-/// spaces and joiners, line and paragraph separators, bidirectional
-/// controls, the byte order mark. A name of them would show blank, and one
-/// could reverse the ID printed after it at exit.
-fn invisible(c: char) -> bool {
+/// Bidirectional controls and line or paragraph separators: they could
+/// reverse the ID printed after a name at exit, or break its line.
+fn reorders(c: char) -> bool {
     matches!(
         c,
-        '\u{200B}'..='\u{200F}'
-            | '\u{2028}'..='\u{202E}'
-            | '\u{2060}'..='\u{2069}'
-            | '\u{FEFF}'
+        '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
     )
+}
+
+/// Characters that draw nothing. Joiners belong inside emoji sequences
+/// and some scripts' words; a name of them only would show blank.
+fn zero_width(c: char) -> bool {
+    matches!(c, '\u{200B}'..='\u{200D}' | '\u{2060}'..='\u{2064}' | '\u{FEFF}')
 }
 
 impl Sessions {
@@ -97,14 +101,20 @@ mod tests {
         assert_eq!(parse(&"é".repeat(80)).map(|n| n.chars().count()), Ok(80));
         assert!(parse("").is_err() && parse("   ").is_err());
         assert!(parse("two\nlines").is_err());
-        for invisible in [
+        for refused in [
             "\u{200B}",
+            "\u{200D}\u{FEFF} ",
             "a\u{202E}b",
             "a\u{2028}b",
             "\u{2066}a",
-            "\u{FEFF}a",
+            "a\u{061C}b",
         ] {
-            assert!(parse(invisible).is_err(), "{invisible:?}");
+            assert!(parse(refused).is_err(), "{refused:?}");
+        }
+        // Joiners inside an emoji sequence or a word are part of the name.
+        let persian = "\u{0646}\u{06CC}\u{0645}\u{200C}\u{0641}\u{0627}\u{0635}\u{0644}\u{0647}";
+        for kept in ["\u{1F469}\u{200D}\u{1F4BB} review", persian] {
+            assert_eq!(parse(kept).as_deref(), Ok(kept), "{kept:?}");
         }
         assert!(parse(&"x".repeat(81)).is_err());
     }
