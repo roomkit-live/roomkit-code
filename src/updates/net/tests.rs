@@ -4,9 +4,20 @@ use axum::{Router, routing::get};
 
 #[tokio::test]
 async fn missing_release_is_not_an_error_when_the_repository_is_accessible() {
-    use axum::http::StatusCode;
+    use axum::{
+        http::{HeaderMap, StatusCode, header::ACCEPT_ENCODING},
+        response::IntoResponse,
+    };
+    // roomkit-tools enables reqwest's gzip: the answer is still asked uncompressed.
+    let repository = |headers: HeaderMap| async move {
+        if headers.contains_key(ACCEPT_ENCODING) {
+            (StatusCode::BAD_REQUEST, "compressed").into_response()
+        } else {
+            "{}".into_response()
+        }
+    };
     let router = Router::new()
-        .route("/repos/roomkit-live/roomkit-code", get(|| async { "{}" }))
+        .route("/repos/roomkit-live/roomkit-code", get(repository))
         .route(
             "/repos/roomkit-live/roomkit-code/releases/latest",
             get(|| async { StatusCode::NOT_FOUND }),
@@ -72,7 +83,7 @@ async fn unavailable_service_is_not_reported_as_no_update() {
 #[tokio::test]
 async fn github_fixture_checks_pair_size_integrity_and_never_follows_untrusted_redirects() {
     let data = b"fixture release binary";
-    let hash = format!("{:x}", Sha256::digest(data));
+    let hash = crate::digest::sha256_hex(data);
     let name = format!("roomkit-code-v0.2.0-{TARGET}");
     let release = Release {
         tag_name: "v0.2.0".into(),

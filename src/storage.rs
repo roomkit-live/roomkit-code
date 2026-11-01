@@ -10,7 +10,6 @@ use std::{
 };
 
 use fs2::FileExt;
-use sha2::{Digest, Sha256};
 
 use crate::Result;
 
@@ -70,10 +69,7 @@ impl Drop for FileLease {
 
 impl Storage {
     pub fn open(state_dir: &Path, workspace: &Path) -> Result<Self> {
-        let key = format!(
-            "{:x}",
-            Sha256::digest(workspace.as_os_str().as_encoded_bytes())
-        );
+        let key = crate::digest::sha256_hex(workspace.as_os_str().as_encoded_bytes());
         let directory = state_dir.join("projects").join(key);
         let mut builder = std::fs::DirBuilder::new();
         builder.recursive(true);
@@ -144,7 +140,7 @@ impl SessionLeases {
         }
         let path = self
             .directory
-            .join(format!("{:x}.lock", Sha256::digest(id.as_bytes())));
+            .join(format!("{}.lock", crate::digest::sha256_hex(id.as_bytes())));
         match FileLease::exclusive(private_file(&path)?) {
             Ok(lease) => Ok(Some(SessionClaim {
                 id: id.into(),

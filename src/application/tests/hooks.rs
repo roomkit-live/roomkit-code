@@ -1,7 +1,6 @@
 use super::*;
 use roomkit_tui::protocol::PanelSpec;
 use roomkit_tui_engine::CommandResult;
-use sha2::Digest;
 use std::path::Path;
 
 fn configure(root: &Path, events: &[&str], body: &str, plan: bool) {
@@ -170,10 +169,7 @@ async fn hooks_span_real_tool_rounds_preserve_correlation_and_resume_without_rep
         first_execution
     );
     app.close().await.unwrap();
-    let project = format!(
-        "{:x}",
-        sha2::Sha256::digest(root.path().as_os_str().as_encoded_bytes())
-    );
+    let project = crate::digest::sha256_hex(root.path().as_os_str().as_encoded_bytes());
     let log = std::fs::read_to_string(
         state
             .path()

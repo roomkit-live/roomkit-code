@@ -40,7 +40,7 @@ pub fn digest(path: &Path) -> Result<String> {
         }
         hash.update(&buf[..n]);
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(crate::digest::hex(&hash.finalize()))
 }
 
 fn regular_dir(path: &Path) -> Result<()> {

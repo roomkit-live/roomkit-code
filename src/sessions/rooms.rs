@@ -9,7 +9,6 @@ use roomkit::{
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::{Choice, Event};
 use roomkit_tui_engine::{CommandResult, SessionConfig};
-use sha2::{Digest, Sha256};
 
 use super::{Sessions, names, title};
 use crate::{Result, config::valid_session_name};
@@ -163,7 +162,7 @@ impl Sessions {
         }
         let identity = serde_json::to_vec(&(current.room.as_str(), operation))
             .map_err(|_| "Invalid operation identity".to_string())?;
-        let name = format!("session-{:x}", Sha256::digest(identity));
+        let name = format!("session-{}", crate::digest::sha256_hex(identity));
         let draft_key = format!("roomkit_code:new-draft:{name}");
         if self.kept_draft(&current.room, &draft_key).await? {
             return Ok(self.switched(current.clone(), current.room).await);

@@ -22,7 +22,6 @@ use roomkit_tools_process::{
 use roomkit_tui::protocol::{Command, Event, Item, Message, Request, RunOutcome};
 use roomkit_tui_engine::{CommandExecution, CommandResult, ExecutionContext, SessionConfig};
 use serde_json::json;
-use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
@@ -99,7 +98,7 @@ impl Shell {
             request.operation.as_str(),
         ))
         .map_err(|_| "Invalid operation identity")?;
-        let id = EventId::new(format!("shell-{:x}", Sha256::digest(identity)))
+        let id = EventId::new(format!("shell-{}", crate::digest::sha256_hex(identity)))
             .map_err(|_| "Invalid operation identity")?;
         if let Some(row) = kit
             .store()

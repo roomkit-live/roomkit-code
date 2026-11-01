@@ -14,6 +14,13 @@ and revision to avoid duplicate, incompatible RoomKit types. A checkout must
 build without sibling directories. Review the matching integration tests when
 updating a source pin.
 
+`make audit` refuses two versions of one crate. `deny.toml` admits an older
+version only through the third-party crate that still holds it, so a RoomKit
+crate that brings it fails too. When a RoomKit repository moves a shared
+dependency (reqwest, sha2, base64…), align the others rather than widening
+that list. HTTP clients take `crate::http_client::builder()`: reqwest is built
+without a crypto provider and panics without that configuration.
+
 Public code, documentation and fixtures are in English and contain only generic
 examples. Local `docs/`, agent configuration, `*.local.toml`, `.env*`, databases
 and build output are ignored. Cargo's package allowlist and `make package-check`

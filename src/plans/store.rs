@@ -1,7 +1,6 @@
 use roomkit_tools_core::Error;
 use roomkit_tools_plans::*;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     io::{Read, Write},
@@ -100,7 +99,9 @@ impl Plans {
             cancelled(&cancel)?;
             let key = serde_json::to_vec(&(&scope.room_id, &scope.caller_id))
                 .map_err(|_| unavailable())?;
-            let path = this.root.join(format!("{:x}.json", Sha256::digest(key)));
+            let path = this
+                .root
+                .join(format!("{}.json", crate::digest::sha256_hex(key)));
             let mut doc = load(&path, &scope)?;
             let before = doc.clone();
             let output = apply(&mut doc)?;

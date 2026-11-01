@@ -112,12 +112,8 @@ impl Instructions {
     }
 
     fn emit(&self, room: &str, agent: &str, report: &Report) -> bool {
-        use sha2::{Digest, Sha256};
-        let scope = format!(
-            "{:x}",
-            Sha256::digest(serde_json::json!(report.checked_scopes).to_string())
-        );
-        let signature = format!("{:x}", Sha256::digest(report.scoped()));
+        let scope = crate::digest::sha256_hex(serde_json::json!(report.checked_scopes).to_string());
+        let signature = crate::digest::sha256_hex(report.scoped());
         let mut cache = crate::sync::lock(&self.emitted);
         let Some(entry) = cache
             .iter_mut()

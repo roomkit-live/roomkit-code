@@ -17,7 +17,6 @@ use roomkit_openai::OpenAiAgent;
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::ModelInfo;
 use roomkit_tui_engine::SessionConfig;
-use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::sync::Mutex;
 

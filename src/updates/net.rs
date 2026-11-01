@@ -98,7 +98,7 @@ impl GitHub {
         Ok(Self {
             base,
             token,
-            client: reqwest::Client::builder()
+            client: crate::http_client::builder()?
                 .redirect(reqwest::redirect::Policy::none())
                 .user_agent(concat!("roomkit-code/", env!("CARGO_PKG_VERSION")))
                 .connect_timeout(std::time::Duration::from_secs(5))
@@ -245,7 +245,7 @@ impl GitHub {
             hash.update(&chunk);
             file.write_all(&chunk)?;
         }
-        if size != binary.size || format!("{:x}", hash.finalize()) != expected {
+        if size != binary.size || crate::digest::hex(&hash.finalize()) != expected {
             return Err("Release checksum mismatch; installation unchanged".into());
         }
         file.as_file().sync_all()?;

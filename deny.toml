@@ -11,8 +11,33 @@ version = 2
 allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "Unicode-3.0", "ISC", "Zlib", "CDLA-Permissive-2.0"]
 
 [bans]
-multiple-versions = "warn"
+# Two copies of one crate cost size and build time. The RoomKit crates use one
+# version of each shared dependency. Where a third-party crate still holds an
+# older one, the version RoomKit uses is skipped and the older one is allowed
+# only through that crate. A RoomKit crate that brings the older version, or
+# any new duplicate, fails the check: align the repositories, or name the
+# third-party holder here.
+multiple-versions = "deny"
 wildcards = "deny"
+skip = [
+    { crate = "base64@0.23", reason = "jsonwebtoken 11 (roomkit-auth) still uses 0.22" },
+    { crate = "foldhash@0.2", reason = "hashbrown 0.15, through petgraph, still uses 0.1" },
+    { crate = "getrandom@0.4", reason = "ring 0.17 and jsonwebtoken 11 still use 0.2" },
+    { crate = "hashbrown@0.17", reason = "petgraph (wl-clipboard-rs, through arboard) still uses 0.15" },
+    { crate = "miniz_oxide@0.9", reason = "png still uses 0.8" },
+    { crate = "untrusted@0.9", reason = "aws-lc-rs (jsonwebtoken 11, roomkit-auth) still uses 0.7" },
+    { crate = "windows-sys@0.61", reason = "ring 0.17 still uses 0.52; Windows only" },
+    { crate = "syn@2", reason = "proc-macros only, compiled for the build and absent from the binary" },
+]
+deny = [
+    { crate = "base64@0.22", wrappers = ["jsonwebtoken"] },
+    { crate = "foldhash@0.1", wrappers = ["hashbrown"] },
+    { crate = "getrandom@0.2", wrappers = ["ring", "jsonwebtoken"] },
+    { crate = "hashbrown@0.15", wrappers = ["petgraph"] },
+    { crate = "miniz_oxide@0.8", wrappers = ["png"] },
+    { crate = "untrusted@0.7", wrappers = ["aws-lc-rs"] },
+    { crate = "windows-sys@0.52", wrappers = ["ring"] },
+]
 
 [sources]
 unknown-registry = "deny"

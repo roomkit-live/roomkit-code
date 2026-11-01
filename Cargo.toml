@@ -15,40 +15,44 @@ include = ["build.rs", "src/**", "Cargo.toml", "Cargo.lock", "README.md", "LICEN
 
 [dependencies]
 roomkit-hooks = { path = "crates/roomkit-hooks", version = "0.1.0" }
-roomkit-auth = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-auth", rev = "e995fe8f14d2c2d40f7330cb925ce7ad78126b4c" }
+roomkit-auth = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-auth", rev = "c2420e496e421732f1c615e9f637277680cdd106" }
 # Keep the engine source identical to the CLI and tools adapters.
-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "dd6ab1b2186518d159b0f38c830a4307834bf199" }
-roomkit-mcp = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "dd6ab1b2186518d159b0f38c830a4307834bf199", features = ["http"] }
-roomkit-ai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "dd6ab1b2186518d159b0f38c830a4307834bf199" }
-roomkit-openai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "dd6ab1b2186518d159b0f38c830a4307834bf199" }
-roomkit-sqlite = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "dd6ab1b2186518d159b0f38c830a4307834bf199" }
-roomkit-tui-engine = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tui", rev = "e8c1167aee64a93fabcb824d4753d3e07ae4919b" }
-roomkit-tui = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tui", rev = "e8c1167aee64a93fabcb824d4753d3e07ae4919b" }
-roomkit-tools-code = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "8d96ec3492fb9bade7420954ce9d364eda12029b" }
-roomkit-tools-fs = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "8d96ec3492fb9bade7420954ce9d364eda12029b" }
-roomkit-tools-process = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "8d96ec3492fb9bade7420954ce9d364eda12029b" }
-roomkit-tools-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "8d96ec3492fb9bade7420954ce9d364eda12029b", features = ["plans", "docs"] }
-roomkit-tools-plans = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "8d96ec3492fb9bade7420954ce9d364eda12029b" }
+roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "e5ced400061a8558f9b59dbadbf16f9cbac97ba3" }
+roomkit-mcp = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "e5ced400061a8558f9b59dbadbf16f9cbac97ba3", features = ["http"] }
+roomkit-ai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "e5ced400061a8558f9b59dbadbf16f9cbac97ba3" }
+roomkit-openai = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "e5ced400061a8558f9b59dbadbf16f9cbac97ba3" }
+roomkit-sqlite = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "e5ced400061a8558f9b59dbadbf16f9cbac97ba3" }
+roomkit-tui-engine = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tui", rev = "1c75527dea6d8cb6e1da08d88b55703cd78eb60d" }
+roomkit-tui = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tui", rev = "1c75527dea6d8cb6e1da08d88b55703cd78eb60d" }
+roomkit-tools-code = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "c08dee039334a6ff71a5d4976aa8eff5095e4222" }
+roomkit-tools-fs = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "c08dee039334a6ff71a5d4976aa8eff5095e4222" }
+roomkit-tools-process = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "c08dee039334a6ff71a5d4976aa8eff5095e4222" }
+roomkit-tools-roomkit = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "c08dee039334a6ff71a5d4976aa8eff5095e4222", features = ["plans", "docs"] }
+roomkit-tools-plans = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "c08dee039334a6ff71a5d4976aa8eff5095e4222" }
 # The application's own guide is served from local files only.
-roomkit-tools-docs = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "8d96ec3492fb9bade7420954ce9d364eda12029b", features = ["files"] }
-roomkit-tools-core = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "8d96ec3492fb9bade7420954ce9d364eda12029b" }
-roomkit-tools-web = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "8d96ec3492fb9bade7420954ce9d364eda12029b" }
-roomkit-tools-search = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "8d96ec3492fb9bade7420954ce9d364eda12029b", default-features = false, features = ["exa"] }
+roomkit-tools-docs = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "c08dee039334a6ff71a5d4976aa8eff5095e4222", features = ["files"] }
+roomkit-tools-core = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "c08dee039334a6ff71a5d4976aa8eff5095e4222" }
+roomkit-tools-web = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "c08dee039334a6ff71a5d4976aa8eff5095e4222" }
+roomkit-tools-search = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "c08dee039334a6ff71a5d4976aa8eff5095e4222", default-features = false, features = ["exa"] }
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.9"
+toml = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 fs2 = "0.4"
 # PNG validation and encoding of private image attachments.
-base64 = "0.22"
+base64 = "0.23"
 png = "0.18"
-sha2 = "0.10"
+sha2 = "0.11"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# rustls with the ring provider and the webpki roots, given to reqwest as a
+# configuration (src/http_client.rs): 0.13 has no ring-backed feature.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
 rustix = { version = "1", features = ["fs"] }
 ignore = "0.4.34"
 

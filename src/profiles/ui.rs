@@ -910,7 +910,8 @@ fn parse_agent(
 
 async fn discover(provider: &Provider) -> Result<Vec<(String, Option<u64>)>, String> {
     provider.validate()?;
-    let client = reqwest::Client::builder()
+    let client = crate::http_client::builder()
+        .map_err(|_| "Cannot initialize connection check")?
         .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(10))
         .build()

@@ -34,7 +34,7 @@ impl Sequence {
             hash.update((value.len() as u64).to_le_bytes());
             hash.update(value);
         }
-        let key = format!("{:x}", hash.finalize());
+        let key = crate::digest::hex(&hash.finalize());
         let path = endpoint.storage.join(format!("{key}.json"));
         let mut options = OpenOptions::new();
         options.read(true).write(true).create(true).truncate(false);

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Compile one HTTP stack and one SHA-256 implementation: roomkit-rs,
+  roomkit-auth and this application move to reqwest 0.13 and sha2 0.11 with
+  roomkit-tools, and keep rustls with the ring provider and the webpki roots.
+  `make audit` now fails on a crate compiled twice unless `deny.toml` names
+  the third-party crate responsible.
+
 - Give shell commands, processes and `!` commands only the variables
   development tools need: the defaults of roomkit-tools (`PATH`, `HOME`, user,
   locale…) plus the SSH agent, desktop session, terminal, editors, proxies,

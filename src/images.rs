@@ -4,7 +4,6 @@ use roomkit::model::{CompositeContent, EventContent, MediaContent, RoomId, TextC
 use roomkit::transcript::Image;
 use roomkit_ai::ImageResolver;
 use roomkit_tui::protocol::{ImageUpload, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_IMAGES};
-use sha2::{Digest, Sha256};
 use std::{
     future::Future,
     io::{Cursor, Read, Write},
@@ -22,7 +21,7 @@ impl Images {
     }
     fn directory(&self, room: &RoomId) -> PathBuf {
         self.root
-            .join(format!("{:x}", Sha256::digest(room.as_str().as_bytes())))
+            .join(crate::digest::sha256_hex(room.as_str().as_bytes()))
     }
     pub async fn prepare(
         self: &Arc<Self>,
@@ -58,7 +57,7 @@ impl Images {
             parts.push(TextContent::new(text).into());
         }
         for (index, (image, bytes)) in images.iter().zip(decoded).enumerate() {
-            let digest = format!("{:x}", Sha256::digest(&bytes));
+            let digest = crate::digest::sha256_hex(&bytes);
             let path = directory.join(format!("{digest}.png"));
             match std::fs::symlink_metadata(&path) {
                 Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
@@ -121,7 +120,7 @@ impl Images {
             .take((MAX_IMAGE_BYTES + 1) as u64)
             .read_to_end(&mut bytes)
             .ok()?;
-        if bytes.len() > MAX_IMAGE_BYTES || format!("{:x}", Sha256::digest(&bytes)) != digest {
+        if bytes.len() > MAX_IMAGE_BYTES || crate::digest::sha256_hex(&bytes) != digest {
             return None;
         }
         Image::new(

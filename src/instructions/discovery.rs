@@ -3,7 +3,6 @@ use rustix::{
     fd::OwnedFd,
     fs::{self, Mode, OFlags},
 };
-use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, io::Read, path::Component};
 
 const FILE_LIMIT: usize = 16 * 1024;
@@ -83,7 +82,7 @@ impl Report {
                         self.sources.push(Source {
                             path,
                             scope: scope.into(),
-                            revision: format!("{:x}", Sha256::digest(text.as_bytes())),
+                            revision: crate::digest::sha256_hex(text.as_bytes()),
                             text,
                         });
                     }

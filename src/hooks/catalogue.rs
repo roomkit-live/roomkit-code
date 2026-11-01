@@ -1,6 +1,5 @@
 //! Discovery and explicit per-project trust; configuration never grants itself trust.
 use roomkit_hooks::{CommandHook, Configuration, Event, HookGroup};
-use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeSet,
     io::{Read, Write},
@@ -101,7 +100,7 @@ impl Catalogue {
                                 let definition =
                                     serde_json::to_vec(&(path, event, &group.matcher, hook))
                                         .unwrap_or_default();
-                                let id = format!("{:x}", Sha256::digest(definition));
+                                let id = crate::digest::sha256_hex(definition);
                                 if next.entries.iter().any(|entry| entry.id == id) {
                                     continue;
                                 }

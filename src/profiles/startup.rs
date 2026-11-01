@@ -85,10 +85,7 @@ fn add_first_agent(
     settings: &Settings,
     api_key: String,
 ) -> Result<(), String> {
-    let digest = format!(
-        "{:x}",
-        Sha256::digest(settings.workspace.as_os_str().as_encoded_bytes())
-    );
+    let digest = crate::digest::sha256_hex(settings.workspace.as_os_str().as_encoded_bytes());
     let id = format!("imported-{}", &digest[..12]);
     if !documents.providers.value.profiles.contains_key(&id) {
         let provider = Provider {

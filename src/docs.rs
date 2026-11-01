@@ -109,7 +109,7 @@ pub(crate) fn materialize(parent: &Path, topics: &[Topic]) -> std::io::Result<Pa
         hash.update(topic.text.as_bytes());
         hash.update([0]);
     }
-    let revision = format!("{:x}", hash.finalize());
+    let revision = crate::digest::hex(&hash.finalize());
     let target = parent.join(&revision[..16]);
     if target.is_dir() {
         return Ok(target);
