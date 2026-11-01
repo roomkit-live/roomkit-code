@@ -466,6 +466,20 @@ async fn approval(client: &roomkit_tui::Client) -> roomkit_tui::protocol::Permis
     }
 }
 
+/// Whether request `id` was refused. Progress items sent meanwhile, such as a
+/// call shown again once its decision is asked, are skipped; nothing else is.
+async fn refused(client: &roomkit_tui::Client, id: u64) -> bool {
+    loop {
+        match event(client).await {
+            Event::Item { .. } => {}
+            Event::Reply { request, error, .. } => {
+                return request == RequestId::new(id) && error.is_some();
+            }
+            _ => return false,
+        }
+    }
+}
+
 #[tokio::test]
 async fn ask_gates_real_changes_and_yolo_never_auto_approves_an_existing_request() {
     use roomkit_tui::protocol::Decision;
@@ -519,10 +533,7 @@ async fn ask_gates_real_changes_and_yolo_never_auto_approves_an_existing_request
             decision: Decision::Allow,
         },
     );
-    assert!(matches!(
-        event(&client).await,
-        Event::Reply { error: Some(_), .. }
-    ));
+    assert!(refused(&client, 2).await);
     assert!(!project.path().join("denied.txt").exists());
     command(
         &client,
@@ -567,10 +578,7 @@ async fn ask_gates_real_changes_and_yolo_never_auto_approves_an_existing_request
             decision: Decision::Allow,
         },
     );
-    assert!(matches!(
-        event(&client).await,
-        Event::Reply { error: Some(_), .. }
-    ));
+    assert!(refused(&client, 5).await);
     command(
         &client,
         6,

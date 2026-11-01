@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Copy an answer longer than the screen with the mouse: keep the button held
+  and turn the wheel, or hold the pointer above or below the conversation, and
+  the selection follows while it scrolls; the copy holds the lines no longer
+  on screen. Copied text stays highlighted until the next click or key. The
+  wheel used to clear the selection, so only what fit on screen could be
+  copied.
+
+- Show a tool call as running from its start, and as pending only while a
+  decision of its turn is unanswered: every call used to read "pending" until
+  it ended, even while it ran.
+
 - Keep only the current and previous versions in a managed installation:
   each update used to add up to 256 MiB that was never removed.
 
