@@ -92,7 +92,7 @@ dependencies = [
  "objc2-foundation",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
  "wl-clipboard-rs",
  "x11rb",
 ]
@@ -607,7 +607,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1572,7 +1572,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1817,7 +1817,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2316,7 +2316,7 @@ dependencies = [
 [[package]]
 name = "roomkit-tui"
 version = "0.1.0"
-source = "git+https://github.com/roomkit-live/roomkit-tui?rev=0bf50a40432f65e09fcaef45729ddf5ddb4d7802#0bf50a40432f65e09fcaef45729ddf5ddb4d7802"
+source = "git+https://github.com/roomkit-live/roomkit-tui?rev=2ebb703cb39087cd76a46bb36053cea007d4079c#2ebb703cb39087cd76a46bb36053cea007d4079c"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -2336,7 +2336,7 @@ dependencies = [
 [[package]]
 name = "roomkit-tui-engine"
 version = "0.1.0"
-source = "git+https://github.com/roomkit-live/roomkit-tui?rev=0bf50a40432f65e09fcaef45729ddf5ddb4d7802#0bf50a40432f65e09fcaef45729ddf5ddb4d7802"
+source = "git+https://github.com/roomkit-live/roomkit-tui?rev=2ebb703cb39087cd76a46bb36053cea007d4079c#2ebb703cb39087cd76a46bb36053cea007d4079c"
 dependencies = [
  "roomkit",
  "roomkit-tui-protocol",
@@ -2349,7 +2349,7 @@ dependencies = [
 [[package]]
 name = "roomkit-tui-protocol"
 version = "0.1.0"
-source = "git+https://github.com/roomkit-live/roomkit-tui?rev=0bf50a40432f65e09fcaef45729ddf5ddb4d7802#0bf50a40432f65e09fcaef45729ddf5ddb4d7802"
+source = "git+https://github.com/roomkit-live/roomkit-tui?rev=2ebb703cb39087cd76a46bb36053cea007d4079c#2ebb703cb39087cd76a46bb36053cea007d4079c"
 dependencies = [
  "serde",
  "serde_json",
@@ -2358,7 +2358,7 @@ dependencies = [
 [[package]]
 name = "roomkit-tui-transport"
 version = "0.1.0"
-source = "git+https://github.com/roomkit-live/roomkit-tui?rev=0bf50a40432f65e09fcaef45729ddf5ddb4d7802#0bf50a40432f65e09fcaef45729ddf5ddb4d7802"
+source = "git+https://github.com/roomkit-live/roomkit-tui?rev=2ebb703cb39087cd76a46bb36053cea007d4079c#2ebb703cb39087cd76a46bb36053cea007d4079c"
 dependencies = [
  "roomkit-tui-protocol",
 ]
@@ -2403,7 +2403,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2814,7 +2814,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3435,7 +3435,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

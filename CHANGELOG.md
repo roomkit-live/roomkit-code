@@ -7,9 +7,10 @@
   shows the stored plan, and approving moves the conversation to Ask. The agent
   never moves to Yolo.
 
-- Add `/rename NAME` to name a conversation: the name leads the header and
-  the Herdr pane title, labels the `/resume` list and shows in the exit
-  report; the session ID still reopens it.
+- Add `/rename NAME` to name a conversation, also while a response runs: the
+  name leads the header and the Herdr pane title, labels the `/resume` list
+  and shows in the exit report; the session ID still reopens it
+  (roomkit-tui 2ebb703).
 
 - Copy an answer longer than the screen with the mouse: keep the button held
   and turn the wheel, or hold the pointer above or below the conversation, and

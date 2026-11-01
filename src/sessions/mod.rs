@@ -116,16 +116,30 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
 /// header or Herdr's 80 characters cut the workspace path rather than the
 /// name; otherwise the workspace comes first, then the start of the ID.
 pub(crate) fn title(workspace: &std::path::Path, room: &RoomId, name: Option<&str>) -> String {
-    if let Some(name) = name {
-        return format!("{name} · {}", workspace.display());
-    }
-    let id = room.as_str();
-    let label = if id.len() > 20 {
-        format!("{}…", id.chars().take(16).collect::<String>())
+    let title = if let Some(name) = name {
+        format!("{name} · {}", workspace.display())
     } else {
-        id.into()
+        let id = room.as_str();
+        let label = if id.len() > 20 {
+            format!("{}…", id.chars().take(16).collect::<String>())
+        } else {
+            id.into()
+        };
+        format!("{} · {label}", workspace.display())
     };
-    format!("{} · {label}", workspace.display())
+    fit_label(title)
+}
+
+/// `text` within the protocol's label size, which views ignore a longer
+/// title past: cut at a character boundary, marked with an ellipsis.
+fn fit_label(mut text: String) -> String {
+    use roomkit_tui::protocol::limits::MAX_LABEL_BYTES;
+    if text.len() <= MAX_LABEL_BYTES {
+        return text;
+    }
+    text.truncate(text.floor_char_boundary(MAX_LABEL_BYTES - "…".len()));
+    text.push('…');
+    text
 }
 
 pub(crate) struct Sessions {
@@ -179,6 +193,7 @@ impl CommandHandler for Sessions {
         matches!(
             name,
             "mode"
+                | "rename"
                 | "tools"
                 | "processes"
                 | "files"
@@ -345,5 +360,24 @@ impl Sessions {
             conversation: room.into(),
             mode,
         }]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, reason = "A fixed fixture ID is valid")]
+    use super::title;
+    use roomkit::model::RoomId;
+    use roomkit_tui::protocol::limits::MAX_LABEL_BYTES;
+
+    #[test]
+    fn a_title_fits_the_label_limit_and_keeps_the_name_first() {
+        let room = RoomId::new("session-1").unwrap();
+        let workspace = std::path::PathBuf::from(format!("/{}", "é".repeat(200)));
+        let named = title(&workspace, &room, Some("Release notes"));
+        assert!(named.len() <= MAX_LABEL_BYTES, "{}", named.len());
+        assert!(named.starts_with("Release notes · /é") && named.ends_with('…'));
+        let short = title(std::path::Path::new("/p"), &room, Some("Notes"));
+        assert_eq!(short, "Notes · /p");
     }
 }

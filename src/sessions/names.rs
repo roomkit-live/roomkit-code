@@ -5,9 +5,10 @@
 use roomkit::model::RoomId;
 use roomkit::{ConversationStore, RoomKit};
 use roomkit_sqlite::SqliteStore;
+use roomkit_tui::protocol::Event;
 use roomkit_tui_engine::{CommandResult, SessionConfig};
 
-use super::{Sessions, rooms::empty};
+use super::{Sessions, rooms::empty, title};
 
 const KEY: &str = "roomkit_code:name";
 
@@ -72,8 +73,9 @@ fn zero_width(c: char) -> bool {
 }
 
 impl Sessions {
-    /// `/rename`: name this conversation. An empty one has nothing to name
-    /// yet: it is reused as the next draft and by `/new`.
+    /// `/rename`: name this conversation, also while a response runs: the
+    /// view renames it in place. An empty one has nothing to name yet: it is
+    /// reused as the next draft and by `/new`.
     pub(super) async fn rename(
         &self,
         current: SessionConfig,
@@ -87,7 +89,10 @@ impl Sessions {
             return Err("Send a first message before naming this conversation".into());
         }
         set(&self.kit, &current.room, &name).await?;
-        Ok(self.switched(current.clone(), current.room).await)
+        Ok(CommandResult::Events(vec![Event::TitleChanged {
+            conversation: current.room.as_str().into(),
+            title: title(&self.workspace, &current.room, Some(&name)),
+        }]))
     }
 }
 

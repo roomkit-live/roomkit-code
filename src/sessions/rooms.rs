@@ -141,7 +141,7 @@ async fn unused_draft(
 }
 
 impl Sessions {
-    pub(super) async fn switched(&self, mut config: SessionConfig, room: RoomId) -> CommandResult {
+    async fn switched(&self, mut config: SessionConfig, room: RoomId) -> CommandResult {
         let name = names::name(&self.kit, &room).await;
         config.title = title(&self.workspace, &room, name.as_deref());
         config.mode = Some(self.policy.state(room.as_str()));

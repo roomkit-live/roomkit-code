@@ -44,19 +44,28 @@ async fn a_named_conversation_keeps_its_name_in_the_title_the_picker_and_the_exi
                 .is_err()
         );
     }
-    let CommandResult::Switch(view) =
+    let CommandResult::Events(events) =
         invoke(&app, &settings, &app.view, "rename", "  Release notes ")
             .await
             .unwrap()
     else {
-        panic!("Expected the renamed view");
+        panic!("Expected the title change");
     };
-    assert_eq!(view.room, room);
+    // The view renames the conversation in place, without switching.
+    let [
+        Event::TitleChanged {
+            conversation,
+            title,
+        },
+    ] = events.as_slice()
+    else {
+        panic!("Expected one title change: {events:?}");
+    };
+    assert_eq!(conversation.as_str(), room.as_str());
     // The name leads, so a narrow header cuts the path, not the name.
-    assert!(view.title.starts_with("Release notes · "), "{}", view.title);
-    // The engine refuses commands while a response runs, before this
-    // handler: a rename then never stores a name it cannot show.
-    assert!(!app.router(&settings.workspace).allow_while_busy("rename"));
+    assert!(title.starts_with("Release notes · "), "{title}");
+    // It renames while a response runs too: no switch is involved.
+    assert!(app.router(&settings.workspace).allow_while_busy("rename"));
     // A stored name this version would refuse reads as no name.
     let key = "roomkit_code:name";
     let invalid = [("name".into(), json!("a\u{202E}b"))].into_iter().collect();
@@ -120,5 +129,73 @@ async fn a_named_conversation_keeps_its_name_in_the_title_the_picker_and_the_exi
         "{}",
         named.description
     );
+    app.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_conversation_is_renamed_while_a_response_runs() {
+    use roomkit_tui::protocol::Decision;
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![("write", json!({"path":"held.txt","content":"x"}))]).await;
+    let settings = settings(project.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+    let task = tokio::spawn(
+        app.session()
+            .run_with_commands(host, app.router(&settings.workspace)),
+    );
+    assert!(matches!(event(&client).await, Event::Snapshot(_)));
+    command(
+        &client,
+        1,
+        "main",
+        Command::Submit {
+            agent: "code".into(),
+            text: "Write the file".into(),
+        },
+    );
+    // The turn waits on this approval: the conversation is executing.
+    let held = approval(&client).await;
+    command(
+        &client,
+        2,
+        "main",
+        Command::Invoke {
+            name: "rename".into(),
+            arguments: "Held turn".into(),
+        },
+    );
+    let title = loop {
+        match event(&client).await {
+            Event::Reply { request, error, .. } if request == RequestId::new(2) => {
+                assert!(error.is_none(), "{error:?}");
+            }
+            Event::TitleChanged { title, .. } => break title,
+            _ => {}
+        }
+    };
+    assert!(title.starts_with("Held turn · "), "{title}");
+    command(
+        &client,
+        3,
+        "main",
+        Command::Decide {
+            permission: held.id.clone(),
+            decision: Decision::Deny,
+        },
+    );
+    loop {
+        if let Event::RunFinished { .. } = event(&client).await {
+            break;
+        }
+    }
+    let room = app.view.room.clone();
+    assert_eq!(
+        crate::sessions::name(&app.kit, &room).await.as_deref(),
+        Some("Held turn")
+    );
+    drop(client);
+    task.await.unwrap().unwrap();
     app.close().await.unwrap();
 }
