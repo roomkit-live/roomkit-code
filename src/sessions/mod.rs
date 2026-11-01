@@ -112,14 +112,18 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
     .collect()
 }
 
-/// The view's title: the workspace, then the conversation's name, or the
-/// start of its ID.
+/// The view's title. A named conversation leads with its name, so a narrow
+/// header or Herdr's 80 characters cut the workspace path rather than the
+/// name; otherwise the workspace comes first, then the start of the ID.
 pub(crate) fn title(workspace: &std::path::Path, room: &RoomId, name: Option<&str>) -> String {
+    if let Some(name) = name {
+        return format!("{name} · {}", workspace.display());
+    }
     let id = room.as_str();
-    let label = match name {
-        Some(name) => name.into(),
-        None if id.len() > 20 => format!("{}…", id.chars().take(16).collect::<String>()),
-        None => id.into(),
+    let label = if id.len() > 20 {
+        format!("{}…", id.chars().take(16).collect::<String>())
+    } else {
+        id.into()
     };
     format!("{} · {label}", workspace.display())
 }

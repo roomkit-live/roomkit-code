@@ -51,7 +51,11 @@ async fn a_named_conversation_keeps_its_name_in_the_title_the_picker_and_the_exi
         panic!("Expected the renamed view");
     };
     assert_eq!(view.room, room);
-    assert!(view.title.ends_with(" · Release notes"), "{}", view.title);
+    // The name leads, so a narrow header cuts the path, not the name.
+    assert!(view.title.starts_with("Release notes · "), "{}", view.title);
+    // The engine refuses commands while a response runs, before this
+    // handler: a rename then never stores a name it cannot show.
+    assert!(!app.router(&settings.workspace).allow_while_busy("rename"));
     let summary = crate::exit_summary::collect(
         &app.kit,
         &app.profiles.resources.processes,
@@ -67,7 +71,7 @@ async fn a_named_conversation_keeps_its_name_in_the_title_the_picker_and_the_exi
     settings.session = Some(room.to_string());
     let app = Application::open(&settings, String::new()).await.unwrap();
     assert!(
-        app.view.title.ends_with(" · Release notes"),
+        app.view.title.starts_with("Release notes · "),
         "{}",
         app.view.title
     );
@@ -92,5 +96,11 @@ async fn a_named_conversation_keeps_its_name_in_the_title_the_picker_and_the_exi
         .find(|choice| choice.value == room.as_str())
         .unwrap();
     assert_eq!(named.label, "Release notes");
+    // Its first message stays where the picker's filter finds it.
+    assert!(
+        named.description.starts_with("Inspect the project. · "),
+        "{}",
+        named.description
+    );
     app.close().await.unwrap();
 }

@@ -141,7 +141,7 @@ async fn unused_draft(
 }
 
 impl Sessions {
-    async fn switched(&self, mut config: SessionConfig, room: RoomId) -> CommandResult {
+    pub(super) async fn switched(&self, mut config: SessionConfig, room: RoomId) -> CommandResult {
         let name = names::name(&self.kit, &room).await;
         config.title = title(&self.workspace, &room, name.as_deref());
         config.mode = Some(self.policy.state(room.as_str()));
@@ -211,24 +211,6 @@ impl Sessions {
             .set_private_state(room, key, Some(kept))
             .await
             .map_err(|_| "Could not retain the current draft".to_string())
-    }
-
-    /// `/rename`: name this conversation. An empty one has nothing to name
-    /// yet: it is reused as the next draft and by `/new`.
-    pub(super) async fn rename(
-        &self,
-        current: SessionConfig,
-        arguments: &str,
-    ) -> std::result::Result<CommandResult, String> {
-        let name = names::parse(arguments)?;
-        if empty(&self.kit, &current.room)
-            .await
-            .map_err(|_| "Could not inspect the current session".to_string())?
-        {
-            return Err("Send a first message before naming this conversation".into());
-        }
-        names::set(&self.kit, &current.room, &name).await?;
-        Ok(self.switched(current.clone(), current.room).await)
     }
 
     /// `/resume`: the sessions to choose from, or the chosen one.
@@ -338,8 +320,9 @@ impl Sessions {
         Ok(choices)
     }
 
-    /// A session as `/resume` lists it, labelled by the viewer's first
-    /// message; none when the view cannot read it or it is empty.
+    /// A session as `/resume` lists it, labelled by its name or else the
+    /// viewer's first message; none when the view cannot read it or it is
+    /// empty.
     async fn choice(&self, room: Room, current: &SessionConfig) -> Result<Option<Choice>> {
         let bindings = self
             .kit
@@ -370,24 +353,31 @@ impl Sessions {
                 },
             )
             .await?;
-        let date = utc_minute(room.updated_at.as_unix_millis());
-        let id = room.id.to_string();
-        let count = room.event_count;
         let mut context = RoomContext::new(room);
         context.bindings = bindings;
         context.recent_events = rows;
-        let label = match names::name(&self.kit, &context.room.id).await {
-            Some(name) => name,
-            None => self.label(&context, current),
+        self.listed(&context, current).await.map(Some)
+    }
+
+    /// A readable session's entry. A named one keeps its first message in
+    /// the description, where the picker's filter still finds it.
+    async fn listed(&self, context: &RoomContext, current: &SessionConfig) -> Result<Choice> {
+        let room = &context.room;
+        let id = room.id.to_string();
+        let first = self.label(context, current);
+        let (label, first) = match names::name(&self.kit, &room.id).await {
+            Some(name) => (name, format!("{first} · ")),
+            None => (first, String::new()),
         };
         let occupied = if self.services.sessions.busy(&id)? {
             "Open in another instance · "
         } else {
             ""
         };
-        Ok(Some(Choice::new(id.clone(), label).with_description(
-            format!("{occupied}{date} UTC · {count} events · {id}"),
-        )))
+        let date = utc_minute(room.updated_at.as_unix_millis());
+        let count = room.event_count;
+        let description = format!("{first}{occupied}{date} UTC · {count} events · {id}");
+        Ok(Choice::new(id.clone(), label).with_description(description))
     }
 
     /// The start of the viewer's first visible message, on one line.

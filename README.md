@@ -48,19 +48,21 @@ cargo run --locked -- /path/to/project --check-config
 
 Each normal launch opens a blank conversation, reusing an unused application
 draft when available. Use **/resume** to list earlier nonempty
-sessions for this project, filter by their first message, date or identifier,
+sessions for this project, filter by their name, first message, date or identifier,
 then press Enter to continue one. Escape cancels without switching. **/new**
 starts another conversation without leaving the application, or keeps the
 current draft if it is already empty. These commands
 are local navigation and never call the model; wait for an active response to
 finish before switching.
 
-**/rename NAME** names the current conversation: one line of at most 80
-characters. The name replaces the session ID in the header and in the Herdr
-pane title, labels the session in `/resume`, and precedes the ID in the exit
-report. The ID stays its identity: `/resume ID`, `--session` and the resume
-command still use it. An empty conversation cannot be named, since it is
-reused as the next draft; renaming waits for an active response to finish.
+**/rename NAME** names the current conversation: one visible line of at most 80
+characters. The name leads the header and the Herdr pane title, before the
+workspace path, so a narrow terminal cuts the path rather than the name. It
+labels the session in `/resume`, which keeps the first message in the
+description, and precedes the ID in the exit report. The ID stays its
+identity: `/resume ID`, `--session` and the resume command still use it. An
+empty conversation cannot be named, since it is reused as the next draft.
+Renaming is refused while a response runs: send it again once it finished.
 
 `--session NAME` explicitly opens or creates a named session. Existing sessions,
 including the former default `main`, remain available through `/resume` or

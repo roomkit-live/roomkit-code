@@ -120,8 +120,8 @@ def scenario(project, state, base_url, resume=False, color="never"):
             wait_for(b"Tab commands", offset)
             os.write(master, b"/resume\r")
             wait_for(b"Resume session", offset)
-            os.write(master, b"fixture")
-            wait_for(b"Filter: fixture", offset)
+            os.write(master, b"review")
+            wait_for(b"Filter: review", offset)
             os.write(master, b"\r")
         wait_for(b"Fixture inspection complete.")
         assert b"person:local-user" not in captured, "Own messages must not expose the technical author label"
@@ -154,11 +154,11 @@ def scenario(project, state, base_url, resume=False, color="never"):
         os.write(master, b"\x1b[1;5F")
         if not resume:
             wait_for(b"Execution Completed")
-            # A name replaces the session ID in the header; the resume
-            # picker below finds it by that name.
+            # A name leads the header, before the workspace path; the resume
+            # picker of the second run filters on that name only.
             offset = len(captured)
             os.write(master, b"/rename fixture review\r")
-            wait_for("· fixture review".encode(), offset)
+            wait_for("fixture review · ".encode(), offset)
 
         os.write(master, b"Unsent draft\x1b[1;5F")
         wait_for(b"Latest answer marker.")
