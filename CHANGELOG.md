@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Pass more host variables to shell commands when you ask for them:
+  `--inherit-env LD_LIBRARY_PATH,NIX_*`, `ROOMKIT_INHERIT_ENV` or
+  `[shell] inherit_env`, a trailing `*` naming a prefix. `DOCKER_HOST` and
+  `KUBECONFIG` join the built-in list.
+
 - Show what a file search left out: `grep`, `list` and `glob` cards now count
   names that are not UTF-8 and lines too long to search, as they already
   counted binary files, and mark a match clipped to fit its page.

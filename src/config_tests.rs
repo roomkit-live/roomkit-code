@@ -320,3 +320,40 @@ fn a_missing_workspace_is_named() {
     let error = Settings::load(&cli(&missing)).err().unwrap().to_string();
     assert!(error.contains("missing-project"), "{error}");
 }
+
+#[test]
+fn added_shell_variables_come_from_the_cli_or_the_file_and_are_checked() {
+    let root = tempfile::tempdir().unwrap();
+    let mut cli = cli(root.path());
+    assert!(Settings::load(&cli).unwrap().inherit_env.is_empty());
+    let config = root.path().join("shell.toml");
+    std::fs::write(
+        &config,
+        "[shell]\ninherit_env = ['LD_LIBRARY_PATH', 'NIX_*']\n",
+    )
+    .unwrap();
+    cli.config = Some(config);
+    assert_eq!(
+        Settings::load(&cli).unwrap().inherit_env,
+        ["LD_LIBRARY_PATH", "NIX_*"]
+    );
+    // The command line replaces the file's list, and the resume command keeps it.
+    let mut cli = Cli::try_parse_from([
+        "roomkit-code",
+        root.path().to_str().unwrap(),
+        "--inherit-env",
+        "CONDA_*, PKG_CONFIG_PATH",
+    ])
+    .unwrap();
+    assert_eq!(
+        Settings::load(&cli).unwrap().inherit_env,
+        ["CONDA_*", "PKG_CONFIG_PATH"]
+    );
+    assert_eq!(
+        resume_options(&cli).unwrap().unwrap(),
+        ["--inherit-env", "CONDA_*, PKG_CONFIG_PATH"]
+    );
+    // A lone `*` would pass every variable, keys included.
+    cli.inherit_env = vec!["*".into()];
+    assert!(Settings::load(&cli).is_err());
+}

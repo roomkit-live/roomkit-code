@@ -23,8 +23,11 @@ def scenario(project, state, resume=False):
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 34, 120, 0, 0))
     original = termios.tcgetattr(slave)
     env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
-    # Commands get the SSH agent but no other host variable, such as a key.
-    env.update(SSH_AUTH_SOCK="/roomkit-fixture/agent.sock", FIXTURE_API_KEY="leaked")
+    # Commands get the SSH agent and the added names, never another host
+    # variable such as a key.
+    env.update(SSH_AUTH_SOCK="/roomkit-fixture/agent.sock", FIXTURE_API_KEY="leaked",
+               ROOMKIT_INHERIT_ENV="FIXTURE_EXTRA,FIXTURE_NIX_*",
+               FIXTURE_EXTRA="extra", FIXTURE_NIX_FLAGS="nix")
     process = subprocess.Popen([
         str(binary), str(project), "--state-dir", str(state), "--session", "shell-fixture",
         "--color", "never", "--no-animations", "--no-logo",
@@ -56,8 +59,8 @@ def scenario(project, state, resume=False):
             wait_for(b"Execution Failed", offset)
             wait_for(b"quoted two words", offset)
             offset = len(captured)
-            os.write(master, b"!printf '[%s|%s]\\n' \"$SSH_AUTH_SOCK\" \"${FIXTURE_API_KEY-unset}\"\r")
-            wait_for(b"[/roomkit-fixture/agent.sock|unset]", offset)
+            os.write(master, b"!printf '[%s|%s|%s|%s]\\n' \"$SSH_AUTH_SOCK\" \"$FIXTURE_EXTRA\" \"$FIXTURE_NIX_FLAGS\" \"${FIXTURE_API_KEY-unset}\"\r")
+            wait_for(b"[/roomkit-fixture/agent.sock|extra|nix|unset]", offset)
             offset = len(captured)
             os.write(master, b"!printf 'started\\n'; sleep 30; printf bad > late.txt\r")
             wait_for(b"Esc interrupt", offset)

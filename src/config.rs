@@ -88,6 +88,10 @@ pub(crate) struct Cli {
     /// Disable the optional Herdr TUI integration.
     #[arg(long)]
     pub no_herdr: bool,
+    /// More host variables for shell commands, comma-separated; `NIX_*`
+    /// passes every variable with that prefix.
+    #[arg(long, env = "ROOMKIT_INHERIT_ENV", value_delimiter = ',')]
+    pub inherit_env: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, ValueEnum)]
@@ -117,6 +121,13 @@ struct FileConfig {
     permissions: Permissions,
     integrations: Integrations,
     updates: UpdateOptions,
+    shell: ShellOptions,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ShellOptions {
+    inherit_env: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -244,6 +255,8 @@ pub(crate) struct Settings {
     pub debug: bool,
     pub ui: UiOptions,
     pub mode: Mode,
+    /// Host variables commands receive beyond the development list.
+    pub inherit_env: Vec<String>,
 }
 
 impl Settings {
@@ -397,6 +410,7 @@ impl Settings {
                 .require_tool_intent
                 .unwrap_or(file.agent.require_tool_intent),
             herdr: file.integrations.herdr && !cli.no_herdr,
+            inherit_env: inherit_env(cli, file.shell)?,
             resume_options: resume_options(cli)?,
             workspace,
             debug: cli.debug,
@@ -439,8 +453,23 @@ pub(crate) fn default_state_dir() -> Option<PathBuf> {
 
 /// Retain explicit UI/configuration choices; provider secrets and bootstrap
 /// options are deliberately absent. Persisted profiles restore agent/model.
+/// The `--inherit-env` names, else the configuration file's, checked.
+fn inherit_env(cli: &Cli, file: ShellOptions) -> Result<Vec<String>> {
+    let names = if cli.inherit_env.is_empty() {
+        file.inherit_env
+    } else {
+        cli.inherit_env.clone()
+    };
+    let names: Vec<String> = names.iter().map(|name| name.trim().to_owned()).collect();
+    crate::command_env::validate(&names)?;
+    Ok(names)
+}
+
 fn resume_options(cli: &Cli) -> Result<Option<Vec<String>>> {
     let mut args = vec![];
+    if !cli.inherit_env.is_empty() {
+        args.extend(["--inherit-env".into(), cli.inherit_env.join(",")]);
+    }
     if let Some(required) = cli.require_tool_intent {
         args.push(format!("--require-tool-intent={required}"));
     }

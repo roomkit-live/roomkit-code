@@ -42,6 +42,9 @@ const DEVELOPMENT: &[&str] = &[
     "SSL_CERT_DIR",
     "NODE_EXTRA_CA_CERTS",
     "REQUESTS_CA_BUNDLE",
+    // Container and cluster clients.
+    "DOCKER_HOST",
+    "KUBECONFIG",
     // Toolchain homes.
     "CARGO_HOME",
     "RUSTUP_HOME",
@@ -52,12 +55,53 @@ const DEVELOPMENT: &[&str] = &[
     "GOPATH",
 ];
 
-/// The environment of the agent's shell, its processes and `/shell`.
-pub(crate) fn command_env() -> CommandEnv {
+/// The environment of the agent's shell, its processes and `/shell`: the
+/// development list and the names the user adds (`--inherit-env`). A
+/// `PREFIX*` name is matched against this process's variables now: they do
+/// not change after launch, and the tools read values only by exact name.
+pub(crate) fn command_env(extra: &[String]) -> CommandEnv {
+    let host: Vec<String> = std::env::vars_os()
+        .filter_map(|(name, _)| name.into_string().ok())
+        .collect();
     let mut env = CommandEnv::default();
     env.inherit_env
         .extend(DEVELOPMENT.iter().map(|&name| name.to_owned()));
+    env.inherit_env.extend(expand(extra, &host));
+    env.inherit_env.sort();
+    env.inherit_env.dedup();
     env
+}
+
+/// `requested` with each `PREFIX*` replaced by the `host` names it starts.
+fn expand(requested: &[String], host: &[String]) -> Vec<String> {
+    requested
+        .iter()
+        .flat_map(|name| match name.strip_suffix('*') {
+            Some(prefix) => host
+                .iter()
+                .filter(|candidate| candidate.starts_with(prefix))
+                .cloned()
+                .collect(),
+            None => vec![name.clone()],
+        })
+        .collect()
+}
+
+/// Checks the names a user adds: variable names, or a prefix ending in `*`.
+/// A lone `*` would pass every variable, API keys included, and is refused.
+pub(crate) fn validate(names: &[String]) -> Result<(), String> {
+    for name in names {
+        let stem = name.strip_suffix('*').unwrap_or(name);
+        if stem.is_empty()
+            || stem.contains(['=', '\0', '*', ','])
+            || stem.contains(char::is_whitespace)
+        {
+            return Err(format!(
+                "inherit_env takes variable names or prefixes such as NIX_*; {name:?} is neither"
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -65,8 +109,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn added_names_pass_as_given_and_prefixes_match_the_host_names() {
+        let host = ["NIX_CFLAGS", "NIX_LDFLAGS", "NIXOS", "PATH"].map(String::from);
+        let requested = ["LD_LIBRARY_PATH", "NIX_*"].map(String::from);
+        assert_eq!(
+            expand(&requested, &host),
+            ["LD_LIBRARY_PATH", "NIX_CFLAGS", "NIX_LDFLAGS"]
+        );
+        assert!(validate(&requested).is_ok());
+        for refused in ["", "*", "A=B", "A*B", "TWO WORDS"] {
+            assert!(validate(&[refused.into()]).is_err(), "{refused:?}");
+        }
+    }
+
+    #[test]
     fn the_development_variables_are_valid_names_and_no_credential() {
-        let env = command_env();
+        let env = command_env(&[]);
         assert!(env.validate().is_ok());
         let credential = ["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"];
         for name in &env.inherit_env {

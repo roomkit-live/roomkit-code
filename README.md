@@ -294,10 +294,18 @@ directory variables, plus those development tools look for: `SSH_AUTH_SOCK`,
 the desktop session (`DISPLAY`, `XAUTHORITY`, `WAYLAND_DISPLAY`, D-Bus) and XDG
 directories, `TERM`, `COLORTERM`, the editors, the proxies (whose URL may embed
 a password), the certificate bundles (`SSL_CERT_FILE`, `SSL_CERT_DIR`,
-`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`), and `CARGO_HOME`, `RUSTUP_HOME`,
-`JAVA_HOME`, `ANDROID_HOME`, `NVM_DIR`, `VIRTUAL_ENV`, `GOPATH`. Every other
-variable, such as an API key exported in your shell or one set by direnv or a
-Nix shell, stays out of commands (`src/command_env.rs`).
+`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`), `DOCKER_HOST`, `KUBECONFIG`, and
+`CARGO_HOME`, `RUSTUP_HOME`, `JAVA_HOME`, `ANDROID_HOME`, `NVM_DIR`,
+`VIRTUAL_ENV`, `GOPATH`. Every other variable, such as an API key exported in
+your shell, stays out of commands (`src/command_env.rs`).
+
+Add the variables your environment needs, for example those direnv, a Nix shell
+or conda export: `--inherit-env LD_LIBRARY_PATH,NIX_*`, `ROOMKIT_INHERIT_ENV`
+(handy in an `.envrc`), or `inherit_env` under `[shell]` in the `--config`
+file; the command line replaces the file's list. A name ending in `*` passes
+every variable with that prefix that is set when RoomKit Code starts. A lone
+`*` is refused: it would pass your API keys too. Each added variable is
+readable by the agent's commands, and so by the model.
 
 Persistent processes use pipes, not a PTY, and survive tool calls and profile
 changes while the app runs. They default to a five-minute lifetime (up to one

@@ -366,7 +366,7 @@ async fn web_uses_anonymous_exa_and_fetch_without_reusing_the_model_credential()
     .await;
     let mut settings = settings(root.path(), state.path(), &mock.base_url);
     settings.mode = crate::permissions::Mode::Yolo;
-    let mut resources = crate::agent::Resources::new(root.path(), state.path(), state.path())
+    let mut resources = crate::agent::Resources::new(root.path(), state.path(), state.path(), &[])
         .await
         .unwrap();
     let mut config = SearchHttpConfig::default();

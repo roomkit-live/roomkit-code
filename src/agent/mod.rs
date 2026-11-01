@@ -14,7 +14,7 @@ use roomkit_tools_plans::{
     PlanCreateTool, PlanDeleteTool, PlanListTool, PlanReadTool, PlanUpdateTool,
 };
 use roomkit_tools_process::{
-    OutputLimits, OutputStore, ProcessLimits, ProcessManager, ShellLimits, ShellTool,
+    CommandEnv, OutputLimits, OutputStore, ProcessLimits, ProcessManager, ShellLimits, ShellTool,
 };
 use roomkit_tools_roomkit::{
     CodeOutlineToolset, DiffToolset, EditToolset, GlobToolset, GrepToolset, ListToolset,
@@ -48,13 +48,21 @@ pub(crate) struct Resources {
     pub docs: Arc<dyn DocsBackend>,
     pub mutations: MutationWorkspace,
     pub processes: ProcessManager,
+    /// The environment of every agent's shell, as of the processes.
+    pub command_env: CommandEnv,
     pub outputs: OutputStore,
     pub search: WebSearchTool,
     pub fetch: WebFetchTool,
 }
 
 impl Resources {
-    pub async fn new(root: &Path, state: &Path, global: &Path) -> Result<Self> {
+    pub async fn new(
+        root: &Path,
+        state: &Path,
+        global: &Path,
+        inherit_env: &[String],
+    ) -> Result<Self> {
+        let command_env = crate::command_env::command_env(inherit_env);
         let mutations = MutationWorkspace::new(root).await?;
         // Small immediate pages leave room for the JSON envelope in the bounded
         // terminal projection. Large captures remain in separately paged archives.
@@ -66,7 +74,7 @@ impl Resources {
         let processes = ProcessManager::new(root)
             .await?
             .with_limits(process_limits)?
-            .with_env(crate::command_env::command_env())?
+            .with_env(command_env.clone())?
             .with_output_store(outputs.clone())?;
         let mut search_limits = SearchLimits::default();
         search_limits.max_output_bytes = 48 * 1024;
@@ -79,6 +87,7 @@ impl Resources {
             docs: crate::docs::guide(global)?,
             mutations,
             processes,
+            command_env,
             outputs,
             search: WebSearchTool::new(Arc::new(ExaSearch::new(
                 None,
@@ -160,7 +169,7 @@ pub(crate) async fn create(
         write = WriteToolset::new(WriteTool::from_workspace(mutations.clone())),
         edit = EditToolset::new(EditTool::from_workspace(mutations.clone())),
         patch = PatchToolset::new(PatchTool::from_workspace(mutations)),
-        shell = ShellToolset::new(ShellTool::new(root).await?.with_limits(shell_limits)?.with_env(crate::command_env::command_env())?.with_output_store(resources.outputs.clone())),
+        shell = ShellToolset::new(ShellTool::new(root).await?.with_limits(shell_limits)?.with_env(resources.command_env.clone())?.with_output_store(resources.outputs.clone())),
         fetch = WebFetchToolset::new(resources.fetch.clone()),
         search = WebSearchToolset::new(resources.search.clone()),
         start = ProcessStartToolset::new(resources.processes.clone()),

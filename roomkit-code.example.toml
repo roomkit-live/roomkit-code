@@ -38,6 +38,11 @@ name = "RoomKit Code"
 # logo = ["RK", "CODE"]
 # logo = [] # hide the logo
 
+[shell]
+# Host variables shell commands receive beyond the built-in development list;
+# NAME_* passes every variable with that prefix. The model can read them.
+# inherit_env = ["LD_LIBRARY_PATH", "PKG_CONFIG_PATH", "NIX_*"]
+
 [integrations]
 herdr = true # auto-detect Herdr TUI; --no-herdr disables this adapter
 
