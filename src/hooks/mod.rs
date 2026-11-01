@@ -38,6 +38,9 @@ struct Session {
 struct Turn {
     context: Context,
     begun: AtomicBool,
+    /// Set once the engine reports the turn finished: its TurnEnd hooks run
+    /// to their own budget, even while the application closes.
+    ending: AtomicBool,
     posts: TaskTracker,
 }
 
@@ -386,20 +389,20 @@ impl Hooks {
         self.close_within(crate::timeouts::SETTLE).await;
     }
 
-    /// `close`, waiting at most `wait` for turns and hook tasks.
-    async fn close_within(&self, wait: Duration) {
+    /// `close`, giving up after `orphaned` on turns the engine never began
+    /// to finish.
+    async fn close_within(&self, orphaned: Duration) {
         if self.closing.swap(true, Ordering::AcqRel) {
             return;
         }
         self.stopping.cancel();
-        // Turns end once the engine reports them, and hook tasks stop with
-        // `stopping`; a turn the engine never finished must not hold the exit.
-        let settled = tokio::time::timeout(wait, self.settle()).await;
-        if settled.is_err() {
-            self.background.close();
-            let turns = self.state().turns.len();
+        let left = self.settle(orphaned).await;
+        // Session hooks stop with `stopping`; HOOKS bounds them anyway.
+        self.background.close();
+        let _ = tokio::time::timeout(crate::timeouts::HOOKS, self.background.wait()).await;
+        if left > 0 {
             self.diagnostics
-                .record("hooks_close_timeout", json!({ "turns": turns }), None);
+                .record("hooks_close_timeout", json!({ "turns": left }), None);
         }
         let sessions: Vec<_> = self.state().sessions.values().cloned().collect();
         for session in sessions {
@@ -413,16 +416,39 @@ impl Hooks {
 }
 
 impl Hooks {
-    /// Wait until every turn ended and every hook task finished.
-    async fn settle(&self) {
+    /// Wait for the turns to end; how many are left. A turn the engine is
+    /// finishing runs its TurnEnd hooks, which `stopping` does not cut, so
+    /// it gets their whole budget; any other gets only `orphaned`: a turn
+    /// the engine accepted but never finished must not hold the exit.
+    async fn settle(&self, orphaned: Duration) -> usize {
         let mut changed = self.changes.subscribe();
-        while !self.state().turns.is_empty() {
-            if changed.changed().await.is_err() {
-                break;
+        let begun = tokio::time::Instant::now();
+        loop {
+            let (left, ending) = {
+                let state = self.state();
+                let ending = state
+                    .turns
+                    .values()
+                    .filter(|turn| turn.ending.load(Ordering::Acquire));
+                (state.turns.len(), ending.count())
+            };
+            if left == 0 {
+                return 0;
+            }
+            let limit = if ending > 0 {
+                crate::timeouts::HOOKS
+            } else {
+                orphaned
+            };
+            let Some(remaining) = limit.checked_sub(begun.elapsed()).filter(|r| !r.is_zero())
+            else {
+                return left;
+            };
+            // A change or the limit: either way, look again.
+            if let Ok(Err(_)) = tokio::time::timeout(remaining, changed.changed()).await {
+                return left;
             }
         }
-        self.background.close();
-        self.background.wait().await;
     }
 }
 
@@ -498,6 +524,7 @@ impl SessionLifecycle for Lifecycle {
                     Arc::new(Turn {
                         context: context.clone(),
                         begun: AtomicBool::new(false),
+                        ending: AtomicBool::new(false),
                         posts: TaskTracker::new(),
                     }),
                 );
@@ -544,6 +571,8 @@ impl SessionLifecycle for Lifecycle {
             let key = key(view, operation);
             let turn = self.0.state().turns.get(&key).cloned();
             if let Some(turn) = turn {
+                turn.ending.store(true, Ordering::Release);
+                self.0.changes.send_replace(());
                 turn.posts.close();
                 turn.posts.wait().await;
                 if turn.begun.load(Ordering::Acquire) {
@@ -586,41 +615,80 @@ fn prompt_text(content: &roomkit::model::EventContent) -> String {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "Invalid fixtures fail the test")]
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        reason = "Invalid fixtures fail the test"
+    )]
     use super::*;
     use clap::Parser;
 
-    #[tokio::test]
-    async fn closing_gives_up_on_a_turn_the_engine_never_finished() {
-        let workspace = tempfile::tempdir().unwrap();
-        let state = tempfile::tempdir().unwrap();
+    fn hooks(state: &std::path::Path, workspace: &std::path::Path) -> (Arc<Hooks>, PathBuf) {
         let cli = crate::config::Cli::try_parse_from([
             "roomkit-code",
-            workspace.path().to_str().unwrap(),
+            workspace.to_str().unwrap(),
             "--state-dir",
-            state.path().to_str().unwrap(),
+            state.to_str().unwrap(),
         ])
         .unwrap();
         let settings = crate::config::Settings::load(&cli).unwrap();
-        let path = state.path().join("diagnostics.jsonl");
+        let path = state.join("diagnostics.jsonl");
         let log = crate::diagnostics::Diagnostics::open(path.clone(), false).unwrap();
         let policy = crate::permissions::Policy::new(crate::permissions::Mode::Ask);
-        let hooks = Hooks::load(&settings, state.path(), policy, log);
-        let orphan = Arc::new(Turn {
+        (Hooks::load(&settings, state, policy, log), path)
+    }
+
+    fn turn(hooks: &Hooks, operation: &str, ending: bool) -> Key {
+        let key: Key = ("room".into(), "agent".into(), operation.into());
+        let turn = Arc::new(Turn {
             context: Context {
                 payload: json!({}),
                 entries: Vec::new(),
             },
             begun: AtomicBool::new(false),
+            ending: AtomicBool::new(ending),
             posts: TaskTracker::new(),
         });
-        let key = ("room".into(), "agent".into(), "operation".into());
-        hooks.state().turns.insert(key, orphan);
-        hooks.close_within(Duration::from_millis(50)).await;
+        hooks.state().turns.insert(key.clone(), turn);
+        key
+    }
+
+    /// Close, failing rather than hanging if closing never returns.
+    async fn close(hooks: &Hooks, orphaned: Duration) {
+        tokio::time::timeout(Duration::from_secs(5), hooks.close_within(orphaned))
+            .await
+            .expect("Closing never returned");
+    }
+
+    #[tokio::test]
+    async fn closing_gives_up_on_a_turn_the_engine_never_finished() {
+        let (workspace, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (hooks, path) = hooks(state.path(), workspace.path());
+        turn(&hooks, "orphan", false);
+        close(&hooks, Duration::from_millis(50)).await;
         let records = std::fs::read_to_string(path).unwrap();
         assert!(
             records.contains("hooks_close_timeout") && records.contains("\"turns\":1"),
             "{records}"
         );
+    }
+
+    #[tokio::test]
+    async fn closing_waits_for_a_turn_the_engine_is_finishing() {
+        let (workspace, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (hooks, path) = hooks(state.path(), workspace.path());
+        let key = turn(&hooks, "ending", true);
+        // Its TurnEnd hooks outlast the orphan wait, then the turn ends.
+        let finisher = hooks.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            finisher.state().turns.remove(&key);
+            finisher.changes.send_replace(());
+        });
+        let started = std::time::Instant::now();
+        close(&hooks, Duration::from_millis(50)).await;
+        assert!(started.elapsed() >= Duration::from_millis(300));
+        let records = std::fs::read_to_string(path).unwrap();
+        assert!(!records.contains("hooks_close_timeout"), "{records}");
     }
 }

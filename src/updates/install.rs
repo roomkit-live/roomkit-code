@@ -156,10 +156,12 @@ impl Installation {
         Ok(self.version_at(&dir)?.version)
     }
     pub fn ensure_current(&self, exe: &Path) -> Result<()> {
-        if self.resolve("current")?.join("roomkit-code") != exe.canonicalize()? {
-            return Err(
-                "Another version was activated. Restart RoomKit Code before updating again".into(),
-            );
+        const RESTART: &str =
+            "Another version was activated. Restart RoomKit Code before updating again";
+        // A later update may have removed this process's version directory.
+        let running = exe.canonicalize().map_err(|_| RESTART)?;
+        if self.resolve("current")?.join("roomkit-code") != running {
+            return Err(RESTART.into());
         }
         Ok(())
     }

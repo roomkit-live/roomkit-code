@@ -25,12 +25,15 @@ const APPROVAL_MILLIS: u64 = 300_000;
 /// Hook sources that run for one event: global, then project.
 const HOOK_SOURCES: u64 = 2;
 
-/// One event's command hooks, every source at its longest.
+/// One event's command hooks, every source at its longest; closing waits
+/// this long for a turn the engine is finishing, whose TurnEnd hooks run
+/// to the end.
 pub(crate) const HOOKS: Duration = Duration::from_millis(HOOKS_MILLIS);
 const HOOKS_MILLIS: u64 = HOOK_SOURCES * roomkit_hooks::SOURCE_DEADLINE_MILLIS + MARGIN_MILLIS;
 
-/// Closing waits this long for work that stops with the application: hook
-/// turns and tasks, file comparisons. Only work that never ends waits it out.
+/// Closing waits this long for work that stops with the application: file
+/// comparisons, and turns the engine accepted but never began to finish.
+/// Only work that never ends waits it out.
 pub(crate) const SETTLE: Duration = Duration::from_millis(MARGIN_MILLIS);
 
 /// The permission gate runs the tool's hooks, then waits for an approval.
@@ -50,5 +53,7 @@ mod tests {
             + Duration::from_millis(roomkit_hooks::OUTPUT_DRAIN_MILLIS) * handlers as u32;
         assert!(HOOKS > source * HOOK_SOURCES as u32);
         assert!(PERMISSION_GATE > HOOKS + APPROVAL);
+        // A finishing turn's hooks get their budget, not the orphan wait.
+        assert!(HOOKS > SETTLE);
     }
 }

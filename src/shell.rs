@@ -242,9 +242,7 @@ impl Shell {
         jobs: &'a [ObservedProcess],
         owner: &str,
     ) -> Option<&'a ObservedProcess> {
-        let mut started = crate::sync::lock(&self.started);
-        // Forget the IDs of processes the manager no longer keeps.
-        started.retain(|id| jobs.iter().any(|job| job.status.process_id == *id));
+        let started = crate::sync::lock(&self.started);
         started.iter().find_map(|id| {
             jobs.iter().find(|job| {
                 job.status.process_id == *id
@@ -265,6 +263,9 @@ impl Shell {
         // Reclaim only old completed manual commands in this conversation. Model
         // jobs and live processes remain under their owner's explicit control.
         let jobs = self.manager.observe().await;
+        // Forget the IDs of processes the manager no longer keeps.
+        crate::sync::lock(&self.started)
+            .retain(|id| jobs.iter().any(|job| job.status.process_id == *id));
         if jobs.iter().filter(|job| job.owner == owner).count() >= 8
             && let Some(oldest) = self.oldest_finished(&jobs, owner)
         {

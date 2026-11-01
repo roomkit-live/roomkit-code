@@ -89,7 +89,8 @@ impl Storage {
         #[cfg(unix)]
         for private in [&directory, &sessions] {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(private, std::fs::Permissions::from_mode(0o700))?;
+            std::fs::set_permissions(private, std::fs::Permissions::from_mode(0o700))
+                .map_err(|error| format!("Cannot make {} private: {error}", private.display()))?;
         }
         let database = directory.join("history.sqlite3");
         private_file(&database)?;

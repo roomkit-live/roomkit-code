@@ -222,7 +222,11 @@ fn updates_keep_only_the_current_and_previous_versions() {
         names.sort();
         names
     };
+    let mut first_running = None;
     for (index, release) in ["0.1.0", "0.2.0", "0.3.0"].into_iter().enumerate() {
+        if index == 1 {
+            first_running = Some(bin.join("roomkit-code").canonicalize().unwrap());
+        }
         let binary = temp.path().join(release);
         fs::write(&binary, format!("binary {index}")).unwrap();
         if index == 2 {
@@ -238,6 +242,14 @@ fn updates_keep_only_the_current_and_previous_versions() {
     assert!(
         names.iter().all(|name| !name.starts_with("0.1.0")),
         "{names:?}"
+    );
+    // A process still running the removed version is told to restart.
+    let stale = installation.ensure_current(&first_running.unwrap());
+    assert!(
+        stale
+            .unwrap_err()
+            .to_string()
+            .contains("Restart RoomKit Code")
     );
     // The kept previous version still rolls back.
     let current = bin.join("roomkit-code").canonicalize().unwrap();

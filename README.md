@@ -1101,8 +1101,8 @@ shell installer requires `gh` for private downloads; it accepts the same token.
 The managed entry point is a symlink to `.roomkit-code/current/roomkit-code`
 inside the chosen bin directory. Version directories are immutable; activation
 uses an atomic symlink replacement and an installation lock. The previous pointer
-allows rollback. Each update removes the versions older than the previous one,
-so the installation holds two binaries at most; a process still running an
+allows rollback. Each update removes every version other than the current and
+previous ones, so the installation holds two binaries at most; a process still running an
 older one keeps its open binary until it exits. Do not edit managed files
 manually. Cargo/source builds and package-manager binaries
 are never self-modified; `/update` explains how to install a managed release.
