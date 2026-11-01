@@ -242,7 +242,9 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         offset = send(b"\r")
         wait_for(b"Agent profile", offset)
         wait_for(b"fixture-discovered", offset)
-        send(b"\x1b")
+        offset = send(b"\x1b")
+        # The form is closed only once the composer shows again.
+        wait_for(b"Enter send", offset)
         assert secret.encode() not in captured
         # Agents are global by default: shared by every project, selected here.
         agents = json.loads((state / "agents.json").read_text())

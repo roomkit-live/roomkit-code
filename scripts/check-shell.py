@@ -34,13 +34,16 @@ def scenario(project, state, resume=False):
     ], stdin=slave, stdout=slave, stderr=slave, start_new_session=True, env=env)
     captured = bytearray()
 
-    def wait_for(marker, after=0):
-        deadline = time.monotonic() + 15
+    def wait_for(marker, after=0, seconds=15):
+        deadline = time.monotonic() + seconds
         while marker not in re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", captured[after:]):
             if time.monotonic() >= deadline or process.poll() is not None:
                 raise RuntimeError(f"Missing {marker!r}; {bytes(captured[-4000:])!r}")
             if select.select([master], [], [], 0.1)[0]:
                 captured.extend(os.read(master, 65536))
+
+    def shown(marker, after):
+        return marker in re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", captured[after:])
 
     try:
         wait_for(b"RoomKit Code")
@@ -61,9 +64,19 @@ def scenario(project, state, resume=False):
             offset = len(captured)
             os.write(master, b"!printf '[%s|%s|%s|%s]\\n' \"$SSH_AUTH_SOCK\" \"$FIXTURE_EXTRA\" \"$FIXTURE_NIX_FLAGS\" \"${FIXTURE_API_KEY-unset}\"\r")
             wait_for(b"[/roomkit-fixture/agent.sock|extra|nix|unset]", offset)
-            offset = len(captured)
-            os.write(master, b"!printf 'started\\n'; sleep 30; printf bad > late.txt\r")
-            wait_for(b"Esc interrupt", offset)
+            wait_for(b"Execution Completed", offset)
+            # The conversation stays busy a moment after the end is shown, and
+            # refuses a command sent in that window: send it again.
+            for _ in range(20):
+                offset = len(captured)
+                os.write(master, b"!printf 'started\\n'; sleep 30; printf bad > late.txt\r")
+                try:
+                    wait_for(b"Esc interrupt", offset, seconds=1)
+                    break
+                except RuntimeError:
+                    assert shown(b"A request is still executing", offset), bytes(captured[-4000:])
+            else:
+                raise RuntimeError("The conversation stayed busy")
             os.write(master, b"\x1b[17~")  # F6
             wait_for(b"Background processes", offset)
             offset = len(captured)
