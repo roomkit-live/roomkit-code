@@ -231,11 +231,12 @@ impl Hooks {
                 // The engine calls this observer on a task of its own after it
                 // reported the call, and the turn is found by its conversation
                 // and agent: the turn's TurnEnd waits for the post-tool hook
-                // registered here, but a report that reaches this after the
-                // turn finished, such as a call cut at the very end of an
-                // interrupted turn, runs no hook, or runs with that agent's
-                // next turn there. The engine offers no way to wait for its
-                // observers of a turn.
+                // registered here, but a report that reaches this late, such
+                // as a call cut at the very end of an interrupted turn, runs
+                // no hook, or runs with that agent's next turn there once it
+                // has begun, even before the first turn's TurnEnd. The engine
+                // offers no way to wait for its observers of a turn, and its
+                // event names no turn.
                 let turn = hooks.tool_turn(&event);
                 let hooks = hooks.clone();
                 let task = turn.map(|turn| {

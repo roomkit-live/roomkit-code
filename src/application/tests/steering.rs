@@ -1,6 +1,7 @@
 //! RMK-1230: a person writes while the agent works. The message goes to the
-//! running turn, which reads it at its next step; written as the turn writes
-//! its last answer, it gets a turn of its own, with the hooks of any turn.
+//! running turn, which reads it at its next step, under that turn's hooks;
+//! sent once the turn's last answer is complete, it gets a turn of its own,
+//! with the hooks of any turn.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -52,17 +53,44 @@ fn asked(mock: &Mock, index: usize) -> String {
     mock.requests.lock().unwrap()[index]["messages"].to_string()
 }
 
+/// The hooks every test turn runs, which record their events.
+const HOOKED: [&str; 5] = [
+    "UserPromptSubmit",
+    "TurnStart",
+    "PreToolUse",
+    "PostToolUse",
+    "TurnEnd",
+];
+
+/// The hook events of the turn the operation `operation` started.
+fn turn_hooks(root: &std::path::Path, operation: &str) -> Vec<Value> {
+    records(root)
+        .into_iter()
+        .filter(|e| e["roomkit"]["turn_id"] == operation)
+        .collect()
+}
+
+fn named<'a>(hooks: &'a [Value], name: &str) -> Vec<&'a Value> {
+    hooks
+        .iter()
+        .filter(|e| e["hook_event_name"] == name)
+        .collect()
+}
+
 #[tokio::test]
 async fn a_message_written_while_a_call_waits_reaches_the_running_turn() {
     let project = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
-    let mock = Mock::start(vec![(
-        "write",
-        json!({"path":"note.txt", "content":"first"}),
-    )])
+    configure(project.path(), &HOOKED, "", false);
+    // The turn writes a note, reads it, then answers.
+    let mock = Mock::start(vec![
+        ("write", json!({"path":"note.txt", "content":"first"})),
+        ("read", json!({"path":"note.txt"})),
+    ])
     .await;
     let settings = settings(project.path(), state.path(), &mock.base_url);
     let app = Application::open(&settings, String::new()).await.unwrap();
+    enable_all(&app);
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run(host));
     let Event::Snapshot(initial) = event(&client).await else {
@@ -89,11 +117,28 @@ async fn a_message_written_while_a_call_waits_reaches_the_running_turn() {
 
     assert!(project.path().join("note.txt").exists());
     let requests = mock.requests.lock().unwrap().len();
-    assert_eq!(requests, 2, "The message took no turn of its own");
+    assert_eq!(requests, 3, "The message took no turn of its own");
     assert!(
         asked(&mock, 1).contains("Mention the second ledger too."),
         "The turn read the message at its next step"
     );
+    // The message starts no turn; the running turn's hooks cover the call
+    // it led to.
+    let steered = turn_hooks(project.path(), "operation-2");
+    assert_eq!(steered.len(), 1, "{steered:?}");
+    assert_eq!(steered[0]["hook_event_name"], "UserPromptSubmit");
+    let running = turn_hooks(project.path(), "operation-1");
+    let first_and_last = [&running[1], &running[running.len() - 1]];
+    assert_eq!(
+        first_and_last.map(|e| &e["hook_event_name"]),
+        ["TurnStart", "TurnEnd"]
+    );
+    let called: Vec<_> = named(&running, "PreToolUse")
+        .iter()
+        .map(|e| e["tool_name"].as_str())
+        .collect();
+    assert_eq!(called, [Some("write"), Some("read")]);
+    assert_eq!(named(&running, "PostToolUse").len(), 2);
     drop(client);
     task.await.unwrap().unwrap();
     app.close().await.unwrap();
@@ -124,26 +169,11 @@ fn hold_first_answer(app: &Application, gate: watch::Receiver<bool>, held: Arc<N
     app.kit.hook(trigger, hold, options).unwrap();
 }
 
-/// The hook events of the turn the operation `operation` started.
-fn turn_hooks(root: &std::path::Path, operation: &str) -> Vec<Value> {
-    records(root)
-        .into_iter()
-        .filter(|e| e["roomkit"]["turn_id"] == operation)
-        .collect()
-}
-
 #[tokio::test]
 async fn a_message_the_turn_no_longer_reads_gets_a_turn_with_its_hooks() {
     let project = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
-    let hooked = [
-        "UserPromptSubmit",
-        "TurnStart",
-        "PreToolUse",
-        "PostToolUse",
-        "TurnEnd",
-    ];
-    configure(project.path(), &hooked, "", false);
+    configure(project.path(), &HOOKED, "", false);
     std::fs::write(project.path().join("source"), "sample").unwrap();
     // The first turn answers; the second reads a file, then answers.
     let mock = Mock::start(vec![("", json!({})), ("read", json!({"path":"source"}))]).await;
@@ -158,7 +188,9 @@ async fn a_message_the_turn_no_longer_reads_gets_a_turn_with_its_hooks() {
     event(&client).await;
 
     submit(&client, 1, "First question.");
-    held.notified().await;
+    let waits = Duration::from_secs(5);
+    let held = tokio::time::timeout(waits, held.notified()).await;
+    assert!(held.is_ok(), "The first answer was never held");
     submit(&client, 2, "Second question.");
     let reply =
         |e: &Event| matches!(e, Event::Reply { request, .. } if *request == RequestId::new(2));
@@ -184,7 +216,7 @@ async fn a_message_the_turn_no_longer_reads_gets_a_turn_with_its_hooks() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     };
     let names: Vec<_> = own.iter().map(|e| e["hook_event_name"].as_str()).collect();
-    assert_eq!(names, hooked.map(Some), "Hooked as any turn");
+    assert_eq!(names, HOOKED.map(Some), "Hooked as any turn");
     assert_eq!(own[3]["roomkit"]["outcome"], "served", "The read ran");
     assert_eq!(mock.requests.lock().unwrap().len(), 3);
     assert!(asked(&mock, 2).contains("sample"));
