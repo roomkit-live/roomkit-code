@@ -77,14 +77,9 @@ impl Application {
         self.services.shell.close().await;
         self.profiles.accounts.close().await;
         self.profiles.mcp_runtime.close().await;
-        let engine = self.kit.close().await;
         // Closing cancels running shell calls: the agents' slots record what
         // they changed as they close, before the engine closes its store.
-        self.profiles
-            .resources
-            .files
-            .settle(crate::timeouts::SETTLE)
-            .await;
+        let engine = self.kit.close().await;
         self.services.hooks.close().await;
         let tools = self.profiles.resources.close().await;
         self.profiles.diagnostics.close().await;

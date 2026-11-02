@@ -18,7 +18,7 @@ use std::{
 
 use roomkit::{ConversationStore, RoomKit, model::RoomId};
 use roomkit_sqlite::SqliteStore;
-use tokio::sync::{Mutex, watch};
+use tokio::sync::{Mutex, OnceCell, watch};
 
 use record::Record;
 pub(crate) use record::{Change, Effect};
@@ -39,6 +39,8 @@ pub(crate) struct Files {
     digests: Arc<std::sync::Mutex<Digests>>,
     /// Comparisons that outlive their shell call, awaited when closing.
     comparisons: tokio_util::task::TaskTracker,
+    /// Set once closing waited for the comparisons.
+    settled: OnceCell<()>,
     changes: watch::Sender<()>,
 }
 
@@ -51,6 +53,7 @@ impl Files {
             rooms: std::sync::Mutex::default(),
             digests: Arc::default(),
             comparisons: tokio_util::task::TaskTracker::new(),
+            settled: OnceCell::new(),
             changes: watch::channel(()).0,
         })
     }
@@ -62,9 +65,15 @@ impl Files {
 
     /// Wait, at most `bound`, for comparisons of shell calls that closing the
     /// engine cancelled, so their changes are recorded before the process ends.
+    /// Only the first call waits: every agent's slot settles as the engine
+    /// closes it, and a comparison that never ends holds up the close once.
     pub async fn settle(&self, bound: std::time::Duration) {
-        self.comparisons.close();
-        let _ = tokio::time::timeout(bound, self.comparisons.wait()).await;
+        self.settled
+            .get_or_init(|| async {
+                self.comparisons.close();
+                let _ = tokio::time::timeout(bound, self.comparisons.wait()).await;
+            })
+            .await;
     }
 
     /// Compare the project with `before` in a task of its own: dropping the

@@ -230,6 +230,22 @@ async fn a_cancelled_shell_call_still_reports_what_it_changed() {
     assert_eq!(changes, [("partial.txt".into(), "Created · shell".into())]);
 }
 
+/// Every agent slot settles the comparisons as the engine closes it: a
+/// comparison that never ends holds up the close once, not once per slot.
+#[tokio::test]
+async fn closing_waits_once_for_a_comparison_that_never_ends() {
+    let root = tempfile::tempdir().unwrap();
+    let files = Files::new(root.path());
+    files.comparisons.spawn(std::future::pending::<()>());
+    let bound = Duration::from_millis(300);
+    let first = tokio::time::Instant::now();
+    files.settle(bound).await;
+    assert!(first.elapsed() >= bound);
+    let second = tokio::time::Instant::now();
+    files.settle(bound).await;
+    assert!(second.elapsed() < bound, "{:?}", second.elapsed());
+}
+
 /// Review finding: an unreadable saved list was replaced by an empty one,
 /// then saved over the original on the next change.
 #[tokio::test]

@@ -127,8 +127,9 @@ impl Channel for AgentSlot {
     }
     /// Records what the shell calls the kit's close cut changed, while the
     /// kit's store is still open: it closes the store after its channels.
-    /// Then closes the current agent's provider; the host closes what serves
-    /// its tools.
+    /// The agents share one file tracker, which waits for them once. Then
+    /// closes the current agent's provider; the host closes what serves its
+    /// tools.
     async fn close(&self) {
         self.files.settle(crate::timeouts::SETTLE).await;
         let agent = crate::sync::read(&self.current).clone();
