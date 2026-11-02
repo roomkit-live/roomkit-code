@@ -912,7 +912,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
     let before = app
         .kit
         .store()
-        .list_rooms(&Default::default())
+        .list_rooms(Default::default())
         .await
         .unwrap()
         .len();
@@ -923,7 +923,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
     assert_eq!(
         app.kit
             .store()
-            .list_rooms(&Default::default())
+            .list_rooms(Default::default())
             .await
             .unwrap()
             .len(),
@@ -948,7 +948,7 @@ async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history
     assert_eq!(
         app.kit
             .store()
-            .list_rooms(&Default::default())
+            .list_rooms(Default::default())
             .await
             .unwrap()
             .len(),
@@ -1248,7 +1248,7 @@ async fn unused_automatic_drafts_are_reused_without_adopting_named_sessions() {
         assert_eq!(
             app.kit
                 .store()
-                .list_rooms(&Default::default())
+                .list_rooms(Default::default())
                 .await
                 .unwrap()
                 .len(),

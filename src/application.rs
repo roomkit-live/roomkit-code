@@ -2,9 +2,11 @@
 
 use std::num::NonZeroUsize;
 
+use roomkit::ConversationStore;
 use roomkit::model::ChannelId;
+use roomkit::store::ListRoomsOptions;
 use roomkit::{RoomKit, RoomKitOptions};
-use roomkit_sqlite::SqliteStore;
+use roomkit_sqlite::{SqliteStore, SqliteStoreOptions};
 use roomkit_tui::connection;
 use roomkit_tui_engine::{ConversationChannel, LocalSession, SessionConfig};
 
@@ -38,7 +40,18 @@ impl Application {
         let services = Services::new(settings, &storage, &profiles)?;
         let store = {
             let _initializing = storage.initialization_lease().await?;
-            SqliteStore::open(&storage.database).await?
+            let store = SqliteStore::new(SqliteStoreOptions {
+                path: storage.database.clone(),
+            });
+            // The store opens its file, creating or migrating its schema, at
+            // its first operation: run one under the lease, which serializes
+            // that across instances, and refuse a file it cannot open now.
+            let first = ListRoomsOptions {
+                limit: 1,
+                ..ListRoomsOptions::default()
+            };
+            store.list_rooms(first).await?;
+            store
         };
         let kit = RoomKit::new(RoomKitOptions::with_store(store));
         let policy = profiles.policy.clone();
@@ -65,7 +78,8 @@ impl Application {
         self.profiles.accounts.close().await;
         self.profiles.mcp_runtime.close().await;
         let engine = self.kit.close().await;
-        // Closing cancels running shell calls; record what they changed.
+        // Closing cancels running shell calls: the agents' slots record what
+        // they changed as they close, before the engine closes its store.
         self.profiles
             .resources
             .files

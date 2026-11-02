@@ -107,3 +107,18 @@ async fn the_context_breakdown_follows_the_request_sent_to_the_model() {
     );
     app.close().await.unwrap();
 }
+
+/// The application sends no temperature: the endpoint's default applies, and
+/// a model that refuses one, behind any base URL, is never sent it.
+#[tokio::test]
+async fn the_request_leaves_the_temperature_to_the_endpoint() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    turn(&app).await;
+    let request = mock.requests.lock().unwrap()[0].clone();
+    assert!(request.get("temperature").is_none(), "{request}");
+    app.close().await.unwrap();
+}

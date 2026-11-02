@@ -1,6 +1,7 @@
 //! MCP configuration, connection workflow and per-agent exposure belong to the
-//! host. Protocol, aliases, selection enforcement and process cleanup are supplied
-//! by roomkit-mcp; there is no application tool implementation here.
+//! host: it names the selected tools `mcp__<server>__<tool>`, serves only those,
+//! and closes the servers. The protocol and each stdio server's process group are
+//! roomkit-mcp's; there is no application tool implementation here.
 mod config;
 mod runtime;
 mod ui;
@@ -8,9 +9,9 @@ mod ui;
 use super::*;
 pub(super) use config::Servers;
 pub(crate) use config::valid_id;
-use roomkit_ai::Toolset;
 use roomkit_tui::protocol::{Command, Request};
 use roomkit_tui_engine::CommandResult;
+pub(crate) use runtime::McpTools;
 pub(super) use runtime::Runtime;
 pub(super) use ui::Pending;
 
@@ -122,7 +123,7 @@ impl Profiles {
                         .lock()
                         .await
                         .get(id)
-                        .is_some_and(|c| c.server.as_ref().is_some_and(|s| s.is_connected()))
+                        .is_some_and(|c| c.server.as_ref().is_some_and(|s| s.connected()))
                 {
                     return Err("This MCP server is already connected".into());
                 }
@@ -143,7 +144,7 @@ impl Profiles {
                     let live = connections
                         .get(id)
                         .and_then(|c| c.server.as_ref())
-                        .filter(|s| s.is_connected())
+                        .filter(|s| s.connected())
                         .ok_or("Connect the server before selecting its tools")?;
                     let available = ui::available(id, live);
                     if action == "enable" {
@@ -208,12 +209,12 @@ pub(super) async fn sidebar(
         let connection = connections.get(id);
         let live = connection
             .and_then(|c| c.server.as_ref())
-            .filter(|s| s.is_connected());
+            .filter(|s| s.connected());
         let names = agent
             .as_ref()
             .and_then(|a| a.mcp.get(id))
             .map_or(&[][..], Vec::as_slice);
-        let available = live.map(|s| s.tools()).unwrap_or_default();
+        let available = live.and_then(|s| s.get_tools().ok()).unwrap_or_default();
         let enabled = names
             .iter()
             .filter(|name| available.iter().any(|tool| &tool.name == *name))

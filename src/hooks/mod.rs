@@ -215,10 +215,15 @@ impl Hooks {
         kit: &roomkit::RoomKit<roomkit_sqlite::SqliteStore>,
     ) -> crate::Result<()> {
         let hooks = self.clone();
-        kit.observe_tool_calls(
-            roomkit::ToolHookSpec::new("code-command-hook-outcomes")
-                .with_timeout(crate::timeouts::HOOKS),
-            move |event, _| {
+        let options = roomkit::HookOptions {
+            execution: roomkit::HookExecution::Async,
+            name: "code-command-hook-outcomes".into(),
+            timeout: crate::timeouts::HOOKS,
+            ..roomkit::HookOptions::default()
+        };
+        kit.hook(
+            roomkit::HookTrigger::OnToolCall,
+            move |event: ToolCallEvent, _| {
                 // Capture correlation and register the task immediately, while the
                 // engine reports the call, not later after another turn has started.
                 let turn = hooks.tool_turn(&event);
@@ -228,14 +233,15 @@ impl Hooks {
                     tracker.spawn(async move {
                         let mut context = turn.context.clone();
                         tool_payload(&mut context.payload, &event);
-                        context.payload["tool_response"] = event.result.clone();
-                        context.payload["roomkit"]["outcome"] = json!(event.outcome);
-                        let name = if event.is_error() {
+                        context.payload["tool_response"] =
+                            event.result.clone().unwrap_or(Value::Null);
+                        context.payload["roomkit"]["outcome"] = json!(tool_outcome(&event));
+                        let name = if event.is_error {
                             HookEvent::PostToolUseFailure
                         } else {
                             HookEvent::PostToolUse
                         };
-                        hooks.dispatch(name, &event.call.name, &context).await;
+                        hooks.dispatch(name, &event.name, &context).await;
                     })
                 });
                 async move {
@@ -244,6 +250,7 @@ impl Hooks {
                     }
                 }
             },
+            options,
         )?;
         Ok(())
     }
@@ -253,7 +260,7 @@ impl Hooks {
             .turns
             .iter()
             .find_map(|((room, agent, _), turn)| {
-                (room == event.room_id.as_str()
+                (event.room_id.as_ref().is_some_and(|id| room == id.as_str())
                     && agent == event.channel_id.as_str()
                     && turn.begun.load(Ordering::Acquire))
                 .then(|| turn.clone())
@@ -278,7 +285,7 @@ impl Hooks {
         };
         let mut context = turn.context.clone();
         tool_payload(&mut context.payload, event);
-        self.dispatch(HookEvent::PreToolUse, &event.call.name, &context)
+        self.dispatch(HookEvent::PreToolUse, &event.name, &context)
             .await
     }
 
@@ -453,9 +460,25 @@ impl Hooks {
 }
 
 fn tool_payload(payload: &mut Value, event: &ToolCallEvent) {
-    payload["tool_name"] = json!(event.call.name);
-    payload["tool_use_id"] = json!(event.call.id);
-    payload["tool_input"] = json!(event.call.arguments);
+    payload["tool_name"] = json!(event.name);
+    payload["tool_use_id"] = json!(event.tool_call_id);
+    payload["tool_input"] = json!(event.arguments);
+}
+
+/// How a finished tool call ended, as far as the engine's tool event tells:
+/// `served`, `refused`, `cancelled`, or `failed` for any other error. The
+/// event carries no outcome of its own, as Python's, so a call a hook
+/// withheld or nothing served reads as `failed` too.
+pub(crate) fn tool_outcome(event: &ToolCallEvent) -> &'static str {
+    if !event.is_error {
+        "served"
+    } else if event.refused {
+        "refused"
+    } else if event.cancelled {
+        "cancelled"
+    } else {
+        "failed"
+    }
 }
 
 /// At most `limit` bytes of `text`, cut at a character boundary, without
@@ -690,5 +713,30 @@ mod tests {
         assert!(started.elapsed() >= Duration::from_millis(300));
         let records = std::fs::read_to_string(path).unwrap();
         assert!(!records.contains("hooks_close_timeout"), "{records}");
+    }
+
+    /// The engine's tool event carries markers, no outcome: each marker
+    /// names the outcome it stands for, any other error reads `failed`.
+    #[test]
+    fn a_tool_outcome_is_read_from_the_event_markers() {
+        let event = |is_error, refused, cancelled| {
+            let mut event = ToolCallEvent::new(
+                roomkit::model::ChannelId::new("code").unwrap(),
+                roomkit::model::ChannelType::AI,
+                "call",
+                "read",
+                Default::default(),
+            );
+            (event.is_error, event.refused, event.cancelled) = (is_error, refused, cancelled);
+            event
+        };
+        let outcomes = [
+            event(false, false, false),
+            event(true, true, false),
+            event(true, false, true),
+            event(true, false, false),
+        ]
+        .map(|event| tool_outcome(&event));
+        assert_eq!(outcomes, ["served", "refused", "cancelled", "failed"]);
     }
 }

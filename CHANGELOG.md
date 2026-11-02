@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- Bound a model request's wait between two reads of its answer by the
+  connection's timeout, not the whole request; connecting takes at most 5
+  seconds (roomkit-rs 93e757c).
+
+- Ask Chat Completions endpoints for at most 1,024 output tokens, the engine's
+  default; requests still carry no temperature.
+
+- Ask the model again, once, when a round of tool calls is followed by an
+  empty answer.
+
+- Fail an MCP tool call after 30 seconds without an answer, the engine's bound,
+  instead of the tool-call bound.
+
+- Report a failed tool to command hooks as `refused`, `cancelled` or `failed`
+  in `roomkit.outcome`; `failed` also covers a result a hook withheld and a call
+  nothing served.
+
+- Name the provider in the footer as the engine reports its usage,
+  `OpenAIAIProvider`, instead of `openai`.
+
 - Pass more host variables to shell commands when you ask for them:
   `--inherit-env 'LD_LIBRARY_PATH,NIX_*'`, `ROOMKIT_INHERIT_ENV` or
   `[shell] inherit_env`. A trailing `*` names a prefix, which never passes a

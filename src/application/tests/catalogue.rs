@@ -1,20 +1,23 @@
 use super::*;
-use roomkit::model::{RoomId, ToolCall};
-use roomkit_ai::{ToolContext, ToolOutput, Toolset};
+use roomkit_ai::{Tool, ToolResult};
 use roomkit_tools_roomkit::{
-    OutputForgetToolset, OutputReadToolset, ProcessReadToolset, ProcessStatusToolset,
+    OutputForgetToolset, OutputReadToolset, ProcessReadToolset, ProcessStartToolset,
+    ProcessStatusToolset, ProcessStopToolset,
 };
 
-fn context(room: &str, agent: &str) -> ToolContext {
-    ToolContext::new(RoomId::new(room).unwrap(), ChannelId::new(agent).unwrap())
+/// What `tool` answers the call of `name` with `args`, made by the agent
+/// `agent` in the room `room`.
+async fn call(
+    tool: &Arc<dyn Tool>,
+    (room, agent): (&str, &str),
+    name: &str,
+    args: Value,
+) -> crate::testing::Answer {
+    crate::testing::call(tool, room, agent, name, args).await
 }
 
-fn call(name: &str, args: Value) -> ToolCall {
-    ToolCall::new("fixture", name, serde_json::from_value(args).unwrap())
-}
-
-fn data(output: ToolOutput) -> Value {
-    let ToolOutput::Json(value) = output else {
+fn data(output: ToolResult) -> Value {
+    let ToolResult::Json(value) = output else {
         panic!("Expected structured output")
     };
     value["data"].clone()
@@ -136,21 +139,15 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
     let shell = tool_result(&session, "shell");
     assert_eq!(shell["stdout"]["truncated"], true);
     let archive = shell["stdout"]["archive"]["archive_id"].as_str().unwrap();
-    let outputs = OutputReadToolset::new(app.profiles.resources.outputs.clone());
-    let processes = ProcessReadToolset::new(app.profiles.resources.processes.clone());
-    for ctx in [context("other", "code"), context("main", "other")] {
+    let resources = &app.profiles.resources;
+    let outputs: Arc<dyn Tool> = Arc::new(OutputReadToolset::new(resources.outputs.clone()));
+    let processes: Arc<dyn Tool> = Arc::new(ProcessReadToolset::new(resources.processes.clone()));
+    for caller in [("other", "code"), ("main", "other")] {
+        let read = json!({"archive_id":archive});
+        assert!(call(&outputs, caller, "output_read", read).await.is_err());
+        let read = json!({"process_id":"p1"});
         assert!(
-            outputs
-                .call(
-                    call("output_read", json!({"archive_id":archive})),
-                    ctx.clone()
-                )
-                .await
-                .is_err()
-        );
-        assert!(
-            processes
-                .call(call("process_read", json!({"process_id":"p1"})), ctx)
+            call(&processes, caller, "process_read", read)
                 .await
                 .is_err()
         );
@@ -188,21 +185,11 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
         ],
     )
     .await;
-    let observer = ProcessStatusToolset::new(app.profiles.resources.processes.clone());
-    assert!(
-        data(
-            observer
-                .call(
-                    call("process_status", json!({})),
-                    context("main", "observer")
-                )
-                .await
-                .unwrap()
-        )
-        .as_array()
-        .unwrap()
-        .is_empty()
-    );
+    let observer: Arc<dyn Tool> = Arc::new(ProcessStatusToolset::new(
+        app.profiles.resources.processes.clone(),
+    ));
+    let status = call(&observer, ("main", "observer"), "process_status", json!({}));
+    assert!(data(status.await.unwrap()).as_array().unwrap().is_empty());
     let roomkit_tui_engine::CommandResult::Switch(view) = profile_command(
         &app,
         Command::Invoke {
@@ -239,12 +226,9 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
     assert!(!shown.contains("\"archive_id\"") && !shown.contains("\"bytes\":["));
     let completed = tokio::time::timeout(Duration::from_secs(3), async {
         loop {
+            let read = json!({"process_id":"p1"});
             let result = data(
-                processes
-                    .call(
-                        call("process_read", json!({"process_id":"p1"})),
-                        context("main", "code"),
-                    )
+                call(&processes, ("main", "code"), "process_read", read)
                     .await
                     .unwrap(),
             );
@@ -258,56 +242,29 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
     .unwrap();
     assert_eq!(completed["stdout"]["text"], "hello\n");
     assert_eq!(completed["status"]["exit_code"], 0);
-    let forget = OutputForgetToolset::new(app.profiles.resources.outputs.clone());
-    assert_eq!(
-        data(
-            forget
-                .call(
-                    call("output_forget", json!({"archive_id":archive})),
-                    context("main", "code")
-                )
-                .await
-                .unwrap()
-        )["forgotten"],
-        true
+    let code = ("main", "code");
+    let forget: Arc<dyn Tool> = Arc::new(OutputForgetToolset::new(
+        app.profiles.resources.outputs.clone(),
+    ));
+    let forgotten = call(
+        &forget,
+        code,
+        "output_forget",
+        json!({"archive_id":archive}),
     );
-    assert!(
-        outputs
-            .call(
-                call("output_read", json!({"archive_id":archive})),
-                context("main", "code")
-            )
-            .await
-            .is_err()
-    );
+    assert_eq!(data(forgotten.await.unwrap())["forgotten"], true);
+    let read = json!({"archive_id":archive});
+    assert!(call(&outputs, code, "output_read", read).await.is_err());
     // Leave another live process for the application's shutdown path to reap.
-    let start =
-        roomkit_tools_roomkit::ProcessStartToolset::new(app.profiles.resources.processes.clone());
-    start
-        .call(
-            call("process_start", json!({"command":"cat"})),
-            context("main", "code"),
-        )
-        .await
-        .unwrap();
-    let stop =
-        roomkit_tools_roomkit::ProcessStopToolset::new(app.profiles.resources.processes.clone());
-    let stopped = data(
-        stop.call(
-            call("process_stop", json!({"process_id":"p2","forget":true})),
-            context("main", "code"),
-        )
-        .await
-        .unwrap(),
-    );
+    let processes = &app.profiles.resources.processes;
+    let start: Arc<dyn Tool> = Arc::new(ProcessStartToolset::new(processes.clone()));
+    let stop: Arc<dyn Tool> = Arc::new(ProcessStopToolset::new(processes.clone()));
+    let cat = || json!({"command":"cat"});
+    call(&start, code, "process_start", cat()).await.unwrap();
+    let stopping = json!({"process_id":"p2","forget":true});
+    let stopped = data(call(&stop, code, "process_stop", stopping).await.unwrap());
     assert_eq!(stopped["forgotten"], true);
-    start
-        .call(
-            call("process_start", json!({"command":"cat"})),
-            context("main", "code"),
-        )
-        .await
-        .unwrap();
+    call(&start, code, "process_start", cat()).await.unwrap();
     let state_path = app._storage.database.parent().unwrap().to_owned();
     let archives: Vec<_> = std::fs::read_dir(state_path)
         .unwrap()
@@ -324,12 +281,8 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
         "Output archive storage exists before shutdown"
     );
     app.close().await.unwrap();
-    assert!(
-        observer
-            .call(call("process_status", json!({})), context("main", "code"))
-            .await
-            .is_err()
-    );
+    let status = call(&observer, ("main", "code"), "process_status", json!({}));
+    assert!(status.await.is_err());
     assert!(
         archives.iter().all(|path| !path.exists()),
         "Temporary output archives are removed at shutdown"

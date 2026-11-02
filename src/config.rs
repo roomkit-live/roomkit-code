@@ -43,7 +43,7 @@ pub(crate) struct Cli {
     /// Initial model for a project without agent profiles.
     #[arg(long, env = "ROOMKIT_MODEL", hide_env_values = true)]
     pub model: Option<String>,
-    /// Initial model-request timeout, including its streamed response.
+    /// Initial model-request timeout: the longest wait between two reads of its answer.
     #[arg(long)]
     pub provider_timeout_seconds: Option<u64>,
     /// Initial effective model context capacity in tokens.

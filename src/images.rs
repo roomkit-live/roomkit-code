@@ -1,8 +1,8 @@
 //! Private, room-scoped author attachments. No workspace paths enter the protocol.
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use roomkit::model::{CompositeContent, EventContent, MediaContent, RoomId, TextContent};
-use roomkit::transcript::Image;
 use roomkit_ai::ImageResolver;
+use roomkit_core::rules::transcript::Image;
 use roomkit_tui::protocol::{ImageUpload, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_IMAGES};
 use std::{
     future::Future,

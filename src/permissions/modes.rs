@@ -7,16 +7,16 @@
 
 use std::sync::Arc;
 
-use roomkit::model::ToolCall;
-use roomkit::{ToolCallEvent, ToolUse};
-use roomkit_ai::{ToolContext, ToolDefinition, ToolError, ToolOutput, Toolset};
+use roomkit::ToolCallEvent;
+use roomkit::model::{Metadata, ToolCall};
+use roomkit_ai::{AiTool, Tool, ToolError, ToolFuture, ToolResult, current_tool_call};
 use roomkit_tools_plans::{Plan, PlanScope, StepStatus};
 use roomkit_tui::protocol::Decision;
 use roomkit_tui_engine::{ConversationChannel, PermissionRequest};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{Mode, Policy};
+use super::{Mode, Policy, Verdict, block, room_of};
 use crate::plans::Plans;
 
 pub(crate) const ENTER: &str = "plan_mode_enter";
@@ -56,17 +56,27 @@ impl ModeTools {
         Self { policy, plans }
     }
 
-    fn enter(&self, room: &str, call: &ToolCall) -> Result<ToolOutput, ToolError> {
+    /// Both mode tools, each serving its own calls.
+    pub fn tools(&self) -> [Arc<dyn Tool>; 2] {
+        [ENTER, EXIT].map(|name| -> Arc<dyn Tool> {
+            Arc::new(ModeTool {
+                tools: self.clone(),
+                name,
+            })
+        })
+    }
+
+    fn enter(&self, scope: &PlanScope, call: &ToolCall) -> Result<ToolResult, ToolError> {
         let input: EnterInput = roomkit_ai::arguments(call)?;
-        self.policy.apply(room, Mode::Plan);
-        Ok(ToolOutput::Json(json!({
+        self.policy.apply(&scope.room_id, Mode::Plan);
+        Ok(ToolResult::Json(json!({
             "mode": "plan",
             "reason": input.reason,
             "next": "The mode is now Plan; it replaces any earlier mode instruction in this turn. Explore and write the plan with the plan tools, without changing the project or running commands, then call plan_mode_exit for the user's approval."
         })))
     }
 
-    async fn exit(&self, context: &ToolContext, call: &ToolCall) -> Result<ToolOutput, ToolError> {
+    async fn exit(&self, scope: &PlanScope, call: &ToolCall) -> Result<ToolResult, ToolError> {
         let input: ExitInput = roomkit_ai::arguments(call)?;
         let (Some(id), Some(approved)) = (input.plan_id, input.revision) else {
             return Err(ToolError::refused(
@@ -75,7 +85,7 @@ impl ModeTools {
         };
         let plan = self
             .plans
-            .plan(&scope(context), Some(&id))
+            .plan(scope, Some(&id))
             .await
             .map_err(|error| ToolError::refused(error.to_string()))?;
         if plan.revision != approved {
@@ -83,8 +93,8 @@ impl ModeTools {
                 "The plan changed while the user was approving it, so it was not approved and the mode is still Plan. Call plan_mode_exit again for the current plan.",
             ));
         }
-        self.policy.apply(context.room_id.as_str(), Mode::Ask);
-        Ok(ToolOutput::Json(json!({
+        self.policy.apply(&scope.room_id, Mode::Ask);
+        Ok(ToolResult::Json(json!({
             "mode": "ask",
             "approved_plan_id": plan.plan_id,
             "approved_revision": plan.revision,
@@ -93,13 +103,19 @@ impl ModeTools {
     }
 }
 
-impl Toolset for ModeTools {
-    fn tools(&self) -> Vec<ToolDefinition> {
-        vec![
-            ToolDefinition::new(
-                ENTER,
-                "Ask the user to move this conversation to Plan mode before substantial or ambiguous work: several files, several possible approaches, an architecture choice. Not for a small, clear change. The user approves or refuses (in Yolo it applies at once); in Plan you explore and write a plan with the plan tools, without changing the project or running commands.",
-                json!({
+/// One mode tool: entering Plan, or leaving it.
+struct ModeTool {
+    tools: ModeTools,
+    name: &'static str,
+}
+
+impl Tool for ModeTool {
+    fn definition(&self) -> AiTool {
+        if self.name == ENTER {
+            AiTool {
+                name: ENTER.into(),
+                description: "Ask the user to move this conversation to Plan mode before substantial or ambiguous work: several files, several possible approaches, an architecture choice. Not for a small, clear change. The user approves or refuses (in Yolo it applies at once); in Plan you explore and write a plan with the plan tools, without changing the project or running commands.".into(),
+                parameters: json!({
                     "type": "object",
                     "properties": {
                         "reason": {"type": "string", "maxLength": 1000, "description": "Why this task needs a plan first, shown to the user."}
@@ -107,11 +123,12 @@ impl Toolset for ModeTools {
                     "required": ["reason"],
                     "additionalProperties": false
                 }),
-            ),
-            ToolDefinition::new(
-                EXIT,
-                "In Plan mode, ask the user to approve a written plan and move this conversation to Ask mode to implement it. The user sees the stored plan, not your summary. Give plan_id; it may be omitted only when this conversation has a single plan. Approved, you implement it, each change still asking for approval; otherwise you stay in Plan and refine it.",
-                json!({
+            }
+        } else {
+            AiTool {
+                name: EXIT.into(),
+                description: "In Plan mode, ask the user to approve a written plan and move this conversation to Ask mode to implement it. The user sees the stored plan, not your summary. Give plan_id; it may be omitted only when this conversation has a single plan. Approved, you implement it, each change still asking for approval; otherwise you stay in Plan and refine it.".into(),
+                parameters: json!({
                     "type": "object",
                     "properties": {
                         "plan_id": {"type": "string", "description": "The plan to approve; required when this conversation has several plans."},
@@ -119,23 +136,35 @@ impl Toolset for ModeTools {
                     },
                     "additionalProperties": false
                 }),
-            ),
-        ]
-    }
-
-    async fn call(&self, call: ToolCall, context: ToolContext) -> Result<ToolOutput, ToolError> {
-        match call.name.as_str() {
-            ENTER => self.enter(context.room_id.as_str(), &call),
-            EXIT => self.exit(&context, &call).await,
-            _ => Err(ToolError::refused("unavailable mode tool")),
+            }
         }
     }
-}
 
-fn scope(context: &ToolContext) -> PlanScope {
-    PlanScope {
-        room_id: context.room_id.to_string(),
-        caller_id: context.channel_id.to_string(),
+    fn handler(&self, name: String, arguments: Metadata) -> ToolFuture {
+        if name != self.name {
+            let unserved = ToolError::unserved(format!("'{}' does not serve '{name}'", self.name));
+            return Box::pin(async move { Err(unserved) });
+        }
+        let call = current_tool_call();
+        let scope = call.as_ref().and_then(|call| {
+            Some(PlanScope {
+                room_id: call.room_id.as_ref()?.to_string(),
+                caller_id: call.channel_id.as_ref()?.to_string(),
+            })
+        });
+        let id = call.map(|call| call.tool_call_id).unwrap_or_default();
+        let call = ToolCall::new(id, name, arguments);
+        let tools = self.tools.clone();
+        Box::pin(async move {
+            let scope = scope.ok_or_else(|| {
+                ToolError::refused("mode tools require a conversation and an acting agent")
+            })?;
+            if call.name == ENTER {
+                tools.enter(&scope, &call)
+            } else {
+                tools.exit(&scope, &call).await
+            }
+        })
     }
 }
 
@@ -148,14 +177,14 @@ pub(crate) async fn approve_exit(
     plans: &Plans,
     event: ToolCallEvent,
     review: Option<String>,
-) -> ToolUse {
-    let room = event.room_id.as_str();
+) -> Verdict {
+    let room = room_of(&event);
     if policy.mode(room) != Mode::Plan {
-        return ToolUse::block("plan_mode_exit applies in Plan mode only; the mode is unchanged.");
+        return block("plan_mode_exit applies in Plan mode only; the mode is unchanged.");
     }
     let plan = match shown_plan(plans, &event).await {
         Ok(plan) => plan,
-        Err(refusal) => return refusal,
+        Err(refusal) => return block(refusal),
     };
     let detail = match review {
         Some(reason) => format!("Hook requires review: {reason}\n\n{}", render(&plan)),
@@ -168,39 +197,39 @@ pub(crate) async fn approve_exit(
     )
     .with_summary(format!("{EXIT} · {}", plan.title));
     match channel.ask_tool_permission(&event, request).await {
-        Decision::Allow if policy.mode(room) == Mode::Plan => pinned(&plan),
-        Decision::Allow => ToolUse::block(
-            "The mode changed while approval was pending; the plan was not approved.",
-        ),
-        _ => ToolUse::block(
+        Decision::Allow if policy.mode(room) == Mode::Plan => pinned(event, &plan),
+        Decision::Allow => {
+            block("The mode changed while approval was pending; the plan was not approved.")
+        }
+        _ => block(
             "The plan was not approved (refused, expired or view disconnected): stay in Plan, refine the plan if the user asks, and ask again.",
         ),
     }
 }
 
 /// The plan the card shows: the one named, or the conversation's only one.
-async fn shown_plan(plans: &Plans, event: &ToolCallEvent) -> Result<Plan, ToolUse> {
+async fn shown_plan(plans: &Plans, event: &ToolCallEvent) -> Result<Plan, String> {
     let id = event
-        .call
         .arguments
         .get("plan_id")
         .and_then(serde_json::Value::as_str);
     let scope = PlanScope {
-        room_id: event.room_id.to_string(),
+        room_id: room_of(event).to_owned(),
         caller_id: event.channel_id.to_string(),
     };
     plans
         .plan(&scope, id)
         .await
-        .map_err(|error| ToolUse::block(error.to_string()))
+        .map_err(|error| error.to_string())
 }
 
-/// The call's arguments, pinned to the plan and revision the user approved.
-fn pinned(plan: &Plan) -> ToolUse {
-    let mut arguments = roomkit::model::Metadata::new();
+/// The call, its arguments pinned to the plan and revision the user approved.
+fn pinned(mut event: ToolCallEvent, plan: &Plan) -> Verdict {
+    let mut arguments = Metadata::new();
     arguments.insert("plan_id".into(), json!(plan.plan_id));
     arguments.insert("revision".into(), json!(plan.revision));
-    ToolUse::Rewrite(arguments)
+    event.arguments = arguments;
+    roomkit::model::HookResult::modify(event, Default::default())
 }
 
 /// A plan as the user approves it: title, objective, then numbered steps.

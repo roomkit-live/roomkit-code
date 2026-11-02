@@ -209,3 +209,36 @@ fn panics_are_recorded_and_counted_without_waiting_on_the_log() -> crate::Result
     assert!(!format!("{events:?}").contains("WRITE FAILED"));
     Ok(())
 }
+
+/// The engine's framework events reach the log through their handlers: in
+/// debug, a room's creation is recorded; after the application stopped,
+/// nothing more is.
+#[tokio::test]
+async fn framework_events_are_recorded_until_the_application_stops() -> crate::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("diagnostics.jsonl");
+    let store = SqliteStore::new(roomkit_sqlite::SqliteStoreOptions {
+        path: directory.path().join("history.sqlite3"),
+    });
+    let kit = RoomKit::new(roomkit::RoomKitOptions::with_store(store));
+    let log = Diagnostics::open(path.clone(), true)?;
+    log.install(&kit).await?;
+    let room = |id: &str| -> crate::Result<roomkit::CreateRoomOptions> {
+        Ok(roomkit::CreateRoomOptions {
+            room_id: Some(roomkit::model::RoomId::new(id)?),
+            ..Default::default()
+        })
+    };
+    kit.create_room(room("before")?).await?;
+    log.close().await;
+    kit.create_room(room("after")?).await?;
+    kit.close().await?;
+    let records = std::fs::read_to_string(&path)?;
+    let created: Vec<&str> = records
+        .lines()
+        .filter(|line| line.contains("\"room_created\""))
+        .collect();
+    assert_eq!(created.len(), 1, "{records}");
+    assert!(created[0].contains("\"before\""), "{records}");
+    Ok(())
+}

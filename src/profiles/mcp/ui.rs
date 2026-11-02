@@ -2,9 +2,9 @@ use super::super::ui::choice;
 use super::super::*;
 use super::{
     Runtime,
-    config::{Connection as Connector, Server, Transport},
+    config::{Server, Transport},
 };
-use roomkit_ai::Toolset;
+use roomkit_mcp::McpToolProvider;
 use roomkit_tui::protocol::{Choice, Event, FieldKind, FormField, FormSpec, FormValues, PanelSpec};
 use roomkit_tui_engine::CommandResult;
 
@@ -69,9 +69,10 @@ pub(super) async fn list(
         "Connect local stdio or remote Streamable HTTP servers. Local servers run with your user permissions, in this workspace. Saving connects the server and enables its tools for the current agent. Existing selections, including disabled tools, are preserved. Connections last until disconnect or application exit. Ask approves every MCP tool call; Plan blocks MCP calls; Yolo runs selected tools without asking. Servers and tools are independent of the agent's model provider.".into(), actions)
 }
 
-pub(super) fn available(id: &str, server: &roomkit_mcp::McpServer) -> Vec<ToolDefinition> {
+pub(super) fn available(id: &str, server: &McpToolProvider) -> Vec<AiTool> {
     server
-        .tools()
+        .get_tools()
+        .unwrap_or_default()
         .into_iter()
         .filter(|tool| {
             let alias = format!("mcp__{id}__{}", tool.name);
@@ -96,7 +97,7 @@ pub(super) async fn detail(
     let status = connection.map_or("Disconnected", |c| c.status());
     let live = connection
         .and_then(|c| c.server.as_ref())
-        .filter(|s| s.is_connected());
+        .filter(|s| s.connected());
     let agent = state.agent(current.agent.as_str());
     let selected = agent.as_ref().and_then(|a| a.mcp.get(&config.id));
     let names = selected.map_or(&[][..], Vec::as_slice);
@@ -338,7 +339,7 @@ pub(super) fn save(
     form: &str,
     values: &FormValues,
     workspace: &std::path::Path,
-) -> Result<(Server, Connector), String> {
+) -> Result<(Server, McpToolProvider), String> {
     let Some(Pending::Form {
         room,
         form: expected,

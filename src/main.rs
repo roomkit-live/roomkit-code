@@ -25,6 +25,8 @@ mod sessions;
 mod shell;
 mod storage;
 mod sync;
+#[cfg(test)]
+mod testing;
 mod timeouts;
 mod tool_views;
 mod updates;

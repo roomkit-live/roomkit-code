@@ -363,7 +363,7 @@ fn item(row: &RoomEvent) -> Item {
     Item::Message(Message::new(
         row.id.as_str(),
         roomkit_tui::protocol::ActorId::new(actor),
-        roomkit::text_of(&row.content),
+        roomkit_core::rules::transcoding::text_of(&row.content),
     ))
 }
 

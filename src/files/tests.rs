@@ -5,8 +5,8 @@ use serde_json::json;
 
 use std::time::Duration;
 
-use roomkit::model::{ChannelId, RoomId, ToolCall};
-use roomkit_ai::{ToolContext, ToolDefinition, ToolError, ToolOutput, Toolset};
+use roomkit::model::{Metadata, RoomId};
+use roomkit_ai::{AiChannelOptions, AiTool, Tool, ToolFuture};
 
 use super::record::{Record, merge};
 use super::snapshot::Digests;
@@ -185,17 +185,24 @@ fn unpacked_files_with_old_times_are_still_created() {
     );
 }
 
-/// Writes a file, then runs until the call is dropped.
+/// A shell that writes a file, then runs until the call is dropped.
 struct Hanging(std::path::PathBuf);
 
-impl Toolset for Hanging {
-    fn tools(&self) -> Vec<ToolDefinition> {
-        Vec::new()
+impl Tool for Hanging {
+    fn definition(&self) -> AiTool {
+        AiTool {
+            name: "shell".into(),
+            description: "Run a command".into(),
+            parameters: json!({"type": "object"}),
+        }
     }
 
-    async fn call(&self, _: ToolCall, _: ToolContext) -> Result<ToolOutput, ToolError> {
-        std::fs::write(self.0.join("partial.txt"), "written before the cancel").unwrap();
-        std::future::pending().await
+    fn handler(&self, _: String, _: Metadata) -> ToolFuture {
+        let path = self.0.join("partial.txt");
+        Box::pin(async move {
+            std::fs::write(path, "written before the cancel").unwrap();
+            std::future::pending().await
+        })
     }
 }
 
@@ -204,15 +211,14 @@ impl Toolset for Hanging {
 async fn a_cancelled_shell_call_still_reports_what_it_changed() {
     let root = tempfile::tempdir().unwrap();
     let files = Files::new(root.path());
-    let tracked = files.wrap(Hanging(root.path().into()));
-    let call = ToolCall::new("call", "shell", Default::default());
-    let context = ToolContext::new(
-        RoomId::new("room").unwrap(),
-        ChannelId::new("code").unwrap(),
-    );
+    let tracked = files.wrap(Arc::new(Hanging(root.path().into())));
     // Cancelling the turn or the tool timeout drops the call mid-command.
-    let call = tokio::time::timeout(Duration::from_millis(200), tracked.call(call, context));
-    assert!(call.await.is_err());
+    let options = AiChannelOptions {
+        tool_timeout: Some(Duration::from_millis(200)),
+        ..AiChannelOptions::default()
+    };
+    let answered = crate::testing::turn(&tracked, "room", "code", "shell", json!({}), options);
+    assert!(answered.await.is_none());
     // Closing the application waits for the comparison the drop started.
     files.settle(Duration::from_secs(5)).await;
     let record = files.record("room").await;
@@ -229,9 +235,9 @@ async fn a_cancelled_shell_call_still_reports_what_it_changed() {
 #[tokio::test]
 async fn an_unreadable_saved_list_is_never_overwritten() {
     let state = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open(&state.path().join("history.sqlite3"))
-        .await
-        .unwrap();
+    let store = SqliteStore::new(roomkit_sqlite::SqliteStoreOptions {
+        path: state.path().join("history.sqlite3"),
+    });
     let kit = RoomKit::new(roomkit::RoomKitOptions::with_store(store));
     let room = kit
         .create_room(roomkit::CreateRoomOptions {

@@ -10,7 +10,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use roomkit::{FrameworkEvent, HookTrigger, RoomKit};
+use roomkit::{FrameworkEvent, HookExecution, HookOptions, HookTrigger, RoomKit};
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::{Choice, Event, PanelSpec};
 use roomkit_tui_engine::{CommandResult, Diagnostic, SessionConfig};
@@ -24,8 +24,9 @@ pub(crate) struct Diagnostics {
     instance: String,
     debug: bool,
     state: Mutex<State>,
+    /// Cancelled once the application stopped: framework events are no
+    /// longer recorded.
     stop: CancellationToken,
-    listener: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Panics in this run, recorded or not.
     panics: AtomicUsize,
 }
@@ -47,7 +48,6 @@ impl Diagnostics {
                 write_failed: false,
             }),
             stop: CancellationToken::new(),
-            listener: tokio::sync::Mutex::new(None),
             panics: AtomicUsize::new(0),
         });
         diagnostics.record("application_started", json!({"debug":debug}), None);
@@ -92,10 +92,9 @@ impl Diagnostics {
 
     pub async fn install(self: &Arc<Self>, kit: &RoomKit<SqliteStore>) -> crate::Result<()> {
         let log = self.clone();
-        kit.observe(
-            "code-diagnostics-errors",
+        kit.hook(
             HookTrigger::OnError,
-            move |event, _| {
+            move |event: roomkit::model::RoomEvent, _| {
                 let log = log.clone();
                 async move {
                     log.record("engine_error", json!({
@@ -110,116 +109,99 @@ impl Diagnostics {
                 }), Some(event.metadata.get("error").and_then(Value::as_str).unwrap_or("unknown")));
                 }
             },
+            observer("code-diagnostics-errors"),
         )?;
         let log = self.clone();
-        kit.observe_tool_calls("code-diagnostics-tools", move |event, _| {
-            let log = log.clone();
-            async move {
-                // Tool names come from this application's known inventory;
-                // call IDs, arguments, results and error bodies are not logged.
-                let name = if crate::profiles::model::TOOLS.contains(&event.call.name.as_str()) {
-                    event.call.name.as_str()
-                } else {
-                    "unknown"
-                };
-                log.record(
-                    "tool_finished",
-                    json!({
-                        "room":event.room_id.as_str(), "channel":event.channel_id.as_str(),
-                        "tool":name, "outcome":event.outcome,
-                    }),
-                    event.error_detail.as_deref(),
-                );
-            }
-        })?;
-        let mut events = kit.subscribe();
-        let log = self.clone();
-        *self.listener.lock().await = Some(tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    biased;
-                    event = events.recv() => match event {
-                        Ok(event) => log.framework(event),
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) =>
-                            log.record("audit_events_skipped", json!({"count":count}), None),
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    },
-                    () = log.stop.cancelled() => break,
+        kit.hook(
+            HookTrigger::OnToolCall,
+            move |event: roomkit::ToolCallEvent, _| {
+                let log = log.clone();
+                async move {
+                    // Tool names come from this application's known inventory;
+                    // call IDs, arguments, results and error bodies are not logged.
+                    let name = if crate::profiles::model::TOOLS.contains(&event.name.as_str()) {
+                        event.name.as_str()
+                    } else {
+                        "unknown"
+                    };
+                    log.record(
+                        "tool_finished",
+                        json!({
+                            "room":event.room_id.as_ref().map(|id| id.as_str()),
+                            "channel":event.channel_id.as_str(),
+                            "tool":name, "outcome":crate::hooks::tool_outcome(&event),
+                        }),
+                        event.error_detail.as_deref(),
+                    );
                 }
-            }
-        }));
+            },
+            observer("code-diagnostics-tools"),
+        )?;
+        let mut types = vec![
+            "delivery_failed",
+            "hook_error",
+            "process_timeout",
+            "hook_timeout",
+        ];
+        if self.debug {
+            types.extend(["event_processed", "delivery_succeeded", "room_created"]);
+        }
+        for r#type in types {
+            let log = self.clone();
+            kit.on(r#type, move |event| {
+                if !log.stop.is_cancelled() {
+                    log.framework(&event);
+                }
+                async {}
+            })?;
+        }
         Ok(())
     }
 
-    fn framework(&self, event: FrameworkEvent) {
-        match event {
-            FrameworkEvent::DeliveryFailed {
-                room_id,
-                event_id,
-                channel_id,
-                error,
-                ..
-            } => self.record(
+    fn framework(&self, event: &FrameworkEvent) {
+        let room = event.room_id.as_ref().map(|id| id.as_str());
+        let event_id = event.event_id.as_ref().map(|id| id.as_str());
+        let channel = event.channel_id.as_ref().map(|id| id.as_str());
+        let data = |key: &str| event.data.get(key).cloned().unwrap_or(Value::Null);
+        let text = |key: &str| event.data.get(key).and_then(Value::as_str);
+        match event.r#type.as_str() {
+            "delivery_failed" => self.record(
                 "delivery_failed",
-                json!({"room":room_id,"event_id":event_id,"channel":channel_id}),
-                Some(&error),
+                json!({"room":room,"event_id":event_id,"channel":channel}),
+                text("error"),
             ),
-            FrameworkEvent::HookError {
-                room_id,
-                event_id,
-                error,
-                ..
-            } => self.record(
+            "hook_error" => self.record(
                 "hook_failed",
-                json!({"room":room_id,"event_id":event_id}),
-                Some(&error),
+                json!({"room":room,"event_id":event_id}),
+                text("error"),
             ),
-            FrameworkEvent::ProcessTimeout {
-                room_id,
-                event_id,
-                timeout,
-                ..
-            } => self.record(
+            "process_timeout" => self.record(
                 "processing_timeout",
-                json!({"room":room_id,"event_id":event_id,"timeout_seconds":timeout}),
+                json!({"room":room,"event_id":event_id,"timeout_seconds":data("timeout")}),
                 Some("process_timeout"),
             ),
-            FrameworkEvent::HookTimeout {
-                room_id, timeout, ..
-            } => self.record(
+            "hook_timeout" => self.record(
                 "hook_timeout",
-                json!({"room":room_id,"timeout_seconds":timeout}),
+                json!({"room":room,"timeout_seconds":data("timeout")}),
                 None,
             ),
-            FrameworkEvent::EventProcessed {
-                room_id, event_id, ..
-            } if self.debug => self.record(
+            "event_processed" => self.record(
                 "event_processed",
-                json!({"room":room_id,"event_id":event_id}),
+                json!({"room":room,"event_id":event_id}),
                 None,
             ),
-            FrameworkEvent::DeliverySucceeded {
-                room_id,
-                event_id,
-                channel_id,
-                ..
-            } if self.debug => self.record(
+            "delivery_succeeded" => self.record(
                 "delivery_succeeded",
-                json!({"room":room_id,"event_id":event_id,"channel":channel_id}),
+                json!({"room":room,"event_id":event_id,"channel":channel}),
                 None,
             ),
-            FrameworkEvent::RoomCreated { room_id, .. } if self.debug => {
-                self.record("room_created", json!({"room":room_id}), None)
-            }
+            "room_created" => self.record("room_created", json!({"room":room}), None),
             _ => {}
         }
     }
 
     pub async fn close(&self) {
         self.stop.cancel();
-        if let Some(listener) = self.listener.lock().await.take() {
-            let _ = listener.await;
-        }
         self.record("application_stopped", json!({}), None);
     }
 
@@ -261,6 +243,16 @@ impl Diagnostics {
             ])
             .with_dismiss("dismiss"),
         }])
+    }
+}
+
+/// An observer named `name`: it reads what the engine reports and decides
+/// nothing.
+fn observer(name: &str) -> HookOptions {
+    HookOptions {
+        execution: HookExecution::Async,
+        name: name.into(),
+        ..HookOptions::default()
     }
 }
 

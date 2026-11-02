@@ -1,7 +1,10 @@
 //! The project's sessions: creating one, listing those to resume, resuming
 //! one, and `/new`, which keeps an empty draft rather than opening another.
 
-use roomkit::model::{Access, EventContent, EventType, Room, RoomContext, RoomId, RoomStatus};
+use roomkit::model::{
+    Access, ChannelId, EventContent, EventType, Room, RoomContext, RoomId, RoomStatus,
+};
+use roomkit::store::{FindRoomIdsByChannelOptions, GetEventCountOptions};
 use roomkit::{
     ConversationStore, CreateRoomOptions, EventFilter, GetRoomOptions, GetTimelineOptions,
     ListBindingsOptions, RoomFilter, RoomKit,
@@ -25,14 +28,37 @@ pub(crate) async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<b
         .store()
         .get_event_count(
             room,
-            Some(EventFilter {
-                exclude_types: Some(vec![EventType::ChannelAttached, EventType::ChannelDetached]),
-                include_blocked: true,
-                ..Default::default()
-            }),
+            GetEventCountOptions {
+                event_filter: Some(EventFilter {
+                    exclude_types: Some(vec![
+                        EventType::ChannelAttached,
+                        EventType::ChannelDetached,
+                    ]),
+                    include_blocked: true,
+                    ..Default::default()
+                }),
+            },
         )
         .await?
         == 0)
+}
+
+/// The active rooms binding `channel`, oldest first.
+async fn active_rooms(kit: &RoomKit<SqliteStore>, channel: &ChannelId) -> Result<Vec<Room>> {
+    let store = kit.store();
+    let options = FindRoomIdsByChannelOptions {
+        room_filter: Some(RoomFilter {
+            statuses: Some(vec![RoomStatus::Active]),
+            ..Default::default()
+        }),
+        limit: usize::MAX,
+        group: None,
+    };
+    let mut rooms = Vec::new();
+    for id in store.find_room_ids_by_channel(channel, options).await? {
+        rooms.extend(store.get_room(&id).await?);
+    }
+    Ok(rooms)
 }
 
 pub(crate) async fn create(
@@ -93,14 +119,7 @@ async fn unused_draft(
     channel: &roomkit::model::ChannelId,
     agent: &roomkit::model::ChannelId,
 ) -> Result<Option<RoomId>> {
-    let mut rooms = kit
-        .store()
-        .list_rooms(&RoomFilter {
-            channel_id: Some(channel.clone()),
-            status: Some(RoomStatus::Active),
-            ..Default::default()
-        })
-        .await?;
+    let mut rooms = active_rooms(kit, channel).await?;
     rooms.sort_by(|a, b| {
         b.updated_at
             .cmp(&a.updated_at)
@@ -291,15 +310,7 @@ impl Sessions {
 
     /// The other active sessions this view can read, newest first.
     async fn choices(&self, current: &SessionConfig) -> Result<Vec<Choice>> {
-        let mut rooms = self
-            .kit
-            .store()
-            .list_rooms(&RoomFilter {
-                channel_id: Some(self.channel.clone()),
-                status: Some(RoomStatus::Active),
-                ..Default::default()
-            })
-            .await?;
+        let mut rooms = active_rooms(&self.kit, &self.channel).await?;
         rooms
             .retain(|room| room.id != current.room && room.organization_id == current.organization);
         rooms.sort_by(|a, b| {

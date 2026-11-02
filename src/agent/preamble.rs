@@ -2,11 +2,10 @@
 //! and the tool inventory, and how many characters each part takes. The
 //! sidebar's context breakdown shows these measures.
 
-use roomkit_ai::{SkillRegistry, ToolDefinition, Toolset};
-use roomkit_mcp::McpServer;
+use roomkit_ai::{AiTool, SkillRegistry};
 use std::path::PathBuf;
 
-use crate::profiles::model::Agent;
+use crate::profiles::{McpTools, model::Agent};
 
 const INSTRUCTIONS: &str = include_str!("coding-agent.txt");
 const ACTIVITY_INSTRUCTIONS: &str = r#"For every tool call, include a short description of your next action in _roomkit_intent, in the user's language. Put action announcements there, not in a separate message. Keep messages for findings, questions, explanations and the final answer.
@@ -28,7 +27,7 @@ pub(crate) struct Composition {
 /// The tools an agent exposes, and what every one of its requests carries.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Inventory {
-    pub tools: Vec<ToolDefinition>,
+    pub tools: Vec<AiTool>,
     pub composition: Composition,
 }
 
@@ -44,7 +43,7 @@ const SERVER_INSTRUCTIONS_MAX: usize = 8192;
 /// Tools as an OpenAI-compatible request sends them: with the reserved intent
 /// property the engine adds, required when the application requires it, each
 /// wrapped as a function.
-fn schema_chars(tools: &[ToolDefinition], intent_required: bool) -> usize {
+fn schema_chars(tools: &[AiTool], intent_required: bool) -> usize {
     tools
         .iter()
         .map(|tool| {
@@ -90,16 +89,16 @@ pub(super) struct Preamble {
 /// and its MCP servers.
 pub(super) fn preamble(
     profile: &Agent,
-    native: Vec<ToolDefinition>,
+    native: Vec<AiTool>,
     skills: &SkillRegistry,
     skill_roots: &[PathBuf],
-    mcp: &[(String, McpServer)],
+    mcp: &[McpTools],
     intent_required: bool,
 ) -> Preamble {
     let mut tools = native.clone();
     tools.extend(skills.tool_definitions());
-    for (_, server) in mcp {
-        tools.extend(server.tools());
+    for server in mcp {
+        tools.extend(server.tools.iter().cloned());
     }
     let base = base_prompt(profile, &tools);
     let context = skill_context(skills, skill_roots);
@@ -112,7 +111,7 @@ pub(super) fn preamble(
 
 /// The application's instructions, the agent's identity and instructions,
 /// and the names of every tool it has.
-fn base_prompt(profile: &Agent, tools: &[ToolDefinition]) -> String {
+fn base_prompt(profile: &Agent, tools: &[AiTool]) -> String {
     let inventory = tools
         .iter()
         .map(|tool| tool.name.as_str())
@@ -130,18 +129,18 @@ fn base_prompt(profile: &Agent, tools: &[ToolDefinition]) -> String {
 fn measure(
     base: &str,
     context: &str,
-    native: &[ToolDefinition],
+    native: &[AiTool],
     skills: &SkillRegistry,
-    mcp: &[(String, McpServer)],
+    mcp: &[McpTools],
     intent_required: bool,
 ) -> Composition {
     let servers = mcp
         .iter()
-        .any(|(label, server)| instruction_chars(label, server.instructions()) > 0);
-    let preamble = if skills.is_empty() {
-        0
-    } else {
+        .any(|server| instruction_chars(&server.label, server.instructions.as_deref()) > 0);
+    let preamble = if skills.has_entries() {
         SKILLS_PREAMBLE
+    } else {
+        0
     };
     Composition {
         system: base.len() + ACTIVITY_INSTRUCTIONS.len() + if servers { SERVERS_BLOCK } else { 0 },
@@ -152,10 +151,10 @@ fn measure(
             + schema_chars(&skills.tool_definitions(), intent_required),
         mcp: mcp
             .iter()
-            .map(|(label, server)| {
-                let size = instruction_chars(label, server.instructions())
-                    + schema_chars(&server.tools(), intent_required);
-                (label.clone(), size)
+            .map(|server| {
+                let size = instruction_chars(&server.label, server.instructions.as_deref())
+                    + schema_chars(&server.tools, intent_required);
+                (server.label.clone(), size)
             })
             .collect(),
     }
@@ -170,17 +169,18 @@ fn skill_context(skills: &SkillRegistry, roots: &[PathBuf]) -> String {
         .map(|path| format!("- {}", serde_json::json!(path.to_string_lossy())))
         .collect::<Vec<_>>()
         .join("\n");
-    let available = if skills.is_empty() {
+    let available = if !skills.has_entries() {
         "No skills are currently available to this agent. Creation with available file tools and user configuration through /skills are still supported.".into()
     } else {
         let locations = skills
-            .skills()
-            .iter()
+            .skill_names()
+            .into_iter()
+            .filter_map(|name| skills.get_skill(name))
             .map(|skill| {
                 format!(
                     "- {}: {}",
                     skill.name(),
-                    serde_json::json!(skill.path().to_string_lossy())
+                    serde_json::json!(skill.path.to_string_lossy())
                 )
             })
             .collect::<Vec<_>>()
@@ -233,11 +233,11 @@ mod tests {
 
     #[test]
     fn tool_schemas_count_the_intent_property_and_the_function_wrapper() {
-        let tool = ToolDefinition::new(
-            "add",
-            "Add two numbers",
-            serde_json::json!({"type": "object", "properties": {"a": {"type": "number"}}}),
-        );
+        let tool = AiTool {
+            name: "add".into(),
+            description: "Add two numbers".into(),
+            parameters: serde_json::json!({"type": "object", "properties": {"a": {"type": "number"}}}),
+        };
         let bare = tool.name.len() + tool.description.len() + tool.parameters.to_string().len();
         let sent = schema_chars(std::slice::from_ref(&tool), false);
         assert!(sent > bare + "_roomkit_intent".len() + r#"{"type":"function"}"#.len());

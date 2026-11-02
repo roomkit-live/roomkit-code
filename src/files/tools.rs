@@ -2,60 +2,69 @@
 
 use std::sync::Arc;
 
-use roomkit::model::ToolCall;
-use roomkit_ai::{ToolContext, ToolDefinition, ToolError, ToolOutput, Toolset};
+use roomkit::model::Metadata;
+use roomkit_ai::{AiTool, Tool, ToolFuture, ToolResult, current_tool_call};
 use roomkit_tools_fs::{PatchOperation, PatchResult};
 use serde_json::Value;
 
 use super::{Change, Effect, Files, Snapshot};
 
-pub(crate) struct Tracked<T> {
-    inner: T,
+pub(crate) struct Tracked {
+    inner: Arc<dyn Tool>,
+    /// The tool `inner` serves: a call to another passes on unobserved.
+    name: String,
     files: Arc<Files>,
 }
 
 impl Files {
     /// Record what `write`, `edit`, `patch` and `read` report, and compare the
     /// project around each `shell` command. Other tools pass through unchanged.
-    pub fn wrap<T: Toolset>(self: &Arc<Self>, inner: T) -> impl Toolset {
-        Tracked {
+    pub fn wrap(self: &Arc<Self>, inner: Arc<dyn Tool>) -> Arc<dyn Tool> {
+        Arc::new(Tracked {
+            name: inner.definition().name,
             inner,
             files: self.clone(),
-        }
+        })
     }
 }
 
-impl<T: Toolset> Toolset for Tracked<T> {
-    fn tools(&self) -> Vec<ToolDefinition> {
-        self.inner.tools()
+impl Tool for Tracked {
+    fn definition(&self) -> AiTool {
+        self.inner.definition()
     }
 
-    async fn call(&self, call: ToolCall, context: ToolContext) -> Result<ToolOutput, ToolError> {
-        let room = context.room_id.to_string();
-        let name = call.name.clone();
+    fn handler(&self, name: String, arguments: Metadata) -> ToolFuture {
+        let room = current_tool_call().and_then(|call| call.room_id);
+        let Some(room) = room.filter(|_| name == self.name) else {
+            return self.inner.handler(name, arguments);
+        };
+        let room = room.to_string();
+        let files = self.files.clone();
         if name == "shell" {
-            // A failed command may still have changed files: compare either way.
-            let comparison = Comparison {
-                before: Some(self.files.snapshot().await),
-                files: self.files.clone(),
-                room,
-            };
-            let result = self.inner.call(call, context).await;
-            comparison.finish().await;
-            return result;
+            let call = self.inner.handler(name, arguments);
+            return Box::pin(async move {
+                // A failed command may still have changed files: compare either way.
+                let comparison = Comparison {
+                    before: Some(files.snapshot().await),
+                    files,
+                    room,
+                };
+                let result = call.await;
+                comparison.finish().await;
+                result
+            });
         }
-        let result = self.inner.call(call, context).await;
-        if let Ok(ToolOutput::Json(output)) = &result {
-            let (effects, read) = reported(&name, &output["data"]);
-            if !effects.is_empty() || read.is_some() {
-                self.files.observed(&room, effects, read).await;
+        let call = self.inner.handler(name.clone(), arguments);
+        Box::pin(async move {
+            let result = call.await;
+            if let Ok(ToolResult::Json(output)) = &result {
+                let (effects, read) = reported(&name, &output["data"]);
+                if !effects.is_empty() || read.is_some() {
+                    files.observed(&room, effects, read).await;
+                }
             }
-        }
-        result
-    }
-
-    async fn close(&self) {
-        self.inner.close().await;
+            result
+        })
     }
 }
 

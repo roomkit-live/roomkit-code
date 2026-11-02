@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use clap::ValueEnum;
-use roomkit::{ToolCallEvent, ToolUse};
+use roomkit::ToolCallEvent;
+use roomkit::model::HookResult;
+use roomkit::model::hook::{AllowOptions, BlockOptions};
 use roomkit_tui::protocol::{Choice, Decision, ModeState};
 use roomkit_tui_engine::ConversationChannel;
 use serde::Deserialize;
@@ -20,6 +22,29 @@ pub(crate) use modes::{EXIT as PLAN_EXIT, ModeTools, approve_exit};
 pub(crate) const MODE_TOOLS: [&str; 2] = [modes::ENTER, modes::EXIT];
 
 pub(crate) use rules::summary;
+
+/// What the permission gate decides on a tool call: it runs, runs with other
+/// arguments, or is refused with words the model reads.
+pub(crate) type Verdict = HookResult<ToolCallEvent>;
+
+/// The call runs.
+pub(crate) fn allow() -> Verdict {
+    HookResult::allow(AllowOptions::default())
+}
+
+/// The call is refused; the model reads `reason`.
+pub(crate) fn block(reason: impl Into<String>) -> Verdict {
+    HookResult::block(reason, BlockOptions::default())
+}
+
+/// The room of `event`; none for a call outside a conversation, which the
+/// gate refuses before reading a mode.
+pub(crate) fn room_of(event: &ToolCallEvent) -> &str {
+    event
+        .room_id
+        .as_ref()
+        .map_or("", roomkit::model::RoomId::as_str)
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
@@ -112,12 +137,12 @@ impl Policy {
         self.changes.send_replace(());
     }
 
-    pub async fn gate(&self, channel: &ConversationChannel, event: ToolCallEvent) -> ToolUse {
+    pub async fn gate(&self, channel: &ConversationChannel, event: ToolCallEvent) -> Verdict {
         self.gate_with_review(channel, event, None).await
     }
 
     pub(crate) fn plan_blocks(&self, event: &ToolCallEvent) -> bool {
-        self.mode(event.room_id.as_str()) == Mode::Plan && !plan_allowed(event)
+        self.mode(room_of(event)) == Mode::Plan && !plan_allowed(event)
     }
 
     pub(crate) async fn gate_with_review(
@@ -125,38 +150,38 @@ impl Policy {
         channel: &ConversationChannel,
         event: ToolCallEvent,
         review: Option<String>,
-    ) -> ToolUse {
+    ) -> Verdict {
         if self.plan_blocks(&event) {
-            return ToolUse::block(
+            return block(
                 "Plan mode: explore and update the plan only. This action is disabled. Ask the user to switch to Ask or Yolo before implementing; do not retry or use another tool to bypass this restriction.",
             );
         }
         let Some(rule) = rules::rule(&event) else {
-            return ToolUse::block("This tool has no application permission policy.");
+            return block("This tool has no application permission policy.");
         };
         if rule.direct && review.is_none() {
-            return ToolUse::Allow;
+            return allow();
         }
         // Changing modes never auto-accepts a pending approval. Recheck Plan
         // after approval; actions already dispatched are not revoked.
-        if review.is_none() && self.mode(event.room_id.as_str()) == Mode::Yolo {
-            return ToolUse::Allow;
+        if review.is_none() && self.mode(room_of(&event)) == Mode::Yolo {
+            return allow();
         }
         let request = match card::request(&event, rule.label, review) {
             Ok(request) => request,
-            Err(refusal) => return refusal,
+            Err(refusal) => return block(refusal),
         };
         match channel.ask_tool_permission(&event, request).await {
             Decision::Allow
-                if self.mode(event.room_id.as_str()) == Mode::Plan && !plan_allowed(&event) =>
+                if self.mode(room_of(&event)) == Mode::Plan && !plan_allowed(&event) =>
             {
-                ToolUse::block(
+                block(
                     "The mode changed to Plan while approval was pending; this action was not executed.",
                 )
             }
-            Decision::Allow => ToolUse::Allow,
+            Decision::Allow => allow(),
             // Deny, or a decision added by a newer adapter: never execute.
-            _ => ToolUse::block(
+            _ => block(
                 "The action was not approved (refused, expired or view disconnected). Do not retry it without a new user instruction.",
             ),
         }

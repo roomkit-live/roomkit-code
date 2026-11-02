@@ -12,18 +12,26 @@ mod ui;
 
 use roomkit::model::{Access, ChannelId};
 use roomkit::{ListBindingsOptions, RoomKit};
-use roomkit_ai::ToolDefinition;
-use roomkit_openai::OpenAiAgent;
+use roomkit_ai::AiTool;
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::ModelInfo;
 use roomkit_tui_engine::SessionConfig;
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::sync::Mutex;
 
-use crate::{agent::Inventory, config::Settings, storage::Storage};
+use crate::{
+    agent::{CodeAgent, Inventory},
+    config::Settings,
+    storage::Storage,
+};
+pub(crate) use mcp::McpTools;
 use model::{Agent, Authentication, PROJECT_SCHEMA, Project, Provider, Providers, TOOLS};
 use slot::AgentSlot;
 use store::Document;
+
+/// The name the OpenAI provider reports for the usage it measures, which a
+/// view's model must carry for its measurements: Python's class name.
+const PROVIDER_NAME: &str = "OpenAIAIProvider";
 
 pub(crate) struct Profiles {
     pub(crate) policy: crate::permissions::Policy,
@@ -43,6 +51,8 @@ pub(crate) struct Profiles {
 
 struct State {
     instructions: Arc<crate::instructions::Instructions>,
+    /// The files the agents' tools change, which a slot settles as it closes.
+    files: Arc<crate::files::Files>,
     policy: crate::permissions::Policy,
     mcp: Document<mcp::Servers>,
     pending_mcp: Option<mcp::Pending>,
@@ -51,7 +61,7 @@ struct State {
     /// Agents shared by every project, beside the shared connections.
     global: Document<Project>,
     slots: BTreeMap<String, AgentSlot>,
-    tools: BTreeMap<String, Vec<ToolDefinition>>,
+    tools: BTreeMap<String, Vec<AiTool>>,
     /// What each configured agent's requests carry before their messages.
     compositions: BTreeMap<String, crate::agent::Composition>,
     pending: Option<ui::Pending>,
@@ -92,6 +102,7 @@ impl Profiles {
             skills::Catalogue::load(settings.workspace.clone(), settings.state_dir.clone()).await?;
         let policy = crate::permissions::Policy::new(settings.mode);
         let instructions = resources.instructions.clone();
+        let files = resources.files.clone();
         Ok(Arc::new(Self {
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),
@@ -107,6 +118,7 @@ impl Profiles {
             mcp_runtime: mcp::Runtime::default(),
             state: Mutex::new(State {
                 instructions,
+                files,
                 policy,
                 mcp,
                 pending_mcp: None,
@@ -154,6 +166,7 @@ impl Profiles {
             agent,
             self.policy.clone(),
             state.instructions.clone(),
+            state.files.clone(),
         );
         kit.register_channel(slot.clone())
             .map_err(|_| "Could not register the agent")?;
@@ -169,7 +182,7 @@ impl Profiles {
         &self,
         profile: &Agent,
         provider: &Provider,
-    ) -> Result<(OpenAiAgent, Inventory), String> {
+    ) -> Result<(CodeAgent, Inventory), String> {
         profile.validate()?;
         provider.validate()?;
         let config = match &provider.authentication {
@@ -188,29 +201,33 @@ impl Profiles {
                 if !connected.plan_usage {
                     return Err("Authorize ChatGPT plan usage with /providers".into());
                 }
-                roomkit_openai::OpenAiConfig::new(
-                    roomkit_auth::CHATGPT_API_ROOT,
-                    "",
-                    &profile.model,
-                )
-                .with_api(roomkit_openai::OpenAiApi::Responses)
-                .with_tool_namespace("functions", "Tools available to this assistant")
-                .with_token_source(Arc::new(crate::accounts::Credential {
-                    auth: self.accounts.auth.clone(),
-                    account: account.clone(),
-                }))
+                roomkit_openai::OpenAiConfig {
+                    base_url: Some(roomkit_auth::CHATGPT_API_ROOT.into()),
+                    api: roomkit_openai::OpenAiApi::Responses,
+                    tool_namespace: Some((
+                        "functions".into(),
+                        "Tools available to this assistant".into(),
+                    )),
+                    token_source: Some(Arc::new(crate::accounts::Credential {
+                        auth: self.accounts.auth.clone(),
+                        account: account.clone(),
+                    })),
+                    ..roomkit_openai::OpenAiConfig::new("", &profile.model)
+                }
             }
-            _ => roomkit_openai::OpenAiConfig::new(
-                &provider.base_url,
-                provider.authentication.key()?,
-                &profile.model,
-            ),
-        }
-        .with_timeout(std::time::Duration::from_secs(provider.timeout_seconds))
-        .with_vision(profile.vision);
-        let config = match &profile.reasoning_effort {
-            Some(effort) => config.with_reasoning_effort(effort),
-            None => config,
+            _ => roomkit_openai::OpenAiConfig {
+                base_url: Some(provider.base_url.clone()),
+                ..roomkit_openai::OpenAiConfig::new(provider.authentication.key()?, &profile.model)
+            },
+        };
+        let config = roomkit_openai::OpenAiConfig {
+            timeout: std::time::Duration::from_secs(provider.timeout_seconds),
+            vision: profile.vision,
+            reasoning_effort: profile.reasoning_effort.clone(),
+            // The application sends no temperature, as before: the endpoint's
+            // default applies, and a model that refuses one is never sent it.
+            supports_custom_temperature: Some(false),
+            ..config
         };
         let (skills, skill_roots) = {
             let catalogue = self.skill_catalogue.read().await;
@@ -225,6 +242,7 @@ impl Profiles {
             mcp: self.mcp_runtime.selected(profile).await?,
             intent_required: self.require_tool_intent,
             policy: self.policy.clone(),
+            images: self.images.clone(),
         };
         crate::agent::create(
             &self.workspace,
@@ -238,14 +256,13 @@ impl Profiles {
             |_| "Could not configure this agent; verify its provider, credential and workspace",
         )
         .map_err(String::from)
-        .map(|(agent, tools)| (agent.with_image_resolver(self.images.clone()), tools))
     }
 
     pub async fn configure_view(&self, view: &mut SessionConfig) {
         self.state.lock().await.view(view);
     }
 
-    pub async fn tools(&self, id: &str) -> Vec<ToolDefinition> {
+    pub async fn tools(&self, id: &str) -> Vec<AiTool> {
         self.state
             .lock()
             .await
@@ -298,7 +315,7 @@ impl State {
         if let Some(profile) = agent {
             // Match the engine's usage identity, including Responses over OAuth.
             view.model = Some(
-                ModelInfo::new("openai", profile.model.clone()).with_effort(
+                ModelInfo::new(PROVIDER_NAME, profile.model.clone()).with_effort(
                     profile
                         .reasoning_effort
                         .clone()
@@ -324,6 +341,7 @@ impl State {
                 None,
                 self.policy.clone(),
                 self.instructions.clone(),
+                self.files.clone(),
             );
             kit.register_channel(slot.clone())
                 .map_err(|_| "Could not register agent")?;
@@ -336,7 +354,7 @@ impl State {
         &mut self,
         kit: &RoomKit<SqliteStore>,
         id: &str,
-        agent: OpenAiAgent,
+        agent: CodeAgent,
         inventory: Inventory,
     ) -> Result<(), String> {
         if let Some(slot) = self.slots.get(id) {
@@ -347,6 +365,7 @@ impl State {
                 Some(agent),
                 self.policy.clone(),
                 self.instructions.clone(),
+                self.files.clone(),
             );
             kit.register_channel(slot.clone())
                 .map_err(|_| "Could not register agent")?;

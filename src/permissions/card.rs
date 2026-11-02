@@ -1,7 +1,7 @@
 //! The approval card for one tool call: its exact arguments, a command shown
 //! as the shell would run it, and a one-line summary for the queue.
 
-use roomkit::{ToolCallEvent, ToolUse};
+use roomkit::ToolCallEvent;
 use roomkit_tui_engine::PermissionRequest;
 
 /// Larger cards are refused rather than cut: the user approves exactly what
@@ -11,13 +11,14 @@ const MAX_DETAIL: usize = 65_536;
 type Arguments = serde_json::Map<String, serde_json::Value>;
 
 /// The request for approving `event`, headed by its rule's `label` and by a
-/// hook's reason for asking; a refusal when it cannot be shown in full.
+/// hook's reason for asking; the reason for refusing the call when it cannot
+/// be shown in full.
 pub(super) fn request(
     event: &ToolCallEvent,
     label: &str,
     review: Option<String>,
-) -> Result<PermissionRequest, ToolUse> {
-    let (name, arguments) = (event.call.name.as_str(), &event.call.arguments);
+) -> Result<PermissionRequest, &'static str> {
+    let (name, arguments) = (event.name.as_str(), &event.arguments);
     let detail = detail(name, arguments, label, review)?;
     Ok(
         PermissionRequest::new(format!("Allow {name}?"), detail, crate::timeouts::APPROVAL)
@@ -31,9 +32,9 @@ fn detail(
     arguments: &Arguments,
     label: &str,
     review: Option<String>,
-) -> Result<String, ToolUse> {
+) -> Result<String, &'static str> {
     let Ok(pretty) = serde_json::to_string_pretty(arguments) else {
-        return Err(ToolUse::block("Could not present the action for approval."));
+        return Err("Could not present the action for approval.");
     };
     let detail = command(name, arguments, label).unwrap_or_else(|| format!("{label}:\n{pretty}"));
     let detail = if let Some(reason) = review {
@@ -42,9 +43,7 @@ fn detail(
         detail
     };
     if detail.len() > MAX_DETAIL {
-        return Err(ToolUse::block(
-            "The action is too large to review; split it into smaller calls.",
-        ));
+        return Err("The action is too large to review; split it into smaller calls.");
     }
     Ok(detail)
 }

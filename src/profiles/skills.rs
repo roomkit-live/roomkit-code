@@ -96,7 +96,7 @@ impl Catalogue {
                     .register(&path)
                     .map_err(|error| error.to_string())
                     .and_then(|skill| {
-                        if skill.name() == name { Ok(skill.description().to_owned()) }
+                        if skill.name == name { Ok(skill.description) }
                         else { Err("Skill name must match the directory entry; renamed aliases are not supported".into()) }
                     })
             } else {
@@ -155,10 +155,10 @@ impl Catalogue {
         let mut actions = Vec::new();
         if let Some(error) = &entry.error {
             body.push_str(&format!("Unavailable: {error}\n"));
-        } else if let Some(skill) = self.registry.get(name) {
+        } else if let Some(skill) = self.registry.get_skill(name) {
             body.push_str("Instructions (preview):\n\n");
-            body.extend(skill.instructions().chars().take(12_000));
-            if skill.instructions().chars().count() > 12_000 {
+            body.extend(skill.instructions.chars().take(12_000));
+            if skill.instructions.chars().count() > 12_000 {
                 body.push_str("\n… Preview truncated; activation loads the complete instructions.");
             }
             if enabled {
@@ -276,12 +276,12 @@ impl Profiles {
                 "Load the skill and explain briefly how you can help with it.",
             ));
             if !agent.skills.iter().any(|n| n == name)
-                || self
+                || !self
                     .skill_catalogue
                     .read()
                     .await
                     .selected(&[name.into()])
-                    .is_empty()
+                    .has_entries()
             {
                 return Err("Enable this skill for the current agent with /skills first".into());
             }
@@ -409,14 +409,16 @@ mod tests {
         assert_eq!(
             catalogue
                 .selected(&["review".into()])
-                .get("review")
+                .get_skill("review")
                 .unwrap()
-                .instructions(),
+                .instructions,
             "Native version"
         );
         assert!(catalogue.entries["broken"].error.is_some());
         assert_eq!(
-            catalogue.selected(&["valid".into(), "broken".into()]).len(),
+            catalogue
+                .selected(&["valid".into(), "broken".into()])
+                .skill_count(),
             1
         );
         // A broken override must not silently reactivate an earlier version.
@@ -428,7 +430,7 @@ mod tests {
         let catalogue = Catalogue::load(workspace.path().into(), state.path().into())
             .await
             .unwrap();
-        assert!(catalogue.selected(&["review".into()]).is_empty());
+        assert!(!catalogue.selected(&["review".into()]).has_entries());
     }
     #[cfg(unix)]
     #[tokio::test]
@@ -459,9 +461,9 @@ mod tests {
         );
         assert!(catalogue.entries["policy"].error.is_some());
         assert!(
-            catalogue
+            !catalogue
                 .selected(&["linked".into(), "policy".into()])
-                .is_empty()
+                .has_entries()
         );
     }
 }

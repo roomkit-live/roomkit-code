@@ -530,10 +530,14 @@ billing totals nor dollar costs. Resume restores applicable measurements; a
 new execution clears its turn totals. Changing the model or conversation clears
 the previous-context fallback too.
 
-The connection's **Timeout** in `/providers` controls the entire HTTP model
-request, including streaming. The initial TOML/CLI timeout and context flags
+The connection's **Timeout** in `/providers` bounds how long a model request
+waits for the endpoint between two reads of its answer, and for each write: an
+answer that keeps streaming is never cut. Connecting is bounded at 5 seconds.
+The initial TOML/CLI timeout and context flags
 remain available when bootstrapping a new project. The application defaults to 600 seconds;
-the library's own default is unchanged. Failures explain timeout, access, rate
+the library's own default is unchanged. Chat Completions requests send no
+temperature, so the endpoint's default applies, and ask for at most 1,024 output
+tokens, the engine's default. Failures explain timeout, access, rate
 limit, server and protocol errors without echoing raw provider responses or keys.
 Failed requests are not automatically retried. Existing completed tool actions
 remain in the project and conversation.
@@ -562,8 +566,10 @@ and projects those records into generic CLI panels and sidebar entries. The
 CRUD schemas and tool implementations remain in `roomkit-tools`.
 `src/accounts.rs` owns account menus and browser launching; `src/profiles/` links
 accounts, providers and agents without exposing credentials to the UI.
-`src/profiles/mcp/` owns MCP configuration and exposure; the engine's
-`roomkit-mcp` crate owns protocol calls, aliases and server process cleanup.
+`src/profiles/mcp/` owns MCP configuration and exposure: it names each selected
+tool `mcp__<server>__<tool>`, serves only the selected ones, and closes the
+servers; the engine's `roomkit-mcp` crate owns protocol calls and each stdio
+server's process group.
 `src/sessions/` routes application commands and owns the project session catalogue.
 The TUI receives only its generic client connection, preserving the boundary
 needed for a future remote host.
@@ -816,7 +822,8 @@ refresh are not part of this transport yet.
 In **Ask**, every MCP call requires approval, including tools advertised as
 read-only. **Plan** blocks MCP calls. **Yolo** executes selected tools without asking. Server instructions
 are framed as external content by the engine and grant no permission. Tool
-results use the CLI's generic expandable presentation. **Esc** requests MCP
+results use the CLI's generic expandable presentation. An MCP call that gets no
+answer within 30 seconds fails, the engine's bound. **Esc** requests MCP
 cancellation of a running call; the server must honor the protocol cancellation. This
 cannot undo effects already performed. **Disconnect** stops and waits for the
 owned stdio process group, including subprocesses on Linux and macOS. For HTTP,
@@ -991,7 +998,7 @@ Observation failures are reported but do not undo an action that already happene
 | `TurnEnd` | After delivery, cancellation cleanup and pending tool hooks; `roomkit.outcome` is `completed`, `failed`, `cancelled` or `blocked`. |
 | `PreToolUse` | Before an eligible agent tool, including MCP, and before the application's approval. Hard Plan restrictions take precedence. |
 | `PostToolUse` | A successful tool outcome, observed asynchronously; the tool result remains unchanged. |
-| `PostToolUseFailure` | A refused, failed, blocked, unhandled or cancelled tool; exact engine outcome in `roomkit.outcome`. |
+| `PostToolUseFailure` | A refused, failed, blocked, unhandled or cancelled tool; `roomkit.outcome` is `refused`, `cancelled` or `failed`, which also covers a result a hook withheld and a call nothing served. |
 
 A session remains open when switching views or agents; those actions do not fire
 `SessionEnd`. Returning to a session in the same execution does not fire another

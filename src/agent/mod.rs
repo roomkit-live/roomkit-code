@@ -2,8 +2,11 @@
 //! builds its system prompt and measures what its requests carry.
 
 use roomkit::model::ChannelId;
-use roomkit_ai::{SkillRegistry, ToolDefinition, Toolset};
-use roomkit_openai::{OpenAiAgent, OpenAiConfig};
+use roomkit_ai::{
+    AiChannel, AiChannelOptions, AiTool, ImageResolver, SkillRegistry, Tool, ToolEntry,
+    ToolHandler, compose_tool_handlers,
+};
+use roomkit_openai::{OpenAiAiProvider, OpenAiConfig};
 use roomkit_tools_code::CodeOutlineTool;
 use roomkit_tools_docs::{DocsBackend, DocsListTool, DocsReadTool, DocsSearchTool};
 use roomkit_tools_fs::{
@@ -36,6 +39,16 @@ mod preamble;
 
 use preamble::preamble;
 pub(crate) use preamble::{Composition, Inventory};
+
+/// The agent the application runs: an AI channel answering through an
+/// OpenAI-compatible endpoint.
+pub(crate) type CodeAgent = AiChannel<OpenAiAiProvider>;
+
+/// How many of the room's latest events a turn reads, as the engine handed
+/// every turn before it sized contexts by the channels' windows. The agent's
+/// slot declares the same window, since the kit sizes the context it hands
+/// the slot by it.
+pub(crate) const HISTORY: usize = 50;
 
 /// Application-scoped resources survive turn, agent and connection changes.
 /// Tool adapters derive archive/process ownership from the room and agent IDs.
@@ -106,45 +119,17 @@ impl Resources {
     }
 }
 
-/// Every toolset is named once: its tools join the inventory, and it is
-/// registered when the profile selects one of them. The toolsets' types
-/// differ, and `Toolset` is not object-safe, hence a macro.
-macro_rules! assemble {
-    ($id:expr, $profile:expr, $provider:expr, $extensions:expr, $instructions:expr, $files:expr; $($binding:ident = $tool:expr),+ $(,)?) => {{
-        $(let $binding = $tool;)+
-        // The mode tools come with plan writing: leaving Plan approves a plan.
-        let plans = $profile.tools.iter().any(|tool| tool == "plan_create");
-        let selected = |tool: &ToolDefinition| {
-            $profile.tools.contains(&tool.name)
-                || (plans && crate::permissions::MODE_TOOLS.contains(&tool.name.as_str()))
-        };
-        let native: Vec<ToolDefinition> = [$($binding.tools()),+].concat().into_iter().filter(selected).collect();
-        let Extensions { skills, skill_roots, mcp, intent_required, .. } = $extensions;
-        let preamble = preamble($profile, native, &skills, &skill_roots, &mcp, intent_required);
-        let mut agent = OpenAiAgent::new($id, $provider.with_system_prompt(preamble.prompt))?
-            .with_tool_call_intents(true)
-            .with_tool_call_intents_required(intent_required)
-            .with_skills(skills)?;
-        $(if $binding.tools().iter().any(selected) {
-            agent = agent.with_tools($files.wrap($instructions.wrap($binding)))?;
-        })+
-        for (label, server) in mcp {
-            agent = agent.with_server_instructions(&label, server.instructions())?.with_tools(server)?;
-        }
-        let agent = agent.with_tool_timeout(Some(crate::timeouts::TOOL_CALL));
-        Ok((agent, preamble.inventory))
-    }};
-}
-
 /// What an agent receives beyond the application's own tools.
 pub(crate) struct Extensions {
     pub skills: SkillRegistry,
     pub skill_roots: Vec<std::path::PathBuf>,
-    pub mcp: Vec<(String, roomkit_mcp::McpServer)>,
+    pub mcp: Vec<crate::profiles::McpTools>,
     /// Whether every tool call must carry an intent.
     pub intent_required: bool,
     /// The mode policy the mode tools change.
     pub policy: crate::permissions::Policy,
+    /// What resolves the conversation's image attachments for vision models.
+    pub images: Arc<dyn ImageResolver>,
 }
 
 pub(crate) async fn create(
@@ -153,40 +138,148 @@ pub(crate) async fn create(
     profile: &Agent,
     provider: OpenAiConfig,
     extensions: Extensions,
-) -> Result<(OpenAiAgent, Inventory)> {
+) -> Result<(CodeAgent, Inventory)> {
     profile.validate()?;
+    let tools = native_tools(root, resources, extensions.policy.clone()).await?;
+    let tools = selected(profile, tools);
+    let native: Vec<AiTool> = tools
+        .iter()
+        .map(|(definition, _)| definition.clone())
+        .collect();
+    let Extensions {
+        skills,
+        skill_roots,
+        mcp,
+        intent_required,
+        images,
+        ..
+    } = extensions;
+    let preamble = preamble(
+        profile,
+        native,
+        &skills,
+        &skill_roots,
+        &mcp,
+        intent_required,
+    );
+    let mut entries: Vec<ToolEntry> = tools
+        .into_iter()
+        .map(|(_, tool)| ToolEntry::Tool(tool))
+        .collect();
+    entries.extend(
+        mcp.iter()
+            .flat_map(|server| server.tools.iter().cloned().map(ToolEntry::Definition)),
+    );
+    let options = AiChannelOptions {
+        system_prompt: Some(preamble.prompt),
+        tools: entries,
+        tool_handler: mcp_handler(&mcp)?,
+        server_instructions: mcp
+            .iter()
+            .map(|server| (server.label.clone(), server.instructions.clone()))
+            .collect(),
+        skills: Some(skills),
+        tool_call_intents: true,
+        tool_call_intents_required: intent_required,
+        tool_timeout: Some(crate::timeouts::TOOL_CALL),
+        // A coding turn runs as long as its calls and approvals take, as
+        // before: the engine's five-minute bound on a turn's tool loop would
+        // end it before the calls of its next round run.
+        tool_loop_timeout: None,
+        max_context_events: HISTORY,
+        image_resolver: Some(images),
+        ..AiChannelOptions::default()
+    };
+    let provider = OpenAiAiProvider::new(provider)?;
+    let agent = AiChannel::new(ChannelId::new(&profile.id)?, provider, options)?;
+    Ok((agent, preamble.inventory))
+}
+
+/// The tools of `tools` the profile selects, with their definitions, in
+/// inventory order: every tool is named once, it joins the inventory, and
+/// the agent serves it. The mode tools come with plan writing: leaving Plan
+/// approves a plan.
+fn selected(profile: &Agent, tools: Vec<Arc<dyn Tool>>) -> Vec<(AiTool, Arc<dyn Tool>)> {
+    let plans = profile.tools.iter().any(|tool| tool == "plan_create");
+    let selected = |tool: &AiTool| {
+        profile.tools.contains(&tool.name)
+            || (plans && crate::permissions::MODE_TOOLS.contains(&tool.name.as_str()))
+    };
+    tools
+        .into_iter()
+        .map(|tool| (tool.definition(), tool))
+        .filter(|(definition, _)| selected(definition))
+        .collect()
+}
+
+/// The handler of the selected MCP servers' tools, each server's first in
+/// the order given; none without a server.
+fn mcp_handler(mcp: &[crate::profiles::McpTools]) -> Result<Option<ToolHandler>> {
+    let mut handlers: Vec<ToolHandler> = mcp.iter().map(|server| server.handler.clone()).collect();
+    Ok(match handlers.len() {
+        0 => None,
+        1 => handlers.pop(),
+        _ => Some(compose_tool_handlers(handlers)?),
+    })
+}
+
+/// Every tool the application can give an agent, in inventory order, each
+/// scoped to the instructions of what it reads and tracked for the files it
+/// changes.
+async fn native_tools(
+    root: &Path,
+    resources: &Resources,
+    policy: crate::permissions::Policy,
+) -> Result<Vec<Arc<dyn Tool>>> {
     let mutations = resources.mutations.clone();
     let mut shell_limits = ShellLimits::default();
     shell_limits.max_output_bytes = 8192;
     shell_limits.max_timeout_ms = crate::timeouts::SHELL_MAX_SECONDS * 1000;
-    assemble!(ChannelId::new(&profile.id)?, profile, provider, extensions, resources.instructions, resources.files;
-        outline = CodeOutlineToolset::new(CodeOutlineTool::new(root).await?),
-        list = ListToolset::new(ListTool::new(root).await?),
-        glob = GlobToolset::new(GlobTool::new(root).await?),
-        grep = GrepToolset::new(GrepTool::new(root).await?),
-        read = ReadToolset::new(ReadTool::new(root).await?),
-        diff = DiffToolset::new(DiffTool::new(root).await?),
-        write = WriteToolset::new(WriteTool::from_workspace(mutations.clone())),
-        edit = EditToolset::new(EditTool::from_workspace(mutations.clone())),
-        patch = PatchToolset::new(PatchTool::from_workspace(mutations)),
-        shell = ShellToolset::new(ShellTool::new(root).await?.with_limits(shell_limits)?.with_env(resources.command_env.clone())?.with_output_store(resources.outputs.clone())),
-        fetch = WebFetchToolset::new(resources.fetch.clone()),
-        search = WebSearchToolset::new(resources.search.clone()),
-        start = ProcessStartToolset::new(resources.processes.clone()),
-        status = ProcessStatusToolset::new(resources.processes.clone()),
-        process_read = ProcessReadToolset::new(resources.processes.clone()),
-        process_write = ProcessWriteToolset::new(resources.processes.clone()),
-        stop = ProcessStopToolset::new(resources.processes.clone()),
-        output_read = OutputReadToolset::new(resources.outputs.clone()),
-        forget = OutputForgetToolset::new(resources.outputs.clone()),
-        plan_create = PlanCreateToolset::new(PlanCreateTool::new(resources.plans.clone())),
-        plan_read = PlanReadToolset::new(PlanReadTool::new(resources.plans.clone())),
-        plan_list = PlanListToolset::new(PlanListTool::new(resources.plans.clone())),
-        plan_update = PlanUpdateToolset::new(PlanUpdateTool::new(resources.plans.clone())),
-        plan_delete = PlanDeleteToolset::new(PlanDeleteTool::new(resources.plans.clone())),
-        docs_list = DocsListToolset::new(DocsListTool::new(resources.docs.clone())),
-        docs_search = DocsSearchToolset::new(DocsSearchTool::new(resources.docs.clone())),
-        docs_read = DocsReadToolset::new(DocsReadTool::new(resources.docs.clone())),
-        modes = crate::permissions::ModeTools::new(extensions.policy.clone(), resources.plans.clone()),
-    )
+    let shell = ShellTool::new(root)
+        .await?
+        .with_limits(shell_limits)?
+        .with_env(resources.command_env.clone())?
+        .with_output_store(resources.outputs.clone());
+    let processes = &resources.processes;
+    let plans = &resources.plans;
+    let docs = &resources.docs;
+    let modes = crate::permissions::ModeTools::new(policy, plans.clone());
+    let mut tools: Vec<Arc<dyn Tool>> = vec![
+        Arc::new(CodeOutlineToolset::new(CodeOutlineTool::new(root).await?)),
+        Arc::new(ListToolset::new(ListTool::new(root).await?)),
+        Arc::new(GlobToolset::new(GlobTool::new(root).await?)),
+        Arc::new(GrepToolset::new(GrepTool::new(root).await?)),
+        Arc::new(ReadToolset::new(ReadTool::new(root).await?)),
+        Arc::new(DiffToolset::new(DiffTool::new(root).await?)),
+        Arc::new(WriteToolset::new(WriteTool::from_workspace(
+            mutations.clone(),
+        ))),
+        Arc::new(EditToolset::new(EditTool::from_workspace(
+            mutations.clone(),
+        ))),
+        Arc::new(PatchToolset::new(PatchTool::from_workspace(mutations))),
+        Arc::new(ShellToolset::new(shell)),
+        Arc::new(WebFetchToolset::new(resources.fetch.clone())),
+        Arc::new(WebSearchToolset::new(resources.search.clone())),
+        Arc::new(ProcessStartToolset::new(processes.clone())),
+        Arc::new(ProcessStatusToolset::new(processes.clone())),
+        Arc::new(ProcessReadToolset::new(processes.clone())),
+        Arc::new(ProcessWriteToolset::new(processes.clone())),
+        Arc::new(ProcessStopToolset::new(processes.clone())),
+        Arc::new(OutputReadToolset::new(resources.outputs.clone())),
+        Arc::new(OutputForgetToolset::new(resources.outputs.clone())),
+        Arc::new(PlanCreateToolset::new(PlanCreateTool::new(plans.clone()))),
+        Arc::new(PlanReadToolset::new(PlanReadTool::new(plans.clone()))),
+        Arc::new(PlanListToolset::new(PlanListTool::new(plans.clone()))),
+        Arc::new(PlanUpdateToolset::new(PlanUpdateTool::new(plans.clone()))),
+        Arc::new(PlanDeleteToolset::new(PlanDeleteTool::new(plans.clone()))),
+        Arc::new(DocsListToolset::new(DocsListTool::new(docs.clone()))),
+        Arc::new(DocsSearchToolset::new(DocsSearchTool::new(docs.clone()))),
+        Arc::new(DocsReadToolset::new(DocsReadTool::new(docs.clone()))),
+    ];
+    tools.extend(modes.tools());
+    Ok(tools
+        .into_iter()
+        .map(|tool| resources.files.wrap(resources.instructions.wrap(tool)))
+        .collect())
 }

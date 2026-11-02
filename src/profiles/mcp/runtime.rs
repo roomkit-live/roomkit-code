@@ -1,17 +1,18 @@
 //! Host ownership outlives agent replacements and is joined at application exit.
 use super::super::*;
-use roomkit_ai::Toolset;
-use roomkit_mcp::{McpError, McpServer};
+use roomkit_ai::{ToolError, ToolFuture, ToolHandler};
+use roomkit_mcp::{AsToolHandlerOptions, McpError, McpToolProvider};
+use std::collections::BTreeSet;
 use tokio_util::sync::CancellationToken;
 
 pub(super) struct Connection {
-    pub server: Option<McpServer>,
+    pub server: Option<McpToolProvider>,
     pub status: String,
 }
 impl Connection {
     pub fn status(&self) -> &str {
         match &self.server {
-            Some(server) if server.is_connected() => "Connected",
+            Some(server) if server.connected() => "Connected",
             Some(_) => "Disconnected · server exited or closed its transport",
             None => &self.status,
         }
@@ -36,39 +37,77 @@ impl Runtime {
         }
     }
 
-    pub async fn selected(
-        &self,
-        profile: &model::Agent,
-    ) -> Result<Vec<(String, McpServer)>, String> {
+    pub async fn selected(&self, profile: &model::Agent) -> Result<Vec<McpTools>, String> {
         let connections = self.connections.lock().await;
         let mut selected = Vec::new();
         for (id, names) in &profile.mcp {
             let Some(server) = connections
                 .get(id)
                 .and_then(|entry| entry.server.as_ref())
-                .filter(|s| s.is_connected())
+                .filter(|s| s.connected())
             else {
                 continue;
             };
             // A reconnected server may remove tools. Never silently select new ones.
-            let catalogue = server.tools();
-            let available = names
-                .iter()
-                .filter(|name| catalogue.iter().any(|tool| &tool.name == *name))
-                .cloned()
-                .collect::<Vec<_>>();
-            if available.is_empty() {
+            let tools: Vec<AiTool> = server
+                .get_tools()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|tool| names.contains(&tool.name))
+                .map(|tool| AiTool {
+                    name: alias(id, &tool.name),
+                    ..tool
+                })
+                .collect();
+            if tools.is_empty() {
                 continue;
             }
-            let tools = server
-                .clone()
-                .with_label(id)
-                .and_then(|s| s.with_tool_names(&available))
+            let handler = server
+                .as_tool_handler(AsToolHandlerOptions::default())
                 .map_err(|_| "Invalid MCP tool selection")?;
-            selected.push((id.clone(), tools));
+            let served = tools.iter().map(|tool| tool.name.clone()).collect();
+            selected.push(McpTools {
+                label: id.clone(),
+                instructions: server.instructions().ok().flatten(),
+                tools,
+                handler: only(served, handler),
+            });
         }
         Ok(selected)
     }
+}
+
+/// The tools of one MCP server an agent selected, as the model calls them,
+/// `mcp__<server>__<tool>`, and what serves them.
+#[derive(Clone)]
+pub(crate) struct McpTools {
+    /// The server's ID, its label in the aliases and in the instructions.
+    pub label: String,
+    /// What the server published on how to use its tools.
+    pub instructions: Option<String>,
+    pub tools: Vec<AiTool>,
+    pub handler: ToolHandler,
+}
+
+/// The name the model calls the tool `tool` of the server `id` by.
+fn alias(id: &str, tool: &str) -> String {
+    format!("mcp__{id}__{tool}")
+}
+
+/// `handler`, serving only the calls of `served`: another server's alias,
+/// a tool of this server the agent did not select, or a bare name a
+/// built-in tool also bears, goes to the next handler.
+fn only(served: BTreeSet<String>, handler: ToolHandler) -> ToolHandler {
+    ToolHandler::new(move |name, arguments| -> ToolFuture {
+        if served.contains(&name) {
+            return handler.call(name, arguments);
+        }
+        Box::pin(async move {
+            Err(ToolError::unserved(format!(
+                "MCP tool {name:?} is not selected"
+            )))
+        })
+    })
 }
 
 pub(super) fn failure(error: &McpError) -> &'static str {
@@ -112,7 +151,7 @@ impl Profiles {
         kit: &RoomKit<SqliteStore>,
         current: SessionConfig,
         id: String,
-        connector: Option<super::config::Connection>,
+        connector: Option<McpToolProvider>,
     ) -> roomkit_tui_engine::CommandResult {
         use roomkit_tui::protocol::{Item, Message, RunOutcome};
         use roomkit_tui_engine::{CommandExecution, CommandResult};
@@ -143,8 +182,8 @@ impl Profiles {
                         tokio::select! { () = context.cancelled() => {}, () = runtime.stop.cancelled() => {} }
                     };
                     match connector.connect_until(stopped).await {
-                        Ok(server) => Connection {
-                            server: Some(server),
+                        Ok(()) => Connection {
+                            server: Some(connector),
                             status: "Connected".into(),
                         },
                         Err(cause) => {
@@ -221,7 +260,7 @@ impl Profiles {
             if let Some(server) = connections
                 .get(id)
                 .and_then(|c| c.server.as_ref())
-                .filter(|s| s.is_connected())
+                .filter(|s| s.connected())
             {
                 let tools = super::ui::available(id, server);
                 let capacity = 64usize.saturating_sub(profile.mcp.values().map(Vec::len).sum());

@@ -140,27 +140,25 @@ async fn aggregate_budget_reports_omissions_instead_of_truncating_instructions()
 
 #[tokio::test]
 async fn scoped_tool_disclosure_is_isolated_by_turn_room_and_agent() {
-    use roomkit::model::{ChannelId, RoomId, ToolCall};
-    use roomkit_ai::{ToolContext, ToolOutput, Toolset};
+    use roomkit_ai::ToolResult;
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     write(root.path(), "src/AGENTS.md", "RULES_ONE");
     write(root.path(), "src/file", "contents");
     let loader = Instructions::new(root.path(), state.path());
-    let tool = loader.wrap(roomkit_tools_roomkit::ReadToolset::new(
-        roomkit_tools_fs::ReadTool::new(root.path()).await.unwrap(),
+    let tool = loader.wrap(std::sync::Arc::new(
+        roomkit_tools_roomkit::ReadToolset::new(
+            roomkit_tools_fs::ReadTool::new(root.path()).await.unwrap(),
+        ),
     ));
-    let read = |room: &str, agent: &str| {
-        tool.call(
-            ToolCall::new(
-                "call",
-                "read",
-                serde_json::from_value(serde_json::json!({"path":"src/file"})).unwrap(),
-            ),
-            ToolContext::new(RoomId::new(room).unwrap(), ChannelId::new(agent).unwrap()),
-        )
+    let read = |room: &'static str, agent: &'static str| {
+        let tool = tool.clone();
+        async move {
+            let arguments = serde_json::json!({"path":"src/file"});
+            crate::testing::call(&tool, room, agent, "read", arguments).await
+        }
     };
-    let contains = |output: ToolOutput| matches!(output, ToolOutput::Json(value) if value.get("project_instructions").is_some());
+    let contains = |output: ToolResult| matches!(output, ToolResult::Json(value) if value.get("project_instructions").is_some());
     loader.begin("one", "agent");
     assert!(contains(read("one", "agent").await.unwrap()));
     assert!(!contains(read("one", "agent").await.unwrap()));

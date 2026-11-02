@@ -99,16 +99,17 @@ async fn entering_plan_revokes_pending_mutations_but_web_still_asks() {
         "output_forget",
         "future_tool",
     ] {
-        let e = roomkit::ToolCallEvent::new(
+        let mut e = roomkit::ToolCallEvent::new(
             app.view.agent.clone(),
-            app.view.room.clone(),
-            roomkit::model::ToolCall::new("test", name, Default::default()),
+            roomkit::model::ChannelType::AI,
+            "test",
+            name,
+            Default::default(),
         );
-        assert!(
-            matches!(
-                app.policy.gate(&app.channel, e).await,
-                roomkit::ToolUse::Block(_)
-            ),
+        e.room_id = Some(app.view.room.clone());
+        assert_eq!(
+            app.policy.gate(&app.channel, e).await.action,
+            roomkit::model::HookAction::Block,
             "{name}"
         );
     }

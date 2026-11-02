@@ -1,5 +1,5 @@
 //! Private project configuration. Credentials are resolved only at connection time.
-use roomkit_mcp::{McpCommand, McpError, McpHttp, McpServer};
+use roomkit_mcp::{FromCommandOptions, FromUrlOptions, McpToolProvider};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, time::Duration};
 
@@ -76,9 +76,11 @@ impl Transport {
                 if url.len() > 4096 || url.chars().any(char::is_control) {
                     return Err("Invalid MCP endpoint URL".into());
                 }
-                let mut endpoint = McpHttp::new(url).map_err(
-                    |_| "Use an HTTP(S) MCP endpoint without URL credentials or a fragment",
-                )?;
+                if endpoint(url, BTreeMap::new()).is_none() {
+                    return Err(
+                        "Use an HTTP(S) MCP endpoint without URL credentials or a fragment".into(),
+                    );
+                }
                 if bearer_env.as_ref().is_some_and(|v| !variable(v)) {
                     return Err(
                         "Bearer token must reference a host environment variable name".into(),
@@ -94,6 +96,7 @@ impl Transport {
                     );
                 }
                 let mut names = std::collections::BTreeSet::new();
+                let mut sent = BTreeMap::new();
                 for name in headers.keys() {
                     if !names.insert(name.to_ascii_lowercase())
                         || (bearer_env.is_some() && name.eq_ignore_ascii_case("authorization"))
@@ -102,19 +105,30 @@ impl Transport {
                             "Duplicate HTTP header; configure Authorization only once".into()
                         );
                     }
-                    endpoint = endpoint
-                        .header(name, "validation")
-                        .map_err(|_| "Invalid or transport-owned HTTP header")?;
+                    sent.insert(name.clone(), "validation".to_owned());
+                    if endpoint(url, sent.clone()).is_none() {
+                        return Err("Invalid or transport-owned HTTP header".into());
+                    }
                 }
                 if bearer_env.is_some() {
-                    let _checked = endpoint
-                        .header("authorization", "Bearer validation")
-                        .map_err(|_| "Too many HTTP headers")?;
+                    sent.insert("authorization".into(), "Bearer validation".into());
+                    if endpoint(url, sent).is_none() {
+                        return Err("Too many HTTP headers".into());
+                    }
                 }
             }
         }
         Ok(())
     }
+}
+/// The endpoint `url`, sending `headers`, as the MCP client accepts it;
+/// none for a URL or a header it refuses.
+fn endpoint(url: &str, headers: BTreeMap<String, String>) -> Option<McpToolProvider> {
+    let options = FromUrlOptions {
+        headers,
+        ..FromUrlOptions::default()
+    };
+    McpToolProvider::from_url(url, options).ok()
 }
 fn fits_editor(value: &impl Serialize) -> bool {
     serde_json::to_string(value).is_ok_and(|s| s.len() <= 8192)
@@ -136,21 +150,6 @@ fn credential(source: &str) -> Result<String, String> {
     }
     Ok(value)
 }
-pub(super) enum Connection {
-    Stdio(McpCommand),
-    Http(McpHttp),
-}
-impl Connection {
-    pub async fn connect_until(
-        self,
-        cancelled: impl Future<Output = ()> + Send,
-    ) -> Result<McpServer, McpError> {
-        match self {
-            Self::Stdio(c) => c.connect_until(cancelled).await,
-            Self::Http(c) => c.connect_until(cancelled).await,
-        }
-    }
-}
 impl Server {
     pub fn validate(&self) -> Result<(), String> {
         if !valid_id(&self.id) {
@@ -161,49 +160,70 @@ impl Server {
         }
         self.transport.validate()
     }
-    pub(super) fn connection(&self, workspace: &std::path::Path) -> Result<Connection, String> {
+    /// The server as configured, its tools served under `mcp__<id>__<tool>`,
+    /// not connected yet; its credentials are read from the host's
+    /// environment now.
+    pub(super) fn connection(
+        &self,
+        workspace: &std::path::Path,
+    ) -> Result<McpToolProvider, String> {
         self.validate()?;
-        let timeout = Duration::from_secs(self.timeout_seconds);
+        let connect_timeout = Duration::from_secs(self.timeout_seconds);
+        let label = Some(self.id.clone());
         match &self.transport {
             Transport::Stdio {
                 program,
                 args,
                 environment,
             } => {
-                let mut command = McpCommand::new(program)
-                    .args(args)
-                    .current_dir(workspace)
-                    .connect_timeout(timeout);
+                let mut env = BTreeMap::new();
                 for (key, source) in environment {
-                    command = command.env(key, credential(source)?);
+                    env.insert(key.into(), credential(source)?.into());
                 }
-                Ok(Connection::Stdio(command))
+                let options = FromCommandOptions {
+                    args: args.iter().map(Into::into).collect(),
+                    env,
+                    cwd: Some(workspace.to_path_buf()),
+                    label,
+                    connect_timeout,
+                    ..FromCommandOptions::default()
+                };
+                McpToolProvider::from_command(program, options)
+                    .map_err(|_| "Invalid MCP configuration".into())
             }
             Transport::Http {
                 url,
                 bearer_env,
                 headers,
             } => {
-                let mut endpoint = McpHttp::new(url)
-                    .map_err(|_| "Invalid MCP endpoint")?
-                    .connect_timeout(timeout);
+                if endpoint(url, BTreeMap::new()).is_none() {
+                    return Err("Invalid MCP endpoint".into());
+                }
+                let mut sent = BTreeMap::new();
                 for (name, source) in headers {
-                    endpoint = endpoint.header(name, &credential(source)?).map_err(
-                        |_| "An MCP header environment variable contains an invalid value",
-                    )?;
+                    sent.insert(name.clone(), credential(source)?);
+                    if endpoint(url, sent.clone()).is_none() {
+                        return Err(
+                            "An MCP header environment variable contains an invalid value".into(),
+                        );
+                    }
                 }
                 if let Some(source) = bearer_env {
                     let token = credential(source)?;
                     if token.is_empty() {
                         return Err("The MCP bearer environment variable is empty".into());
                     }
-                    endpoint = endpoint
-                        .header("authorization", &format!("Bearer {token}"))
-                        .map_err(
-                            |_| "The MCP bearer environment variable contains an invalid value",
-                        )?;
+                    sent.insert("authorization".into(), format!("Bearer {token}"));
                 }
-                Ok(Connection::Http(endpoint))
+                let options = FromUrlOptions {
+                    headers: sent,
+                    label,
+                    connect_timeout,
+                    ..FromUrlOptions::default()
+                };
+                McpToolProvider::from_url(url, options).map_err(|_| {
+                    "The MCP bearer environment variable contains an invalid value".into()
+                })
             }
         }
     }

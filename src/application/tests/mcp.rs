@@ -303,6 +303,41 @@ async fn saving_mcp_connects_and_enables_tools_with_permissions_and_durable_sele
     app.close().await.unwrap();
 }
 
+/// An MCP server's tool named like a built-in tool is the server's only
+/// under its alias: a call of the built-in tool never reaches the server.
+#[tokio::test]
+async fn a_built_in_call_never_reaches_an_mcp_tool_of_the_same_name() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("notes.md"), "# Fixture notes").unwrap();
+    let mock = Mock::start(vec![("read", json!({"path":"notes.md"}))]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    configure(&app, root.path(), "demo", "normal", "5").await;
+    // The fixture server lists `read` too, selected under its alias.
+    let tools = app.profiles.tools("code").await;
+    assert!(tools.iter().any(|t| t.name == "mcp__demo__read"));
+    assert!(tools.iter().any(|t| t.name == "read"));
+    let session = turn(&app).await;
+    let read = session
+        .snapshot()
+        .unwrap()
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Tool { call, .. } if call.name == "read" => Some(call.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(read.state, ToolState::Succeeded, "{}", read.text);
+    assert!(read.text.contains("# Fixture notes"), "{}", read.text);
+    assert!(
+        !root.path().join("demo.trace").exists(),
+        "The MCP server received no call"
+    );
+    app.close().await.unwrap();
+}
+
 #[tokio::test]
 async fn mcp_failed_startup_timeout_and_cancel_do_not_leak_or_leave_processes() {
     let root = tempfile::tempdir().unwrap();

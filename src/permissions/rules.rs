@@ -147,7 +147,7 @@ pub(crate) fn summary() -> String {
 
 /// The rule for this call, or none: such a tool is blocked.
 pub(crate) fn rule(event: &ToolCallEvent) -> Option<Rule> {
-    rule_for(event.call.name.as_str(), &event.call.arguments)
+    rule_for(event.name.as_str(), &event.arguments)
 }
 
 fn rule_for(name: &str, arguments: &serde_json::Map<String, serde_json::Value>) -> Option<Rule> {
