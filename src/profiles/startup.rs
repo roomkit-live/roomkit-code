@@ -114,6 +114,7 @@ fn add_first_agent(
         skills: Vec::new(),
         mcp: BTreeMap::new(),
         context_window: settings.context_window,
+        max_output_tokens: settings.max_output_tokens,
         instructions: String::new(),
         tools: TOOLS.iter().map(|s| (*s).into()).collect(),
     };
@@ -159,11 +160,13 @@ mod tests {
     async fn a_configured_connection_starts_a_new_project_with_its_own_agent() {
         let workspace = tempfile::tempdir().unwrap();
         let state = tempfile::tempdir().unwrap();
-        let settings = settings(workspace.path(), state.path(), "http://127.0.0.1:9/v1");
+        let mut settings = settings(workspace.path(), state.path(), "http://127.0.0.1:9/v1");
+        settings.max_output_tokens = Some(4096);
         let storage = Storage::open(&settings.state_dir, &settings.workspace).unwrap();
         let documents = load(&settings, &storage, String::new()).await.unwrap();
         let agent = &documents.project.value.agents["code"];
         assert_eq!(agent.model, "fixture-model");
+        assert_eq!(agent.max_output_tokens, Some(4096));
         assert_eq!(agent.tools.len(), TOOLS.len());
         assert_eq!(documents.project.value.selected.as_deref(), Some("code"));
         assert!(

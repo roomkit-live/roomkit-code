@@ -122,3 +122,54 @@ async fn the_request_leaves_the_temperature_to_the_endpoint() {
     assert!(request.get("temperature").is_none(), "{request}");
     app.close().await.unwrap();
 }
+
+/// No output limit is sent unless the agent sets one: the endpoint decides,
+/// as each model has its own. A limit set in `/agents` goes with the next
+/// request; zero is refused rather than read as no limit, and a profile
+/// without a limit is stored without the field.
+#[tokio::test]
+async fn the_request_carries_an_output_limit_only_when_the_agent_sets_one() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let mut app = Application::open(&settings, String::new()).await.unwrap();
+    let limits = |request: &Value| {
+        (
+            request.get("max_tokens").cloned(),
+            request.get("max_completion_tokens").cloned(),
+        )
+    };
+    let stored = || {
+        let project = std::fs::read_dir(state.path().join("projects"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let saved: Value =
+            serde_json::from_slice(&std::fs::read(project.join("agents.json")).unwrap()).unwrap();
+        saved["agents"]["code"].clone()
+    };
+    turn(&app).await;
+    let first = mock.requests.lock().unwrap()[0].clone();
+    assert_eq!(limits(&first), (None, None));
+    assert!(stored().get("max_output_tokens").is_none());
+
+    let refused = submit_profile(&app, "agents", "edit:code", &[("output", "0")])
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        refused,
+        "Max output tokens must be a positive number of tokens, or empty"
+    );
+    edit_profile(&mut app, "agents", "edit:code", &[("output", "2048")]).await;
+    assert_eq!(stored()["max_output_tokens"], 2048);
+    turn_operation(&app, "with-a-limit").await;
+    let requests = mock.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(limits(&requests[1]), (Some(json!(2048)), None));
+    app.close().await.unwrap();
+}

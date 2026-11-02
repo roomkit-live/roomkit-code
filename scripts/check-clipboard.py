@@ -97,7 +97,7 @@ try:
         os.write(master, b"/agents edit:code\r")
         wait_for(b"Agent profile")
         offset = len(captured)
-        os.write(master, b"\t" * 8 + b"\x1b[C\x13")
+        os.write(master, b"\t" * 9 + b"\x1b[C\x13")
         wait_for(b"Tab commands", offset)
         offset = len(captured)
         os.write(master, b"\x16")

@@ -669,6 +669,7 @@ fn agent_form(
         skills: Vec::new(),
         mcp: BTreeMap::new(),
         context_window: None,
+        max_output_tokens: None,
         instructions: String::new(),
         tools: TOOLS.iter().map(|s| (*s).into()).collect(),
     };
@@ -723,6 +724,15 @@ fn agent_form(
                 "Context capacity",
                 a.context_window.map_or_else(String::new, |n| n.to_string()),
                 "Effective server capacity in tokens; empty means unknown",
+                false,
+                FieldKind::Text,
+            ),
+            field(
+                "output",
+                "Max output tokens",
+                a.max_output_tokens
+                    .map_or_else(String::new, |n| n.to_string()),
+                "Most tokens one reply may write; empty sends no limit. Chat Completions connections only",
                 false,
                 FieldKind::Text,
             ),
@@ -865,6 +875,7 @@ fn parse_agent(
         state.check_global_id(id)?;
     }
     let capacity = value(values, "context").trim();
+    let output = value(values, "output").trim();
     let profile = Agent {
         id: id.into(),
         label: value(values, "label").trim().into(),
@@ -886,6 +897,15 @@ fn parse_agent(
                 capacity
                     .parse()
                     .map_err(|_| "Context capacity must be a positive integer")?,
+            )
+        },
+        max_output_tokens: if output.is_empty() {
+            None
+        } else {
+            Some(
+                output
+                    .parse()
+                    .map_err(|_| "Max output tokens must be a positive integer, or empty")?,
             )
         },
         instructions: value(values, "instructions").into(),

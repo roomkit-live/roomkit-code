@@ -201,7 +201,7 @@ it sends no conversation. Some compatible servers do not implement discovery,
 so model identifiers can always be entered manually.
 
 **/agents** manages the interlocutors. Each has a stable ID, display name,
-provider, model, optional context capacity, additional instructions, selected
+provider, model, optional context capacity and output limit, additional instructions, selected
 tools and a **Scope**. A **Global** agent, the default, is available in every
 project: a new project opens with the global agent used last, ready to write.
 A **This project** agent exists only in its project. Changing the scope moves
@@ -533,14 +533,17 @@ the previous-context fallback too.
 The connection's **Timeout** in `/providers` bounds how long a model request
 waits for the endpoint between two reads of its answer, and for each write: an
 answer that keeps streaming is never cut. Connecting is bounded at 5 seconds.
-The initial TOML/CLI timeout and context flags
+The initial TOML/CLI timeout, context and output-limit flags
 remain available when bootstrapping a new project. The application defaults to 600 seconds;
 the library's own default is unchanged. Chat Completions requests send no
-temperature, so the endpoint's default applies, and ask for at most 1,024 output
-tokens, the engine's default. Failures explain timeout, access, rate
-limit, server and protocol errors without echoing raw provider responses or keys.
-Failed requests are not automatically retried. Existing completed tool actions
-remain in the project and conversation.
+temperature, so the endpoint's default applies, and no output limit: each model
+has its own. Set the agent's **Max output tokens** in `/agents` to cap how many
+tokens one reply may write; it is sent as `max_tokens`, or as
+`max_completion_tokens` to the OpenAI models that take it, and zero is refused.
+ChatGPT sign-in connections send no limit, whatever the setting. Failures
+explain timeout, access, rate limit, server and protocol errors without echoing
+raw provider responses or keys. Failed requests are not automatically retried.
+Existing completed tool actions remain in the project and conversation.
 
 ## Boundaries
 

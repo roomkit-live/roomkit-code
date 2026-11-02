@@ -246,6 +246,31 @@ fn provider_limits_are_explicit_and_cli_values_override_the_file() {
     assert!(Settings::load(&cli).is_err());
 }
 
+/// No output limit unless one is configured; the flag wins over the file, and
+/// a limit of zero is refused, never read as "no limit".
+#[test]
+fn the_output_limit_is_optional_and_positive() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("settings.toml");
+    std::fs::write(&path, "[provider]\nmax_output_tokens = 4096\n").unwrap();
+    let mut cli = cli(root.path());
+    assert_eq!(Settings::load(&cli).unwrap().max_output_tokens, None);
+    cli.config = Some(path.clone());
+    assert_eq!(Settings::load(&cli).unwrap().max_output_tokens, Some(4096));
+    cli.max_output_tokens = Some(8192);
+    assert_eq!(Settings::load(&cli).unwrap().max_output_tokens, Some(8192));
+    cli.max_output_tokens = Some(0);
+    let error = Settings::load(&cli).err().unwrap();
+    assert_eq!(
+        error.to_string(),
+        "max output tokens must be a positive token count"
+    );
+    cli.max_output_tokens = None;
+    std::fs::write(&path, "[provider]\nmax_output_tokens = 0\n").unwrap();
+    assert!(Settings::load(&cli).is_err());
+    assert!(Cli::try_parse_from(["roomkit-code", "--max-output-tokens", "-1"]).is_err());
+}
+
 #[test]
 fn sidebar_appearance_is_configurable_without_changing_agent_settings() {
     let root = tempfile::tempdir().unwrap();

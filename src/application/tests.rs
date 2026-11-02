@@ -1373,6 +1373,21 @@ async fn edit_profile(
     action: &str,
     changes: &[(&str, &str)],
 ) {
+    use roomkit_tui_engine::CommandResult;
+    let CommandResult::Switch(view) = submit_profile(app, command, action, changes).await.unwrap()
+    else {
+        panic!("Expected refreshed view")
+    };
+    app.view = *view;
+}
+
+/// Opens the `command` form for `action`, changes `changes` and submits it.
+async fn submit_profile(
+    app: &Application,
+    command: &str,
+    action: &str,
+    changes: &[(&str, &str)],
+) -> Result<roomkit_tui_engine::CommandResult> {
     use roomkit_tui::protocol::FormValues;
     use roomkit_tui_engine::CommandResult;
     let CommandResult::Events(events) = profile_command(
@@ -1401,7 +1416,7 @@ async fn edit_profile(
     for (name, value) in changes {
         values.insert(*name, *value);
     }
-    let CommandResult::Switch(view) = profile_command(
+    profile_command(
         app,
         Command::SubmitForm {
             name: form.command,
@@ -1410,10 +1425,6 @@ async fn edit_profile(
         },
     )
     .await
-    .unwrap() else {
-        panic!("Expected refreshed view")
-    };
-    app.view = *view;
 }
 
 #[tokio::test]

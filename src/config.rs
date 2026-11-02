@@ -49,6 +49,9 @@ pub(crate) struct Cli {
     /// Initial effective model context capacity in tokens.
     #[arg(long)]
     pub context_window: Option<u64>,
+    /// Initial limit on the tokens one model reply may write; none by default.
+    #[arg(long)]
+    pub max_output_tokens: Option<u32>,
     /// Open or create a named conversation; without this, start a new session.
     #[arg(long)]
     pub session: Option<String>,
@@ -181,6 +184,7 @@ struct Provider {
     model: Option<String>,
     timeout_seconds: Option<u64>,
     context_window: Option<u64>,
+    max_output_tokens: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -253,6 +257,7 @@ pub(crate) struct Settings {
     pub model: String,
     pub provider_timeout_seconds: u64,
     pub context_window: Option<u64>,
+    pub max_output_tokens: Option<u32>,
     pub debug: bool,
     pub ui: UiOptions,
     pub mode: Mode,
@@ -321,6 +326,10 @@ impl Settings {
         let context_window = cli.context_window.or(file.provider.context_window);
         if context_window == Some(0) {
             return Err("context window must be a positive token count".into());
+        }
+        let max_output_tokens = cli.max_output_tokens.or(file.provider.max_output_tokens);
+        if max_output_tokens == Some(0) {
+            return Err("max output tokens must be a positive token count".into());
         }
         let workspace = cli
             .workspace
@@ -422,6 +431,7 @@ impl Settings {
             model,
             provider_timeout_seconds,
             context_window,
+            max_output_tokens,
             ui,
         })
     }

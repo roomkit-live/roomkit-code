@@ -224,6 +224,9 @@ impl Profiles {
             timeout: std::time::Duration::from_secs(provider.timeout_seconds),
             vision: profile.vision,
             reasoning_effort: profile.reasoning_effort.clone(),
+            // No cap unless the agent sets one: the endpoint decides how long
+            // a reply may be, as each model has its own limit.
+            max_tokens: profile.max_output_tokens,
             // The application sends no temperature, as before: the endpoint's
             // default applies, and a model that refuses one is never sent it.
             supports_custom_temperature: Some(false),

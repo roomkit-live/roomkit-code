@@ -6,8 +6,10 @@
   connection's timeout, not the whole request; connecting takes at most 5
   seconds (roomkit-rs 93e757c).
 
-- Ask Chat Completions endpoints for at most 1,024 output tokens, the engine's
-  default; requests still carry no temperature.
+- Limit how many tokens one reply may write, per agent: **Max output tokens**
+  in `/agents`, or `max_output_tokens` and `--max-output-tokens` for a new
+  project's first agent. Without it, requests carry no limit, as before, and
+  still no temperature; ChatGPT sign-in connections send none either way.
 
 - Ask the model again, once, when a round of tool calls is followed by an
   empty answer.

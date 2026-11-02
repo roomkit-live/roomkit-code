@@ -87,6 +87,11 @@ pub(crate) struct Agent {
     #[serde(default)]
     pub mcp: BTreeMap<String, Vec<String>>,
     pub context_window: Option<u64>,
+    /// The most tokens one model reply may write; `None` sends no limit and
+    /// the endpoint decides. Written only when set, so a file without it
+    /// stays readable by earlier versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
     pub instructions: String,
     pub tools: Vec<String>,
 }
@@ -270,6 +275,9 @@ impl Agent {
             return Err(
                 "Context capacity must be between 1 and 1000000000 tokens, or empty".into(),
             );
+        }
+        if self.max_output_tokens == Some(0) {
+            return Err("Max output tokens must be a positive number of tokens, or empty".into());
         }
         if self.instructions.len() > 8192
             || self
