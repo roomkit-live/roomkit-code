@@ -222,6 +222,7 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
         shown.contains("stdout archive") && shown.contains("bytes 36000–36120"),
         "{shown}"
     );
+    assert!(shown.contains("1 retained processes"), "{shown}");
     assert!(!shown.contains("\"archive_id\"") && !shown.contains("\"bytes\":["));
     let completed = tokio::time::timeout(Duration::from_secs(3), async {
         loop {

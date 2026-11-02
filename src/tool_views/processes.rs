@@ -5,7 +5,7 @@ use super::{
 };
 use roomkit_tools_process::{
     OutputArchive, OutputForgetResult, OutputPage, ProcessChunk, ProcessReadResult, ProcessState,
-    ProcessStatus, ProcessStopResult, ProcessWriteResult,
+    ProcessStatus, ProcessStatusResult, ProcessStopResult, ProcessWriteResult,
 };
 use roomkit_tui::{
     protocol::ToolCall,
@@ -39,12 +39,12 @@ impl ToolRenderer for Processes {
                 }
             }
             "process_status" => {
-                if let Some(results) = output::<Vec<ProcessStatus>>(call) {
+                if let Some(result) = output::<ProcessStatusResult>(call) {
                     lines.push(vec![Span::new(
-                        format!("{} retained processes", results.len()),
+                        format!("{} retained processes", result.processes.len()),
                         Tone::Muted,
                     )]);
-                    for result in results {
+                    for result in result.processes {
                         status(&mut lines, &result);
                     }
                 }

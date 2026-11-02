@@ -576,6 +576,25 @@ mod tests {
     }
 
     #[test]
+    fn process_status_shows_each_listed_process() {
+        let status = call(
+            "process_status",
+            json!({"processes":[{
+                "process_id":"p1","cwd":".","state":"running","end":null,
+                "exit_code":null,"signal":null,"timeout_ms":300000,
+                "output_complete":false,"stdin_closed":false,
+                "stdout_bytes":0,"stderr_bytes":0,
+                "stdout_retained_from":0,"stderr_retained_from":0,"error":null
+            }]}),
+        );
+        let shown = plain(&processes::Processes.render_styled(&status, false));
+        assert!(
+            shown.contains("1 retained processes") && shown.contains("p1 · running"),
+            "{shown}"
+        );
+    }
+
+    #[test]
     fn shell_failures_and_partial_patches_remain_explicit_after_tool_completion() {
         let shell = call(
             "shell",
