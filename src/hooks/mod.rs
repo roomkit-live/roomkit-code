@@ -224,8 +224,14 @@ impl Hooks {
         kit.hook(
             roomkit::HookTrigger::OnToolCall,
             move |event: ToolCallEvent, _| {
-                // Capture correlation and register the task immediately, while the
-                // engine reports the call, not later after another turn has started.
+                // The engine calls this observer on a task of its own after it
+                // reported the call, and the turn is found by its conversation
+                // and agent: the turn's TurnEnd waits for the post-tool hook
+                // registered here, but a report that reaches this after the
+                // turn finished, such as a call cut at the very end of an
+                // interrupted turn, runs no hook, or runs with that agent's
+                // next turn there. The engine offers no way to wait for its
+                // observers of a turn.
                 let turn = hooks.tool_turn(&event);
                 let hooks = hooks.clone();
                 let task = turn.map(|turn| {
@@ -596,6 +602,7 @@ impl SessionLifecycle for Lifecycle {
             if let Some(turn) = turn {
                 turn.ending.store(true, Ordering::Release);
                 self.0.changes.send_replace(());
+                // The post-tool hooks registered so far; see `install`.
                 turn.posts.close();
                 turn.posts.wait().await;
                 if turn.begun.load(Ordering::Acquire) {

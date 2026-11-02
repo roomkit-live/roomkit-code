@@ -826,7 +826,8 @@ In **Ask**, every MCP call requires approval, including tools advertised as
 read-only. **Plan** blocks MCP calls. **Yolo** executes selected tools without asking. Server instructions
 are framed as external content by the engine and grant no permission. Tool
 results use the CLI's generic expandable presentation. An MCP call that gets no
-answer within 30 seconds fails, the engine's bound. **Esc** requests MCP
+answer within 30 seconds fails: the engine's fixed bound, as in RoomKit's Python
+implementation. **Esc** requests MCP
 cancellation of a running call; the server must honor the protocol cancellation. This
 cannot undo effects already performed. **Disconnect** stops and waits for the
 owned stdio process group, including subprocesses on Linux and macOS. For HTTP,
@@ -998,10 +999,15 @@ Observation failures are reported but do not undo an action that already happene
 | `SessionEnd` | Application shutdown, for each session opened in this execution; `reason` is `shutdown`. |
 | `UserPromptSubmit` | Validated text/image prompt before entering engine history; `prompt` contains text, never image bytes or attachment references. |
 | `TurnStart` | One accepted logical agent turn, before the first model request. |
-| `TurnEnd` | After delivery, cancellation cleanup and pending tool hooks; `roomkit.outcome` is `completed`, `failed`, `cancelled` or `blocked`. |
+| `TurnEnd` | After delivery, cancellation cleanup and the turn's tool hooks already started; `roomkit.outcome` is `completed`, `failed`, `cancelled` or `blocked`. |
 | `PreToolUse` | Before an eligible agent tool, including MCP, and before the application's approval. Hard Plan restrictions take precedence. |
-| `PostToolUse` | A successful tool outcome, observed asynchronously; the tool result remains unchanged. |
+| `PostToolUse` | A successful tool outcome, observed asynchronously; `roomkit.outcome` is `served` and the tool result remains unchanged. |
 | `PostToolUseFailure` | A refused, failed, blocked, unhandled or cancelled tool; `roomkit.outcome` is `refused`, `cancelled` or `failed`, which also covers a result a hook withheld and a call nothing served. |
+
+RoomKit reports tool outcomes in the background. A `PostToolUse` or
+`PostToolUseFailure` hook normally runs before its turn's `TurnEnd`, which waits
+for those already started; an outcome reported once the turn has ended, such as
+a call cut at the very end of an interruption, runs no hook for that turn.
 
 A session remains open when switching views or agents; those actions do not fire
 `SessionEnd`. Returning to a session in the same execution does not fire another

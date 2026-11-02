@@ -14,12 +14,17 @@
 - Ask the model again, once, when a round of tool calls is followed by an
   empty answer.
 
-- Fail an MCP tool call after 30 seconds without an answer, the engine's bound,
-  instead of the tool-call bound.
+- Fail an MCP tool call after 30 seconds without an answer, the engine's fixed
+  bound, as in RoomKit's Python implementation, instead of the tool-call bound.
 
-- Report a failed tool to command hooks as `refused`, `cancelled` or `failed`
-  in `roomkit.outcome`; `failed` also covers a result a hook withheld and a call
-  nothing served.
+- Report a tool's outcome to command hooks with four `roomkit.outcome` values:
+  `served`, `refused`, `cancelled` or `failed`. `failed` now also covers a
+  result a hook withheld and a call nothing served, which were `blocked` and
+  `unserved`.
+
+- Run no `PostToolUse` or `PostToolUseFailure` hook for an outcome RoomKit
+  reports after its turn ended, such as a call cut at the very end of an
+  interruption; `TurnEnd` still waits for the tool hooks already started.
 
 - Name the provider in the footer as the engine reports its usage,
   `OpenAIAIProvider`, instead of `openai`.
