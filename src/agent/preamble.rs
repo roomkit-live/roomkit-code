@@ -219,6 +219,13 @@ mod tests {
     }
 
     #[test]
+    fn the_prompt_states_the_process_maximum_the_tool_enforces() {
+        // A larger timeout_ms is refused, not capped.
+        let maximum = roomkit_tools_process::ProcessLimits::default().max_timeout_ms;
+        assert!(INSTRUCTIONS.contains(&format!("up to one hour (maximum {maximum})")));
+    }
+
+    #[test]
     fn the_prompt_states_the_permission_rules_the_gate_applies() {
         assert_eq!(INSTRUCTIONS.matches("{permissions}").count(), 1);
         let profile: Agent = serde_json::from_value(serde_json::json!({
