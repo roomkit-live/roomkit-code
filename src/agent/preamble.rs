@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn the_prompt_states_the_process_maximum_the_tool_enforces() {
         // A larger timeout_ms is refused, not capped.
-        let maximum = roomkit_tools_process::ProcessLimits::default().max_timeout_ms;
+        let maximum = crate::agent::process_limits().max_timeout_ms;
         assert!(INSTRUCTIONS.contains(&format!("up to one hour (maximum {maximum})")));
     }
 

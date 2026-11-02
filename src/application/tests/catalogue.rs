@@ -294,7 +294,7 @@ async fn a_timeout_above_the_host_maximum_is_refused_with_the_maximum() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let shell = crate::timeouts::SHELL_MAX_SECONDS * 1000;
-    let process = roomkit_tools_process::ProcessLimits::default().max_timeout_ms;
+    let process = crate::agent::process_limits().max_timeout_ms;
     let mock = Mock::start(vec![
         ("shell", json!({"command":"true","timeout_ms":shell + 1})),
         (
@@ -317,7 +317,7 @@ async fn a_timeout_above_the_host_maximum_is_refused_with_the_maximum() {
                 _ => None,
             })
             .unwrap();
-        assert_ne!(call.state, ToolState::Succeeded, "{name}: {}", call.text);
+        assert_eq!(call.state, ToolState::Denied, "{name}: {}", call.text);
         let message = format!("timeout_ms exceeds the host maximum of {maximum} ms");
         assert!(call.text.contains(&message), "{name}: {}", call.text);
     }

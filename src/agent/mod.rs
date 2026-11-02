@@ -80,13 +80,9 @@ impl Resources {
             ..OutputLimits::default()
         };
         let outputs = OutputStore::new(Some(state), output_limits).await?;
-        let process_limits = ProcessLimits {
-            max_read_bytes: 4096,
-            ..ProcessLimits::default()
-        };
         let processes = ProcessSession::new(root)
             .await?
-            .with_limits(process_limits)?
+            .with_limits(process_limits())?
             .with_env(command_env.clone())?
             .with_output_store(outputs.clone())?;
         let search_limits = SearchLimits {
@@ -117,6 +113,15 @@ impl Resources {
         let processes = self.processes.close().await;
         let outputs = self.outputs.close().await;
         plans && processes && outputs
+    }
+}
+
+/// The limits of every agent's processes: 4 KiB read pages, as for the
+/// output archives. The system prompt states their maximum `timeout_ms`.
+pub(crate) fn process_limits() -> ProcessLimits {
+    ProcessLimits {
+        max_read_bytes: 4096,
+        ..ProcessLimits::default()
     }
 }
 
