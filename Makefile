@@ -30,6 +30,7 @@ terminal-check:
 	python3 scripts/check-terminal.py
 	python3 scripts/check-multi-session.py
 	python3 scripts/check-permissions.py
+	python3 scripts/check-steering.py
 	python3 scripts/check-plans.py
 	python3 scripts/check-profiles.py
 	python3 scripts/check-processes.py

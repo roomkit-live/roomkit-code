@@ -92,6 +92,14 @@ work; a second press within two seconds exits. Typing or pasting disarms exit.
 Interruption waits for engine cleanup, preserves completed tool effects and
 leaves the conversation ready to continue.
 
+While the agent works, Enter sends the message to its running turn, which reads
+it at its next step: after its current tool calls, or once the model has
+answered. The message shows "↳ sent to the running turn". Written as the turn
+writes its last answer, it gets a turn of its own instead, shown as "↳ answered
+in its own turn", which Esc interrupts like any turn. A shell command (`!`), an
+application command, images, or an interruption under way still wait for the
+turn to end.
+
 Once the view has closed, the terminal prints a short report:
 
 ```text
@@ -1009,6 +1017,11 @@ RoomKit reports tool outcomes in the background. A `PostToolUse` or
 for those already started. An outcome reported late, such as a call cut at the
 very end of an interruption, may run its hook after `TurnEnd`, with the agent's
 next turn in that conversation, or not at all.
+
+A message written while the agent works passes `UserPromptSubmit`. Sent to the
+running turn, it starts no turn: it has no `TurnStart` or `TurnEnd`, and the
+running turn's hooks cover the calls it leads to. Given a turn of its own, that
+turn runs `TurnStart`, its tool hooks and `TurnEnd` as any turn.
 
 A session remains open when switching views or agents; those actions do not fire
 `SessionEnd`. Returning to a session in the same execution does not fire another

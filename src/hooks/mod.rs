@@ -13,7 +13,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -37,7 +37,8 @@ struct Session {
 
 struct Turn {
     context: Context,
-    begun: AtomicBool,
+    /// When the turn began, in the order turns begin: 0 until then.
+    begun: AtomicU64,
     /// Set once the engine reports the turn finished: its TurnEnd hooks run
     /// to their own budget, even while the application closes.
     ending: AtomicBool,
@@ -114,6 +115,8 @@ pub(crate) struct Hooks {
     background: TaskTracker,
     stopping: CancellationToken,
     closing: AtomicBool,
+    /// The turns begun so far, which orders them.
+    begun: AtomicU64,
     pub changes: tokio::sync::watch::Sender<()>,
 }
 
@@ -146,6 +149,7 @@ impl Hooks {
             background: TaskTracker::new(),
             stopping: CancellationToken::new(),
             closing: AtomicBool::new(false),
+            begun: AtomicU64::new(0),
             changes: tokio::sync::watch::channel(()).0,
         })
     }
@@ -261,16 +265,21 @@ impl Hooks {
         Ok(())
     }
 
+    /// The turn a tool call belongs to: the agent's latest begun turn in the
+    /// conversation. An agent's turns there run one after the other, but the
+    /// engine may report the previous one finished only after the next one
+    /// began, as when a message written during a turn gets its own.
     fn tool_turn(&self, event: &ToolCallEvent) -> Option<Arc<Turn>> {
+        let room = event.room_id.as_ref()?.as_str();
+        let agent = event.channel_id.as_str();
         self.state()
             .turns
             .iter()
-            .find_map(|((room, agent, _), turn)| {
-                (event.room_id.as_ref().is_some_and(|id| room == id.as_str())
-                    && agent == event.channel_id.as_str()
-                    && turn.begun.load(Ordering::Acquire))
-                .then(|| turn.clone())
-            })
+            .filter(|((r, a, _), _)| r == room && a == agent)
+            .map(|(_, turn)| (turn.begun.load(Ordering::Acquire), turn))
+            .filter(|(begun, _)| *begun > 0)
+            .max_by_key(|(begun, _)| *begun)
+            .map(|(_, turn)| turn.clone())
     }
 
     pub async fn before_tool(&self, event: &ToolCallEvent) -> Decision {
@@ -552,7 +561,7 @@ impl SessionLifecycle for Lifecycle {
                     key,
                     Arc::new(Turn {
                         context: context.clone(),
-                        begun: AtomicBool::new(false),
+                        begun: AtomicU64::new(0),
                         ending: AtomicBool::new(false),
                         posts: TaskTracker::new(),
                     }),
@@ -582,7 +591,8 @@ impl SessionLifecycle for Lifecycle {
         Box::pin(async move {
             let turn = self.0.state().turns.get(&key(view, operation)).cloned();
             if let Some(turn) = turn {
-                turn.begun.store(true, Ordering::Release);
+                let order = self.0.begun.fetch_add(1, Ordering::AcqRel) + 1;
+                turn.begun.store(order, Ordering::Release);
                 self.0
                     .dispatch(HookEvent::TurnStart, "", &turn.context)
                     .await;
@@ -605,7 +615,7 @@ impl SessionLifecycle for Lifecycle {
                 // The post-tool hooks registered so far; see `install`.
                 turn.posts.close();
                 turn.posts.wait().await;
-                if turn.begun.load(Ordering::Acquire) {
+                if turn.begun.load(Ordering::Acquire) > 0 {
                     let mut context = turn.context.clone();
                     context.payload["roomkit"]["outcome"] = json!(match outcome {
                         TurnOutcome::Completed => "completed",
@@ -675,7 +685,7 @@ mod tests {
                 payload: json!({}),
                 entries: Vec::new(),
             },
-            begun: AtomicBool::new(false),
+            begun: AtomicU64::new(0),
             ending: AtomicBool::new(ending),
             posts: TaskTracker::new(),
         });
@@ -720,6 +730,43 @@ mod tests {
         assert!(started.elapsed() >= Duration::from_millis(300));
         let records = std::fs::read_to_string(path).unwrap();
         assert!(!records.contains("hooks_close_timeout"), "{records}");
+    }
+
+    /// A message written during a turn may get a turn of its own, which
+    /// begins before the engine reports the previous one finished: the
+    /// agent's tool calls belong to the turn begun last.
+    #[tokio::test]
+    async fn a_tool_call_belongs_to_the_agent_s_latest_begun_turn() {
+        let (workspace, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (hooks, _) = hooks(state.path(), workspace.path());
+        let lifecycle = hooks.lifecycle();
+        let (room, agent) = (
+            roomkit::model::RoomId::new("room").unwrap(),
+            roomkit::model::ChannelId::new("agent").unwrap(),
+        );
+        let view = SessionConfig::new(room.clone(), agent.clone(), "person");
+        let content = roomkit::model::TextContent::new("Go on").into();
+        for operation in ["first", "second"] {
+            let operation = OperationId::new(operation);
+            lifecycle.admit(&view, &operation, &content).await.unwrap();
+            lifecycle.started(&view, &operation).await;
+        }
+        let mut event = ToolCallEvent::new(
+            agent,
+            roomkit::model::ChannelType::AI,
+            "call",
+            "read",
+            Default::default(),
+        );
+        event.room_id = Some(room);
+        let second = ("room".into(), "agent".into(), "second".into());
+        let second = hooks.state().turns.get(&second).cloned().unwrap();
+        let found = hooks.tool_turn(&event).unwrap();
+        assert!(
+            Arc::ptr_eq(&found, &second),
+            "The call went to the first turn"
+        );
+        close(&hooks, Duration::from_millis(50)).await;
     }
 
     /// The engine's tool event carries markers, no outcome: each marker

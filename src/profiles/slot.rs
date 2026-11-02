@@ -1,7 +1,8 @@
 //! Stable engine identity, with an immutable configuration pinned for each turn.
 use roomkit::model::{
     ChannelBinding, ChannelCapabilities, ChannelCategory, ChannelId, ChannelMediaType,
-    ChannelOutput, ChannelType, EventType, InboundMessage, RoomContext, RoomEvent, TextContent,
+    ChannelOutput, ChannelType, EventType, InboundMessage, RoomContext, RoomEvent,
+    SteeringDirective, TextContent,
 };
 use roomkit::{Channel, ChannelError};
 use std::sync::{Arc, RwLock};
@@ -61,6 +62,25 @@ impl Channel for AgentSlot {
     /// the slot is registered.
     fn recent_events_window(&self) -> usize {
         crate::agent::HISTORY
+    }
+    /// A message written while an agent's turn runs goes to that turn, which
+    /// reads it at its next step. The kit reads this on the registered
+    /// channel, the slot, whatever agent it holds.
+    fn steers_room_turns(&self) -> bool {
+        true
+    }
+    /// Steered turns run one after the other, as an AI channel that steers
+    /// declares.
+    fn serializes_room_turns(&self) -> bool {
+        true
+    }
+    /// The kit hands a steered message to the turn through the registered
+    /// channel: the agent holding the turn's loop reads it. An agent
+    /// replaced since the turn began has no loop for it; the message then
+    /// gets a turn of its own.
+    fn steer_turn(&self, directive: &SteeringDirective, turn_id: &str) -> Option<usize> {
+        let agent = crate::sync::read(&self.current).clone()?;
+        agent.steer_turn(directive, turn_id)
     }
     async fn handle_inbound(
         &self,
@@ -146,9 +166,10 @@ mod tests {
 
     /// The kit sizes the history it hands a turn by the largest window the
     /// room's channels declare, read once as the slot is registered: the
-    /// slot declares its agents' history, whatever agent it holds then.
+    /// slot declares its agents' history, whatever agent it holds then. It
+    /// also reads there that the agents steer their turns.
     #[test]
-    fn the_slot_declares_its_agents_history_and_media() {
+    fn the_slot_declares_its_agents_history_media_and_steering() {
         let root = tempfile::tempdir().unwrap();
         let slot = AgentSlot::new(
             ChannelId::new("code").unwrap(),
@@ -158,6 +179,7 @@ mod tests {
             crate::files::Files::new(root.path()),
         );
         let declared = slot.declaration();
+        assert!(declared.steers_room_turns && declared.serializes_room_turns);
         assert_eq!(declared.recent_events_window, crate::agent::HISTORY);
         assert_eq!(declared.category, ChannelCategory::Intelligence);
         assert!(declared.capabilities.supports_media);

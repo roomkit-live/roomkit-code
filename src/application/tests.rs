@@ -108,12 +108,13 @@ async fn answer(
         requests.push(request);
         index
     };
+    // A call named "" answers: a later request may call a tool.
     let (delta, reason) = match fixture.calls.get(index) {
-        Some((name, args)) => (
+        Some((name, args)) if !name.is_empty() => (
             json!({"tool_calls":[{"index":0,"id":format!("call-{index}"),"type":"function","function":{"name":name,"arguments":args.to_string()}}]}),
             "tool_calls",
         ),
-        None => (json!({"content":fixture.answer}), "stop"),
+        _ => (json!({"content":fixture.answer}), "stop"),
     };
     let report = fixture
         .usage
@@ -1796,6 +1797,7 @@ async fn effort_selection_persists_reconfigures_requests_and_can_restore_provide
 mod images;
 mod shell;
 mod skills;
+mod steering;
 
 mod mcp;
 

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Write to the agent while it works: Enter sends the message to the running
+  turn, which reads it at its next step, or gives it a turn of its own, with
+  its own `TurnStart` and `TurnEnd`, when the turn is already writing its last
+  answer (roomkit-tui 48054c9).
+
 - Bound a model request's wait between two reads of its answer by the
   connection's timeout, not the whole request; connecting takes at most 5
   seconds (roomkit-rs 93e757c).

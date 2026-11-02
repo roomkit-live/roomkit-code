@@ -3,7 +3,7 @@ use roomkit_tui::protocol::PanelSpec;
 use roomkit_tui_engine::CommandResult;
 use std::path::Path;
 
-fn configure(root: &Path, events: &[&str], body: &str, plan: bool) {
+pub(super) fn configure(root: &Path, events: &[&str], body: &str, plan: bool) {
     std::fs::create_dir_all(root.join(".roomkit")).unwrap();
     std::fs::write(root.join("hook.py"), format!(
         "import json, sys\nfrom pathlib import Path\ne = json.load(sys.stdin)\nwith open('hook-events.jsonl', 'a') as f:\n    f.write(json.dumps(e) + '\\n')\n{body}\n"
@@ -34,7 +34,7 @@ fn panel(result: CommandResult) -> PanelSpec {
         .unwrap()
 }
 
-fn enable_all(app: &Application) {
+pub(super) fn enable_all(app: &Application) {
     let list = panel(app.services.hooks.panel(&app.view, "").unwrap());
     let ids: Vec<_> = list
         .actions
@@ -59,7 +59,7 @@ fn enable_all(app: &Application) {
     }
 }
 
-fn records(root: &Path) -> Vec<Value> {
+pub(super) fn records(root: &Path) -> Vec<Value> {
     std::fs::read_to_string(root.join("hook-events.jsonl"))
         .unwrap_or_default()
         .lines()
