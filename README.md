@@ -1006,8 +1006,9 @@ Observation failures are reported but do not undo an action that already happene
 
 RoomKit reports tool outcomes in the background. A `PostToolUse` or
 `PostToolUseFailure` hook normally runs before its turn's `TurnEnd`, which waits
-for those already started; an outcome reported once the turn has ended, such as
-a call cut at the very end of an interruption, runs no hook for that turn.
+for those already started. An outcome reported late, such as a call cut at the
+very end of an interruption, may run its hook after `TurnEnd`, with the agent's
+next turn in that conversation, or not at all.
 
 A session remains open when switching views or agents; those actions do not fire
 `SessionEnd`. Returning to a session in the same execution does not fire another

@@ -876,54 +876,53 @@ fn parse_agent(
     }
     let capacity = value(values, "context").trim();
     let output = value(values, "output").trim();
-    let profile = Agent {
-        id: id.into(),
-        label: value(values, "label").trim().into(),
-        provider: value(values, "provider").into(),
-        model: value(values, "model").trim().into(),
-        vision: match value(values, "vision") {
-            "" | "disabled" => false,
-            "enabled" => true,
-            _ => return Err("Choose enabled or disabled for image input".into()),
-        },
-        reasoning_effort: match value(values, "effort") {
-            "" | "default" => None,
-            effort => Some(effort.into()),
-        },
-        context_window: if capacity.is_empty() {
-            None
-        } else {
-            Some(
-                capacity
-                    .parse()
-                    .map_err(|_| "Context capacity must be a positive integer")?,
-            )
-        },
-        max_output_tokens: if output.is_empty() {
-            None
-        } else {
-            Some(
-                output
-                    .parse()
-                    .map_err(|_| "Max output tokens must be a positive integer, or empty")?,
-            )
-        },
-        instructions: value(values, "instructions").into(),
-        mcp: original
-            .and_then(|id| state.agent(id))
-            .map(|agent| agent.mcp.clone())
-            .unwrap_or_default(),
-        skills: original
-            .and_then(|id| state.agent(id))
-            .map(|agent| agent.skills.clone())
-            .unwrap_or_default(),
-        tools: value(values, "tools")
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect(),
-    };
+    let profile =
+        Agent {
+            id: id.into(),
+            label: value(values, "label").trim().into(),
+            provider: value(values, "provider").into(),
+            model: value(values, "model").trim().into(),
+            vision: match value(values, "vision") {
+                "" | "disabled" => false,
+                "enabled" => true,
+                _ => return Err("Choose enabled or disabled for image input".into()),
+            },
+            reasoning_effort: match value(values, "effort") {
+                "" | "default" => None,
+                effort => Some(effort.into()),
+            },
+            context_window: if capacity.is_empty() {
+                None
+            } else {
+                Some(
+                    capacity
+                        .parse()
+                        .map_err(|_| "Context capacity must be a positive integer")?,
+                )
+            },
+            max_output_tokens: if output.is_empty() {
+                None
+            } else {
+                Some(output.parse().map_err(
+                    |_| "Max output tokens must be a positive number of tokens, or empty",
+                )?)
+            },
+            instructions: value(values, "instructions").into(),
+            mcp: original
+                .and_then(|id| state.agent(id))
+                .map(|agent| agent.mcp.clone())
+                .unwrap_or_default(),
+            skills: original
+                .and_then(|id| state.agent(id))
+                .map(|agent| agent.skills.clone())
+                .unwrap_or_default(),
+            tools: value(values, "tools")
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect(),
+        };
     profile.validate()?;
     Ok((profile, scope))
 }

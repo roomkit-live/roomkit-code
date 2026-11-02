@@ -9,7 +9,8 @@
 - Limit how many tokens one reply may write, per agent: **Max output tokens**
   in `/agents`, or `max_output_tokens` and `--max-output-tokens` for a new
   project's first agent. Without it, requests carry no limit, as before, and
-  still no temperature; ChatGPT sign-in connections send none either way.
+  still no temperature; ChatGPT sign-in connections send none either way. An
+  `agents.json` that sets it cannot be read by an earlier version.
 
 - Ask the model again, once, when a round of tool calls is followed by an
   empty answer.
@@ -22,9 +23,10 @@
   result a hook withheld and a call nothing served, which were `blocked` and
   `unserved`.
 
-- Run no `PostToolUse` or `PostToolUseFailure` hook for an outcome RoomKit
-  reports after its turn ended, such as a call cut at the very end of an
-  interruption; `TurnEnd` still waits for the tool hooks already started.
+- A `PostToolUse` or `PostToolUseFailure` hook for an outcome RoomKit reports
+  late, such as a call cut at the very end of an interruption, may run after
+  its turn's `TurnEnd`, with the agent's next turn in that conversation, or
+  not at all; `TurnEnd` still waits for the tool hooks already started.
 
 - Name the provider in the footer as the engine reports its usage,
   `OpenAIAIProvider`, instead of `openai`.

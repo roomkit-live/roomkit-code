@@ -282,3 +282,28 @@ async fn a_framework_event_never_waits_for_the_log_file() -> crate::Result<()> {
     );
     Ok(())
 }
+
+/// The review of cb5d0a8: records dropped from a full queue were reported
+/// written once the next record reached the file.
+#[tokio::test]
+async fn records_lost_to_a_full_queue_stay_reported() -> crate::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("diagnostics.jsonl");
+    let kit = kit(directory.path());
+    let log = Diagnostics::open(path.clone(), true)?;
+    log.install(&kit).await?;
+    let held = crate::storage::FileLease::exclusive(crate::storage::private_file(
+        &path.with_extension("lock"),
+    )?)?;
+    // More records than the writer's queue holds while it waits for the lock.
+    for index in 0..400 {
+        let mut event = FrameworkEvent::new("room_created");
+        event.room_id = Some(roomkit::model::RoomId::new(format!("r{index}"))?);
+        log.framework(&event);
+    }
+    drop(held);
+    log.close().await;
+    kit.close().await?;
+    assert!(log.storage_failed(), "Some records never reached the file");
+    Ok(())
+}

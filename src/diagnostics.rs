@@ -35,6 +35,9 @@ pub(crate) struct Diagnostics {
 struct State {
     recent: VecDeque<String>,
     write_failed: bool,
+    /// A record never reached the file: the writer's queue was full. Kept
+    /// until the application stops, as later writes do not bring it back.
+    dropped: bool,
     /// Where the engine's callbacks leave their records for the writer
     /// `install` starts, so that none waits for the file: the engine waits
     /// for a framework event's handlers before it goes on. `None` before
@@ -45,6 +48,11 @@ struct State {
 
 impl State {
     /// Keeps `line` among the last records the panel shows.
+    /// Whether the panel must say records may be missing from the file.
+    fn storage_failed(&self) -> bool {
+        self.write_failed || self.dropped
+    }
+
     fn remember(&mut self, line: String) {
         if self.recent.len() == 100 {
             self.recent.pop_front();
@@ -63,6 +71,7 @@ impl Diagnostics {
             state: Mutex::new(State {
                 recent: VecDeque::new(),
                 write_failed: false,
+                dropped: false,
                 queue: None,
                 writer: None,
             }),
@@ -93,7 +102,7 @@ impl Diagnostics {
         let queued = queue.try_send(line.clone()).is_ok();
         state.remember(line);
         if !queued {
-            state.write_failed = true;
+            state.dropped = true;
         }
     }
 
@@ -246,6 +255,12 @@ impl Diagnostics {
 
     /// The log's state, with this thread marked as holding it: a panic while
     /// it is held is counted, not recorded, rather than waiting for it.
+    /// Whether records may be missing from the file, as the panel says.
+    #[cfg(test)]
+    pub(crate) fn storage_failed(&self) -> bool {
+        self.locked().0.storage_failed()
+    }
+
     fn locked(&self) -> (std::sync::MutexGuard<'_, State>, panics::Recording) {
         let recording = panics::Recording::start();
         (crate::sync::lock(&self.state), recording)
@@ -258,7 +273,10 @@ impl Diagnostics {
         let (recent, failed) = {
             let (state, _recording) = self.locked();
             let recent = state.recent.iter().rev().take(20).cloned();
-            (recent.collect::<Vec<_>>().join("\n"), state.write_failed)
+            (
+                recent.collect::<Vec<_>>().join("\n"),
+                state.storage_failed(),
+            )
         };
         CommandResult::Events(vec![Event::Panel {
             conversation: current.room.as_str().into(),
