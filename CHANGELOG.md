@@ -7,11 +7,20 @@
   its own `TurnStart` and `TurnEnd`, when the turn's last answer is already
   complete (roomkit-tui 48054c9).
 
-- Refuse a `timeout_ms` above the host maximum, 120000 ms for `shell` and one
-  hour for `process_start`, with a message that gives the maximum, instead of
-  shortening it. The process monitor shows a job's directory relative to the
-  project, `.` for its root (roomkit-tools 6b59222). `process_status` results
-  stored before this version show as raw text.
+- Refuse a `timeout_ms` above the maximum, 120000 ms for `shell` and one hour
+  for `process_start`, with a message that gives the maximum, instead of
+  shortening it. In Ask mode the refusal comes after you approve the call: the
+  card shows it denied, hooks get `PostToolUseFailure` with the outcome
+  `refused`, and the model can retry with a smaller value (roomkit-tools
+  6b59222).
+
+- Change tool results as roomkit-tools 6b59222 does, for the model and for
+  hooks, which receive them as `tool_response`: `process_status` returns
+  `{"processes": [...]}` instead of a bare list; `shell` and process results
+  give their `cwd` relative to the project, `.` for its root, as the process
+  monitor now shows it; `docs_list` and `docs_search` offsets count from 1,
+  and an offset of 0 or past the last result is refused. `process_status`
+  results stored before this version show as raw text.
 
 - Bound a model request's wait between two reads of its answer by the
   connection's timeout, not the whole request; connecting takes at most 5
