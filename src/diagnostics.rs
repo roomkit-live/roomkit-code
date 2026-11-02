@@ -5,8 +5,8 @@ use std::{
     collections::VecDeque,
     fs::{File, OpenOptions},
     io::Write,
-    path::PathBuf,
-    sync::{Arc, Mutex, atomic::AtomicUsize},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, Weak, atomic::AtomicUsize},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -15,18 +15,19 @@ use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::{Choice, Event, PanelSpec};
 use roomkit_tui_engine::{CommandResult, Diagnostic, SessionConfig};
 use serde_json::{Value, json};
-use tokio_util::sync::CancellationToken;
+use tokio::sync::mpsc;
 
 const LIMIT: u64 = 1024 * 1024;
+
+/// Records the engine's callbacks may leave waiting for the file; past it, a
+/// record stays in memory only, and the panel says writing failed.
+const QUEUED: usize = 256;
 
 pub(crate) struct Diagnostics {
     path: PathBuf,
     instance: String,
     debug: bool,
     state: Mutex<State>,
-    /// Cancelled once the application stopped: framework events are no
-    /// longer recorded.
-    stop: CancellationToken,
     /// Panics in this run, recorded or not.
     panics: AtomicUsize,
 }
@@ -34,6 +35,22 @@ pub(crate) struct Diagnostics {
 struct State {
     recent: VecDeque<String>,
     write_failed: bool,
+    /// Where the engine's callbacks leave their records for the writer
+    /// `install` starts, so that none waits for the file: the engine waits
+    /// for a framework event's handlers before it goes on. `None` before
+    /// `install`, and once the application stopped: nothing more is recorded.
+    queue: Option<mpsc::Sender<String>>,
+    writer: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl State {
+    /// Keeps `line` among the last records the panel shows.
+    fn remember(&mut self, line: String) {
+        if self.recent.len() == 100 {
+            self.recent.pop_front();
+        }
+        self.recent.push_back(line);
+    }
 }
 
 impl Diagnostics {
@@ -46,15 +63,43 @@ impl Diagnostics {
             state: Mutex::new(State {
                 recent: VecDeque::new(),
                 write_failed: false,
+                queue: None,
+                writer: None,
             }),
-            stop: CancellationToken::new(),
             panics: AtomicUsize::new(0),
         });
         diagnostics.record("application_started", json!({"debug":debug}), None);
         Ok(diagnostics)
     }
 
-    pub fn record(&self, kind: &'static str, mut fields: Value, error: Option<&str>) {
+    /// Records `kind` and writes it before returning. The log's lock can wait
+    /// for another instance: an engine callback calls `observe` instead.
+    pub fn record(&self, kind: &'static str, fields: Value, error: Option<&str>) {
+        let line = self.line(kind, fields, error);
+        self.locked().0.remember(line.clone());
+        let written = append(&self.path, &line);
+        self.locked().0.write_failed = written.is_err();
+    }
+
+    /// Records what an engine callback reports without waiting for the file:
+    /// the panel has it at once, the writer appends it. Nothing is recorded
+    /// once the application stopped.
+    fn observe(&self, kind: &'static str, fields: Value, error: Option<&str>) {
+        let line = self.line(kind, fields, error);
+        let (mut state, _recording) = self.locked();
+        let Some(queue) = &state.queue else {
+            return;
+        };
+        let queued = queue.try_send(line.clone()).is_ok();
+        state.remember(line);
+        if !queued {
+            state.write_failed = true;
+        }
+    }
+
+    /// The line recording `kind`: `fields`, the time, this instance and, for
+    /// an error, its classification, never its text.
+    fn line(&self, kind: &'static str, mut fields: Value, error: Option<&str>) -> String {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -67,37 +112,24 @@ impl Diagnostics {
             fields["code"] = json!(diagnostic.code);
             fields["summary"] = json!(diagnostic.summary);
         }
-        let (mut state, _recording) = self.locked();
-        let line = format!("{fields}\n");
-        if state.recent.len() == 100 {
-            state.recent.pop_front();
-        }
-        state.recent.push_back(line.clone());
-        let written = (|| -> std::io::Result<()> {
-            let _lease = crate::storage::FileLease::exclusive_wait(crate::storage::private_file(
-                &self.path.with_extension("lock"),
-            )?)?;
-            // Always reopen under the short log lock: another instance may have
-            // rotated the file since our previous record.
-            let mut file = private_file(&self.path)?;
-            if file.metadata()?.len().saturating_add(line.len() as u64) > LIMIT {
-                std::fs::rename(&self.path, self.path.with_extension("previous.jsonl"))?;
-                file = private_file(&self.path)?;
-            }
-            file.write_all(line.as_bytes())?;
-            Ok(())
-        })();
-        state.write_failed = written.is_err();
+        format!("{fields}\n")
     }
 
     pub async fn install(self: &Arc<Self>, kit: &RoomKit<SqliteStore>) -> crate::Result<()> {
+        let (queue, lines) = mpsc::channel(QUEUED);
+        let writer = tokio::spawn(write_queued(self.path.clone(), Arc::downgrade(self), lines));
+        {
+            let (mut state, _recording) = self.locked();
+            state.queue = Some(queue);
+            state.writer = Some(writer);
+        }
         let log = self.clone();
         kit.hook(
             HookTrigger::OnError,
             move |event: roomkit::model::RoomEvent, _| {
                 let log = log.clone();
                 async move {
-                    log.record("engine_error", json!({
+                    log.observe("engine_error", json!({
                     "room":event.room_id.as_str(),
                     "channel":event.source.channel_id.as_str(),
                     "responds_to":event.responds_to.as_ref().map(|id| id.as_str()),
@@ -124,7 +156,7 @@ impl Diagnostics {
                     } else {
                         "unknown"
                     };
-                    log.record(
+                    log.observe(
                         "tool_finished",
                         json!({
                             "room":event.room_id.as_ref().map(|id| id.as_str()),
@@ -149,9 +181,7 @@ impl Diagnostics {
         for r#type in types {
             let log = self.clone();
             kit.on(r#type, move |event| {
-                if !log.stop.is_cancelled() {
-                    log.framework(&event);
-                }
+                log.framework(&event);
                 async {}
             })?;
         }
@@ -165,43 +195,52 @@ impl Diagnostics {
         let data = |key: &str| event.data.get(key).cloned().unwrap_or(Value::Null);
         let text = |key: &str| event.data.get(key).and_then(Value::as_str);
         match event.r#type.as_str() {
-            "delivery_failed" => self.record(
+            "delivery_failed" => self.observe(
                 "delivery_failed",
                 json!({"room":room,"event_id":event_id,"channel":channel}),
                 text("error"),
             ),
-            "hook_error" => self.record(
+            "hook_error" => self.observe(
                 "hook_failed",
                 json!({"room":room,"event_id":event_id}),
                 text("error"),
             ),
-            "process_timeout" => self.record(
+            "process_timeout" => self.observe(
                 "processing_timeout",
                 json!({"room":room,"event_id":event_id,"timeout_seconds":data("timeout")}),
                 Some("process_timeout"),
             ),
-            "hook_timeout" => self.record(
+            "hook_timeout" => self.observe(
                 "hook_timeout",
                 json!({"room":room,"timeout_seconds":data("timeout")}),
                 None,
             ),
-            "event_processed" => self.record(
+            "event_processed" => self.observe(
                 "event_processed",
                 json!({"room":room,"event_id":event_id}),
                 None,
             ),
-            "delivery_succeeded" => self.record(
+            "delivery_succeeded" => self.observe(
                 "delivery_succeeded",
                 json!({"room":room,"event_id":event_id,"channel":channel}),
                 None,
             ),
-            "room_created" => self.record("room_created", json!({"room":room}), None),
+            "room_created" => self.observe("room_created", json!({"room":room}), None),
             _ => {}
         }
     }
 
+    /// Stops recording the engine's callbacks, writes what they queued
+    /// (within `SETTLE`), then records the application's stop.
     pub async fn close(&self) {
-        self.stop.cancel();
+        let writer = {
+            let (mut state, _recording) = self.locked();
+            state.queue = None;
+            state.writer.take()
+        };
+        if let Some(writer) = writer {
+            let _ = tokio::time::timeout(crate::timeouts::SETTLE, writer).await;
+        }
         self.record("application_stopped", json!({}), None);
     }
 
@@ -256,7 +295,37 @@ fn observer(name: &str) -> HookOptions {
     }
 }
 
-fn private_file(path: &std::path::Path) -> std::io::Result<File> {
+/// Appends the records the engine's callbacks queued, in order, on the
+/// blocking pool: taking the log's lock can wait for another instance. Ends
+/// once the queue is closed and drained.
+async fn write_queued(path: PathBuf, log: Weak<Diagnostics>, mut lines: mpsc::Receiver<String>) {
+    while let Some(line) = lines.recv().await {
+        let path = path.clone();
+        let written = tokio::task::spawn_blocking(move || append(&path, &line)).await;
+        let Some(log) = log.upgrade() else {
+            return;
+        };
+        log.locked().0.write_failed = !matches!(written, Ok(Ok(())));
+    }
+}
+
+/// Appends `line` under the log's short cross-process lock, rotating the
+/// file once it would pass its limit.
+fn append(path: &Path, line: &str) -> std::io::Result<()> {
+    let _lease = crate::storage::FileLease::exclusive_wait(crate::storage::private_file(
+        &path.with_extension("lock"),
+    )?)?;
+    // Always reopen under the lock: another instance may have rotated the
+    // file since our previous record.
+    let mut file = private_file(path)?;
+    if file.metadata()?.len().saturating_add(line.len() as u64) > LIMIT {
+        std::fs::rename(path, path.with_extension("previous.jsonl"))?;
+        file = private_file(path)?;
+    }
+    file.write_all(line.as_bytes())
+}
+
+fn private_file(path: &Path) -> std::io::Result<File> {
     if std::fs::symlink_metadata(path).is_ok_and(|m| !m.file_type().is_file()) {
         return Err(std::io::Error::other(
             "Diagnostic log must be a regular file",
