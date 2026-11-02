@@ -115,6 +115,7 @@ fn resume_follows_the_displayed_session_and_confirmed_mode_with_explicit_options
     session.apply(Event::RunStarted {
         conversation: "first".into(),
         run: "run".into(),
+        answers: None,
     });
     session.apply(Event::PermissionRequested {
         conversation: "first".into(),
