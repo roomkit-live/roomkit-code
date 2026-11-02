@@ -146,11 +146,9 @@ async fn scoped_tool_disclosure_is_isolated_by_turn_room_and_agent() {
     write(root.path(), "src/AGENTS.md", "RULES_ONE");
     write(root.path(), "src/file", "contents");
     let loader = Instructions::new(root.path(), state.path());
-    let tool = loader.wrap(std::sync::Arc::new(
-        roomkit_tools_roomkit::ReadToolset::new(
-            roomkit_tools_fs::ReadTool::new(root.path()).await.unwrap(),
-        ),
-    ));
+    let tool = loader.wrap(std::sync::Arc::new(roomkit_tools_roomkit::Read::new(
+        roomkit_tools_fs::ReadTool::new(root.path()).await.unwrap(),
+    )));
     let read = |room: &'static str, agent: &'static str| {
         let tool = tool.clone();
         async move {

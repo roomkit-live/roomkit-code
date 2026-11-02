@@ -115,7 +115,7 @@ async fn monitor_observes_actual_lifecycle_filters_owners_and_rejects_old_action
     let cancel = CancellationToken::new();
     let process = manager
         .start(
-            &owner,
+            Some(&owner),
             ProcessStartInput::new("printf 'stdout marker'; printf 'stderr marker' >&2; cat"),
             &cancel,
         )
@@ -124,7 +124,7 @@ async fn monitor_observes_actual_lifecycle_filters_owners_and_rejects_old_action
         .data;
     let hidden = manager
         .start(
-            "[\"unbound-room\",\"other-agent\"]",
+            Some("[\"unbound-room\",\"other-agent\"]"),
             ProcessStartInput::new("cat"),
             &cancel,
         )
@@ -163,6 +163,8 @@ async fn monitor_observes_actual_lifecycle_filters_owners_and_rejects_old_action
     let open = action(&list, &format!("open:{}", process.process_id));
     let detail = panel(&app, &open).await.unwrap();
     assert!(detail.body.contains("Command:") && detail.body.contains("Owner: code"));
+    // The directory is relative to the workspace, `.` for its root.
+    assert!(detail.body.contains("\nDirectory: .\n"), "{}", detail.body);
     let stop = action(&detail, ":stop");
     assert!(
         panel(&app, &open).await.is_err(),
@@ -251,13 +253,13 @@ async fn monitor_pages_output_without_consuming_it_and_does_not_tick_when_closed
         app.view.clone(),
     );
     let owner = serde_json::to_string(&(app.view.room.as_str(), app.view.agent.as_str())).unwrap();
-    let p = manager.start(&owner, ProcessStartInput::new("printf FIRST; i=0; while [ $i -lt 5000 ]; do printf .; i=$((i+1)); done; printf LAST; cat"), &CancellationToken::new()).await.unwrap().data;
+    let p = manager.start(Some(&owner), ProcessStartInput::new("printf FIRST; i=0; while [ $i -lt 5000 ]; do printf .; i=$((i+1)); done; printf LAST; cat"), &CancellationToken::new()).await.unwrap().data;
     badge(&mut updates, "running").await;
     let list = panel(&app, "").await.unwrap();
     assert_eq!(list.actions.len(), 1);
     manager
         .write(
-            &owner,
+            Some(&owner),
             roomkit_tools_process::ProcessWriteInput {
                 process_id: p.process_id.clone(),
                 text: String::new(),

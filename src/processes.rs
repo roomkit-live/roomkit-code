@@ -5,7 +5,7 @@ use roomkit::model::{Access, ChannelId, RoomId};
 use roomkit::{GetRoomOptions, ListBindingsOptions, RoomKit};
 use roomkit_sqlite::SqliteStore;
 use roomkit_tools_process::{
-    ObservedProcess, ProcessChunk, ProcessManager, ProcessReadInput, ProcessState, ProcessStopInput,
+    ObservedProcess, ProcessChunk, ProcessReadInput, ProcessSession, ProcessState, ProcessStopInput,
 };
 use roomkit_tui::protocol::{
     BackgroundStatus, Choice, Event, PanelSpec, SidebarContent, SidebarEntry, SidebarSection,
@@ -27,7 +27,7 @@ struct Panel {
 }
 
 pub(crate) struct Processes {
-    manager: ProcessManager,
+    manager: ProcessSession,
     panel: watch::Sender<Option<Panel>>,
     sidebar: watch::Sender<(uuid::Uuid, SidebarSection)>,
 }
@@ -40,7 +40,7 @@ struct Job {
 }
 
 impl Processes {
-    pub fn new(manager: ProcessManager) -> Arc<Self> {
+    pub fn new(manager: ProcessSession) -> Arc<Self> {
         Arc::new(Self {
             manager,
             panel: watch::channel(None).0,
@@ -154,7 +154,11 @@ impl Processes {
         let mut jobs = Vec::new();
         for process in self.manager.observe().await {
             // The RoomKit adapters, not the model, construct this owner tuple.
-            let Ok((room, agent)) = serde_json::from_str::<(String, String)>(&process.owner) else {
+            let Some(Ok((room, agent))) = process
+                .owner
+                .as_deref()
+                .map(serde_json::from_str::<(String, String)>)
+            else {
                 continue;
             };
             let permission = if let Some(permission) = access.get(&room) {
@@ -246,7 +250,7 @@ impl Processes {
                         }
                         self.manager
                             .stop(
-                                &job.process.owner,
+                                job.process.owner.as_deref(),
                                 ProcessStopInput {
                                     process_id: job.process.status.process_id.clone(),
                                     forget: action == "forget",
@@ -345,7 +349,7 @@ impl Processes {
             let read = self
                 .manager
                 .read(
-                    &p.owner,
+                    p.owner.as_deref(),
                     ProcessReadInput {
                         process_id: id.clone(),
                         stdout_offset: stdout,

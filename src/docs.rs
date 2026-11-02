@@ -33,8 +33,9 @@ pub(crate) fn guide(state: &Path) -> Result<Arc<dyn DocsBackend>> {
         max_read_bytes: 16 * 1024,
         ..FileDocsLimits::default()
     };
-    let version = Some(env!("CARGO_PKG_VERSION").into());
-    Ok(Arc::new(FileDocs::new(root, version, limits)?))
+    Ok(Arc::new(
+        FileDocs::new(root, limits)?.with_version(env!("CARGO_PKG_VERSION"))?,
+    ))
 }
 
 /// Split Markdown at its `## ` headings outside fenced code. Text before the

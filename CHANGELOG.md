@@ -7,6 +7,11 @@
   its own `TurnStart` and `TurnEnd`, when the turn's last answer is already
   complete (roomkit-tui 48054c9).
 
+- Refuse a `timeout_ms` above the host maximum, 120000 ms for `shell` and one
+  hour for `process_start`, with a message that gives the maximum, instead of
+  shortening it. The process monitor shows a job's directory relative to the
+  project, `.` for its root (roomkit-tools 6b59222).
+
 - Bound a model request's wait between two reads of its answer by the
   connection's timeout, not the whole request; connecting takes at most 5
   seconds (roomkit-rs 93e757c).

@@ -7,7 +7,7 @@ use std::time::Duration;
 use roomkit::model::{EventType, RoomEvent, RoomId};
 use roomkit::{GetTimelineOptions, RoomKit};
 use roomkit_sqlite::SqliteStore;
-use roomkit_tools_process::{ProcessManager, ProcessState};
+use roomkit_tools_process::{ProcessSession, ProcessState};
 use serde_json::Value;
 
 /// Processes listed by name; the rest are counted.
@@ -48,7 +48,7 @@ pub(crate) struct Summary {
 /// command that reopens it. An untouched draft has nothing to resume.
 pub(crate) async fn collect(
     kit: &RoomKit<SqliteStore>,
-    processes: &ProcessManager,
+    processes: &ProcessSession,
     shown: Option<(String, Option<Vec<String>>)>,
 ) -> Summary {
     let mut summary = Summary {
@@ -74,7 +74,7 @@ pub(crate) async fn collect(
     summary
 }
 
-async fn running(processes: &ProcessManager) -> Vec<Process> {
+async fn running(processes: &ProcessSession) -> Vec<Process> {
     processes
         .observe()
         .await

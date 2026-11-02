@@ -42,12 +42,12 @@ async fn native_facades_preserve_plans_and_selection_across_restart_and_isolate_
     let cancel = CancellationToken::new();
     let tool = PlanCreateTool::new(std::sync::Arc::new(plans.clone()));
     let first = tool
-        .execute(&owner, input("First"), &cancel)
+        .call(&owner, input("First"), &cancel)
         .await
         .unwrap()
         .data;
     let second = tool
-        .execute(&owner, input("Second"), &cancel)
+        .call(&owner, input("Second"), &cancel)
         .await
         .unwrap()
         .data;

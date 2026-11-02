@@ -1,4 +1,4 @@
-use roomkit_tools_core::Error;
+use roomkit_tools_core::ToolError;
 use roomkit_tools_plans::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -35,26 +35,26 @@ pub(super) struct Document {
     pub plans: BTreeMap<String, Plan>,
 }
 
-fn unavailable() -> Error {
-    Error::Unsupported("Plan storage is unavailable; no plan data was displayed".into())
+fn unavailable() -> ToolError {
+    ToolError::UnsupportedResource("Plan storage is unavailable; no plan data was displayed".into())
 }
-fn cancelled(token: &CancellationToken) -> Result<(), Error> {
+fn cancelled(token: &CancellationToken) -> Result<(), ToolError> {
     if token.is_cancelled() {
-        Err(Error::Cancelled)
+        Err(ToolError::Cancelled)
     } else {
         Ok(())
     }
 }
-fn owned<'a>(doc: &'a Document, id: &str) -> Result<&'a Plan, Error> {
-    doc.plans
-        .get(id)
-        .ok_or_else(|| Error::Refused("Unknown plan in this conversation and agent".into()))
+fn owned<'a>(doc: &'a Document, id: &str) -> Result<&'a Plan, ToolError> {
+    doc.plans.get(id).ok_or_else(|| {
+        ToolError::AccessRefused("Unknown plan in this conversation and agent".into())
+    })
 }
-fn revision(plan: &Plan, expected: u64) -> Result<(), Error> {
+fn revision(plan: &Plan, expected: u64) -> Result<(), ToolError> {
     if plan.revision == expected {
         Ok(())
     } else {
-        Err(Error::Refused(
+        Err(ToolError::AccessRefused(
             "Plan revision conflict; use plan_read before retrying".into(),
         ))
     }
@@ -84,8 +84,8 @@ impl Plans {
         &self,
         scope: &PlanScope,
         cancel: &CancellationToken,
-        apply: impl FnOnce(&mut Document) -> Result<T, Error> + Send + 'static,
-    ) -> Result<T, Error> {
+        apply: impl FnOnce(&mut Document) -> Result<T, ToolError> + Send + 'static,
+    ) -> Result<T, ToolError> {
         scope.validate()?;
         cancelled(cancel)?;
         let this = self.clone();
@@ -94,7 +94,7 @@ impl Plans {
         tokio::task::spawn_blocking(move || {
             let _guard = this.lock.lock().map_err(|_| unavailable())?;
             if this.closed.load(Ordering::SeqCst) {
-                return Err(Error::Cancelled);
+                return Err(ToolError::Cancelled);
             }
             cancelled(&cancel)?;
             let key = serde_json::to_vec(&(&scope.room_id, &scope.caller_id))
@@ -119,30 +119,34 @@ impl Plans {
 
     /// Plan `id` in `scope`, or with no ID the conversation's only plan:
     /// with several, which one is meant must be said.
-    pub(crate) async fn plan(&self, scope: &PlanScope, id: Option<&str>) -> Result<Plan, Error> {
+    pub(crate) async fn plan(
+        &self,
+        scope: &PlanScope,
+        id: Option<&str>,
+    ) -> Result<Plan, ToolError> {
         let document = self.snapshot(scope).await?;
         let plan = match id {
             Some(id) => document.plans.get(id),
             None if document.plans.len() > 1 => {
-                return Err(Error::InvalidInput(
+                return Err(ToolError::InvalidInput(
                     "This conversation has several plans; give plan_id (see plan_list)".into(),
                 ));
             }
             None => document.plans.values().next(),
         };
         plan.cloned().ok_or_else(|| {
-            Error::InvalidInput(
+            ToolError::InvalidInput(
                 "No such plan in this conversation; create it with plan_create".into(),
             )
         })
     }
 
-    pub(super) async fn snapshot(&self, scope: &PlanScope) -> Result<Document, Error> {
+    pub(super) async fn snapshot(&self, scope: &PlanScope) -> Result<Document, ToolError> {
         self.access(scope, &CancellationToken::new(), |doc| Ok(doc.clone()))
             .await
     }
 
-    pub async fn select(&self, scope: &PlanScope, id: &str) -> Result<(), Error> {
+    pub async fn select(&self, scope: &PlanScope, id: &str) -> Result<(), ToolError> {
         let id = id.to_owned();
         self.access(scope, &CancellationToken::new(), move |doc| {
             owned(doc, &id)?;
@@ -153,7 +157,7 @@ impl Plans {
     }
 }
 
-fn validate(doc: &Document, scope: &PlanScope) -> Result<(), Error> {
+fn validate(doc: &Document, scope: &PlanScope) -> Result<(), ToolError> {
     if doc.version != 1
         || doc.room != scope.room_id
         || doc.agent != scope.caller_id
@@ -174,7 +178,7 @@ fn validate(doc: &Document, scope: &PlanScope) -> Result<(), Error> {
     Ok(())
 }
 
-fn load(path: &Path, scope: &PlanScope) -> Result<Document, Error> {
+fn load(path: &Path, scope: &PlanScope) -> Result<Document, ToolError> {
     private_directory(path.parent().ok_or_else(unavailable)?)?;
     let meta = match std::fs::symlink_metadata(path) {
         Ok(meta) => meta,
@@ -213,7 +217,7 @@ fn load(path: &Path, scope: &PlanScope) -> Result<Document, Error> {
     Ok(doc)
 }
 
-fn save(path: &Path, doc: &Document) -> Result<(), Error> {
+fn save(path: &Path, doc: &Document) -> Result<(), ToolError> {
     let parent = path.parent().ok_or_else(unavailable)?;
     let mut builder = std::fs::DirBuilder::new();
     builder.recursive(true);
@@ -226,7 +230,7 @@ fn save(path: &Path, doc: &Document) -> Result<(), Error> {
     private_directory(parent)?;
     let bytes = serde_json::to_vec(doc).map_err(|_| unavailable())?;
     if bytes.len() as u64 > MAX_BYTES {
-        return Err(Error::LimitExceeded("Plan scope exceeds 5 MiB".into()));
+        return Err(ToolError::LimitExceeded("Plan scope exceeds 5 MiB".into()));
     }
     let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(|_| unavailable())?;
     temp.write_all(&bytes).map_err(|_| unavailable())?;
@@ -239,7 +243,7 @@ fn save(path: &Path, doc: &Document) -> Result<(), Error> {
     Ok(())
 }
 
-fn private_directory(path: &Path) -> Result<(), Error> {
+fn private_directory(path: &Path) -> Result<(), ToolError> {
     let meta = match std::fs::symlink_metadata(path) {
         Ok(meta) => meta,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -270,7 +274,7 @@ impl PlanBackend for Plans {
             let input = input.clone();
             self.access(scope, cancel, move |doc| {
                 if doc.plans.len() >= 64 {
-                    return Err(Error::LimitExceeded(
+                    return Err(ToolError::LimitExceeded(
                         "This agent already has 64 plans in this conversation".into(),
                     ));
                 }

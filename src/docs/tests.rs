@@ -59,7 +59,7 @@ async fn every_section_of_the_shipped_guide_is_found_first_by_its_title() {
     let cancel = CancellationToken::new();
     let shipped = topics(GUIDE);
     let list = DocsListTool::new(backend.clone())
-        .execute(serde_json::from_str(r#"{"limit":100}"#).unwrap(), &cancel)
+        .call(serde_json::from_str(r#"{"limit":100}"#).unwrap(), &cancel)
         .await
         .unwrap();
     assert_eq!(list.data.total_documents, shipped.len());
@@ -70,7 +70,7 @@ async fn every_section_of_the_shipped_guide_is_found_first_by_its_title() {
         assert_eq!(document.version.as_deref(), Some(env!("CARGO_PKG_VERSION")));
         let input: DocsSearchInput =
             serde_json::from_value(serde_json::json!({ "query": document.title })).unwrap();
-        let found = search.execute(input, &cancel).await.unwrap();
+        let found = search.call(input, &cancel).await.unwrap();
         assert_eq!(
             found.data.matches[0].document.document_id, document.document_id,
             "Searching {:?}",
@@ -80,7 +80,7 @@ async fn every_section_of_the_shipped_guide_is_found_first_by_its_title() {
             serde_json::json!({ "document_id": document.document_id, "limit": 500 }),
         )
         .unwrap();
-        let page = read.execute(input, &cancel).await.unwrap();
+        let page = read.call(input, &cancel).await.unwrap();
         assert!(
             !page.data.truncated,
             "{} must fit one read page",

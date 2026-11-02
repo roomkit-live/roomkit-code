@@ -16,7 +16,7 @@ use roomkit::{
 };
 use roomkit_sqlite::SqliteStore;
 use roomkit_tools_process::{
-    ObservedProcess, ProcessChunk, ProcessEnd, ProcessManager, ProcessReadInput, ProcessReadResult,
+    ObservedProcess, ProcessChunk, ProcessEnd, ProcessReadInput, ProcessReadResult, ProcessSession,
     ProcessStartInput, ProcessState, ProcessStopInput, ProcessWriteInput,
 };
 use roomkit_tui::protocol::{Command, Event, Item, Message, Request, RunOutcome};
@@ -30,7 +30,7 @@ use crate::diagnostics::Diagnostics;
 const OUTPUT_BYTES: u64 = 4096;
 
 pub(crate) struct Shell {
-    manager: ProcessManager,
+    manager: ProcessSession,
     diagnostics: Arc<Diagnostics>,
     shutdown: CancellationToken,
     slot: Arc<Semaphore>,
@@ -40,7 +40,7 @@ pub(crate) struct Shell {
 }
 
 impl Shell {
-    pub fn new(manager: ProcessManager, diagnostics: Arc<Diagnostics>) -> Arc<Self> {
+    pub fn new(manager: ProcessSession, diagnostics: Arc<Diagnostics>) -> Arc<Self> {
         Arc::new(Self {
             manager,
             diagnostics,
@@ -245,7 +245,7 @@ impl Shell {
         started.iter().find_map(|id| {
             jobs.iter().find(|job| {
                 job.status.process_id == *id
-                    && job.owner == owner
+                    && job.owner.as_deref() == Some(owner)
                     && job.status.state == ProcessState::Finished
             })
         })
@@ -265,13 +265,17 @@ impl Shell {
         // Forget the IDs of processes the manager no longer keeps.
         crate::sync::lock(&self.started)
             .retain(|id| jobs.iter().any(|job| job.status.process_id == *id));
-        if jobs.iter().filter(|job| job.owner == owner).count() >= 8
+        if jobs
+            .iter()
+            .filter(|job| job.owner.as_deref() == Some(owner))
+            .count()
+            >= 8
             && let Some(oldest) = self.oldest_finished(&jobs, owner)
         {
             let _ = self
                 .manager
                 .stop(
-                    owner,
+                    Some(owner),
                     ProcessStopInput {
                         process_id: oldest.status.process_id.clone(),
                         forget: true,
@@ -280,7 +284,7 @@ impl Shell {
                 )
                 .await;
         }
-        let process = self.manager.start(owner, ProcessStartInput::new(command), &self.shutdown).await
+        let process = self.manager.start(Some(owner), ProcessStartInput::new(command), &self.shutdown).await
             .map_err(|_| "Could not start command. Inspect /processes for retained jobs or /diagnostics for application failures.")?.data;
         let id = process.process_id;
         crate::sync::lock(&self.started).push_back(id.clone());
@@ -289,7 +293,7 @@ impl Shell {
         let _ = self
             .manager
             .write(
-                owner,
+                Some(owner),
                 ProcessWriteInput {
                     process_id: id.clone(),
                     text: String::new(),
@@ -307,17 +311,17 @@ impl Shell {
             tokio::select! {
                 _ = context.cancelled(), if !stopping => {
                     stopping = true;
-                    let _ = self.manager.stop(owner, ProcessStopInput { process_id: id.clone(), forget: false }, &cleanup).await;
+                    let _ = self.manager.stop(Some(owner), ProcessStopInput { process_id: id.clone(), forget: false }, &cleanup).await;
                 }
                 _ = self.shutdown.cancelled(), if !stopping => {
                     stopping = true;
-                    let _ = self.manager.stop(owner, ProcessStopInput { process_id: id.clone(), forget: false }, &cleanup).await;
+                    let _ = self.manager.stop(Some(owner), ProcessStopInput { process_id: id.clone(), forget: false }, &cleanup).await;
                 }
                 _ = ticker.tick() => {}
             }
             let read = match self
                 .manager
-                .read(owner, ProcessReadInput::new(&id), &cleanup)
+                .read(Some(owner), ProcessReadInput::new(&id), &cleanup)
                 .await
             {
                 Ok(output) => output.data,
@@ -325,7 +329,7 @@ impl Shell {
                     let _ = self
                         .manager
                         .stop(
-                            owner,
+                            Some(owner),
                             ProcessStopInput {
                                 process_id: id.clone(),
                                 forget: false,

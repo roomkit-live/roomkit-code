@@ -10,24 +10,20 @@ use roomkit_openai::{OpenAiAiProvider, OpenAiConfig};
 use roomkit_tools_code::CodeOutlineTool;
 use roomkit_tools_docs::{DocsBackend, DocsListTool, DocsReadTool, DocsSearchTool};
 use roomkit_tools_fs::{
-    DiffTool, EditTool, GlobTool, GrepTool, ListTool, MutationWorkspace, PatchTool, ReadTool,
-    WriteTool,
+    DiffTool, EditTool, GlobTool, GrepTool, ListTool, PatchTool, ReadTool, Workspace, WriteTool,
 };
 use roomkit_tools_plans::{
     PlanCreateTool, PlanDeleteTool, PlanListTool, PlanReadTool, PlanUpdateTool,
 };
 use roomkit_tools_process::{
-    CommandEnv, OutputLimits, OutputStore, ProcessLimits, ProcessManager, ShellLimits, ShellTool,
+    CommandEnv, OutputLimits, OutputStore, ProcessLimits, ProcessSession, ShellLimits, ShellTool,
 };
 use roomkit_tools_roomkit::{
-    CodeOutlineToolset, DiffToolset, EditToolset, GlobToolset, GrepToolset, ListToolset,
-    OutputForgetToolset, OutputReadToolset, PatchToolset, ProcessReadToolset, ProcessStartToolset,
-    ProcessStatusToolset, ProcessStopToolset, ProcessWriteToolset, ReadToolset, ShellToolset,
-    WebFetchToolset, WebSearchToolset, WriteToolset,
+    CodeOutline, Diff, Edit, Glob, Grep, List, OutputForget, OutputRead, Patch, ProcessRead,
+    ProcessStart, ProcessStatus, ProcessStop, ProcessWrite, Shell, WebFetch, WebSearch,
 };
 use roomkit_tools_roomkit::{
-    DocsListToolset, DocsReadToolset, DocsSearchToolset, PlanCreateToolset, PlanDeleteToolset,
-    PlanListToolset, PlanReadToolset, PlanUpdateToolset,
+    DocsList, DocsRead, DocsSearch, PlanCreate, PlanDelete, PlanList, PlanRead, PlanUpdate,
 };
 use roomkit_tools_search::{ExaSearch, SearchHttpConfig, SearchLimits, WebSearchTool};
 use roomkit_tools_web::{WebFetchLimits, WebFetchTool};
@@ -59,8 +55,8 @@ pub(crate) struct Resources {
     pub files: Arc<crate::files::Files>,
     /// The application's own guide, shared by every agent.
     pub docs: Arc<dyn DocsBackend>,
-    pub mutations: MutationWorkspace,
-    pub processes: ProcessManager,
+    pub mutations: Workspace,
+    pub processes: ProcessSession,
     /// The environment of every agent's shell, as of the processes.
     pub command_env: CommandEnv,
     pub outputs: OutputStore,
@@ -76,23 +72,31 @@ impl Resources {
         inherit_env: &[String],
     ) -> Result<Self> {
         let command_env = crate::command_env::command_env(inherit_env);
-        let mutations = MutationWorkspace::new(root).await?;
+        let mutations = Workspace::new(root).await?;
         // Small immediate pages leave room for the JSON envelope in the bounded
         // terminal projection. Large captures remain in separately paged archives.
-        let mut output_limits = OutputLimits::default();
-        output_limits.max_read_bytes = 4096;
-        let outputs = OutputStore::new(state, output_limits).await?;
-        let mut process_limits = ProcessLimits::default();
-        process_limits.max_read_bytes = 4096;
-        let processes = ProcessManager::new(root)
+        let output_limits = OutputLimits {
+            max_read_bytes: 4096,
+            ..OutputLimits::default()
+        };
+        let outputs = OutputStore::new(Some(state), output_limits).await?;
+        let process_limits = ProcessLimits {
+            max_read_bytes: 4096,
+            ..ProcessLimits::default()
+        };
+        let processes = ProcessSession::new(root)
             .await?
             .with_limits(process_limits)?
             .with_env(command_env.clone())?
             .with_output_store(outputs.clone())?;
-        let mut search_limits = SearchLimits::default();
-        search_limits.max_output_bytes = 48 * 1024;
-        let mut fetch_limits = WebFetchLimits::default();
-        fetch_limits.max_output_bytes = 8192;
+        let search_limits = SearchLimits {
+            max_output_bytes: 48 * 1024,
+            ..SearchLimits::default()
+        };
+        let fetch_limits = WebFetchLimits {
+            max_output_bytes: 8192,
+            ..WebFetchLimits::default()
+        };
         Ok(Self {
             instructions: crate::instructions::Instructions::new(root, global),
             plans: Arc::new(crate::plans::Plans::new(state.join("plans"))),
@@ -102,11 +106,8 @@ impl Resources {
             processes,
             command_env,
             outputs,
-            search: WebSearchTool::new(Arc::new(ExaSearch::new(
-                None,
-                SearchHttpConfig::default(),
-            )?))
-            .with_limits(search_limits)?,
+            search: WebSearchTool::new(Arc::new(ExaSearch::new(SearchHttpConfig::default())?))
+                .with_limits(search_limits)?,
             fetch: WebFetchTool::new().with_limits(fetch_limits)?,
         })
     }
@@ -232,9 +233,11 @@ async fn native_tools(
     policy: crate::permissions::Policy,
 ) -> Result<Vec<Arc<dyn Tool>>> {
     let mutations = resources.mutations.clone();
-    let mut shell_limits = ShellLimits::default();
-    shell_limits.max_output_bytes = 8192;
-    shell_limits.max_timeout_ms = crate::timeouts::SHELL_MAX_SECONDS * 1000;
+    let shell_limits = ShellLimits {
+        max_output_bytes: 8192,
+        max_timeout_ms: crate::timeouts::SHELL_MAX_SECONDS * 1000,
+        ..ShellLimits::default()
+    };
     let shell = ShellTool::new(root)
         .await?
         .with_limits(shell_limits)?
@@ -245,37 +248,35 @@ async fn native_tools(
     let docs = &resources.docs;
     let modes = crate::permissions::ModeTools::new(policy, plans.clone());
     let mut tools: Vec<Arc<dyn Tool>> = vec![
-        Arc::new(CodeOutlineToolset::new(CodeOutlineTool::new(root).await?)),
-        Arc::new(ListToolset::new(ListTool::new(root).await?)),
-        Arc::new(GlobToolset::new(GlobTool::new(root).await?)),
-        Arc::new(GrepToolset::new(GrepTool::new(root).await?)),
-        Arc::new(ReadToolset::new(ReadTool::new(root).await?)),
-        Arc::new(DiffToolset::new(DiffTool::new(root).await?)),
-        Arc::new(WriteToolset::new(WriteTool::from_workspace(
-            mutations.clone(),
-        ))),
-        Arc::new(EditToolset::new(EditTool::from_workspace(
-            mutations.clone(),
-        ))),
-        Arc::new(PatchToolset::new(PatchTool::from_workspace(mutations))),
-        Arc::new(ShellToolset::new(shell)),
-        Arc::new(WebFetchToolset::new(resources.fetch.clone())),
-        Arc::new(WebSearchToolset::new(resources.search.clone())),
-        Arc::new(ProcessStartToolset::new(processes.clone())),
-        Arc::new(ProcessStatusToolset::new(processes.clone())),
-        Arc::new(ProcessReadToolset::new(processes.clone())),
-        Arc::new(ProcessWriteToolset::new(processes.clone())),
-        Arc::new(ProcessStopToolset::new(processes.clone())),
-        Arc::new(OutputReadToolset::new(resources.outputs.clone())),
-        Arc::new(OutputForgetToolset::new(resources.outputs.clone())),
-        Arc::new(PlanCreateToolset::new(PlanCreateTool::new(plans.clone()))),
-        Arc::new(PlanReadToolset::new(PlanReadTool::new(plans.clone()))),
-        Arc::new(PlanListToolset::new(PlanListTool::new(plans.clone()))),
-        Arc::new(PlanUpdateToolset::new(PlanUpdateTool::new(plans.clone()))),
-        Arc::new(PlanDeleteToolset::new(PlanDeleteTool::new(plans.clone()))),
-        Arc::new(DocsListToolset::new(DocsListTool::new(docs.clone()))),
-        Arc::new(DocsSearchToolset::new(DocsSearchTool::new(docs.clone()))),
-        Arc::new(DocsReadToolset::new(DocsReadTool::new(docs.clone()))),
+        Arc::new(CodeOutline::new(CodeOutlineTool::new(root).await?)),
+        Arc::new(List::new(ListTool::new(root).await?)),
+        Arc::new(Glob::new(GlobTool::new(root).await?)),
+        Arc::new(Grep::new(GrepTool::new(root).await?)),
+        Arc::new(roomkit_tools_roomkit::Read::new(ReadTool::new(root).await?)),
+        Arc::new(Diff::new(DiffTool::new(root).await?)),
+        Arc::new(roomkit_tools_roomkit::Write::new(
+            WriteTool::from_workspace(mutations.clone()),
+        )),
+        Arc::new(Edit::new(EditTool::from_workspace(mutations.clone()))),
+        Arc::new(Patch::new(PatchTool::from_workspace(mutations))),
+        Arc::new(Shell::new(shell)),
+        Arc::new(WebFetch::new(resources.fetch.clone())),
+        Arc::new(WebSearch::new(resources.search.clone())),
+        Arc::new(ProcessStart::new(processes.clone())),
+        Arc::new(ProcessStatus::new(processes.clone())),
+        Arc::new(ProcessRead::new(processes.clone())),
+        Arc::new(ProcessWrite::new(processes.clone())),
+        Arc::new(ProcessStop::new(processes.clone())),
+        Arc::new(OutputRead::new(resources.outputs.clone())),
+        Arc::new(OutputForget::new(resources.outputs.clone())),
+        Arc::new(PlanCreate::new(PlanCreateTool::new(plans.clone()))),
+        Arc::new(PlanRead::new(PlanReadTool::new(plans.clone()))),
+        Arc::new(PlanList::new(PlanListTool::new(plans.clone()))),
+        Arc::new(PlanUpdate::new(PlanUpdateTool::new(plans.clone()))),
+        Arc::new(PlanDelete::new(PlanDeleteTool::new(plans.clone()))),
+        Arc::new(DocsList::new(DocsListTool::new(docs.clone()))),
+        Arc::new(DocsSearch::new(DocsSearchTool::new(docs.clone()))),
+        Arc::new(DocsRead::new(DocsReadTool::new(docs.clone()))),
     ];
     tools.extend(modes.tools());
     Ok(tools

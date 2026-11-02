@@ -1,8 +1,7 @@
 use super::*;
 use roomkit_ai::{Tool, ToolResult};
 use roomkit_tools_roomkit::{
-    OutputForgetToolset, OutputReadToolset, ProcessReadToolset, ProcessStartToolset,
-    ProcessStatusToolset, ProcessStopToolset,
+    OutputForget, OutputRead, ProcessRead, ProcessStart, ProcessStatus, ProcessStop,
 };
 
 /// What `tool` answers the call of `name` with `args`, made by the agent
@@ -140,8 +139,8 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
     assert_eq!(shell["stdout"]["truncated"], true);
     let archive = shell["stdout"]["archive"]["archive_id"].as_str().unwrap();
     let resources = &app.profiles.resources;
-    let outputs: Arc<dyn Tool> = Arc::new(OutputReadToolset::new(resources.outputs.clone()));
-    let processes: Arc<dyn Tool> = Arc::new(ProcessReadToolset::new(resources.processes.clone()));
+    let outputs: Arc<dyn Tool> = Arc::new(OutputRead::new(resources.outputs.clone()));
+    let processes: Arc<dyn Tool> = Arc::new(ProcessRead::new(resources.processes.clone()));
     for caller in [("other", "code"), ("main", "other")] {
         let read = json!({"archive_id":archive});
         assert!(call(&outputs, caller, "output_read", read).await.is_err());
@@ -185,11 +184,11 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
         ],
     )
     .await;
-    let observer: Arc<dyn Tool> = Arc::new(ProcessStatusToolset::new(
-        app.profiles.resources.processes.clone(),
-    ));
+    let observer: Arc<dyn Tool> =
+        Arc::new(ProcessStatus::new(app.profiles.resources.processes.clone()));
     let status = call(&observer, ("main", "observer"), "process_status", json!({}));
-    assert!(data(status.await.unwrap()).as_array().unwrap().is_empty());
+    let status = data(status.await.unwrap());
+    assert!(status["processes"].as_array().unwrap().is_empty());
     let roomkit_tui_engine::CommandResult::Switch(view) = profile_command(
         &app,
         Command::Invoke {
@@ -204,7 +203,7 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
     app.view = *view;
     let session = turn_operation(&app, "continue-process").await;
     assert_eq!(
-        tool_result(&session, "process_status")[0]["process_id"],
+        tool_result(&session, "process_status")["processes"][0]["process_id"],
         "p1"
     );
     assert_eq!(tool_result(&session, "process_write")["complete"], true);
@@ -243,9 +242,7 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
     assert_eq!(completed["stdout"]["text"], "hello\n");
     assert_eq!(completed["status"]["exit_code"], 0);
     let code = ("main", "code");
-    let forget: Arc<dyn Tool> = Arc::new(OutputForgetToolset::new(
-        app.profiles.resources.outputs.clone(),
-    ));
+    let forget: Arc<dyn Tool> = Arc::new(OutputForget::new(app.profiles.resources.outputs.clone()));
     let forgotten = call(
         &forget,
         code,
@@ -257,8 +254,8 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
     assert!(call(&outputs, code, "output_read", read).await.is_err());
     // Leave another live process for the application's shutdown path to reap.
     let processes = &app.profiles.resources.processes;
-    let start: Arc<dyn Tool> = Arc::new(ProcessStartToolset::new(processes.clone()));
-    let stop: Arc<dyn Tool> = Arc::new(ProcessStopToolset::new(processes.clone()));
+    let start: Arc<dyn Tool> = Arc::new(ProcessStart::new(processes.clone()));
+    let stop: Arc<dyn Tool> = Arc::new(ProcessStop::new(processes.clone()));
     let cat = || json!({"command":"cat"});
     call(&start, code, "process_start", cat()).await.unwrap();
     let stopping = json!({"process_id":"p2","forget":true});
@@ -287,6 +284,44 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
         archives.iter().all(|path| !path.exists()),
         "Temporary output archives are removed at shutdown"
     );
+}
+
+/// A `timeout_ms` above the host maximum the prompt states is refused with
+/// that maximum, so the model can correct it, instead of being capped.
+#[tokio::test]
+async fn a_timeout_above_the_host_maximum_is_refused_with_the_maximum() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let shell = crate::timeouts::SHELL_MAX_SECONDS * 1000;
+    let process = roomkit_tools_process::ProcessLimits::default().max_timeout_ms;
+    let mock = Mock::start(vec![
+        ("shell", json!({"command":"true","timeout_ms":shell + 1})),
+        (
+            "process_start",
+            json!({"command":"true","timeout_ms":process + 1}),
+        ),
+    ])
+    .await;
+    let mut settings = settings(root.path(), state.path(), &mock.base_url);
+    settings.mode = crate::permissions::Mode::Yolo;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let session = turn(&app).await;
+    let snapshot = session.snapshot().unwrap();
+    for (name, maximum) in [("shell", shell), ("process_start", process)] {
+        let call = snapshot
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Tool { call, .. } if call.name == name => Some(call),
+                _ => None,
+            })
+            .unwrap();
+        assert_ne!(call.state, ToolState::Succeeded, "{name}: {}", call.text);
+        let message = format!("timeout_ms exceeds the host maximum of {maximum} ms");
+        assert!(call.text.contains(&message), "{name}: {}", call.text);
+    }
+    assert!(app.profiles.resources.processes.observe().await.is_empty());
+    app.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -322,12 +357,16 @@ async fn web_uses_anonymous_exa_and_fetch_without_reusing_the_model_credential()
     let mut resources = crate::agent::Resources::new(root.path(), state.path(), state.path(), &[])
         .await
         .unwrap();
-    let mut config = SearchHttpConfig::default();
-    config.endpoint = Some(format!("{origin}/search"));
-    config.policy.private_origins = vec![origin.clone()];
-    resources.search = WebSearchTool::new(Arc::new(ExaSearch::new(None, config).unwrap()));
-    let mut policy = WebFetchPolicy::default();
-    policy.private_origins = vec![origin];
+    let config = SearchHttpConfig {
+        endpoint: Some(format!("{origin}/search")),
+        private_origins: vec![origin.clone()],
+        ..SearchHttpConfig::default()
+    };
+    resources.search = WebSearchTool::new(Arc::new(ExaSearch::new(config).unwrap()));
+    let policy = WebFetchPolicy {
+        private_origins: vec![origin],
+        ..WebFetchPolicy::default()
+    };
     resources.fetch = WebFetchTool::new().with_policy(policy).unwrap();
     let app = Application::open_with_tools(&settings, "fixture-model-key".into(), Some(resources))
         .await

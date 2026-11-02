@@ -63,7 +63,7 @@ impl ToolRenderer for Web {
                 format!("{} · {}", result.provider, result.query),
                 Tone::Code,
             )]);
-            match result.response.payload {
+            match result.payload {
                 SearchPayload::Results { results } => {
                     lines.push(vec![Span::new(
                         format!("{} sources", results.len()),
@@ -84,7 +84,7 @@ impl ToolRenderer for Web {
                     Tone::Warning,
                 )]),
             }
-            if result.response.partial || result.omitted_results > 0 {
+            if result.partial || result.omitted_results > 0 {
                 lines.push(vec![Span::new(
                     format!(
                         "Partial results · {} sources omitted",
@@ -93,7 +93,7 @@ impl ToolRenderer for Web {
                     Tone::Warning,
                 )]);
             }
-            for notice in result.response.notices {
+            for notice in result.notices {
                 lines.push(vec![Span::new(notice, Tone::Warning)]);
             }
         } else {
