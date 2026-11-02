@@ -94,14 +94,17 @@ leaves the conversation ready to continue.
 
 While the agent works, Enter sends the message to its running turn, which reads
 it at its next step: after its current tool calls, or right after the model's
-answer, which the model then follows with a reply to the message. The message
-shows "↳ sent to the running turn". Sent once the turn's last answer is
-complete, while it is being stored, the message gets a turn of its own instead,
-shown as "↳ answered in its own turn", which Esc interrupts like any turn. The
-message is refused, and the draft kept, while a turn is being prepared (its
-`UserPromptSubmit` and `TurnStart` hooks included), while an interruption or a
-shell command (`!`) runs, and when it carries images. An application command
-that cannot run while the model is busy is refused until the turn ends.
+answer, which the model then follows with a reply to the message. A turn that
+ends on its round limit, without an answer or on a failure does not read it;
+the message stays in the conversation's history. The message shows "↳ sent to
+the running turn". Sent once the turn's last answer is complete, while it is
+being stored, the message gets a turn of its own instead, shown as "↳ answered
+in its own turn", which Esc interrupts like any turn. A message with images,
+or written while Esc interrupts the turn, stays in the composer. A message sent
+while a turn is being prepared or finished (its `UserPromptSubmit`, `TurnStart`
+and `TurnEnd` hooks included) or during a shell command is refused; Up brings
+its text back. A shell command (`!`) or another application command that
+cannot run while the model is busy is refused until the turn ends.
 
 Once the view has closed, the terminal prints a short report:
 
