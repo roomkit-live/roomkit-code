@@ -92,6 +92,12 @@ work; a second press within two seconds exits. Typing or pasting disarms exit.
 Interruption waits for engine cleanup, preserves completed tool effects and
 leaves the conversation ready to continue.
 
+**Ctrl+S**, or **Ctrl+Enter** where the terminal reports it, sends a message
+now: it interrupts whatever runs and sends the message once nothing runs any
+more, in a turn of its own. A message whose turn it cuts stays in the
+conversation, and that next turn reads it. Esc while it waits keeps the text in
+the composer, and only the text as it was when the key was pressed leaves.
+
 While the agent works, Enter sends the message to its running turn, which reads
 it at its next step: after its current tool calls, or right after the model's
 answer, which the model then follows with a reply to the message. A turn that
@@ -382,7 +388,8 @@ Press **Shift+Tab** in the composer to cycle **Ask → Plan → Yolo → Ask**,
 including while an agent is working. While an approval card is open, Shift+Tab
 does not change the mode: decide first. The status line shows the host-confirmed
 mode. `/mode ask`, `/mode plan` and `/mode yolo` select directly; `/mode` offers
-choices. Changing modes preserves the draft and never starts a model turn.
+choices. Changing modes preserves the draft and never starts a model turn. An
+agent that is working reads the new mode's instruction at its next step.
 Actions already dispatched are not revoked. Yolo permits subsequent selected
 tool calls without asking; tool path, revision, timeout and size checks still
 apply.

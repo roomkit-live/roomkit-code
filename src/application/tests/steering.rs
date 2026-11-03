@@ -1,7 +1,7 @@
 //! RMK-1230: a person writes while the agent works. The message goes to the
 //! running turn, which reads it at its next step, under that turn's hooks;
 //! sent once the turn's last answer is complete, it gets a turn of its own,
-//! with the hooks of any turn.
+//! with the hooks of any turn. A mode change reaches the running turn too.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -220,6 +220,87 @@ async fn a_message_the_turn_no_longer_reads_gets_a_turn_with_its_hooks() {
     assert_eq!(own[3]["roomkit"]["outcome"], "served", "The read ran");
     assert_eq!(mock.requests.lock().unwrap().len(), 3);
     assert!(asked(&mock, 2).contains("sample"));
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.close().await.unwrap();
+}
+
+const MODE_CHANGED: &str = "The user changed the application mode during this turn.";
+
+fn reply(id: u64) -> impl Fn(&Event) -> bool {
+    move |e| matches!(e, Event::Reply { request, .. } if *request == RequestId::new(id))
+}
+
+fn set_mode(client: &roomkit_tui::Client, id: u64, mode: &str) {
+    let invoke = Command::Invoke {
+        name: "mode".into(),
+        arguments: mode.into(),
+    };
+    command(client, id, "main", invoke);
+}
+
+/// RMK-1305: a turn reads its mode's instruction as it starts. Changed while
+/// the turn runs, the new one reaches its next request, once for a real
+/// change, and the permissions already follow it.
+#[tokio::test]
+async fn a_mode_change_during_a_turn_reaches_that_turn() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![(
+        "write",
+        json!({"path":"note.txt", "content":"first"}),
+    )])
+    .await;
+    let settings = settings(project.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let handler = app.router(&settings.workspace);
+    let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+    let task = tokio::spawn(app.session().run_with_commands(host, handler));
+    event(&client).await;
+
+    submit(&client, 1, "Write the note.");
+    let permission = approval(&client).await;
+    assert!(!asked(&mock, 0).contains(MODE_CHANGED));
+    // The mode it already has changes nothing; then a real change.
+    set_mode(&client, 2, "ask");
+    until(&client, reply(2)).await;
+    set_mode(&client, 3, "yolo");
+    until(&client, reply(3)).await;
+    let decide = Command::Decide {
+        permission: permission.id,
+        decision: Decision::Allow,
+    };
+    command(&client, 4, "main", decide);
+    until(&client, |e| finished(e, "operation-1")).await;
+
+    let next = asked(&mock, 1);
+    assert_eq!(next.matches(MODE_CHANGED).count(), 1, "{next}");
+    assert!(next.contains("Application mode: Yolo"), "{next}");
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.close().await.unwrap();
+}
+
+/// Between turns nothing runs to tell: the next turn starts on the new mode.
+#[tokio::test]
+async fn a_mode_change_between_turns_only_changes_the_next_turn() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let settings = settings(project.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let handler = app.router(&settings.workspace);
+    let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+    let task = tokio::spawn(app.session().run_with_commands(host, handler));
+    event(&client).await;
+
+    set_mode(&client, 1, "plan");
+    until(&client, reply(1)).await;
+    submit(&client, 2, "Plan the note.");
+    until(&client, |e| finished(e, "operation-2")).await;
+    let first = asked(&mock, 0);
+    assert!(first.contains("Application mode: Plan"), "{first}");
+    assert!(!first.contains(MODE_CHANGED), "{first}");
     drop(client);
     task.await.unwrap().unwrap();
     app.close().await.unwrap();

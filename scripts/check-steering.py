@@ -1,8 +1,12 @@
 """Write to the agent while it works (RMK-1230), on a real pseudo-terminal.
 
 The local Chat Completions fixture holds the agent's first answer, a call to
-read a file, open while the person types: the message goes to the running
-turn, the terminal says so, and the model reads it at its next step.
+read a file, open while the person types:
+
+- Enter: the message goes to the running turn, the terminal says so, and the
+  model reads it at its next step, as it reads a mode changed meanwhile;
+- Ctrl+S, or Ctrl+Enter where the terminal reports it: the turn is cut, and the
+  message leaves once it stopped, in a turn of its own.
 """
 
 import fcntl
@@ -25,12 +29,14 @@ metadata = json.loads(subprocess.check_output(
 ))
 binary = Path(metadata["target_directory"]) / "debug" / "roomkit-code"
 STEERED = "Look in the second ledger"
+CTRL_S = b"\x13"
+CTRL_ENTER = b"\x1b[13;5u"
 requests = []
 release = threading.Event()
 
 
 class Model(BaseHTTPRequestHandler):
-    """The first answer waits for `release` before its call; the second answers."""
+    """The first answer waits for `release` before its call; the others answer."""
 
     def log_message(self, *args):
         pass
@@ -40,12 +46,7 @@ class Model(BaseHTTPRequestHandler):
         self.wfile.write(b"data: " + json.dumps({"choices": [choice]}).encode() + b"\n\n")
         self.wfile.flush()
 
-    def do_POST(self):
-        requests.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
-        first = len(requests) == 1
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.end_headers()
+    def answer(self, first):
         if first:
             self.chunk({"content": "Checking the record. "})
             release.wait(30)
@@ -59,74 +60,134 @@ class Model(BaseHTTPRequestHandler):
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
 
+    def do_POST(self):
+        requests.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+        first = len(requests) == 1
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        try:
+            self.answer(first)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # An interrupted turn stopped reading its answer.
+
 
 def said(request, text):
     """Whether the model was asked with `text` in any of its messages."""
     return any(text in json.dumps(message) for message in request["messages"])
 
 
-def scenario(project, state, url):
-    master, slave = pty.openpty()
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 120, 0, 0))
-    original = termios.tcgetattr(slave)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
-    process = subprocess.Popen(
-        [str(binary), str(project), "--state-dir", str(state), "--base-url", url,
-         "--model", "fixture", "--color", "always", "--no-animations"],
-        stdin=slave, stdout=slave, stderr=slave, start_new_session=True, env=env,
-    )
-    captured = bytearray()
+class Terminal:
+    """The application on a pseudo-terminal, against the fixture, its first
+    turn holding its answer."""
 
-    def plain(after):
-        return re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", captured[after:])
+    def __init__(self, root, url):
+        self.master, self.slave = pty.openpty()
+        fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 120, 0, 0))
+        self.original = termios.tcgetattr(self.slave)
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+        project = root / "project"
+        project.mkdir()
+        (project / "record.txt").write_text("Record 42: ledger 2\n")
+        self.process = subprocess.Popen(
+            [str(binary), str(project), "--state-dir", str(root / "state"), "--base-url", url,
+             "--model", "fixture", "--color", "always", "--no-animations"],
+            stdin=self.slave, stdout=self.slave, stderr=self.slave, start_new_session=True, env=env,
+        )
+        self.captured = bytearray()
 
-    def wait_for(marker, after=0):
+    def plain(self, after=0):
+        return re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", self.captured[after:])
+
+    def wait_for(self, marker, after=0):
         deadline = time.monotonic() + 15
-        while marker not in plain(after):
-            if time.monotonic() >= deadline or process.poll() is not None:
-                raise RuntimeError(f"Missing {marker!r}; terminal: {bytes(captured[-3500:])!r}")
-            if select.select([master], [], [], 0.1)[0]:
-                captured.extend(os.read(master, 65536))
+        while marker not in self.plain(after):
+            if time.monotonic() >= deadline or self.process.poll() is not None:
+                raise RuntimeError(f"Missing {marker!r}; terminal: {bytes(self.captured[-3500:])!r}")
+            if select.select([self.master], [], [], 0.1)[0]:
+                self.captured.extend(os.read(self.master, 65536))
 
-    try:
-        wait_for(b"[Ask]")
-        os.write(master, b"Find the record\r")
-        wait_for(b"Checking the record.")
-        offset = len(captured)
-        os.write(master, STEERED.encode() + b"\r")
-        wait_for("↳ sent to the running turn".encode(), offset)
+    def send(self, data):
+        os.write(self.master, data)
+
+    def working(self):
+        self.wait_for(b"[Ask]")
+        self.send(b"Find the record\r")
+        self.wait_for(b"Checking the record.")
+        return len(self.captured)
+
+    def exits(self):
+        self.send(b"\x04")
+        deadline = time.monotonic() + 10
+        while self.process.poll() is None:
+            assert time.monotonic() < deadline, "The application did not exit"
+            if select.select([self.master], [], [], 0.05)[0]:
+                self.captured.extend(os.read(self.master, 65536))
+        assert self.process.returncode == 0
+        assert termios.tcgetattr(self.slave) == self.original
+
+    def close(self):
         release.set()
-        wait_for(b"The record is in the second ledger.", offset)
-        wait_for(b"Execution Completed", offset)
-        assert len(requests) == 2, f"{len(requests)} model requests, not 2: the message took a turn of its own"
-        assert said(requests[1], STEERED), "The turn's next step did not read the message"
-        assert said(requests[1], "ledger 2"), "The turn's call did not run"
-        assert b"A request is still executing" not in plain(0), "The message was refused"
-        os.write(master, b"\x04")
-        assert process.wait(timeout=10) == 0
-        assert termios.tcgetattr(slave) == original
-    finally:
-        release.set()
-        if process.poll() is None:
-            process.kill()
-            process.wait(timeout=5)
-        os.close(master)
-        os.close(slave)
+        if self.process.poll() is None:
+            self.process.kill()
+            self.process.wait(timeout=5)
+        os.close(self.master)
+        os.close(self.slave)
+
+
+def handed_to_the_running_turn(terminal):
+    offset = terminal.working()
+    terminal.send(STEERED.encode() + b"\r")
+    terminal.wait_for("↳ sent to the running turn".encode(), offset)
+    # A mode changed now reaches the turn too. The view shows it as it
+    # changes, just before the turn is told.
+    terminal.send(b"\x1b[Z")  # Shift+Tab
+    terminal.wait_for(b"[Plan]", offset)
+    time.sleep(0.2)
+    release.set()
+    terminal.wait_for(b"The record is in the second ledger.", offset)
+    terminal.wait_for(b"Execution Completed", offset)
+    assert len(requests) == 2, f"{len(requests)} model requests, not 2: the message took a turn of its own"
+    assert said(requests[1], STEERED), "The turn's next step did not read the message"
+    assert said(requests[1], "ledger 2"), "The turn's call did not run"
+    assert said(requests[1], "Application mode: Plan"), "The turn did not read the new mode"
+    assert b"A request is still executing" not in terminal.plain(), "The message was refused"
+
+
+def sent_now(key):
+    def scenario(terminal):
+        offset = terminal.working()
+        terminal.send(STEERED.encode() + key)
+        terminal.wait_for(b"Execution Interrupted", offset)
+        terminal.wait_for(b"The record is in the second ledger.", offset)
+        assert len(requests) == 2, f"{len(requests)} model requests, not 2"
+        assert said(requests[1], STEERED), "The message did not reach the model"
+        assert not said(requests[1], "ledger 2"), "The interrupted turn went on to its call"
+        assert "↳ sent to the running turn".encode() not in terminal.plain(offset), \
+            "The message was handed to the turn it should have cut"
+    return scenario
 
 
 server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 try:
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory)
-        project = root / "project"
-        project.mkdir()
-        (project / "record.txt").write_text("Record 42: ledger 2\n")
-        scenario(project, root / "state", f"http://127.0.0.1:{server.server_port}/v1")
+    for check in (handed_to_the_running_turn, sent_now(CTRL_S), sent_now(CTRL_ENTER)):
+        requests.clear()
+        release.clear()
+        with tempfile.TemporaryDirectory() as directory:
+            terminal = Terminal(Path(directory), f"http://127.0.0.1:{server.server_port}/v1")
+            try:
+                check(terminal)
+                terminal.exits()
+            finally:
+                terminal.close()
 finally:
+    release.set()
     server.shutdown()
     server.server_close()
     thread.join(timeout=5)
 
-print("PTY steering passed: a message typed during the agent's turn goes to that turn, which reads it at its next step.")
+print("PTY steering passed: a message typed during the agent's turn goes to that turn, which reads it "
+      "at its next step with a mode changed meanwhile; Ctrl+S and Ctrl+Enter cut the turn and send it "
+      "once it stopped.")

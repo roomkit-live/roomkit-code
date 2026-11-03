@@ -273,7 +273,7 @@ impl Sessions {
                     .await
             }
             "tools" => self.tools(&current, arguments).await,
-            "mode" => self.mode(&current, arguments),
+            "mode" => self.mode(&current, arguments).await,
             "new" => {
                 self.new_session(current, arguments, request.operation.as_str())
                     .await
@@ -341,7 +341,7 @@ impl Sessions {
     }
 
     /// `/mode`: the modes to choose from, or the chosen one.
-    fn mode(
+    async fn mode(
         &self,
         current: &SessionConfig,
         arguments: &str,
@@ -355,11 +355,38 @@ impl Sessions {
                 choices: self.policy.state(room).choices,
             }]));
         }
+        let before = self.policy.mode(room);
         let mode = self.policy.set(room, arguments)?;
+        if self.policy.mode(room) != before {
+            self.tell_the_running_turn(current).await;
+        }
         Ok(CommandResult::Events(vec![Event::ModeChanged {
             conversation: room.into(),
             mode,
         }]))
+    }
+
+    /// A turn reads its mode's instruction as it starts: a turn under way
+    /// reads the new one at its next step, or it would go on working to the
+    /// old one while the permissions follow the new one. Without a turn
+    /// under way nothing is reached, and the next turn starts on the new one.
+    async fn tell_the_running_turn(&self, current: &SessionConfig) {
+        let room = current.room.clone();
+        let update = roomkit::model::UpdateSystemPrompt::new(format!(
+            "\n\nThe user changed the application mode during this turn. This replaces any earlier mode instruction.\n{}",
+            self.policy.instruction(room.as_str())
+        ));
+        let options = roomkit::SteerOptions {
+            room_id: Some(room),
+            organization_id: current.organization.clone(),
+            ..Default::default()
+        };
+        if let Err(error) = self.kit.steer(update, &current.agent, options).await {
+            let detail = serde_json::json!({ "error": error.to_string() });
+            self.profiles
+                .diagnostics
+                .record("mode_change_not_steered", detail, None);
+        }
     }
 }
 

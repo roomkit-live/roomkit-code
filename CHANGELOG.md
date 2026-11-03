@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- A mode changed with `/mode` or Shift+Tab while the agent works reaches its
+  running turn, which reads the new instruction at its next step. It kept
+  working to the old one while the permissions followed the new one.
+
+- Send a message now: Ctrl+S, or Ctrl+Enter where the terminal reports it,
+  interrupts whatever runs and sends the message once nothing runs any more
+  (roomkit-tui, roomkit-rs 9830bc4, roomkit-tools 0.1.0-alpha.16). In terminals
+  with the kitty keyboard protocol, Shift+Enter inserts a line break.
+
 - Write to the agent while it works: Enter sends the message to the running
   turn, which reads it at its next step, or gives it a turn of its own, with
   its own `TurnStart` and `TurnEnd`, when the turn's last answer is already
