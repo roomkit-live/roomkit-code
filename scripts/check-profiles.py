@@ -95,6 +95,24 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         offset = send(text + "\r")
         wait_for(marker, offset)
 
+    def after_turn(text, marker):
+        """Send command `text` after a turn. The conversation stays busy a moment
+        after its end is shown, and refuses a command sent in that window: send
+        it again then, and only then, as anything else would type into the view."""
+        for _ in range(100):
+            offset = send(text + "\r")
+            end = time.monotonic() + 12
+            while True:
+                shown = re.sub(rb"\x1b\[[0-9;:]*[A-Za-z]", b"", captured[offset:])
+                if marker in shown:
+                    return
+                if b"still executing" in shown:
+                    break
+                if time.monotonic() >= end or process.poll() is not None:
+                    raise RuntimeError(f"Missing {marker!r}: {bytes(captured[-2500:])!r}")
+                pump()
+        raise RuntimeError(f"The conversation stayed busy before {text!r}")
+
     def answered(text, count, answer):
         """Send `text`, then wait until the model received request `count` and
         its answer shows below the message: a repaint can redraw an earlier,
@@ -156,7 +174,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         wait_for(b"Tab commands", offset)
 
     def add_agent(identifier, label, model):
-        command("/agents", "Agents · global".encode())
+        after_turn("/agents", "Agents · global".encode())
         offset = send(b"\r")
         wait_for(b"Agent profile", offset)
         fields([identifier, label, None, model, "32768", None, None, "Fixture instructions", "read"])
@@ -205,9 +223,10 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         command("Hello first", b"Answer from fixture-a.")
         wait_for(b"Execution Completed")
         add_agent("second", "Second agent", "fixture-b")
+        offset = len(captured)
         command("Hello second", b"Answer from fixture-b.")
-        wait_for(b"Execution Completed")
-        command("/agents", "Agents · global".encode())
+        wait_for(b"Execution Completed", offset)
+        after_turn("/agents", "Agents · global".encode())
         offset = send("First agent")
         wait_for(b"Filter: First agent", offset)
         offset = send(b"\r")
@@ -220,7 +239,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         assert all(len(r["tools"]) == 1 for r in requests)
         # Reopening a secret never reveals it; Escape does not change storage.
         before = (state / "connections.json").read_bytes()
-        command("/providers", b"Providers")
+        after_turn("/providers", b"Providers")
         send("Fixture provider")
         wait_for(b"Filter: Fixture provider")
         offset = send(b"\r")
