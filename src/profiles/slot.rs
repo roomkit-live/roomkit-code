@@ -39,8 +39,6 @@ impl AgentSlot {
     pub fn disable(&self) {
         *crate::sync::write(&self.current) = None;
     }
-}
-impl AgentSlot {
     /// What a turn reads as it starts: its mode's instruction and the project's.
     async fn mode_and_project(&self, event: &RoomEvent) -> String {
         self.instructions
@@ -51,6 +49,43 @@ impl AgentSlot {
             self.policy.instruction(event.room_id.as_str()),
             project.render()
         )
+    }
+
+    /// What the agent receives for `event`. Keep the delivered user event intact,
+    /// including images and its durable identity: the delegated channel receives
+    /// an application Instruction after it, in this same turn. It is never
+    /// committed as a user's words or inserted into the system prompt/tool
+    /// schemas. The engine's transcript renderer distinguishes application
+    /// instructions from participant text.
+    async fn turn_input(&self, event: RoomEvent, context: &mut RoomContext) -> RoomEvent {
+        match event.r#type {
+            EventType::Message => {
+                if !context.recent_events.iter().any(|past| past.id == event.id) {
+                    context.recent_events.push(event.clone());
+                }
+                let mode_and_project = self.mode_and_project(&event).await;
+                let mut input = RoomEvent::new(
+                    event.room_id.clone(),
+                    event.source.clone(),
+                    TextContent::new(mode_and_project),
+                );
+                input.r#type = EventType::Instruction;
+                input.addressed_to = event.addressed_to.clone();
+                input.index = event.index;
+                input
+            }
+            // A turn started without a message, as to answer one handed to a
+            // turn that was cut: an instruction, which it reads as any turn reads
+            // its mode and the project's instructions, never stored.
+            EventType::Instruction => {
+                let mode_and_project = self.mode_and_project(&event).await;
+                let told = roomkit_core::rules::transcoding::text_of(&event.content);
+                let mut input = event;
+                input.content = TextContent::new(format!("{mode_and_project}\n\n{told}")).into();
+                input
+            }
+            _ => event,
+        }
     }
 }
 impl Channel for AgentSlot {
@@ -128,39 +163,7 @@ impl Channel for AgentSlot {
         let agent = crate::sync::read(&self.current)
             .clone()
             .ok_or("Configure a provider and agent first")?;
-        // Keep the delivered user event intact, including images and its durable
-        // identity. The delegated channel receives an application Instruction
-        // after it, in this same turn. It is never committed as a user's words or
-        // inserted into the system prompt/tool schemas. The engine's transcript
-        // renderer distinguishes application instructions from participant text.
-        let input = match event.r#type {
-            EventType::Message => {
-                if !context.recent_events.iter().any(|past| past.id == event.id) {
-                    context.recent_events.push(event.clone());
-                }
-                let mode_and_project = self.mode_and_project(&event).await;
-                let mut input = RoomEvent::new(
-                    event.room_id.clone(),
-                    event.source.clone(),
-                    TextContent::new(mode_and_project),
-                );
-                input.r#type = EventType::Instruction;
-                input.addressed_to = event.addressed_to.clone();
-                input.index = event.index;
-                input
-            }
-            // A turn started without a message, as to answer one handed to a
-            // turn that was cut: an instruction, which it reads as any turn reads
-            // its mode and the project's instructions, never stored.
-            EventType::Instruction => {
-                let mode_and_project = self.mode_and_project(&event).await;
-                let told = roomkit_core::rules::transcoding::text_of(&event.content);
-                let mut input = event;
-                input.content = TextContent::new(format!("{mode_and_project}\n\n{told}")).into();
-                input
-            }
-            _ => event,
-        };
+        let input = self.turn_input(event, &mut context).await;
         agent.on_event(input, binding, context).await
     }
     /// Records what the shell calls the kit's close cut changed, while the

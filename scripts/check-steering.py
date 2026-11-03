@@ -212,4 +212,4 @@ finally:
 
 print("PTY steering passed: a message typed during the agent's turn goes to that turn, which reads it "
       "at its next step with a mode changed meanwhile; Ctrl+S and Ctrl+Enter cut the turn and send it "
-      "once it stopped; on an empty composer, they cut it to answer the message already handed.")
+      "once it stopped; on an empty composer, Ctrl+S cuts it to answer the message already handed.")

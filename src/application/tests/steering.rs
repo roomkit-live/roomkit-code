@@ -319,10 +319,11 @@ async fn a_cut_turn_s_message_is_answered_with_the_mode_and_the_hooks_of_a_turn(
         "Project rule: keep it short.\n",
     )
     .unwrap();
-    let mock = Mock::start(vec![(
-        "write",
-        json!({"path":"note.txt", "content":"first"}),
-    )])
+    // The cut turn asks to write; the answer's turn reads a file, then answers.
+    let mock = Mock::start(vec![
+        ("write", json!({"path":"note.txt", "content":"first"})),
+        ("read", json!({"path":"AGENTS.md"})),
+    ])
     .await;
     let settings = settings(project.path(), state.path(), &mock.base_url);
     let app = Application::open(&settings, String::new()).await.unwrap();
@@ -344,6 +345,7 @@ async fn a_cut_turn_s_message_is_answered_with_the_mode_and_the_hooks_of_a_turn(
 
     // The host may hold the room a moment: asked again while busy.
     let mut id = 4;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         let answer = Command::Answer {
             agent: "code".into(),
@@ -353,13 +355,21 @@ async fn a_cut_turn_s_message_is_answered_with_the_mode_and_the_hooks_of_a_turn(
         if accepted(&events, id) {
             break;
         }
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::Reply { error: Some(refusal), .. } if refusal.message.contains("still executing")
+            )),
+            "Refused for another reason than being busy: {events:?}"
+        );
+        assert!(std::time::Instant::now() < deadline, "The host stayed busy");
         id += 1;
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     let operation = format!("operation-{id}");
     until(&client, |e| finished(e, &operation)).await;
 
-    assert_eq!(mock.requests.lock().unwrap().len(), 2);
+    assert_eq!(mock.requests.lock().unwrap().len(), 3);
     let next = asked(&mock, 1);
     assert_eq!(
         next.matches("Mention the second ledger too.").count(),
@@ -376,7 +386,10 @@ async fn a_cut_turn_s_message_is_answered_with_the_mode_and_the_hooks_of_a_turn(
             .collect()
     };
     assert_eq!(names("operation-2"), ["UserPromptSubmit"]);
-    assert_eq!(names(&operation), ["TurnStart", "TurnEnd"]);
+    assert_eq!(
+        names(&operation),
+        ["TurnStart", "PreToolUse", "PostToolUse", "TurnEnd"]
+    );
     drop(client);
     task.await.unwrap().unwrap();
     app.close().await.unwrap();
