@@ -370,10 +370,15 @@ impl Sessions {
     /// reads the new one at its next step, or it would go on working to the
     /// old one while the permissions follow the new one. Without a turn
     /// under way nothing is reached, and the next turn starts on the new one.
+    /// A turn still preparing its loop is not reached either, and keeps its
+    /// instruction; the permissions still follow the mode. The system prompt
+    /// only grows, and comes first in the request: the text says which
+    /// instruction holds wherever it reads, and leaves the last word to a
+    /// mode tool the model calls afterwards.
     async fn tell_the_running_turn(&self, current: &SessionConfig) {
         let room = current.room.clone();
         let update = roomkit::model::UpdateSystemPrompt::new(format!(
-            "\n\nThe user changed the application mode during this turn. This replaces any earlier mode instruction.\n{}",
+            "\n\nThe user changed the application mode during this turn. The instruction below replaces the mode instruction elsewhere in this conversation, wherever it appears, unless a plan mode tool you call after reading this reports another mode.\n{}",
             self.policy.instruction(room.as_str())
         ));
         let options = roomkit::SteerOptions {

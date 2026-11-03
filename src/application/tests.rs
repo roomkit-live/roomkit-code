@@ -568,12 +568,14 @@ async fn ask_gates_real_changes_and_yolo_never_auto_approves_an_existing_request
             arguments: "yolo".into(),
         },
     );
-    // The command's report, or the live updates restating the new mode.
-    loop {
-        if let Event::ModeChanged { mode, .. } = event(&client).await
-            && mode.selected == "yolo"
-        {
-            break;
+    // The command's report, or the live updates restating the new mode, and
+    // the command's reply: the mode shows before the running turn is told.
+    let (mut changed, mut replied) = (false, false);
+    while !(changed && replied) {
+        match event(&client).await {
+            Event::ModeChanged { mode, .. } if mode.selected == "yolo" => changed = true,
+            Event::Reply { request, .. } if request == RequestId::new(4) => replied = true,
+            _ => {}
         }
     }
     assert_eq!(

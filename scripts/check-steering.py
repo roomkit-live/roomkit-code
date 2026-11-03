@@ -137,13 +137,12 @@ class Terminal:
 
 def handed_to_the_running_turn(terminal):
     offset = terminal.working()
-    terminal.send(STEERED.encode() + b"\r")
-    terminal.wait_for("↳ sent to the running turn".encode(), offset)
-    # A mode changed now reaches the turn too. The view shows it as it
-    # changes, just before the turn is told.
+    # A mode changed now reaches the turn too. The message waits for the mode
+    # command to return, so once it is handed over, the turn has been told.
     terminal.send(b"\x1b[Z")  # Shift+Tab
     terminal.wait_for(b"[Plan]", offset)
-    time.sleep(0.2)
+    terminal.send(STEERED.encode() + b"\r")
+    terminal.wait_for("↳ sent to the running turn".encode(), offset)
     release.set()
     terminal.wait_for(b"The record is in the second ledger.", offset)
     terminal.wait_for(b"Execution Completed", offset)
@@ -160,9 +159,10 @@ def sent_now(key):
         terminal.send(STEERED.encode() + key)
         terminal.wait_for(b"Execution Interrupted", offset)
         terminal.wait_for(b"The record is in the second ledger.", offset)
+        terminal.wait_for(b"Execution Completed", offset)
         assert len(requests) == 2, f"{len(requests)} model requests, not 2"
         assert said(requests[1], STEERED), "The message did not reach the model"
-        assert not said(requests[1], "ledger 2"), "The interrupted turn went on to its call"
+        assert said(requests[1], "Find the record"), "The cut turn's message left the conversation"
         assert "↳ sent to the running turn".encode() not in terminal.plain(offset), \
             "The message was handed to the turn it should have cut"
     return scenario
