@@ -217,7 +217,7 @@ fn kit(directory: &std::path::Path) -> RoomKit<SqliteStore> {
     RoomKit::new(roomkit::RoomKitOptions::with_store(store))
 }
 
-fn room(id: &str) -> crate::Result<roomkit::CreateRoomOptions> {
+fn room(id: &str) -> crate::Result<roomkit::CreateRoomOptions<roomkit_sqlite::SqliteStore>> {
     Ok(roomkit::CreateRoomOptions {
         room_id: Some(roomkit::model::RoomId::new(id)?),
         ..Default::default()

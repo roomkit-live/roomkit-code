@@ -310,9 +310,6 @@ impl State {
         let agent = self.agent(view.agent.as_str());
         let served = self.tools.contains_key(view.agent.as_str());
         view.can_attach_images = served && agent.as_ref().is_some_and(|a| a.vision);
-        // Every agent's slot steers its turns: a message written while the
-        // served agent works goes to its running turn.
-        view.can_steer = served;
         view.actor_names = self
             .agents()
             .into_iter()
