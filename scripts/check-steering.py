@@ -6,7 +6,8 @@ read a file, open while the person types:
 - Enter: the message goes to the running turn, the terminal says so, and the
   model reads it at its next step, as it reads a mode changed meanwhile;
 - Ctrl+S, or Ctrl+Enter where the terminal reports it: the turn is cut, and the
-  message leaves once it stopped, in a turn of its own.
+  message leaves once it stopped, in a turn of its own. On an empty composer, it
+  cuts the turn for the message already handed to it (RMK-1311).
 """
 
 import fcntl
@@ -153,6 +154,22 @@ def handed_to_the_running_turn(terminal):
     assert b"A request is still executing" not in terminal.plain(), "The message was refused"
 
 
+def cut_for_a_message_already_handed(terminal):
+    offset = terminal.working()
+    terminal.send(STEERED.encode() + b"\r")
+    terminal.wait_for("sent to the running turn · Ctrl+S to cut it now".encode(), offset)
+    terminal.send(CTRL_S)
+    terminal.wait_for(b"Execution Interrupted", offset)
+    terminal.wait_for(b"The record is in the second ledger.", offset)
+    terminal.wait_for("answered in its own turn".encode(), offset)
+    terminal.wait_for(b"Execution Completed", offset)
+    assert len(requests) == 2, f"{len(requests)} model requests, not 2"
+    read = sum(STEERED == message.get("content") for message in requests[1]["messages"])
+    assert read == 1, f"The model read the message {read} times"
+    assert said(requests[1], "Application mode: Ask"), "The turn did not read its mode"
+    assert b"cut the turn" not in terminal.plain(), "The instruction showed"
+
+
 def sent_now(key):
     def scenario(terminal):
         offset = terminal.working()
@@ -172,7 +189,12 @@ server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 try:
-    for check in (handed_to_the_running_turn, sent_now(CTRL_S), sent_now(CTRL_ENTER)):
+    for check in (
+        handed_to_the_running_turn,
+        sent_now(CTRL_S),
+        sent_now(CTRL_ENTER),
+        cut_for_a_message_already_handed,
+    ):
         requests.clear()
         release.clear()
         with tempfile.TemporaryDirectory() as directory:
@@ -190,4 +212,4 @@ finally:
 
 print("PTY steering passed: a message typed during the agent's turn goes to that turn, which reads it "
       "at its next step with a mode changed meanwhile; Ctrl+S and Ctrl+Enter cut the turn and send it "
-      "once it stopped.")
+      "once it stopped; on an empty composer, they cut it to answer the message already handed.")

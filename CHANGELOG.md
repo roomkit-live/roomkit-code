@@ -6,6 +6,13 @@
   running turn, which reads the new instruction at its next step. It kept
   working to the old one while the permissions followed the new one.
 
+- Cut a turn for a message already sent to it: the message's line says
+  `Ctrl+S to cut it now` while the turn runs. Ctrl+S on an empty composer cuts the
+  turn, and a turn of its own answers, with the mode's and the project's
+  instructions, `TurnStart` and `TurnEnd`, and no `UserPromptSubmit`. A message
+  written while the model answers now stays below what it had written
+  (roomkit-tui 5669b0f).
+
 - Send a message now: Ctrl+S, or Ctrl+Enter where the terminal reports it,
   interrupts whatever runs and sends the message once nothing runs any more
   (roomkit-tui, roomkit-rs 9830bc4, roomkit-tools 0.1.0-alpha.16). In terminals

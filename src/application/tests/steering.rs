@@ -305,3 +305,79 @@ async fn a_mode_change_between_turns_only_changes_the_next_turn() {
     task.await.unwrap().unwrap();
     app.close().await.unwrap();
 }
+
+/// RMK-1311: a message handed to a turn waits for that turn's next step. The
+/// turn is cut, and a turn of its own answers: it reads the message once, its
+/// mode as any turn, and runs the hooks of a turn, not of a new prompt.
+#[tokio::test]
+async fn a_cut_turn_s_message_is_answered_with_the_mode_and_the_hooks_of_a_turn() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    configure(project.path(), &HOOKED, "", false);
+    std::fs::write(
+        project.path().join("AGENTS.md"),
+        "Project rule: keep it short.\n",
+    )
+    .unwrap();
+    let mock = Mock::start(vec![(
+        "write",
+        json!({"path":"note.txt", "content":"first"}),
+    )])
+    .await;
+    let settings = settings(project.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    enable_all(&app);
+    let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+    let task = tokio::spawn(app.session().run(host));
+    event(&client).await;
+
+    submit(&client, 1, "Write the note.");
+    let permission = approval(&client).await;
+    assert!(asked(&mock, 0).contains("Project rule: keep it short."));
+    submit(&client, 2, "Mention the second ledger too.");
+    until(&client, |e| matches!(e, Event::MessageSteered { .. })).await;
+    let cut = Command::Interrupt {
+        run: permission.run.clone(),
+    };
+    command(&client, 3, "main", cut);
+    until(&client, |e| finished(e, "operation-1")).await;
+
+    // The host may hold the room a moment: asked again while busy.
+    let mut id = 4;
+    loop {
+        let answer = Command::Answer {
+            agent: "code".into(),
+        };
+        command(&client, id, "main", answer);
+        let events = until(&client, reply(id)).await;
+        if accepted(&events, id) {
+            break;
+        }
+        id += 1;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let operation = format!("operation-{id}");
+    until(&client, |e| finished(e, &operation)).await;
+
+    assert_eq!(mock.requests.lock().unwrap().len(), 2);
+    let next = asked(&mock, 1);
+    assert_eq!(
+        next.matches("Mention the second ledger too.").count(),
+        1,
+        "{next}"
+    );
+    assert!(next.contains("Application mode: Ask"), "{next}");
+    assert!(next.contains("Project rule: keep it short."), "{next}");
+    assert!(next.contains("cut the turn"), "{next}");
+    let names = |operation: &str| -> Vec<String> {
+        turn_hooks(project.path(), operation)
+            .iter()
+            .map(|e| e["hook_event_name"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert_eq!(names("operation-2"), ["UserPromptSubmit"]);
+    assert_eq!(names(&operation), ["TurnStart", "TurnEnd"]);
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.close().await.unwrap();
+}

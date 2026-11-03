@@ -40,6 +40,19 @@ impl AgentSlot {
         *crate::sync::write(&self.current) = None;
     }
 }
+impl AgentSlot {
+    /// What a turn reads as it starts: its mode's instruction and the project's.
+    async fn mode_and_project(&self, event: &RoomEvent) -> String {
+        self.instructions
+            .begin(event.room_id.as_str(), self.id.as_str());
+        let project = self.instructions.load(vec![], true).await;
+        format!(
+            "{}\n\n{}",
+            self.policy.instruction(event.room_id.as_str()),
+            project.render()
+        )
+    }
+}
 impl Channel for AgentSlot {
     fn channel_id(&self) -> ChannelId {
         self.id.clone()
@@ -120,28 +133,33 @@ impl Channel for AgentSlot {
         // after it, in this same turn. It is never committed as a user's words or
         // inserted into the system prompt/tool schemas. The engine's transcript
         // renderer distinguishes application instructions from participant text.
-        let input = if event.r#type == EventType::Message {
-            if !context.recent_events.iter().any(|past| past.id == event.id) {
-                context.recent_events.push(event.clone());
+        let input = match event.r#type {
+            EventType::Message => {
+                if !context.recent_events.iter().any(|past| past.id == event.id) {
+                    context.recent_events.push(event.clone());
+                }
+                let mode_and_project = self.mode_and_project(&event).await;
+                let mut input = RoomEvent::new(
+                    event.room_id.clone(),
+                    event.source.clone(),
+                    TextContent::new(mode_and_project),
+                );
+                input.r#type = EventType::Instruction;
+                input.addressed_to = event.addressed_to.clone();
+                input.index = event.index;
+                input
             }
-            self.instructions
-                .begin(event.room_id.as_str(), self.id.as_str());
-            let project = self.instructions.load(vec![], true).await;
-            let mut input = RoomEvent::new(
-                event.room_id.clone(),
-                event.source.clone(),
-                TextContent::new(format!(
-                    "{}\n\n{}",
-                    self.policy.instruction(event.room_id.as_str()),
-                    project.render()
-                )),
-            );
-            input.r#type = EventType::Instruction;
-            input.addressed_to = event.addressed_to.clone();
-            input.index = event.index;
-            input
-        } else {
-            event
+            // A turn started without a message, as to answer one handed to a
+            // turn that was cut: an instruction, which it reads as any turn reads
+            // its mode and the project's instructions, never stored.
+            EventType::Instruction => {
+                let mode_and_project = self.mode_and_project(&event).await;
+                let told = roomkit_core::rules::transcoding::text_of(&event.content);
+                let mut input = event;
+                input.content = TextContent::new(format!("{mode_and_project}\n\n{told}")).into();
+                input
+            }
+            _ => event,
         };
         agent.on_event(input, binding, context).await
     }

@@ -522,6 +522,46 @@ fn key(view: &SessionConfig, operation: &OperationId) -> Key {
     )
 }
 
+impl Lifecycle {
+    /// The gate every turn passes, and the turn `started` and `finished` find:
+    /// its context, or none for an operation that already ended.
+    async fn open_turn(
+        &self,
+        view: &SessionConfig,
+        operation: &OperationId,
+    ) -> Result<Option<Context>, Rejection> {
+        let hooks = &self.0;
+        if hooks.closing.load(Ordering::Acquire) {
+            return Err(Rejection::unavailable("Application is closing"));
+        }
+        let session = hooks.session(view);
+        let key = key(view, operation);
+        let context = hooks.context(&session, view.agent.as_str(), Some(operation.as_str()));
+        {
+            let mut state = hooks.state();
+            if !state.catalogue.problems.is_empty() {
+                return Err(Rejection::refused(
+                    "Hook configuration has errors; inspect /hooks and reload after correcting it",
+                ));
+            }
+            if state.completed.contains(&key) {
+                return Ok(None);
+            }
+            state.turns.insert(
+                key,
+                Arc::new(Turn {
+                    context: context.clone(),
+                    begun: AtomicU64::new(0),
+                    ending: AtomicBool::new(false),
+                    posts: TaskTracker::new(),
+                }),
+            );
+        }
+        hooks.open_session(&session, view.agent.as_str()).await;
+        Ok(Some(context))
+    }
+}
+
 impl SessionLifecycle for Lifecycle {
     fn attached(&self, view: &SessionConfig) {
         if self.0.closing.load(Ordering::Acquire) {
@@ -542,40 +582,15 @@ impl SessionLifecycle for Lifecycle {
         content: &'a roomkit::model::EventContent,
     ) -> LifecycleFuture<'a, Result<(), Rejection>> {
         Box::pin(async move {
-            let hooks = &self.0;
-            if hooks.closing.load(Ordering::Acquire) {
-                return Err(Rejection::unavailable("Application is closing"));
-            }
-            let session = hooks.session(view);
-            let key = key(view, operation);
-            let context = hooks.context(&session, view.agent.as_str(), Some(operation.as_str()));
-            {
-                let mut state = hooks.state();
-                if !state.catalogue.problems.is_empty() {
-                    return Err(Rejection::refused(
-                        "Hook configuration has errors; inspect /hooks and reload after correcting it",
-                    ));
-                }
-                if state.completed.contains(&key) {
-                    return Ok(());
-                }
-                state.turns.insert(
-                    key,
-                    Arc::new(Turn {
-                        context: context.clone(),
-                        begun: AtomicU64::new(0),
-                        ending: AtomicBool::new(false),
-                        posts: TaskTracker::new(),
-                    }),
-                );
-            }
-            hooks.open_session(&session, view.agent.as_str()).await;
-            let mut context = context;
+            let Some(mut context) = self.open_turn(view, operation).await? else {
+                return Ok(());
+            };
             // Images stay in their protected attachment store. No image bytes or
             // storage references are exposed implicitly to command hooks.
             context.payload["prompt"] = json!(prompt_text(content));
             context.payload["roomkit"]["origin"] = json!("user");
-            match hooks
+            match self
+                .0
                 .dispatch(HookEvent::UserPromptSubmit, "", &context)
                 .await
             {
@@ -583,6 +598,18 @@ impl SessionLifecycle for Lifecycle {
                 _ => Ok(()),
             }
         })
+    }
+
+    /// A turn with no new words: the same gate and the same turn for its hooks,
+    /// and no `UserPromptSubmit`: the person's messages passed it as they came,
+    /// and what the agent is told here is not theirs.
+    fn admit_answer<'a>(
+        &'a self,
+        view: &'a SessionConfig,
+        operation: &'a OperationId,
+        _: &'a roomkit::model::EventContent,
+    ) -> LifecycleFuture<'a, Result<(), Rejection>> {
+        Box::pin(async move { self.open_turn(view, operation).await.map(|_| ()) })
     }
 
     fn started<'a>(

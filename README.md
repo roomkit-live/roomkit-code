@@ -98,6 +98,13 @@ more, in a turn of its own. A message whose turn it cuts stays in the
 conversation, and that next turn reads it. Esc while it waits keeps the text in
 the composer, and only the text as it was when the key was pressed leaves.
 
+A message already sent to the running turn waits for that turn's next step, which
+may be far, as during a long build. Its line says so while the turn runs: with an
+empty composer, **Ctrl+S** cuts the turn, and a turn of its own answers what the
+cut turn was handed, read where it is in the conversation. That turn runs
+`TurnStart` and `TurnEnd`, and no `UserPromptSubmit`: the message passed it when
+it was sent. Esc cancels, and typing ends the wait.
+
 While the agent works, Enter sends the message to its running turn, which reads
 it at its next step: after its current tool calls, or right after the model's
 answer, which the model then follows with a reply to the message. A turn that
