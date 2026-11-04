@@ -2,7 +2,7 @@
 //! and the tool inventory, and how many characters each part takes. The
 //! sidebar's context breakdown shows these measures.
 
-use roomkit_ai::{AiTool, SkillRegistry};
+use roomkit_ai::{AiChannelOptions, AiTool, SkillRegistry, TOOL_SEARCH_INFRA_TOOL_NAMES};
 use std::path::PathBuf;
 
 use crate::profiles::{McpTools, model::Agent};
@@ -16,11 +16,13 @@ Use this only for the field described as "Shown to the user; never passed to the
 pub(crate) struct Composition {
     /// The application's instructions, the agent's own and the tool inventory.
     pub system: usize,
-    /// Native tool schemas.
+    /// Native tool schemas, and the discovery tools' when MCP tools wait behind
+    /// them.
     pub tools: usize,
     /// The skills manifest, its discovery context and the skill tools.
     pub skills: usize,
-    /// Per MCP server, by label: its instructions and tool schemas.
+    /// Per MCP server, by label: its instructions, and its tool schemas unless
+    /// they wait behind the discovery tools.
     pub mcp: Vec<(String, usize)>,
 }
 
@@ -37,6 +39,10 @@ pub(crate) struct Inventory {
 /// `application::tests::breakdown` compares them with a request.
 const SKILLS_PREAMBLE: usize = 309 + 4;
 const SERVERS_BLOCK: usize = 345 + 6;
+/// What the engine adds when a catalogue waits behind its discovery tools, and
+/// does not make public either: its preamble, and the two tools as sent.
+const SEARCH_PREAMBLE: usize = 1388 + 2;
+const DISCOVERY_TOOLS: usize = 1477;
 /// The engine keeps at most this many characters of a server's instructions.
 const SERVER_INSTRUCTIONS_MAX: usize = 8192;
 
@@ -79,10 +85,45 @@ fn instruction_chars(label: &str, instructions: Option<&str>) -> usize {
     heading + fence + "\n\n".len() + kept
 }
 
-/// An agent's system prompt with its inventory and measures.
+/// Whether the agent's MCP tools wait behind the engine's discovery tools.
+/// The application decides, by the engine's own thresholds on what these tools
+/// alone cost: behind a `base_url` the engine has no window to read and would
+/// count the native tools too, searching a catalogue with nothing hidden.
+fn hides_mcp(mcp: &[McpTools], intent_required: bool, window: Option<u64>) -> bool {
+    let chars: usize = mcp
+        .iter()
+        .map(|server| schema_chars(&server.tools, intent_required))
+        .sum();
+    let count = mcp.iter().map(|server| server.tools.len()).sum();
+    past_search_thresholds(chars.div_ceil(4), count, window)
+}
+
+/// The engine's thresholds for `tokens` of schemas of `count` tools: its token
+/// cap, then its share of a known window, else its tool count.
+fn past_search_thresholds(tokens: usize, count: usize, window: Option<u64>) -> bool {
+    let engine = AiChannelOptions::default();
+    let tokens = u64::try_from(tokens).unwrap_or(u64::MAX);
+    if engine
+        .tool_search_threshold_tokens
+        .is_some_and(|cap| tokens > cap)
+    {
+        return true;
+    }
+    match window {
+        Some(window) => tokens as f64 > window as f64 * engine.tool_search_threshold_pct / 100.0,
+        None => count > engine.tool_search_threshold,
+    }
+}
+
+/// An agent's system prompt with its inventory and measures, and what its
+/// requests declare outright.
 pub(super) struct Preamble {
     pub prompt: String,
     pub inventory: Inventory,
+    /// Whether its MCP tools wait behind the discovery tools.
+    pub hides_mcp: bool,
+    /// The tools that never wait behind them: the native ones.
+    pub pinned: Vec<String>,
 }
 
 /// The preamble of `profile` with its selected `native` tools, its skills
@@ -95,26 +136,39 @@ pub(super) fn preamble(
     mcp: &[McpTools],
     intent_required: bool,
 ) -> Preamble {
+    let hidden = hides_mcp(mcp, intent_required, profile.context_window);
     let mut tools = native.clone();
     tools.extend(skills.tool_definitions());
     for server in mcp {
         tools.extend(server.tools.iter().cloned());
     }
-    let base = base_prompt(profile, &tools);
+    let base = base_prompt(profile, &tools, hidden);
     let context = skill_context(skills, skill_roots);
-    let composition = measure(&base, &context, &native, skills, mcp, intent_required);
+    let composition = measure(
+        (&base, &context),
+        &native,
+        skills,
+        mcp,
+        intent_required,
+        hidden,
+    );
     Preamble {
         prompt: format!("{base}\n{context}\n{ACTIVITY_INSTRUCTIONS}"),
         inventory: Inventory { tools, composition },
+        hides_mcp: hidden,
+        pinned: native.into_iter().map(|tool| tool.name).collect(),
     }
 }
 
 /// The application's instructions, the agent's identity and instructions,
-/// and the names of every tool it has.
-fn base_prompt(profile: &Agent, tools: &[AiTool]) -> String {
+/// and the names of every tool it has, those it finds its other tools with
+/// when they are `hidden`.
+fn base_prompt(profile: &Agent, tools: &[AiTool], hidden: bool) -> String {
+    let discovery = TOOL_SEARCH_INFRA_TOOL_NAMES.into_iter().filter(|_| hidden);
     let inventory = tools
         .iter()
         .map(|tool| tool.name.as_str())
+        .chain(discovery)
         .collect::<Vec<_>>()
         .join(", ");
     let instructions = INSTRUCTIONS.replacen("{permissions}", &crate::permissions::summary(), 1);
@@ -127,12 +181,12 @@ fn base_prompt(profile: &Agent, tools: &[AiTool]) -> String {
 /// Characters per part, as a request sends them. The engine's own texts are
 /// counted with the part they introduce.
 fn measure(
-    base: &str,
-    context: &str,
+    (base, context): (&str, &str),
     native: &[AiTool],
     skills: &SkillRegistry,
     mcp: &[McpTools],
     intent_required: bool,
+    hidden: bool,
 ) -> Composition {
     let servers = mcp
         .iter()
@@ -142,9 +196,13 @@ fn measure(
     } else {
         0
     };
+    let only_if = |condition: bool, chars: usize| if condition { chars } else { 0 };
     Composition {
-        system: base.len() + ACTIVITY_INSTRUCTIONS.len() + if servers { SERVERS_BLOCK } else { 0 },
-        tools: schema_chars(native, intent_required),
+        system: base.len()
+            + ACTIVITY_INSTRUCTIONS.len()
+            + only_if(servers, SERVERS_BLOCK)
+            + only_if(hidden, SEARCH_PREAMBLE),
+        tools: schema_chars(native, intent_required) + only_if(hidden, DISCOVERY_TOOLS),
         skills: context.len()
             + preamble
             + skills.to_prompt_xml().len()
@@ -153,7 +211,7 @@ fn measure(
             .iter()
             .map(|server| {
                 let size = instruction_chars(&server.label, server.instructions.as_deref())
-                    + schema_chars(&server.tools, intent_required);
+                    + only_if(!hidden, schema_chars(&server.tools, intent_required));
                 (server.label.clone(), size)
             })
             .collect(),
@@ -233,9 +291,38 @@ mod tests {
             "instructions": "", "tools": [],
         }))
         .unwrap();
-        let prompt = base_prompt(&profile, &[]);
+        let prompt = base_prompt(&profile, &[], false);
         assert!(prompt.contains(&crate::permissions::summary()));
         assert!(!prompt.contains("{permissions}"));
+    }
+
+    #[test]
+    fn mcp_tools_wait_past_the_engines_thresholds_whatever_the_native_tools_cost() {
+        // The token cap, whatever the window.
+        assert!(past_search_thresholds(8_001, 1, Some(10_000_000)));
+        assert!(past_search_thresholds(8_001, 1, None));
+        // Under the cap, a share of a known window; the count no longer matters.
+        assert!(past_search_thresholds(7_000, 1, Some(65_500)));
+        assert!(!past_search_thresholds(6_000, 40, Some(65_500)));
+        // Under the cap with no window, the count: 29 native tools never add to it.
+        assert!(!past_search_thresholds(100, 20, None));
+        assert!(past_search_thresholds(100, 21, None));
+        assert!(!past_search_thresholds(0, 0, None));
+    }
+
+    #[test]
+    fn the_inventory_names_the_discovery_tools_only_when_they_are_declared() {
+        let profile: Agent = serde_json::from_value(serde_json::json!({
+            "id": "code", "label": "Code", "provider": "local", "model": "m",
+            "instructions": "", "tools": [],
+        }))
+        .unwrap();
+        let run = "for this run):\n";
+        assert!(base_prompt(&profile, &[], false).contains(&format!("{run}\nOnly tools")));
+        assert!(
+            base_prompt(&profile, &[], true)
+                .contains(&format!("{run}find_tools, list_tools\nOnly tools"))
+        );
     }
 
     #[test]

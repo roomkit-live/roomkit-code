@@ -26,8 +26,11 @@ for line in sys.stdin:
                   "instructions": "MCP-SERVER-INSTRUCTIONS: use the selected fixture tools."}
     elif method == "tools/list":
         names = [f"tool-{i:03}" for i in range(75)] if mode == "large" else ["read", "danger", "slow"]
+        schema = {"type": "object", "properties": {}}
+        if mode == "heavy":
+            schema["properties"]["note"] = {"type": "string", "description": "A schema that fills the window. " * 450}
         result = {"tools": [{"name": name, "description": "Fixture tool with observable effects",
-                             "inputSchema": {"type": "object", "properties": {}}} for name in names]}
+                             "inputSchema": schema} for name in names]}
     elif method == "tools/call":
         name = request["params"]["name"]
         with open(trace_path, "a") as trace:

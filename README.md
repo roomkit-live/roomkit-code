@@ -551,7 +551,10 @@ sixteen parts, the smallest servers are summed into one. **Messages** is what
 remains of the measurement, including the instructions of skills activated in
 the conversation. The parts are estimates, at four characters per token, marked
 `≈`; when they exceed the measurement the section says so. A server whose
-schemas fill the window shows up at once.
+schemas fill the window shows up at once. While an agent's MCP tools wait behind
+`find_tools`, their server parts count only its instructions, **Tools** counts
+the two discovery tools, and the schemas of the tools it finds fall in
+**Messages**.
 
 The separate **turn** counter totals all reported input/output tokens across
 that execution's model calls. Cached input is counted once. Missing measurements
@@ -873,6 +876,15 @@ selections live in `agents.json`. It is not loaded from a repository-provided MC
 file. Select a different agent with **/agents** to configure its own subset.
 Disabling tools leaves the shared connection open. Before deleting a server,
 disconnect it and remove its selections from every agent.
+
+An agent's native tools are always declared to the model. Its selected MCP tools
+are too, unless they would cost more than 8,000 tokens of schemas, more than 10%
+of its **Context capacity** or, with no capacity set, count more than 20 tools.
+Past that, they wait behind `find_tools` and `list_tools`: the model searches,
+and the last twelve tools it found or called stay declared for its next turns. A
+tool it found but never called is searched again after the agent is rebuilt, as
+when a server connects. A search needs no approval; the tool it finds follows the
+same rules as any MCP tool.
 
 Selections persist, but connections do not start automatically on launch or
 resume. Reconnect explicitly with `/mcp connect <id>`. A reconnect uses the

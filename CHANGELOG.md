@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-- Follows roomkit-rs c30375c, roomkit-tui 9eca2ab and roomkit-tools 23b25be. An agent keeps telling the model of all its tools,
+- MCP tools past 8,000 tokens of schemas, 10% of the agent's context capacity or,
+  with no capacity set, 20 tools wait behind `find_tools` and `list_tools`, so a
+  heavy server no longer fills the window before the first message. Native tools
+  stay declared, and the context breakdown counts what a request carries.
+
+- Follows roomkit-rs c30375c, roomkit-tui 9eca2ab and roomkit-tools 23b25be. An agent keeps telling the model of its native tools,
   and a chosen reasoning effort still reaches its tool turns behind a `base_url`,
   as the kit's new defaults would hide the first and drop the second. On OpenAI's
   own endpoint, the kit now sends the effort its catalogue states for a tagged

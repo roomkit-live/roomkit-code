@@ -263,6 +263,10 @@ async fn saving_mcp_connects_and_enables_tools_with_permissions_and_durable_sele
     assert!(request.to_string().contains("server_instructions"));
     // The breakdown counts the server's instructions and schemas as sent.
     super::breakdown::fixed_parts_match(&app, &request).await;
+    // A server this light stays declared, with nothing to search for.
+    let declared = declared(&request);
+    assert!(declared.iter().any(|name| name == "mcp__demo__read"));
+    assert!(!declared.iter().any(|name| name == "find_tools"));
     drop(client);
     task.await.unwrap().unwrap();
     app.close().await.unwrap();
@@ -300,6 +304,118 @@ async fn saving_mcp_connects_and_enables_tools_with_permissions_and_durable_sele
     assert!(!alive(root.path(), "demo"));
     let encoded = serde_json::to_string(&app.profiles.sidebar(&app.view).await.0).unwrap();
     assert!(encoded.contains("Disconnected") && encoded.contains("0 active tools"));
+    app.close().await.unwrap();
+}
+
+/// The tools `request` declares to the model, by name.
+fn declared(request: &Value) -> Vec<String> {
+    request["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["function"]["name"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+/// A server whose schemas would fill the window stays out of the requests: the
+/// native tools stay declared, the search answers without an approval, and the
+/// tool it finds is declared next and asks for its approval as any MCP tool.
+#[tokio::test]
+async fn heavy_mcp_tools_wait_behind_find_tools_while_native_tools_stay_declared() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![
+        ("find_tools", json!({"query": "read"})),
+        ("mcp__heavy__read", json!({})),
+    ])
+    .await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    configure(&app, root.path(), "heavy", "heavy", "5").await;
+    let (client, task) = attach(&app, root.path()).await;
+    command(
+        &client,
+        82,
+        "main",
+        Command::Submit {
+            agent: app.view.agent.as_str().into(),
+            text: "Use the heavy server".into(),
+        },
+    );
+    let permission = approval(&client).await;
+    assert!(permission.title.contains("mcp__heavy__read"));
+    command(
+        &client,
+        83,
+        "main",
+        Command::Decide {
+            permission: permission.id,
+            decision: Decision::Allow,
+        },
+    );
+    assert_eq!(finish(&client, 82).await.0, RunOutcome::Completed);
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("heavy.trace")).unwrap(),
+        "read\n"
+    );
+    let requests = mock.requests.lock().unwrap().clone();
+    let first = declared(&requests[0]);
+    for name in ["read", "shell", "find_tools", "list_tools"] {
+        assert!(first.iter().any(|tool| tool == name), "{name}: {first:?}");
+    }
+    assert!(
+        !first.iter().any(|tool| tool.starts_with("mcp__")),
+        "{first:?}"
+    );
+    let found = declared(&requests[1]);
+    assert!(
+        found.iter().any(|tool| tool == "mcp__heavy__read"),
+        "{found:?}"
+    );
+    assert!(found.iter().any(|tool| tool == "read"), "{found:?}");
+    assert!(
+        !found.iter().any(|tool| tool == "mcp__heavy__danger"),
+        "{found:?}"
+    );
+    // The breakdown counts what the first request carried, not what it hid.
+    super::breakdown::fixed_parts_match(&app, &requests[0]).await;
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.close().await.unwrap();
+}
+
+/// The agent's context capacity counts: a light server waits too when it passes
+/// the engine's share of a small window.
+#[tokio::test]
+async fn a_light_server_waits_behind_find_tools_on_a_small_context_capacity() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let cli = Cli::try_parse_from([
+        "roomkit-code",
+        root.path().to_str().unwrap(),
+        "--state-dir",
+        state.path().to_str().unwrap(),
+        "--base-url",
+        &mock.base_url,
+        "--model",
+        "fixture-model",
+        "--context-window",
+        "1000",
+        "--session",
+        "main",
+    ])
+    .unwrap();
+    let settings = Settings::load(&cli).unwrap();
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    configure(&app, root.path(), "demo", "normal", "5").await;
+    turn(&app).await;
+    let first = declared(&mock.requests.lock().unwrap()[0]);
+    assert!(first.iter().any(|tool| tool == "find_tools"), "{first:?}");
+    assert!(
+        !first.iter().any(|tool| tool.starts_with("mcp__")),
+        "{first:?}"
+    );
     app.close().await.unwrap();
 }
 

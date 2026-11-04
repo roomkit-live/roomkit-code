@@ -17,8 +17,8 @@ pub(crate) struct Rule {
 
 const CHANGE: &str = "Proposed workspace change · exact tool arguments";
 
-/// Reads of the workspace, the agent's processes and archives, its skills and
-/// the guide, and the agent's own plans, which it also writes.
+/// Reads of the workspace, the agent's processes and archives, its skills, its
+/// tool catalogue and the guide, and the agent's own plans, which it also writes.
 const READ: Rule = Rule {
     direct: true,
     plan: true,
@@ -53,6 +53,8 @@ const MCP: Rule = Rule {
 const RULES: &[(&str, Rule)] = &[
     ("activate_skill", READ),
     ("read_skill_reference", READ),
+    ("find_tools", READ),
+    ("list_tools", READ),
     ("list", READ),
     ("glob", READ),
     ("grep", READ),
@@ -179,6 +181,8 @@ mod tests {
         let others = [
             "activate_skill",
             "read_skill_reference",
+            "find_tools",
+            "list_tools",
             "plan_mode_enter",
             "plan_mode_exit",
         ];
