@@ -150,11 +150,59 @@ fn a_turn_stopped_before_anything_told_leaves_the_total_partial() {
 }
 
 #[test]
+fn a_turn_told_nothing_still_prints_its_partial_total() {
+    let summary = Summary {
+        usage: Some(usage(0, false)),
+        ..Summary::default()
+    };
+    assert!(
+        summary
+            .lines(false)
+            .iter()
+            .any(|line| line.contains("(partial)"))
+    );
+    let idle = Summary {
+        usage: Some(usage(0, true)),
+        ..Summary::default()
+    };
+    assert!(
+        !idle
+            .lines(false)
+            .iter()
+            .any(|line| line.starts_with("Token usage"))
+    );
+}
+
+#[test]
+fn a_run_with_no_turn_counted_leaves_the_report_as_it_is() {
+    let mut summary = Summary {
+        usage: Some(empty()),
+        ..Summary::default()
+    };
+    summary.turn_running();
+    assert!(summary.usage.as_ref().unwrap().complete);
+}
+
+#[test]
 fn a_turn_left_running_leaves_the_total_partial_until_its_record_is_written() {
     let mut summary = Summary {
         usage: Some(empty()),
         ..Summary::default()
     };
+    let total = summary.usage.as_mut().unwrap();
+    total.read(
+        true,
+        &record(&json!({
+            "ai_usage": { "input_tokens": 1000, "output_tokens": 10 },
+            "ai_usage_complete": true,
+            "loop_end_reason": "completed",
+        })),
+    );
+    // A `!` command after it starts no turn.
+    total.read(true, &record(&json!({ "shell_command": "sleep 300" })));
+    summary.turn_running();
+    assert!(summary.usage.as_ref().unwrap().complete);
+
     let total = summary.usage.as_mut().unwrap();
     total.read(true, &record(&json!({ "body": "Second" })));
     summary.turn_running();

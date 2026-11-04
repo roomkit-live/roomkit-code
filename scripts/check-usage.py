@@ -172,8 +172,16 @@ class Run:
 
     def __exit__(self, *_):
         if self.app is not None and self.app.process.poll() is None:
-            self.app.process.kill()
-            self.app.process.wait(timeout=5)
+            # Only the application's close stops what its calls started.
+            for _ in range(2):
+                self.app.send("\x04")
+                time.sleep(0.2)
+            deadline = time.monotonic() + 5
+            while self.app.process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if self.app.process.poll() is None:
+                self.app.process.kill()
+                self.app.process.wait(timeout=5)
         self.directory.cleanup()
 
 
@@ -198,7 +206,8 @@ def scenario(steps, ask, *, stop_at, after_esc, expect_total, in_flight=False, b
         for index, (_, _, tokens) in enumerate(steps[:stop_at]):
             script.gates[first + index].set()
             app.wait(context(tokens + 10), offset)
-            assert "(last report)" not in app.screen(len(app.output)), "A measure of this turn is no report of the last"
+            shown = app.screen(offset)
+            assert "(last report)" not in shown[shown.rindex(context(tokens + 10)):], "A measure of this turn is no report of the last"
             offset = len(app.output)
         until_asked(first + stop_at + (1 if in_flight else 0))
         if holds_after_text:
@@ -248,6 +257,26 @@ def exit_during_a_turn():
         assert "(partial)" in total, lines
 
 
+def exit_during_a_command():
+    """Ctrl+D during a `!` command: a run, but no turn, so the total is whole."""
+    global script
+    script = Script([("Done.", None, 1000)])
+    with Run() as run:
+        app = run.open()
+        script.gates[0].set()
+        offset = app.send("First\r")
+        app.wait("Done.", offset)
+        app.wait("[Yolo]", offset)
+        app.settle()
+        offset = app.send("!sleep 300\r")
+        app.wait("sleep 300", offset)
+        app.settle()
+        offset = app.send("\x04")
+        app.wait("Press Ctrl+D again", offset)
+        total = next(line for line in app.quit() if line.startswith("Token usage:"))
+        assert "1 turn" in total and "(partial)" not in total, total
+
+
 server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
@@ -267,7 +296,7 @@ try:
     scenario([
         ("One.", ("shell", READ), 2000),
         ("Two.", ("shell", LONG), 3000),
-    ], "Review more", before=("Done.", None, 1000), stop_at=2, after_esc=[context(3010)],
+    ], "Review more", before=("Done.", None, 1000), stop_at=2, after_esc=[context(3010), turn(5000, 20)],
         expect_total="total=6030 input=6000 (+ 0 cached) output=30 · 2 turns", resumed=context(3010))
 
     # A first turn with no text at all, stopped while its call runs: the counter
@@ -296,7 +325,14 @@ try:
         after_esc=[],
         expect_total="total=1010 input=1000 (+ 0 cached) output=10 · 1 turn (partial)", resumed="context ?")
 
+    # The same on a first turn: nothing counted, the total still says it is partial.
+    scenario([
+        ("Partly.", None, 3000),
+    ], "Review at once", stop_at=0, holds_after_text=[0], in_flight=True, after_esc=[],
+        expect_total="total=0 input=0 (+ 0 cached) output=0 · 0 turns (partial)", resumed="context ?")
+
     exit_during_a_turn()
+    exit_during_a_command()
 finally:
     server.shutdown()
     server.server_close()

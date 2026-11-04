@@ -123,7 +123,8 @@ impl Usage {
     }
 
     fn read(&mut self, message: bool, metadata: &Metadata) {
-        if message {
+        // A `!` command's row is no turn's, whatever it says.
+        if message && !metadata.keys().any(|key| key.starts_with("shell_")) {
             self.last_turn_recorded = metadata.contains_key("loop_end_reason");
         }
         let Some(total) = metadata
@@ -166,10 +167,12 @@ impl Summary {
     /// read, so the usage read here is not all of it, unless its record is
     /// written already, its answer done but for the view's last word.
     pub(crate) fn turn_running(&mut self) {
+        // With no turn counted there is nothing the report would misstate: the
+        // view's run may also be a `!` command's, or a tool server's.
         if let Some(usage) = self
             .usage
             .as_mut()
-            .filter(|usage| !usage.last_turn_recorded)
+            .filter(|usage| usage.turns > 0 && !usage.last_turn_recorded)
         {
             usage.complete = false;
         }
