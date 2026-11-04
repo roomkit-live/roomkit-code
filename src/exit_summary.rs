@@ -125,8 +125,10 @@ impl Usage {
             .and_then(Value::as_object)
             .filter(|total| !total.is_empty() && message)
         else {
-            // A turn stopped before anything told what it used: unknown tokens.
-            self.complete &= metadata.get("loop_end_reason") != Some(&json!("cancelled"));
+            // A turn stopped before anything told what it used, or a provider
+            // that reported nothing: unknown tokens.
+            self.complete &= metadata.get("loop_end_reason") != Some(&json!("cancelled"))
+                && metadata.get("ai_usage_complete") != Some(&Value::Bool(false));
             return;
         };
         let count = |key| total.get(key).and_then(Value::as_u64);
@@ -154,6 +156,14 @@ impl Usage {
 }
 
 impl Summary {
+    /// A turn still runs as the report is read: closing cuts it after, so the
+    /// usage read here is not all of it.
+    pub(crate) fn turn_running(&mut self) {
+        if let Some(usage) = &mut self.usage {
+            usage.complete = false;
+        }
+    }
+
     /// Write the report to the restored terminal.
     pub fn print(&self, stopped: bool) {
         for line in self.lines(stopped) {
@@ -172,7 +182,11 @@ impl Summary {
                 lines.push(format!("  {}", command.join(" ")));
             }
         }
-        if let Some(usage) = self.usage.as_ref().filter(|usage| usage.turns > 0) {
+        if let Some(usage) = self
+            .usage
+            .as_ref()
+            .filter(|usage| usage.turns > 0 || !usage.complete)
+        {
             lines.push(usage.line());
         }
         self.processes(&mut lines, stopped);
@@ -276,6 +290,20 @@ mod usage_tests {
         );
         assert_eq!((usage.input, usage.output, usage.turns), (3000, 20, 1));
         assert!(usage.complete);
+    }
+
+    #[test]
+    fn a_provider_that_reported_nothing_leaves_the_total_partial() {
+        let mut usage = usage();
+        usage.read(
+            true,
+            &record(&json!({
+                "ai_usage": {},
+                "ai_usage_complete": false,
+                "loop_end_reason": "completed",
+            })),
+        );
+        assert!(!usage.complete);
     }
 
     #[test]

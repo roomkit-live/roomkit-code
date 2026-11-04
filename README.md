@@ -143,12 +143,11 @@ the launch's explicit options such as `--config` and display flags. With
 `cargo run`, replace `roomkit-code` by `cargo run --locked --`. An unused draft
 has no resume line. Token usage covers every turn of the conversation, across
 launches and agents: `input` excludes the cached input shown in parentheses and
-`total` is input plus output. A turn without a complete provider report marks
-the line `(partial)`. Closing stops every running process of this application,
+`total` is input plus output. A stopped turn counts what its generations
+reported. A turn without a complete provider report marks the line `(partial)`,
+as does a generation stopped or still running as the view closes. Closing stops every running process of this application,
 whether an agent or a `!` command started it. The report lists them, or says
 they may still be running when cleanup could not be confirmed.
-A stopped turn counts what its generations reported; `(partial)` says one was still
-running, or did not report its counters.
 
 Type **!command** (for example `!git status`) to run a command directly in the
 project directory without invoking the model. `/shell command` is equivalent.

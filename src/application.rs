@@ -242,6 +242,10 @@ async fn summarize(
     view: Option<roomkit_tui::SessionObservation>,
     resume: &integrations::Resume,
 ) -> crate::exit_summary::Summary {
+    let running = view
+        .as_ref()
+        .and_then(|view| view.run.as_ref())
+        .is_some_and(|run| run.outcome.is_none());
     let shown = view.map(|view| {
         let command = view
             .mode
@@ -249,7 +253,12 @@ async fn summarize(
             .and_then(|mode| resume.command(view.conversation.as_str(), mode.selected.as_str()));
         (view.conversation.into_inner(), command)
     });
-    crate::exit_summary::collect(&app.kit, &app.profiles.resources.processes, shown).await
+    let mut summary =
+        crate::exit_summary::collect(&app.kit, &app.profiles.resources.processes, shown).await;
+    if running {
+        summary.turn_running();
+    }
+    summary
 }
 
 #[cfg(test)]
