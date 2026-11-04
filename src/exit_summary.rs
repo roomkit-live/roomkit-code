@@ -4,11 +4,11 @@
 
 use std::time::Duration;
 
-use roomkit::model::{EventType, RoomEvent, RoomId};
+use roomkit::model::{EventType, Metadata, RoomEvent, RoomId};
 use roomkit::{GetTimelineOptions, RoomKit};
 use roomkit_sqlite::SqliteStore;
 use roomkit_tools_process::{ProcessSession, ProcessState};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// Processes listed by name; the rest are counted.
 const LISTED: usize = 8;
@@ -116,12 +116,17 @@ pub(crate) async fn usage(kit: &RoomKit<SqliteStore>, room: &RoomId) -> crate::R
 
 impl Usage {
     fn add(&mut self, event: &RoomEvent) {
-        let Some(total) = event
-            .metadata
+        self.read(matches!(event.r#type, EventType::Message), &event.metadata);
+    }
+
+    fn read(&mut self, message: bool, metadata: &Metadata) {
+        let Some(total) = metadata
             .get("ai_usage")
             .and_then(Value::as_object)
-            .filter(|total| !total.is_empty() && matches!(event.r#type, EventType::Message))
+            .filter(|total| !total.is_empty() && message)
         else {
+            // A turn stopped before anything told what it used: unknown tokens.
+            self.complete &= metadata.get("loop_end_reason") != Some(&json!("cancelled"));
             return;
         };
         let count = |key| total.get(key).and_then(Value::as_u64);
@@ -130,7 +135,7 @@ impl Usage {
         self.cached += count("cache_read_input_tokens").unwrap_or(0);
         self.output += output.unwrap_or(0);
         self.turns += 1;
-        let reported = event.metadata.get("ai_usage_complete") == Some(&Value::Bool(true));
+        let reported = metadata.get("ai_usage_complete") == Some(&Value::Bool(true));
         self.complete &= reported && input.is_some() && output.is_some();
     }
 
@@ -237,3 +242,47 @@ fn elapsed(duration: Duration) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod usage_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn record(value: &Value) -> Metadata {
+        value.as_object().cloned().unwrap_or_default()
+    }
+
+    fn usage() -> Usage {
+        Usage {
+            input: 0,
+            cached: 0,
+            output: 0,
+            turns: 0,
+            complete: true,
+        }
+    }
+
+    #[test]
+    fn a_stopped_turn_counts_what_it_told() {
+        let mut usage = usage();
+        usage.read(
+            true,
+            &record(&json!({
+                "ai_usage": { "input_tokens": 3000, "output_tokens": 20 },
+                "ai_usage_complete": true,
+                "loop_end_reason": "cancelled",
+            })),
+        );
+        assert_eq!((usage.input, usage.output, usage.turns), (3000, 20, 1));
+        assert!(usage.complete);
+    }
+
+    #[test]
+    fn a_turn_stopped_before_anything_told_leaves_the_total_partial() {
+        let mut usage = usage();
+        usage.read(true, &record(&json!({ "loop_end_reason": "cancelled" })));
+        assert_eq!(usage.turns, 0);
+        assert!(!usage.complete);
+    }
+}

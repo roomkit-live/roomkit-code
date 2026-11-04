@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The context counter follows a long turn step by step, and keeps its last measure
+  after Esc, on the first turn too and after a resume; the turn's totals and the
+  exit summary count a stopped turn, `(partial)` when a generation was still running
+  (roomkit-rs dcaf505, roomkit-tools 46713bd, roomkit-tui 9388992).
+
 - A click on the model's reasoning opens that block alone, where it opened every
   call below it too (roomkit-tui c6c066e).
 

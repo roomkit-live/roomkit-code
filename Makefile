@@ -45,6 +45,7 @@ terminal-check:
 	python3 scripts/check-exit.py
 	python3 scripts/check-files.py
 	python3 scripts/check-context.py
+	python3 scripts/check-usage.py
 	python3 scripts/check-selection.py
 
 msrv:

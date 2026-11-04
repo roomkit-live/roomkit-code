@@ -147,6 +147,8 @@ launches and agents: `input` excludes the cached input shown in parentheses and
 the line `(partial)`. Closing stops every running process of this application,
 whether an agent or a `!` command started it. The report lists them, or says
 they may still be running when cleanup could not be confirmed.
+A stopped turn counts what its generations reported; `(partial)` says one was still
+running, or did not report its counters.
 
 Type **!command** (for example `!git status`) to run a command directly in the
 project directory without invoking the model. `/shell command` is equivalent.
