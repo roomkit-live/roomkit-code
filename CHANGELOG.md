@@ -7,6 +7,9 @@
   heavy server no longer fills the window before the first message. Native tools
   stay declared, and the context breakdown counts what a request carries.
 
+- The model's reasoning shows as it comes, then folds to one line that F2 or a click
+  opens, with the technical history. It is not stored.
+
 - Follows roomkit-rs c30375c, roomkit-tui 9eca2ab and roomkit-tools 23b25be. An agent keeps telling the model of its native tools,
   and a chosen reasoning effort still reaches its tool turns behind a `base_url`,
   as the kit's new defaults would hide the first and drop the second. On OpenAI's

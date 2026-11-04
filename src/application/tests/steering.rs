@@ -458,3 +458,36 @@ async fn the_preamble_vouches_for_the_instruction_mark_only_a_user_message_can_h
     task.await.unwrap().unwrap();
     app.close().await.unwrap();
 }
+
+/// RMK-1325: a server's reasoning reaches the view through the agent's slot, and
+/// the model is not asked with it again.
+#[tokio::test]
+async fn a_model_s_reasoning_reaches_the_view_and_no_request() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::reasoning("The answer.", "Weighing the ledgers").await;
+    let settings = settings(project.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+    let task = tokio::spawn(app.session().run(host));
+    let Event::Snapshot(_) = event(&client).await else {
+        panic!("Expected snapshot");
+    };
+
+    submit(&client, 1, "First");
+    let events = until(&client, |e| finished(e, "operation-1")).await;
+    let thought = events.iter().find_map(|e| match e {
+        Event::ThinkingDelta { text, .. } => Some(text.as_str()),
+        _ => None,
+    });
+    assert_eq!(thought, Some("Weighing the ledgers"), "{events:?}");
+    submit(&client, 2, "Second");
+    until(&client, |e| finished(e, "operation-2")).await;
+    assert!(
+        !asked(&mock, 1).contains("Weighing"),
+        "Replayed to the model"
+    );
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.close().await.unwrap();
+}

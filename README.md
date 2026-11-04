@@ -92,6 +92,11 @@ work; a second press within two seconds exits. Typing or pasting disarms exit.
 Interruption waits for engine cleanup, preserves completed tool effects and
 leaves the conversation ready to continue.
 
+The model's reasoning shows as it comes, when its server sends it apart from the
+answer (`reasoning_content`, `reasoning` or `<think>` tags): `∴ Thinking` with its
+last lines, then one line, `∴ Thought for 12.0s`, once the model goes on. F2 or a
+click opens it. Nothing stores it, so it does not come back with `/resume`.
+
 While the agent works, Enter sends the message to its running turn, which reads
 it at its next step: after its current tool calls, or right after the model's
 answer, which the model then follows with a reply to the message. A turn that

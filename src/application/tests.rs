@@ -32,6 +32,7 @@ struct Mock {
 
 #[derive(Clone)]
 struct Fixture {
+    reasoning: Option<String>,
     answer: String,
     calls: Vec<(&'static str, Value)>,
     usage: Vec<Option<Value>>,
@@ -53,6 +54,20 @@ impl Mock {
         answer_text: &str,
         usage: Vec<Option<Value>>,
     ) -> Self {
+        Self::serving(calls, answer_text, usage, None).await
+    }
+
+    /// A server that writes `reasoning` apart from its answers.
+    async fn reasoning(answer_text: &str, reasoning: &str) -> Self {
+        Self::serving(vec![], answer_text, vec![], Some(reasoning.into())).await
+    }
+
+    async fn serving(
+        calls: Vec<(&'static str, Value)>,
+        answer_text: &str,
+        usage: Vec<Option<Value>>,
+        reasoning: Option<String>,
+    ) -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -66,6 +81,7 @@ impl Mock {
                 }),
             )
             .with_state(Fixture {
+                reasoning,
                 answer: answer_text.into(),
                 calls,
                 usage,
@@ -122,8 +138,19 @@ async fn answer(
         .and_then(Option::as_ref)
         .map(|usage| format!("data: {}\n\n", json!({"choices":[], "usage":usage})))
         .unwrap_or_default();
+    let reasoning = fixture
+        .reasoning
+        .as_ref()
+        .map(|text| {
+            let delta = json!({"reasoning_content":text});
+            format!(
+                "data: {}\n\n",
+                json!({"choices":[{"index":0,"delta":delta}]})
+            )
+        })
+        .unwrap_or_default();
     let body = format!(
-        "data: {}\n\ndata: {}\n\n{report}data: [DONE]\n\n",
+        "{reasoning}data: {}\n\ndata: {}\n\n{report}data: [DONE]\n\n",
         json!({"choices":[{"index":0,"delta":delta}]}),
         json!({"choices":[{"index":0,"delta":{},"finish_reason":reason}]})
     );
