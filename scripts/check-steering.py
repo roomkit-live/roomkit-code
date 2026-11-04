@@ -33,6 +33,10 @@ binary = Path(metadata["target_directory"]) / "debug" / "roomkit-code"
 STEERED = "Look in the second ledger"
 CTRL_S = b"\x13"
 CTRL_ENTER = b"\x1b[13;5u"
+# The terminal says a message went to the turn as the host commits it, and its
+# delivery follows (RMK-1371). Nothing on the screen says when it reached the
+# turn, so a check that lets the turn go on gives it this many seconds.
+DELIVERY = 0.2
 requests = []
 release = threading.Event()
 silent = threading.Event()
@@ -148,6 +152,7 @@ def handed_to_the_running_turn(terminal):
     terminal.wait_for(b"[Plan]", offset)
     terminal.send(STEERED.encode() + b"\r")
     terminal.wait_for("↳ sent to the running turn".encode(), offset)
+    time.sleep(DELIVERY)
     release.set()
     terminal.wait_for(b"The record is in the second ledger.", offset)
     terminal.wait_for(b"Execution Completed", offset)
@@ -169,6 +174,7 @@ def read_at_the_next_stop(terminal):
     offset = len(terminal.captured)
     terminal.send(STEERED.encode() + b"\r")
     terminal.wait_for("↳ sent to the running turn".encode(), offset)
+    time.sleep(DELIVERY)
     release.set()
     terminal.wait_for(b"The record is in the second ledger.", offset)
     terminal.wait_for("↳ read by the turn".encode(), offset)
