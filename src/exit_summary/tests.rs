@@ -1,9 +1,12 @@
 #![expect(clippy::unwrap_used, reason = "test assertions")]
 
+use serde_json::json;
+
 use super::*;
 
 fn usage(turns: u64, complete: bool) -> Usage {
     Usage {
+        last_turn_recorded: false,
         input: 300,
         cached: 600,
         output: 90,
@@ -92,4 +95,84 @@ fn shell_quoting_and_command_lines_are_safe_to_copy() {
     assert_eq!(one_line("a\u{1b}[31mb"), "a [31mb");
     assert_eq!(one_line(&"x".repeat(80)).chars().count(), 60);
     assert_eq!(elapsed(Duration::from_secs(9)), "9s");
+}
+
+fn record(value: &Value) -> Metadata {
+    value.as_object().cloned().unwrap_or_default()
+}
+
+fn empty() -> Usage {
+    Usage {
+        input: 0,
+        cached: 0,
+        output: 0,
+        turns: 0,
+        complete: true,
+        last_turn_recorded: false,
+    }
+}
+
+#[test]
+fn a_stopped_turn_counts_what_it_told() {
+    let mut usage = empty();
+    usage.read(
+        true,
+        &record(&json!({
+            "ai_usage": { "input_tokens": 3000, "output_tokens": 20 },
+            "ai_usage_complete": true,
+            "loop_end_reason": "cancelled",
+        })),
+    );
+    assert_eq!((usage.input, usage.output, usage.turns), (3000, 20, 1));
+    assert!(usage.complete);
+}
+
+#[test]
+fn a_provider_that_reported_nothing_leaves_the_total_partial() {
+    let mut usage = empty();
+    usage.read(
+        true,
+        &record(&json!({
+            "ai_usage": {},
+            "ai_usage_complete": false,
+            "loop_end_reason": "completed",
+        })),
+    );
+    assert!(!usage.complete);
+}
+
+#[test]
+fn a_turn_stopped_before_anything_told_leaves_the_total_partial() {
+    let mut usage = empty();
+    usage.read(true, &record(&json!({ "loop_end_reason": "cancelled" })));
+    assert_eq!(usage.turns, 0);
+    assert!(!usage.complete);
+}
+
+#[test]
+fn a_turn_left_running_leaves_the_total_partial_until_its_record_is_written() {
+    let mut summary = Summary {
+        usage: Some(empty()),
+        ..Summary::default()
+    };
+    let total = summary.usage.as_mut().unwrap();
+    total.read(true, &record(&json!({ "body": "Second" })));
+    summary.turn_running();
+    assert!(!summary.usage.as_ref().unwrap().complete);
+
+    let mut summary = Summary {
+        usage: Some(empty()),
+        ..Summary::default()
+    };
+    let total = summary.usage.as_mut().unwrap();
+    total.read(
+        true,
+        &record(&json!({
+            "ai_usage": { "input_tokens": 3000, "output_tokens": 20 },
+            "ai_usage_complete": true,
+            "loop_end_reason": "completed",
+        })),
+    );
+    summary.turn_running();
+    assert!(summary.usage.as_ref().unwrap().complete);
 }

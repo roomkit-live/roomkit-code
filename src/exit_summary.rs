@@ -24,6 +24,8 @@ pub(crate) struct Usage {
     pub turns: u64,
     /// False when a turn lacked a complete report.
     pub complete: bool,
+    /// Whether the conversation's last message carries its turn's record.
+    pub last_turn_recorded: bool,
 }
 
 /// A process that was running when the application began to close.
@@ -97,6 +99,7 @@ pub(crate) async fn usage(kit: &RoomKit<SqliteStore>, room: &RoomId) -> crate::R
         output: 0,
         turns: 0,
         complete: true,
+        last_turn_recorded: false,
     };
     let mut after = None;
     loop {
@@ -120,6 +123,9 @@ impl Usage {
     }
 
     fn read(&mut self, message: bool, metadata: &Metadata) {
+        if message {
+            self.last_turn_recorded = metadata.contains_key("loop_end_reason");
+        }
         let Some(total) = metadata
             .get("ai_usage")
             .and_then(Value::as_object)
@@ -156,10 +162,15 @@ impl Usage {
 }
 
 impl Summary {
-    /// A turn still runs as the report is read: closing cuts it after, so the
-    /// usage read here is not all of it.
+    /// The view left a turn running: closing cuts it after this report is
+    /// read, so the usage read here is not all of it, unless its record is
+    /// written already, its answer done but for the view's last word.
     pub(crate) fn turn_running(&mut self) {
-        if let Some(usage) = &mut self.usage {
+        if let Some(usage) = self
+            .usage
+            .as_mut()
+            .filter(|usage| !usage.last_turn_recorded)
+        {
             usage.complete = false;
         }
     }
@@ -256,61 +267,3 @@ fn elapsed(duration: Duration) -> String {
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod usage_tests {
-    use serde_json::json;
-
-    use super::*;
-
-    fn record(value: &Value) -> Metadata {
-        value.as_object().cloned().unwrap_or_default()
-    }
-
-    fn usage() -> Usage {
-        Usage {
-            input: 0,
-            cached: 0,
-            output: 0,
-            turns: 0,
-            complete: true,
-        }
-    }
-
-    #[test]
-    fn a_stopped_turn_counts_what_it_told() {
-        let mut usage = usage();
-        usage.read(
-            true,
-            &record(&json!({
-                "ai_usage": { "input_tokens": 3000, "output_tokens": 20 },
-                "ai_usage_complete": true,
-                "loop_end_reason": "cancelled",
-            })),
-        );
-        assert_eq!((usage.input, usage.output, usage.turns), (3000, 20, 1));
-        assert!(usage.complete);
-    }
-
-    #[test]
-    fn a_provider_that_reported_nothing_leaves_the_total_partial() {
-        let mut usage = usage();
-        usage.read(
-            true,
-            &record(&json!({
-                "ai_usage": {},
-                "ai_usage_complete": false,
-                "loop_end_reason": "completed",
-            })),
-        );
-        assert!(!usage.complete);
-    }
-
-    #[test]
-    fn a_turn_stopped_before_anything_told_leaves_the_total_partial() {
-        let mut usage = usage();
-        usage.read(true, &record(&json!({ "loop_end_reason": "cancelled" })));
-        assert_eq!(usage.turns, 0);
-        assert!(!usage.complete);
-    }
-}
