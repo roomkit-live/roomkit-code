@@ -180,14 +180,17 @@ async fn a_project_file_stays_inside_its_block() {
     let app = Application::open(&settings, String::new()).await.unwrap();
     turn(&app).await;
 
-    let requests = mock.requests.lock().unwrap();
-    let messages = requests[0]["messages"].as_array().unwrap();
-    let marked = messages
-        .iter()
-        .filter_map(|m| m["content"].as_str())
-        .find(|text| text.contains(FORGED))
-        .unwrap();
-    assert_eq!(marked.matches(CLOSE).count(), 1, "{marked}");
-    let (inside, _) = marked.split_once(CLOSE).unwrap();
-    assert!(inside.contains(FORGED), "{marked}");
+    {
+        let requests = mock.requests.lock().unwrap();
+        let messages = requests[0]["messages"].as_array().unwrap();
+        let marked = messages
+            .iter()
+            .filter_map(|m| m["content"].as_str())
+            .find(|text| text.contains(FORGED))
+            .unwrap();
+        assert_eq!(marked.matches(CLOSE).count(), 1, "{marked}");
+        let (inside, _) = marked.split_once(CLOSE).unwrap();
+        assert!(inside.contains(FORGED), "{marked}");
+    }
+    app.close().await.unwrap();
 }

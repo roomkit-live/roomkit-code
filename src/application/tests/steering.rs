@@ -456,4 +456,5 @@ async fn the_preamble_vouches_for_the_instruction_mark_only_a_user_message_can_h
     );
     drop(client);
     task.await.unwrap().unwrap();
+    app.close().await.unwrap();
 }

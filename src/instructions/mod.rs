@@ -2,7 +2,7 @@
 mod discovery;
 mod tools;
 
-use roomkit_core::rules::transcript::fence;
+use roomkit_core::rules::transcript::{fence, json_text_line};
 use roomkit_tui::protocol::{Event, PanelSpec};
 use roomkit_tui_engine::{CommandResult, SessionConfig};
 use std::{
@@ -52,8 +52,8 @@ impl Report {
         for source in &self.sources {
             text.push_str(&format!(
                 "\n\nSource: {}\nScope: {}\nRevision: {}\n{}",
-                serde_json::json!(source.path.to_string_lossy()),
-                serde_json::json!(source.scope),
+                json_text_line(&source.path.to_string_lossy()),
+                json_text_line(&source.scope),
                 source.revision,
                 fence("project-instructions", &source.text)
             ));
@@ -61,20 +61,21 @@ impl Report {
         if !self.problems.is_empty() {
             text.push_str("\n\nInstruction loading problems: do not modify affected paths until these are resolved.\n");
             // Quoted, as they name paths, which can hold a line break.
-            let problems: Vec<_> = self
-                .problems
-                .iter()
-                .map(|problem| serde_json::json!(problem).to_string())
-                .collect();
+            let problems: Vec<_> = self.problems.iter().map(|p| json_text_line(p)).collect();
             text.push_str(&problems.join("\n"));
         }
         text
     }
 
     fn scoped(&self) -> String {
+        let scopes: Vec<_> = self
+            .checked_scopes
+            .iter()
+            .map(|s| json_text_line(s))
+            .collect();
+        let scopes = scopes.join(",");
         format!(
-            "Current nested instruction scopes: {}. Replace earlier rules for exactly these directories with this snapshot, including removals. Global/root and unrelated scopes are unchanged.\n{}",
-            serde_json::json!(self.checked_scopes),
+            "Current nested instruction scopes: [{scopes}]. Replace earlier rules for exactly these directories with this snapshot, including removals. Global/root and unrelated scopes are unchanged.\n{}",
             self.render()
         )
     }
