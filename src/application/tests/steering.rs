@@ -6,6 +6,8 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use roomkit::HookOptions;
+use roomkit::model::RoomEvent;
+use roomkit_core::rules::transcoding::text_of;
 use roomkit_tui::protocol::Decision;
 use tokio::sync::{Notify, watch};
 
@@ -306,9 +308,31 @@ async fn a_mode_change_between_turns_only_changes_the_next_turn() {
     app.close().await.unwrap();
 }
 
+/// Tell `delivered` once the delivery of the message `text` is over: the turn
+/// under way took it, or RoomKit has it wait a turn of its own. The host says a
+/// message went to a turn as it is committed, before that.
+fn tell_when_delivered(app: &Application, text: &'static str, delivered: Arc<Notify>) {
+    let tell = move |event: RoomEvent, _| {
+        if text_of(&event.content) == text {
+            delivered.notify_one();
+        }
+        async {}
+    };
+    let options = HookOptions {
+        name: "delivered".to_owned(),
+        execution: roomkit::HookExecution::Async,
+        ..Default::default()
+    };
+    let trigger = roomkit::HookTrigger::AfterBroadcast;
+    app.kit.hook(trigger, tell, options).unwrap();
+}
+
 /// RMK-1311: a message handed to a turn waits for that turn's next step. The
 /// turn is cut, and a turn of its own answers: it reads the message once, its
 /// mode as any turn, and runs the hooks of a turn, not of a new prompt.
+///
+/// RMK-1371: the cut comes once the turn took the message. Cut before, the
+/// message gets a turn of its own, which `Command::Answer` would answer again.
 #[tokio::test]
 async fn a_cut_turn_s_message_is_answered_with_the_mode_and_the_hooks_of_a_turn() {
     let project = tempfile::tempdir().unwrap();
@@ -328,6 +352,8 @@ async fn a_cut_turn_s_message_is_answered_with_the_mode_and_the_hooks_of_a_turn(
     let settings = settings(project.path(), state.path(), &mock.base_url);
     let app = Application::open(&settings, String::new()).await.unwrap();
     enable_all(&app);
+    let delivered = Arc::new(Notify::new());
+    tell_when_delivered(&app, "Mention the second ledger too.", delivered.clone());
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run(host));
     event(&client).await;
@@ -337,6 +363,8 @@ async fn a_cut_turn_s_message_is_answered_with_the_mode_and_the_hooks_of_a_turn(
     assert!(asked(&mock, 0).contains("Project rule: keep it short."));
     submit(&client, 2, "Mention the second ledger too.");
     until(&client, |e| matches!(e, Event::MessageSteered { .. })).await;
+    let reached = tokio::time::timeout(Duration::from_secs(5), delivered.notified());
+    reached.await.expect("The message's delivery ends");
     let cut = Command::Interrupt {
         run: permission.run.clone(),
     };
