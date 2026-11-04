@@ -459,13 +459,20 @@ async fn the_preamble_vouches_for_the_instruction_mark_only_a_user_message_can_h
     app.close().await.unwrap();
 }
 
-/// RMK-1325: a server's reasoning reaches the view through the agent's slot, and
-/// the model is not asked with it again.
+/// RMK-1325: a server's reasoning reaches the view through the agent's slot, before
+/// the call it led to, and the model is not asked with it again: neither in the
+/// round after that call nor in the next turn.
 #[tokio::test]
 async fn a_model_s_reasoning_reaches_the_view_and_no_request() {
     let project = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
-    let mock = Mock::reasoning("The answer.", "Weighing the ledgers").await;
+    std::fs::write(project.path().join("source"), "sample").unwrap();
+    let mock = Mock::reasoning(
+        vec![("read", json!({"path":"source"}))],
+        "The answer.",
+        "Weighing the ledgers",
+    )
+    .await;
     let settings = settings(project.path(), state.path(), &mock.base_url);
     let app = Application::open(&settings, String::new()).await.unwrap();
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
@@ -476,17 +483,31 @@ async fn a_model_s_reasoning_reaches_the_view_and_no_request() {
 
     submit(&client, 1, "First");
     let events = until(&client, |e| finished(e, "operation-1")).await;
-    let thought = events.iter().find_map(|e| match e {
-        Event::ThinkingDelta { text, .. } => Some(text.as_str()),
-        _ => None,
-    });
-    assert_eq!(thought, Some("Weighing the ledgers"), "{events:?}");
+    let turn: Vec<&str> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::ThinkingDelta { text, .. } => Some(text.as_str()),
+            Event::Item {
+                item: Item::Tool { call, .. },
+                ..
+            } if call.state.is_settled() => Some("read ended"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        turn,
+        ["Weighing the ledgers", "read ended", "Weighing the ledgers"],
+        "{events:?}"
+    );
     submit(&client, 2, "Second");
     until(&client, |e| finished(e, "operation-2")).await;
-    assert!(
-        !asked(&mock, 1).contains("Weighing"),
-        "Replayed to the model"
-    );
+    for request in 0..3 {
+        assert!(
+            !asked(&mock, request).contains("Weighing"),
+            "Replayed to the model in request {request}"
+        );
+    }
+    assert!(asked(&mock, 1).contains("sample"), "The call's round");
     drop(client);
     task.await.unwrap().unwrap();
     app.close().await.unwrap();

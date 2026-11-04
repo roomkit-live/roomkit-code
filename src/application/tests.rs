@@ -57,9 +57,13 @@ impl Mock {
         Self::serving(calls, answer_text, usage, None).await
     }
 
-    /// A server that writes `reasoning` apart from its answers.
-    async fn reasoning(answer_text: &str, reasoning: &str) -> Self {
-        Self::serving(vec![], answer_text, vec![], Some(reasoning.into())).await
+    /// A server that writes `reasoning` apart from each of its answers.
+    async fn reasoning(
+        calls: Vec<(&'static str, Value)>,
+        answer_text: &str,
+        reasoning: &str,
+    ) -> Self {
+        Self::serving(calls, answer_text, vec![], Some(reasoning.into())).await
     }
 
     async fn serving(
