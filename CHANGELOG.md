@@ -10,7 +10,7 @@
 - The model's reasoning shows as it comes, then folds to one line that F2 or a click
   opens, with the technical history. It is not stored.
 
-- Follows roomkit-rs c30375c, roomkit-tui 9eca2ab and roomkit-tools 23b25be. An agent keeps telling the model of its native tools,
+- Follows roomkit-rs c30375c, roomkit-tui b489546 and roomkit-tools 23b25be. An agent keeps telling the model of its native tools,
   and a chosen reasoning effort still reaches its tool turns behind a `base_url`,
   as the kit's new defaults would hide the first and drop the second. On OpenAI's
   own endpoint, the kit now sends the effort its catalogue states for a tagged
