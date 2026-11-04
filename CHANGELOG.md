@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- A first turn with no text at all, stopped while its call runs, keeps its measure
+  after a resume, where it read `context ?`, and the exit summary counts it: its
+  record rides its last row (roomkit-rs 6f94ec6, roomkit-tools 3771f26, roomkit-tui
+  7319908).
+
+- The model's reasoning stays out of its requests on Chat Completions, which keeps a
+  server's prompt cache from one step of a turn to the next: `roomkit-rs` no longer
+  sends it back as `<think>` (RMK-1369).
+
 - The context counter follows a long turn step by step, and keeps its last measure
   after Esc, on the first turn too and after a resume; the turn's totals and the
   exit summary count a stopped turn, `(partial)` when a generation was still running

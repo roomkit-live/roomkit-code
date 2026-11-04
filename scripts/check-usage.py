@@ -299,15 +299,15 @@ try:
     ], "Review more", before=("Done.", None, 1000), stop_at=2, after_esc=[context(3010), turn(5000, 20)],
         expect_total="total=6030 input=6000 (+ 0 cached) output=30 · 2 turns", resumed=context(3010))
 
-    # A first turn with no text at all, stopped while its call runs: the counter
-    # holds: nothing redraws it after Esc, "context ?" would. It wrote no message,
-    # so the store holds no record of it (RMK-1333, HITL 5f58e3e3): after a resume,
-    # no measure, and no usage at exit.
+    # A first turn with no text at all, stopped while its call runs: it wrote no
+    # message, so its record rides its last row, the call's end (RMK-1344, HITL
+    # 5f58e3e3): the counter holds, after a resume too, and the exit counts the turn.
     scenario([
         ("", ("shell", READ), 1000),
         ("", ("shell", READ), 2000),
         ("", ("shell", LONG), 3000),
-    ], "Review quietly", stop_at=3, after_esc=[], expect_total=None, resumed="context ?")
+    ], "Review quietly", stop_at=3, after_esc=[context(3010), turn(6000, 30)],
+        expect_total="total=6030 input=6000 (+ 0 cached) output=30 · 1 turn", resumed=context(3010))
 
     # A stop with the third generation in flight: not counted, and partial.
     scenario([
