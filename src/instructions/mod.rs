@@ -55,7 +55,9 @@ impl Report {
                 json_text_line(&source.path.to_string_lossy()),
                 json_text_line(&source.scope),
                 source.revision,
-                fence("project-instructions", &source.text)
+                // One word: `fence` reads a name's letters in all their forms,
+                // but a separator only as it is written.
+                fence("instructions", &source.text)
             ));
         }
         if !self.problems.is_empty() {

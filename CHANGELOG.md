@@ -8,7 +8,7 @@
   message in its answer, and names the mark of the application's instructions,
   which a model took for a prompt injection and did not follow, leaving the mode
   and the project's instructions unread. A project's file can no longer close its
-  `<project-instructions>` block and speak as the application from outside it.
+  `<instructions>` block and speak as the application from outside it.
 
 - Cut a turn for a message already sent to it: the message's line says
   `Ctrl+S to cut it now` while the turn runs. Ctrl+S on an empty composer cuts the
