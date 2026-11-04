@@ -94,9 +94,9 @@ leaves the conversation ready to continue.
 
 The model's reasoning shows as it comes, when its server sends it apart from the
 answer (`reasoning_content`, `reasoning` or `<think>` tags): `∴ Thinking` with its
-last lines, then one line, `∴ Thought for 12.0s`, once the model goes on. F2 or a
-click on that line opens it with the technical history. Nothing stores it, so it
-does not come back with `/resume`.
+last lines, then one line, `∴ Thought for 12.0s`, once the model goes on. A click
+on that line opens that block alone, and a second closes it; F2 opens it with the
+technical history. Nothing stores it, so it does not come back with `/resume`.
 
 While the agent works, Enter sends the message to its running turn, which reads
 it at its next step: after its current tool calls, or right after the model's

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A click on the model's reasoning opens that block alone, where it opened every
+  call below it too (roomkit-tui c6c066e).
+
 - MCP tools past 8,000 tokens of schemas, 10% of the agent's context capacity or,
   with no capacity set, 20 tools wait behind `find_tools` and `list_tools`, so a
   heavy server no longer fills the window before the first message. Native tools
