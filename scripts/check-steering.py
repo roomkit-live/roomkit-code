@@ -4,7 +4,8 @@ The local Chat Completions fixture holds the agent's first answer, a call to
 read a file, open while the person types:
 
 - Enter: the message goes to the running turn, the terminal says so, and the
-  model reads it at its next step, as it reads a mode changed meanwhile;
+  model reads it at its next step, as it reads a mode changed meanwhile, even
+  sent before the model's first word (RMK-1317);
 - Ctrl+S, or Ctrl+Enter where the terminal reports it: the turn is cut, and the
   message leaves once it stopped, in a turn of its own. On an empty composer, it
   cuts the turn for the message already handed to it (RMK-1311).
@@ -34,6 +35,7 @@ CTRL_S = b"\x13"
 CTRL_ENTER = b"\x1b[13;5u"
 requests = []
 release = threading.Event()
+silent = threading.Event()
 
 
 class Model(BaseHTTPRequestHandler):
@@ -49,6 +51,8 @@ class Model(BaseHTTPRequestHandler):
 
     def answer(self, first):
         if first:
+            if silent.is_set():
+                release.wait(30)
             self.chunk({"content": "Checking the record. "})
             release.wait(30)
             call = {"index": 0, "id": "read-1", "type": "function",
@@ -154,6 +158,31 @@ def handed_to_the_running_turn(terminal):
     assert b"A request is still executing" not in terminal.plain(), "The message was refused"
 
 
+def read_at_the_next_stop(terminal):
+    """RMK-1317: sent before the model's first word, the message is not in what
+    it was already asked; it reads it after its round of calls, and the line
+    says so."""
+    silent.set()
+    terminal.wait_for(b"[Ask]")
+    terminal.send(b"Find the record\r")
+    terminal.wait_for(b"Working")
+    offset = len(terminal.captured)
+    terminal.send(STEERED.encode() + b"\r")
+    terminal.wait_for("↳ sent to the running turn".encode(), offset)
+    release.set()
+    terminal.wait_for(b"The record is in the second ledger.", offset)
+    terminal.wait_for("↳ read by the turn".encode(), offset)
+    terminal.wait_for(b"Execution Completed", offset)
+    assert len(requests) == 2, f"{len(requests)} model requests, not 2: the message took a turn of its own"
+    assert not said(requests[0], STEERED), "The first request knew the message"
+    messages = requests[1]["messages"]
+    roles = [message["role"] for message in messages]
+    read = [i for i, message in enumerate(messages) if STEERED in json.dumps(message)]
+    assert len(read) == 1, f"The model read the message {len(read)} times"
+    assert messages[read[0]]["role"] == "user", messages[read[0]]
+    assert read[0] > len(roles) - 1 - roles[::-1].index("tool"), f"Not after the call's result: {roles}"
+
+
 def cut_for_a_message_already_handed(terminal):
     offset = terminal.working()
     terminal.send(STEERED.encode() + b"\r")
@@ -191,12 +220,14 @@ thread.start()
 try:
     for check in (
         handed_to_the_running_turn,
+        read_at_the_next_stop,
         sent_now(CTRL_S),
         sent_now(CTRL_ENTER),
         cut_for_a_message_already_handed,
     ):
         requests.clear()
         release.clear()
+        silent.clear()
         with tempfile.TemporaryDirectory() as directory:
             terminal = Terminal(Path(directory), f"http://127.0.0.1:{server.server_port}/v1")
             try:

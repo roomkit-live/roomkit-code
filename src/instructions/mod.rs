@@ -2,6 +2,7 @@
 mod discovery;
 mod tools;
 
+use roomkit_core::rules::transcript::fence;
 use roomkit_tui::protocol::{Event, PanelSpec};
 use roomkit_tui_engine::{CommandResult, SessionConfig};
 use std::{
@@ -49,12 +50,23 @@ impl Report {
             text.push_str("\nNo nonempty instruction files loaded for this scope.");
         }
         for source in &self.sources {
-            text.push_str(&format!("\n\nSource: {}\nScope: {}\nRevision: {}\n<project-instructions>\n{}\n</project-instructions>",
-                serde_json::json!(source.path.to_string_lossy()), serde_json::json!(source.scope), source.revision, source.text));
+            text.push_str(&format!(
+                "\n\nSource: {}\nScope: {}\nRevision: {}\n{}",
+                serde_json::json!(source.path.to_string_lossy()),
+                serde_json::json!(source.scope),
+                source.revision,
+                fence("project-instructions", &source.text)
+            ));
         }
         if !self.problems.is_empty() {
             text.push_str("\n\nInstruction loading problems: do not modify affected paths until these are resolved.\n");
-            text.push_str(&self.problems.join("\n"));
+            // Quoted, as they name paths, which can hold a line break.
+            let problems: Vec<_> = self
+                .problems
+                .iter()
+                .map(|problem| serde_json::json!(problem).to_string())
+                .collect();
+            text.push_str(&problems.join("\n"));
         }
         text
     }

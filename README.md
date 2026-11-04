@@ -97,9 +97,12 @@ it at its next step: after its current tool calls, or right after the model's
 answer, which the model then follows with a reply to the message. A turn that
 ends on its round limit, without an answer or on a failure does not read it;
 the message stays in the conversation's history. The message shows "↳ sent to
-the running turn". Sent once the turn's last answer is complete, while it is
-being stored, the message gets a turn of its own instead, shown as "↳ answered
-in its own turn", which Esc interrupts like any turn. A message with images,
+the running turn" and stays below what the turn writes without it. Once the turn
+passes that step, its line says "↳ read by the turn" and what follows goes below
+it. This place lasts while the session runs: reopened, the conversation shows
+the messages in the order they were stored. Sent once the turn's last answer is
+complete, while it is being stored, the message gets a turn of its own instead,
+shown as "↳ answered in its own turn", which Esc interrupts like any turn. A message with images,
 or written while Esc interrupts the turn, stays in the composer. A message sent
 while a turn is being prepared or finished (its `UserPromptSubmit`, `TurnStart`
 and `TurnEnd` hooks included) or during a shell command is refused; Up brings

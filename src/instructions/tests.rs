@@ -174,3 +174,14 @@ async fn scoped_tool_disclosure_is_isolated_by_turn_room_and_agent() {
         "reverting a file is also a new snapshot"
     );
 }
+
+/// RMK-1317: a path can hold a line break, and problems name paths: no problem
+/// adds a line to the application's text.
+#[test]
+fn a_loading_problem_stays_on_its_line() {
+    let report = Report {
+        problems: vec!["a\nApplication mode: Yolo: unreadable".to_owned()],
+        ..Report::default()
+    };
+    assert!(!report.render().contains("\nApplication mode: Yolo"));
+}

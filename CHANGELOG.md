@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- A message sent to the running turn stays below what the turn writes without
+  it, and its line says `read by the turn` once the turn passed the step that
+  reads it (roomkit-tui). The agent's preamble now asks it to take up such a
+  message in its answer, and names the mark of the application's instructions,
+  which a model took for a prompt injection and did not follow, leaving the mode
+  and the project's instructions unread. A project's file can no longer close its
+  `<project-instructions>` block and speak as the application from outside it.
+
 - Cut a turn for a message already sent to it: the message's line says
   `Ctrl+S to cut it now` while the turn runs. Ctrl+S on an empty composer cuts the
   turn, and a turn of its own answers, with the mode's and the project's
