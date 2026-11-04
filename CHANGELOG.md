@@ -4,7 +4,7 @@
 
 - A message sent to the running turn stays below what the turn writes without
   it, and its line says `read by the turn` once the turn passed the step that
-  reads it (roomkit-tui). The agent's preamble now asks it to take up such a
+  reads it (roomkit-tui 64236ec). The agent's preamble now asks it to take up such a
   message in its answer, and names the mark of the application's instructions,
   which a model took for a prompt injection and did not follow, leaving the mode
   and the project's instructions unread. A project's file can no longer close its
