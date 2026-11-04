@@ -24,7 +24,7 @@ pub(crate) struct Usage {
     pub turns: u64,
     /// False when a turn lacked a complete report.
     pub complete: bool,
-    /// Whether the conversation's last message carries its turn's record.
+    /// Whether the conversation's last turn holds its record on a row.
     pub last_turn_recorded: bool,
 }
 
@@ -123,14 +123,16 @@ impl Usage {
     }
 
     fn read(&mut self, message: bool, metadata: &Metadata) {
+        // A turn that wrote no message holds its record on its last row.
+        let recorded = metadata.contains_key("loop_end_reason");
         // A `!` command's row is no turn's, whatever it says.
-        if message && !metadata.keys().any(|key| key.starts_with("shell_")) {
-            self.last_turn_recorded = metadata.contains_key("loop_end_reason");
+        if (message || recorded) && !metadata.keys().any(|key| key.starts_with("shell_")) {
+            self.last_turn_recorded = recorded;
         }
         let Some(total) = metadata
             .get("ai_usage")
             .and_then(Value::as_object)
-            .filter(|total| !total.is_empty() && message)
+            .filter(|total| !total.is_empty() && (message || recorded))
         else {
             // A turn stopped before anything told what it used, or a provider
             // that reported nothing: unknown tokens.

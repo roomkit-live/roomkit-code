@@ -128,6 +128,25 @@ fn a_stopped_turn_counts_what_it_told() {
 }
 
 #[test]
+fn a_turn_with_no_message_counts_the_record_on_its_last_row() {
+    let mut usage = empty();
+    usage.read(false, &record(&json!({ "tool_name": "shell" })));
+    usage.read(
+        false,
+        &record(&json!({
+            "ai_usage": { "input_tokens": 6000, "output_tokens": 30 },
+            "ai_usage_complete": true,
+            "loop_end_reason": "cancelled",
+        })),
+    );
+    assert_eq!((usage.input, usage.output, usage.turns), (6000, 30, 1));
+    assert!(usage.complete && usage.last_turn_recorded);
+    // A row after it with no record leaves the turn recorded.
+    usage.read(false, &record(&json!({ "tool_name": "shell" })));
+    assert!(usage.last_turn_recorded);
+}
+
+#[test]
 fn a_provider_that_reported_nothing_leaves_the_total_partial() {
     let mut usage = empty();
     usage.read(
