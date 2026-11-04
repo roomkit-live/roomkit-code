@@ -194,6 +194,9 @@ pub(crate) async fn create(
         tool_loop_timeout: None,
         max_context_events: HISTORY,
         image_resolver: Some(images),
+        // The model is told of its tools outright: past the kit's thresholds,
+        // a coding agent's tools would hide behind find_tools and list_tools.
+        tool_search: Some(false),
         ..AiChannelOptions::default()
     };
     let provider = OpenAiAiProvider::new(provider)?;

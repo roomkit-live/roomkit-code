@@ -224,6 +224,11 @@ impl Profiles {
             timeout: std::time::Duration::from_secs(provider.timeout_seconds),
             vision: profile.vision,
             reasoning_effort: profile.reasoning_effort.clone(),
+            // An effort is the person's choice, and every turn here has tools:
+            // left unstated, the kit would drop it from each of them behind a
+            // base URL. On OpenAI's own endpoint its catalogue still decides for
+            // the models it tags.
+            supports_reasoning_effort_with_tools: Some(true),
             // No cap unless the agent sets one: the endpoint decides how long
             // a reply may be, as each model has its own limit.
             max_tokens: profile.max_output_tokens,

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Follows roomkit-rs c30375c, roomkit-tui 9eca2ab and roomkit-tools 23b25be. An agent keeps telling the model of all its tools,
+  and a chosen reasoning effort still reaches its tool turns behind a `base_url`,
+  as the kit's new defaults would hide the first and drop the second. On OpenAI's
+  own endpoint, the kit now sends the effort its catalogue states for a tagged
+  model on a turn with tools, whatever `/effort` says.
+
 - A message sent to the running turn stays below what the turn writes without
   it, and its line says `read by the turn` once the turn passed the step that
   reads it (roomkit-tui 64236ec). The agent's preamble now asks it to take up such a

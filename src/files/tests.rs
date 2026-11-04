@@ -194,6 +194,7 @@ impl Tool for Hanging {
             name: "shell".into(),
             description: "Run a command".into(),
             parameters: json!({"type": "object"}),
+            tags: Vec::new(),
         }
     }
 

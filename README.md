@@ -670,7 +670,9 @@ forwarding and device-code sign-in are not implemented in this first version.
 Use `/effort` to select the active agent's reasoning effort, or edit **Reasoning
 effort** in `/agents`. The setting is saved per agent and applies to subsequent
 requests, including tool rounds. `default` leaves the parameter out; other levels
-must be supported by the chosen model. Changing effort keeps the current session.
+must be supported by the chosen model. On OpenAI's own endpoint, some models take
+the effort RoomKit's catalogue states on a turn with tools, whatever this setting
+says. Changing effort keeps the current session.
 
 `/diagnostics` shows recent operational records and the exact log location. Each
 project's private state directory contains `diagnostics.jsonl` and, after rotation,

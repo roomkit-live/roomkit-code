@@ -244,6 +244,7 @@ mod tests {
             name: "add".into(),
             description: "Add two numbers".into(),
             parameters: serde_json::json!({"type": "object", "properties": {"a": {"type": "number"}}}),
+            tags: Vec::new(),
         };
         let bare = tool.name.len() + tool.description.len() + tool.parameters.to_string().len();
         let sent = schema_chars(std::slice::from_ref(&tool), false);
