@@ -6,8 +6,15 @@
   there, and the conversation's cost at its model's list price: `≈ $0.42`, every
   turn of the conversation, earlier sessions included; the exit summary ends with
   it too. The kit's catalogue prices OpenAI's models; `[provider.pricing]` prices
-  the configured server's model, per million tokens. A ChatGPT account, billed by
-  plan, shows no cost (roomkit-tui c879190; RMK-1461).
+  the configured server's model, per million tokens (roomkit-tui c879190; RMK-1461).
+
+- A ChatGPT account shows its model's API list price too: what the conversation
+  would cost per token, though a plan bills it (RMK-1461).
+
+- The exit writes how to reopen the conversation, its usage and its cost before
+  closing begins, then the processes it stopped: a close that took long, or that a
+  second Ctrl+C cut, printed nothing at all. Each step of the close is recorded in
+  the diagnostics, so that one that never ends shows where (RMK-1478).
 
 - Follows roomkit-rs f86cbb1, roomkit-tui 23b1e6a, roomkit-tools 5d9096c and
   roomkit-auth 3bf770c (RMK-1460). A prompt's cache writes, which the kit now

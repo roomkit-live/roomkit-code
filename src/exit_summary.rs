@@ -215,15 +215,35 @@ impl Summary {
         }
     }
 
-    /// Write the report to the restored terminal.
-    pub fn print(&self, stopped: bool) {
-        for line in self.lines(stopped) {
+    /// Write how to reopen the conversation and what it used to the restored
+    /// terminal, before closing begins: a close that takes long, or that a
+    /// signal cuts, no longer loses them.
+    pub fn print_conversation(&self) {
+        for line in self.conversation_lines() {
             println!("{line}");
         }
     }
 
-    /// `stopped` tells whether closing confirmed that processes were stopped.
+    /// Write the processes closing stopped, once it has.
+    pub fn print_processes(&self, stopped: bool) {
+        let mut lines = Vec::new();
+        self.processes(&mut lines, stopped);
+        for line in lines {
+            println!("{line}");
+        }
+    }
+
+    /// The whole report, in the order it is written; `stopped` tells whether
+    /// closing confirmed that processes were stopped.
+    #[cfg(test)]
     pub fn lines(&self, stopped: bool) -> Vec<String> {
+        let mut lines = self.conversation_lines();
+        self.processes(&mut lines, stopped);
+        lines
+    }
+
+    /// The conversation's session, how to reopen it, and its usage.
+    fn conversation_lines(&self) -> Vec<String> {
         let mut lines = Vec::new();
         if let Some(session) = &self.session {
             lines.push(format!("Session: {session}"));
@@ -240,7 +260,6 @@ impl Summary {
         {
             lines.push(usage.line(self.cost.as_ref()));
         }
-        self.processes(&mut lines, stopped);
         lines
     }
 

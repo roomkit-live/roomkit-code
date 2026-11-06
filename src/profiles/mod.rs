@@ -79,16 +79,14 @@ struct ConfiguredPrice {
 }
 
 /// The list price of `model` on `connection`: the kit's catalogue, else the
-/// one the configuration states for that server and model. None for a
-/// ChatGPT account, which a plan bills, not each token.
+/// one the configuration states for that server and model. A ChatGPT
+/// account, which a plan bills, reads its model's API list price too: what
+/// the conversation would cost per token.
 fn list_price(
     connection: &Provider,
     model: &str,
     configured: Option<&ConfiguredPrice>,
 ) -> Option<roomkit_ai::ModelPricing> {
-    if matches!(connection.authentication, Authentication::ChatGpt { .. }) {
-        return None;
-    }
     <roomkit_openai::OpenAiAiProvider as roomkit_ai::AiProvider>::available_models()
         .into_iter()
         .find(|entry| entry.id == model)
@@ -453,10 +451,10 @@ mod tests {
         }
     }
 
-    /// RMK-1461: the kit's catalogue prices its models, the configuration a
-    /// server's own, and a ChatGPT account, billed by plan, nothing.
+    /// RMK-1461: the kit's catalogue prices its models, a ChatGPT account's
+    /// too, and the configuration a server's own.
     #[test]
-    fn a_model_is_priced_by_the_catalogue_else_the_configuration_never_by_plan() {
+    fn a_model_is_priced_by_the_catalogue_else_the_configuration() {
         let catalogue =
             <roomkit_openai::OpenAiAiProvider as roomkit_ai::AiProvider>::available_models()
                 .into_iter()
@@ -477,6 +475,6 @@ mod tests {
         let plan = connection(Authentication::ChatGpt {
             account: "account".into(),
         });
-        assert_eq!(list_price(&plan, &catalogue.0, None), None);
+        assert_eq!(list_price(&plan, &catalogue.0, None), Some(catalogue.1));
     }
 }

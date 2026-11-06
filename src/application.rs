@@ -73,14 +73,29 @@ impl Application {
     }
 
     pub async fn close(&self) -> Result<()> {
+        // Each step is recorded as it begins: a close that never ends shows
+        // in the diagnostics where it stopped.
+        let step = |step: &str| {
+            let fields = serde_json::json!({"step": step});
+            self.profiles
+                .diagnostics
+                .record("application_closing", fields, None);
+        };
+        step("updates");
         self.services.updates.close().await;
+        step("shell");
         self.services.shell.close().await;
+        step("accounts");
         self.profiles.accounts.close().await;
+        step("mcp");
         self.profiles.mcp_runtime.close().await;
         // Closing cancels running shell calls: the agents' slots record what
         // they changed as they close, before the engine closes its store.
+        step("engine");
         let engine = self.kit.close().await;
+        step("hooks");
         self.services.hooks.close().await;
+        step("tools");
         let tools = self.profiles.resources.close().await;
         self.profiles.diagnostics.close().await;
         engine?;
@@ -219,6 +234,7 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
     integrations.freeze();
     let attached = adapter.await;
     let summary = summarize(&app, observer.latest(), &resume).await;
+    summary.print_conversation();
     let closed = app.close().await;
     integrations.close().await;
     report(&app, &summary, closed.is_ok());
@@ -228,9 +244,9 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
     Ok(())
 }
 
-/// The exit report, then a line when internal errors occurred.
+/// The processes closing stopped, then a line when internal errors occurred.
 fn report(app: &Application, summary: &crate::exit_summary::Summary, stopped: bool) {
-    summary.print(stopped);
+    summary.print_processes(stopped);
     if let Some(notice) = app.profiles.diagnostics.panic_notice() {
         eprintln!("{notice}");
     }
