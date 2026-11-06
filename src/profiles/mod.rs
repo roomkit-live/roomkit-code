@@ -67,6 +67,37 @@ struct State {
     pending: Option<ui::Pending>,
     pending_delete: Option<deletion::Pending>,
     setup_error: Option<String>,
+    /// The price the configuration states for one server and model.
+    configured_price: Option<ConfiguredPrice>,
+}
+
+/// `[provider.pricing]`: the list price of `model` on `base_url`.
+struct ConfiguredPrice {
+    base_url: String,
+    model: String,
+    pricing: roomkit_ai::ModelPricing,
+}
+
+/// The list price of `model` on `connection`: the kit's catalogue, else the
+/// one the configuration states for that server and model. None for a
+/// ChatGPT account, which a plan bills, not each token.
+fn list_price(
+    connection: &Provider,
+    model: &str,
+    configured: Option<&ConfiguredPrice>,
+) -> Option<roomkit_ai::ModelPricing> {
+    if matches!(connection.authentication, Authentication::ChatGpt { .. }) {
+        return None;
+    }
+    <roomkit_openai::OpenAiAiProvider as roomkit_ai::AiProvider>::available_models()
+        .into_iter()
+        .find(|entry| entry.id == model)
+        .and_then(|entry| entry.pricing)
+        .or_else(|| {
+            configured
+                .filter(|price| price.base_url == connection.base_url && price.model == model)
+                .map(|price| price.pricing.clone())
+        })
 }
 
 impl Profiles {
@@ -131,6 +162,11 @@ impl Profiles {
                 pending: None,
                 pending_delete: None,
                 setup_error: None,
+                configured_price: settings.pricing.clone().map(|pricing| ConfiguredPrice {
+                    base_url: settings.base_url.clone(),
+                    model: settings.model.clone(),
+                    pricing,
+                }),
             }),
         }))
     }
@@ -331,15 +367,22 @@ impl State {
                 ),
             );
             view.context_capacity = profile.context_window;
+            view.pricing = self.pricing(&profile);
         } else {
             view.model = None;
             view.context_capacity = None;
+            view.pricing = None;
         }
         view.submission_error = if self.tools.contains_key(view.agent.as_str()) {
             None
         } else {
             Some(self.setup_error.clone().unwrap_or_else(|| "Configure a connection with /providers, then create or select an agent with /agents".into()))
         };
+    }
+
+    fn pricing(&self, agent: &Agent) -> Option<roomkit_ai::ModelPricing> {
+        let connection = self.providers.value.profiles.get(&agent.provider)?;
+        list_price(connection, &agent.model, self.configured_price.as_ref())
     }
 
     fn ensure_slot(&mut self, kit: &RoomKit<SqliteStore>, id: &str) -> Result<(), String> {
@@ -383,5 +426,57 @@ impl State {
         self.tools.insert(id.into(), inventory.tools);
         self.setup_error = None;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, reason = "Invalid fixtures fail the test")]
+    use super::*;
+
+    fn connection(authentication: Authentication) -> Provider {
+        Provider {
+            id: "local".into(),
+            label: "Local".into(),
+            base_url: "http://localhost:8000/v1".into(),
+            authentication,
+            timeout_seconds: 600,
+        }
+    }
+
+    fn configured(model: &str) -> ConfiguredPrice {
+        let verified = roomkit_ai::Date::new(2026, 11, 6).unwrap();
+        ConfiguredPrice {
+            base_url: "http://localhost:8000/v1".into(),
+            model: model.into(),
+            pricing: roomkit_ai::ModelPricing::new(0.5, 1.5, verified).unwrap(),
+        }
+    }
+
+    /// RMK-1461: the kit's catalogue prices its models, the configuration a
+    /// server's own, and a ChatGPT account, billed by plan, nothing.
+    #[test]
+    fn a_model_is_priced_by_the_catalogue_else_the_configuration_never_by_plan() {
+        let catalogue =
+            <roomkit_openai::OpenAiAiProvider as roomkit_ai::AiProvider>::available_models()
+                .into_iter()
+                .find_map(|entry| Some((entry.id, entry.pricing?)))
+                .unwrap();
+        let key = connection(Authentication::None);
+        let listed = list_price(&key, &catalogue.0, Some(&configured(&catalogue.0)));
+        assert_eq!(listed, Some(catalogue.1.clone()));
+        let local = configured("local-model");
+        assert_eq!(
+            list_price(&key, "local-model", Some(&local)),
+            Some(local.pricing.clone())
+        );
+        assert_eq!(list_price(&key, "another-model", Some(&local)), None);
+        let mut elsewhere = connection(Authentication::None);
+        elsewhere.base_url = "http://another:8000/v1".into();
+        assert_eq!(list_price(&elsewhere, "local-model", Some(&local)), None);
+        let plan = connection(Authentication::ChatGpt {
+            account: "account".into(),
+        });
+        assert_eq!(list_price(&plan, &catalogue.0, None), None);
     }
 }

@@ -40,6 +40,7 @@ fn a_resumable_session_reports_its_command_usage_and_stopped_processes() {
             .to_vec(),
         ),
         usage: Some(usage(2, true)),
+        cost: None,
         running: vec![process("proc-1", "npm run\tdev\n", 252)],
     };
     assert_eq!(
@@ -61,6 +62,7 @@ fn partial_usage_is_marked_and_unconfirmed_cleanup_is_not_reported_as_stopped() 
         session: Some("main".into()),
         resume: None,
         usage: Some(usage(1, false)),
+        cost: None,
         running: (0..10)
             .map(|i| process(&format!("p{i}"), "sleep 9", 3700))
             .collect(),
@@ -82,6 +84,7 @@ fn an_untouched_draft_without_processes_prints_nothing() {
     let unreported = Summary {
         session: Some("main".into()),
         usage: Some(usage(0, true)),
+        cost: None,
         ..Summary::default()
     };
     assert_eq!(unreported.lines(true), ["Session: main"]);
@@ -172,6 +175,7 @@ fn a_turn_stopped_before_anything_told_leaves_the_total_partial() {
 fn a_turn_told_nothing_still_prints_its_partial_total() {
     let summary = Summary {
         usage: Some(usage(0, false)),
+        cost: None,
         ..Summary::default()
     };
     assert!(
@@ -182,6 +186,7 @@ fn a_turn_told_nothing_still_prints_its_partial_total() {
     );
     let idle = Summary {
         usage: Some(usage(0, true)),
+        cost: None,
         ..Summary::default()
     };
     assert!(

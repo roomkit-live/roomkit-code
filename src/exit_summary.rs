@@ -8,6 +8,8 @@ use roomkit::model::{EventType, Metadata, RoomEvent, RoomId};
 use roomkit::{GetTimelineOptions, RoomKit};
 use roomkit_sqlite::SqliteStore;
 use roomkit_tools_process::{ProcessSession, ProcessState};
+use roomkit_tui::protocol::ConversationCost;
+use roomkit_tui_engine::SessionConfig;
 use serde_json::{Value, json};
 
 /// Processes listed by name; the rest are counted.
@@ -43,15 +45,19 @@ pub(crate) struct Summary {
     pub session: Option<String>,
     pub resume: Option<Vec<String>>,
     pub usage: Option<Usage>,
+    /// The conversation's cost at its model's list price, when it has one.
+    pub cost: Option<ConversationCost>,
     pub running: Vec<Process>,
 }
 
 /// Gather the report for the conversation shown at exit, given with the
-/// command that reopens it. An untouched draft has nothing to resume.
+/// command that reopens it, and `priced`, its view priced as the profiles
+/// price it. An untouched draft has nothing to resume.
 pub(crate) async fn collect(
     kit: &RoomKit<SqliteStore>,
     processes: &ProcessSession,
     shown: Option<(String, Option<Vec<String>>)>,
+    priced: Option<SessionConfig>,
 ) -> Summary {
     let mut summary = Summary {
         running: running(processes).await,
@@ -67,6 +73,12 @@ pub(crate) async fn collect(
         return summary;
     }
     summary.usage = usage(kit, &room).await.ok();
+    if let Some(config) = priced.filter(|config| config.room == room) {
+        summary.cost = roomkit_tui_engine::conversation_cost(kit, &config)
+            .await
+            .ok()
+            .flatten();
+    }
     // The ID still reopens it; a name only helps recognize it.
     summary.session = Some(match crate::sessions::name(kit, &room).await {
         Some(name) => format!("{name} · {session}"),
@@ -153,9 +165,13 @@ impl Usage {
         self.complete &= reported && input.is_some() && output.is_some();
     }
 
-    fn line(&self) -> String {
+    fn line(&self, cost: Option<&ConversationCost>) -> String {
+        let cost = cost.map_or_else(String::new, |cost| {
+            let partial = if cost.complete { "" } else { " (partial)" };
+            format!(" · cost {}{partial}", amount(cost))
+        });
         format!(
-            "Token usage: total={} input={} (+ {} cached) output={} · {} {}{}",
+            "Token usage: total={} input={} (+ {} cached) output={} · {} {}{}{cost}",
             self.input.saturating_add(self.output),
             self.input,
             self.cached,
@@ -164,6 +180,22 @@ impl Usage {
             if self.turns == 1 { "turn" } else { "turns" },
             if self.complete { "" } else { " (partial)" },
         )
+    }
+}
+
+/// `≈ $0.42`, a list price's estimate; below a cent, four decimals, as the
+/// view writes it.
+fn amount(cost: &ConversationCost) -> String {
+    let value = cost.micros as f64 / 1_000_000.0;
+    let digits = if cost.micros == 0 || cost.micros >= 10_000 {
+        2
+    } else {
+        4
+    };
+    let value = format!("{value:.digits$}");
+    match cost.currency.as_str() {
+        "USD" => format!("≈ ${value}"),
+        currency => format!("≈ {value} {currency}"),
     }
 }
 
@@ -206,7 +238,7 @@ impl Summary {
             .as_ref()
             .filter(|usage| usage.turns > 0 || !usage.complete)
         {
-            lines.push(usage.line());
+            lines.push(usage.line(self.cost.as_ref()));
         }
         self.processes(&mut lines, stopped);
         lines

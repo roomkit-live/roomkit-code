@@ -6,7 +6,7 @@ use clap::{Parser, ValueEnum};
 use roomkit_tui::{
     Branding, ColorMode, SelectionMode, TerminalStatus, Theme, UiOptions, WelcomeScreen,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{Result, permissions::Mode};
 
@@ -185,6 +185,38 @@ struct Provider {
     timeout_seconds: Option<u64>,
     context_window: Option<u64>,
     max_output_tokens: Option<u32>,
+    pricing: Option<Pricing>,
+}
+
+/// The configured model's list price per million tokens, for a server whose
+/// model the kit's catalogue does not price.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Pricing {
+    input_per_million: f64,
+    output_per_million: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cache_read_per_million: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cache_write_per_million: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    currency: Option<String>,
+    /// The day the rates were read, as `YYYY-MM-DD`.
+    verified: String,
+}
+
+impl Pricing {
+    /// The kit's price, its rates checked as the kit checks its catalogue's.
+    fn read(self) -> Result<roomkit_ai::ModelPricing> {
+        serde_json::to_value(self)
+            .ok()
+            .and_then(|fields| serde_json::from_value(fields).ok())
+            .ok_or_else(|| {
+                "[provider.pricing] needs rates of 0 or more per million tokens and \
+                 verified = \"YYYY-MM-DD\""
+                    .into()
+            })
+    }
 }
 
 #[derive(Deserialize)]
@@ -258,6 +290,8 @@ pub(crate) struct Settings {
     pub provider_timeout_seconds: u64,
     pub context_window: Option<u64>,
     pub max_output_tokens: Option<u32>,
+    /// The list price `[provider.pricing]` states for `model` on `base_url`.
+    pub pricing: Option<roomkit_ai::ModelPricing>,
     pub debug: bool,
     pub ui: UiOptions,
     pub mode: Mode,
@@ -331,6 +365,7 @@ impl Settings {
         if max_output_tokens == Some(0) {
             return Err("max output tokens must be a positive token count".into());
         }
+        let pricing = file.provider.pricing.map(Pricing::read).transpose()?;
         let workspace = cli
             .workspace
             .canonicalize()
@@ -432,6 +467,7 @@ impl Settings {
             provider_timeout_seconds,
             context_window,
             max_output_tokens,
+            pricing,
             ui,
         })
     }

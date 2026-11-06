@@ -8,6 +8,16 @@ timeout_seconds = 600 # longest wait between two reads of a model answer
 # max_output_tokens = 4096 # most tokens one reply may write; omitted sends no limit
 # API keys are read only from ROOMKIT_API_KEY, never from this file.
 
+# The model's list price, which shows the conversation's cost. The kit already
+# prices OpenAI's models; this prices this server's model, per million tokens.
+# [provider.pricing]
+# input_per_million = 0.50
+# output_per_million = 1.50
+# cache_read_per_million = 0.05 # tokens read from the prompt cache
+# cache_write_per_million = 0.60 # tokens written to it, where billed apart
+# currency = "USD"
+# verified = "2026-11-06" # the day the rates were read
+
 [agent]
 require_tool_intent = true # false makes the public description optional in model-facing tool schemas
 

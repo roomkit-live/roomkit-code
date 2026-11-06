@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The footer and the sidebar show what a turn read from the prompt cache and wrote
+  there, and the conversation's cost at its model's list price: `≈ $0.42`, every
+  turn of the conversation, earlier sessions included; the exit summary ends with
+  it too. The kit's catalogue prices OpenAI's models; `[provider.pricing]` prices
+  the configured server's model, per million tokens. A ChatGPT account, billed by
+  plan, shows no cost (roomkit-tui c879190; RMK-1461).
+
 - Follows roomkit-rs f86cbb1, roomkit-tui 23b1e6a, roomkit-tools 5d9096c and
   roomkit-auth 3bf770c (RMK-1460). A prompt's cache writes, which the kit now
   reports apart from its input, count in the exit summary's input, the turn's

@@ -246,6 +246,10 @@ async fn summarize(
         .as_ref()
         .and_then(|view| view.run.as_ref())
         .is_some_and(|run| run.outcome.is_none());
+    let priced = match &view {
+        Some(view) => priced(app, view).await,
+        None => None,
+    };
     let shown = view.map(|view| {
         let command = view
             .mode
@@ -253,12 +257,24 @@ async fn summarize(
             .and_then(|mode| resume.command(view.conversation.as_str(), mode.selected.as_str()));
         (view.conversation.into_inner(), command)
     });
-    let mut summary =
-        crate::exit_summary::collect(&app.kit, &app.profiles.resources.processes, shown).await;
+    let processes = &app.profiles.resources.processes;
+    let mut summary = crate::exit_summary::collect(&app.kit, processes, shown, priced).await;
     if running {
         summary.turn_running();
     }
     summary
+}
+
+/// The view shown at exit, priced as the profiles price its agent.
+async fn priced(
+    app: &Application,
+    view: &roomkit_tui::SessionObservation,
+) -> Option<SessionConfig> {
+    let room = roomkit::model::RoomId::new(view.conversation.as_str()).ok()?;
+    let agent = ChannelId::new(view.selected_agent.as_str()).ok()?;
+    let mut config = SessionConfig::new(room, agent, "local-user");
+    app.profiles.configure_view(&mut config).await;
+    Some(config)
 }
 
 #[cfg(test)]

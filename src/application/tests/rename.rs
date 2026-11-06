@@ -87,6 +87,7 @@ async fn a_named_conversation_keeps_its_name_in_the_title_the_picker_and_the_exi
         &app.kit,
         &app.profiles.resources.processes,
         Some((room.to_string(), None)),
+        None,
     )
     .await;
     let lines = summary.lines(true);

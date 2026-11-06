@@ -3,7 +3,9 @@
 A fake server reports 1000, 2000, then 3000 tokens, one step at a time: the
 counter follows each step without "(last report)", keeps the last measure after
 Esc, on the first turn too, and after a resume, and the turn's totals and the exit
-summary count the stopped turn.
+summary count the stopped turn. With a configured price, the sidebar shows what a
+turn read from the prompt cache and the conversation's cost, and the exit summary
+ends with that cost (RMK-1461).
 """
 import fcntl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -67,7 +69,11 @@ class Model(BaseHTTPRequestHandler):
             tool = {"index": 0, "id": f"call-{index}", "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}
             chunks.append({"choices": [{"index": 0, "delta": {"tool_calls": [tool]}}]})
         chunks.append({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls" if call else "stop"}]})
-        chunks.append({"choices": [], "usage": {"prompt_tokens": tokens, "completion_tokens": 10}})
+        prompt, cached = tokens if isinstance(tokens, tuple) else (tokens, 0)
+        usage = {"prompt_tokens": prompt, "completion_tokens": 10}
+        if cached:
+            usage["prompt_tokens_details"] = {"cached_tokens": cached}
+        chunks.append({"choices": [], "usage": usage})
         frames = [f"data: {json.dumps(chunk)}\n\n" for chunk in chunks] + ["data: [DONE]\n\n"]
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -84,9 +90,9 @@ class Model(BaseHTTPRequestHandler):
 
 
 class App:
-    def __init__(self, argv, storage):
+    def __init__(self, argv, storage, columns=100):
         self.master, self.slave = pty.openpty()
-        fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 100, 0, 0))
+        fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, columns, 0, 0))
         self.original = termios.tcgetattr(self.slave)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
         env.update({"TERM": "xterm-256color", "HOME": str(storage / "home"), "XDG_DATA_HOME": str(storage / "data"), "OPENAI_API_KEY": "x"})
@@ -162,11 +168,12 @@ class Run:
         self.app = None
         return self
 
-    def open(self, argv=None):
+    def open(self, argv=None, extra=(), columns=100):
         url = f"http://127.0.0.1:{server.server_port}/v1"
         argv = argv or [str(binary), str(self.project), "--state-dir", str(self.storage), "--base-url", url, "--model", "fixture",
-                        "--mode", "yolo", "--context-window", "131072", "--color", "never", "--no-animations", "--no-herdr", "--no-terminal-status"]
-        self.app = App(argv, self.storage)
+                        "--mode", "yolo", "--context-window", "131072", "--color", "never", "--no-animations", "--no-herdr", "--no-terminal-status",
+                        *extra]
+        self.app = App(argv, self.storage, columns)
         self.app.wait("[Yolo]")
         return self.app
 
@@ -277,6 +284,26 @@ def exit_during_a_command():
         assert "1 turn" in total and "(partial)" not in total, total
 
 
+def priced_cache_and_cost():
+    """RMK-1461: a price in the configuration shows the turn's cache reads and the
+    conversation's cost in the sidebar, and the exit summary ends with that cost:
+    800 × 2.0 + 200 × 0.1 + 10 × 10.0 millionths of a dollar."""
+    global script
+    script = Script([("Done.", None, (1000, 200))])
+    with Run() as run:
+        config = run.storage / "priced.toml"
+        config.write_text('[provider.pricing]\ninput_per_million = 2.0\noutput_per_million = 10.0\n'
+                          'cache_read_per_million = 0.1\nverified = "2026-11-06"\n')
+        app = run.open(extra=["--config", str(config)], columns=160)
+        script.gates[0].set()
+        offset = app.send("Price this\r")
+        app.wait("Done.", offset)
+        app.wait("Cache: 200 read", offset)
+        app.wait("Conversation: ≈ $0.0017", offset)
+        total = next(line for line in app.quit() if line.startswith("Token usage:"))
+        assert total.endswith("input=800 (+ 200 cached) output=10 · 1 turn · cost ≈ $0.0017"), total
+
+
 server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
@@ -333,9 +360,10 @@ try:
 
     exit_during_a_turn()
     exit_during_a_command()
+    priced_cache_and_cost()
 finally:
     server.shutdown()
     server.server_close()
     thread.join(timeout=5)
 
-print("PTY usage passed: the counter follows each step, a stopped turn keeps its measure and its usage, after a resume too.")
+print("PTY usage passed: the counter follows each step, a stopped turn keeps its measure and its usage, after a resume too; a priced conversation shows its cache and its cost.")

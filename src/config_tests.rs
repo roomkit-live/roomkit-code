@@ -398,3 +398,40 @@ fn the_file_list_loads_and_a_resume_replays_only_the_flag() {
         ]
     );
 }
+
+/// RMK-1461: `[provider.pricing]` states a server's price per million tokens,
+/// checked as the kit checks its catalogue's; a wrong or misspelt rate is refused.
+#[test]
+fn a_configured_price_is_read_and_a_wrong_one_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let mut cli = cli(root.path());
+    let config = root.path().join("options.toml");
+    cli.config = Some(config.clone());
+    let write =
+        |body: &str| std::fs::write(&config, format!("[provider.pricing]\n{body}\n")).unwrap();
+    write(
+        "input_per_million = 0.5\noutput_per_million = 1.5\ncache_read_per_million = 0.05\nverified = \"2026-11-06\"",
+    );
+    let pricing = Settings::load(&cli).unwrap().pricing.unwrap();
+    assert_eq!(pricing.input_per_million.to_bits(), 0.5_f64.to_bits());
+    assert_eq!(pricing.output_per_million.to_bits(), 1.5_f64.to_bits());
+    assert_eq!(
+        pricing.cache_read_per_million.map(f64::to_bits),
+        Some(0.05_f64.to_bits())
+    );
+    assert_eq!(
+        (pricing.cache_write_per_million, pricing.currency.as_str()),
+        (None, "USD")
+    );
+    for wrong in [
+        "input_per_million = -1.0\noutput_per_million = 1.0\nverified = \"2026-11-06\"",
+        "input_per_million = 1.0\noutput_per_million = 1.0\nverified = \"tomorrow\"",
+        "input_per_million = 1.0\noutput_per_million = 1.0\ncache_reads_per_million = 0.1\nverified = \"2026-11-06\"",
+        "input_per_million = 1.0\noutput_per_million = 1.0",
+    ] {
+        write(wrong);
+        assert!(Settings::load(&cli).is_err(), "{wrong}");
+    }
+    std::fs::write(&config, "[provider]\n").unwrap();
+    assert!(Settings::load(&cli).unwrap().pricing.is_none());
+}
