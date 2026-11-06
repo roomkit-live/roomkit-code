@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Follows roomkit-rs f86cbb1, roomkit-tui 23b1e6a, roomkit-tools 5d9096c and
+  roomkit-auth 3bf770c (RMK-1460). A prompt's cache writes, which the kit now
+  reports apart from its input, count in the exit summary's input, the turn's
+  totals and the context counter (RMK-1457).
+
 - A first turn with no text at all, stopped while its call runs, keeps its measure
   after a resume, where it read `context ?`, and the exit summary counts it: its
   record rides its last row (roomkit-rs 6f94ec6, roomkit-tools 3771f26, roomkit-tui

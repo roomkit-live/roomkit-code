@@ -142,7 +142,10 @@ impl Usage {
         };
         let count = |key| total.get(key).and_then(Value::as_u64);
         let (input, output) = (count("input_tokens"), count("output_tokens"));
-        self.input += input.unwrap_or(0);
+        // Since roomkit-rs f86cbb1 a Chat Completions usage reports a prompt's
+        // cache writes apart from its `input_tokens`: they are input the cache
+        // did not serve (RMK-1457).
+        self.input += input.unwrap_or(0) + count("cache_creation_input_tokens").unwrap_or(0);
         self.cached += count("cache_read_input_tokens").unwrap_or(0);
         self.output += output.unwrap_or(0);
         self.turns += 1;

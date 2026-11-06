@@ -61,3 +61,27 @@ async fn exit_report_sums_every_turn_and_lists_processes_closing_will_stop() {
     app.close().await.unwrap();
     assert!(collect(&app.kit, processes, None).await.running.is_empty());
 }
+
+/// RMK-1457: since roomkit-rs f86cbb1 a Chat Completions usage reports the
+/// tokens a prompt wrote to the cache apart from its `input_tokens`, and the
+/// exit line counted them nowhere.
+#[tokio::test]
+async fn exit_report_counts_a_prompt_s_cache_writes_in_its_input() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let written = Some(json!({
+        "prompt_tokens": 1000,
+        "completion_tokens": 10,
+        "prompt_tokens_details": {"cached_tokens": 200, "cache_write_tokens": 300}
+    }));
+    let mock = Mock::with_reports(Vec::new(), "Done.", vec![written]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    turn_operation(&app, "first").await;
+    let processes = &app.profiles.resources.processes;
+    let summary = collect(&app.kit, processes, Some(("main".into(), None))).await;
+    let usage = summary.usage.as_ref().unwrap();
+    // 1000 prompt tokens: 200 read from the cache, 800 not, 300 of them written there.
+    assert_eq!((usage.input, usage.cached, usage.output), (800, 200, 10));
+    app.close().await.unwrap();
+}
