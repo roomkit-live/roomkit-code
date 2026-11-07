@@ -5,8 +5,9 @@
 - `--prompt` sends one message without the terminal interface and exits with the
   turn's outcome; `--json` writes every conversation event as one JSON line.
   Approvals are refused, Plan mode's tools are not offered, SIGINT cuts the
-  turn (HITL e079aac4). `--max-tool-rounds` and `[agent] max_tool_rounds` set a
-  turn's round limit, 50 by default.
+  turn (HITL e079aac4). A turn's round limit stays 50 in the terminal and has
+  none unattended (HITL 1603bb98); `--max-tool-rounds` and
+  `[agent] max_tool_rounds` set it.
 - An agent whose model's window is known compacts its conversation by tiers
   instead of reading its latest 50 messages (HITL a2daedfe, db06dd3d). Under 80 %
   of its ceiling, the window or, when smaller, the input past which the model's

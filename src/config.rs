@@ -76,7 +76,8 @@ pub(crate) struct Cli {
     /// Require the public intent field in tool schemas sent to the model.
     #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
     pub require_tool_intent: Option<bool>,
-    /// Rounds of tool calls one turn may run before it stops unfinished.
+    /// Rounds of tool calls one turn may run before it stops unfinished:
+    /// 50 by default, no limit with --prompt.
     #[arg(long)]
     pub max_tool_rounds: Option<u32>,
     /// Check launch options and workspace without loading profiles or connecting.
@@ -173,9 +174,13 @@ impl Default for AgentOptions {
     }
 }
 
-/// The rounds of tool calls a turn runs when nothing sets them: the bound
-/// the engine has always applied (HITL 1603bb98 decides the default).
+/// The rounds of tool calls a turn runs in the terminal when nothing sets
+/// them: the bound the engine has always applied, a point where the person
+/// sends a message to continue (HITL 1603bb98).
 pub(crate) const DEFAULT_TOOL_ROUNDS: u32 = 50;
+/// Unattended, nobody can say to continue: a turn runs until it answers,
+/// as other harnesses' turns do (HITL 1603bb98).
+pub(crate) const UNATTENDED_TOOL_ROUNDS: u32 = u32::MAX;
 
 #[derive(Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -388,7 +393,10 @@ impl Settings {
         if max_output_tokens == Some(0) {
             return Err("max output tokens must be a positive token count".into());
         }
-        let max_tool_rounds = tool_rounds(cli.max_tool_rounds.or(file.agent.max_tool_rounds))?;
+        let max_tool_rounds = tool_rounds(
+            cli.max_tool_rounds.or(file.agent.max_tool_rounds),
+            cli.prompt.is_some(),
+        )?;
         let pricing = file.provider.pricing.map(Pricing::read).transpose()?;
         let workspace = cli
             .workspace
@@ -499,11 +507,14 @@ impl Settings {
     }
 }
 
-/// The rounds of tool calls a turn may run: at least one.
-fn tool_rounds(rounds: Option<u32>) -> Result<u32> {
+/// The rounds of tool calls a turn may run: at least one when set, else
+/// the default of an attended or an unattended launch.
+fn tool_rounds(rounds: Option<u32>, unattended: bool) -> Result<u32> {
     match rounds {
         Some(0) => Err("max tool rounds must be at least 1".into()),
-        rounds => Ok(rounds.unwrap_or(DEFAULT_TOOL_ROUNDS)),
+        Some(rounds) => Ok(rounds),
+        None if unattended => Ok(UNATTENDED_TOOL_ROUNDS),
+        None => Ok(DEFAULT_TOOL_ROUNDS),
     }
 }
 

@@ -149,6 +149,14 @@ def round_limit(root, model):
     assert len(model.requests) == 2, len(model.requests)
 
 
+def past_fifty_rounds(root, model):
+    # The terminal's bound of 50 rounds does not apply unattended.
+    code, out, err = run(root, model, "--mode", "yolo", "--prompt", "Look around for long.")
+    assert code == 0, (code, err)
+    assert out == ANSWER + "\n", out
+    assert len(model.tool_results()) >= 55, len(model.tool_results())
+
+
 def from_stdin(root, model):
     code, out, err = run(root, model, "--prompt", "-", stdin="A message read from standard input.\n")
     assert code == 0, (code, err)
@@ -189,6 +197,8 @@ scenario("ask refuses approvals", [call("shell", command="touch denied.txt"), AN
 # calls only loses its end before the host reads it, in the terminal too
 # (a defect of the kit's delivery, reported apart).
 scenario("round limit fails the launch", [call("list", path="."), call("list", "Still looking.", path="."), ANSWER], round_limit)
+# Each call differs: the engine stops a turn that repeats one exact call.
+scenario("no round limit unattended", [call("glob", pattern=f"*{i}*") for i in range(55)] + [ANSWER], past_fifty_rounds)
 scenario("message from standard input", [ANSWER], from_stdin)
 scenario("a signal interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], interrupted)
 scenario("invalid launches", [ANSWER], refused_without_agent)

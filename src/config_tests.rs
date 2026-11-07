@@ -481,6 +481,14 @@ fn a_prompt_makes_the_launch_unattended_and_json_needs_one() {
     assert!(parsed.json);
     let settings = Settings::load(&parsed).unwrap();
     assert!(settings.unattended);
+    // Nobody can say to continue: the turn runs until it answers, unless
+    // the launch sets a bound.
+    assert_eq!(settings.max_tool_rounds, u32::MAX);
+    let bounded = base
+        .into_iter()
+        .chain(["-p", "Fix it.", "--max-tool-rounds", "80"]);
+    let parsed_bounded = Cli::try_parse_from(bounded).unwrap();
+    assert_eq!(Settings::load(&parsed_bounded).unwrap().max_tool_rounds, 80);
     // A resumed session opens in the terminal: the message is not replayed.
     assert!(
         !resume_options(&parsed)

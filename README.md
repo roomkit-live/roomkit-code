@@ -211,9 +211,10 @@ Plan mode's tools are not offered, since leaving Plan needs a person's
 approval. The conversation is saved like any other: `--session NAME` continues
 it, and `/resume` lists it in the terminal.
 
-A turn runs at most 50 rounds of tool calls before it stops unfinished, in the
-terminal too. `--max-tool-rounds N` or `[agent] max_tool_rounds` in the
-configuration file raises or lowers that bound; the flag is kept in the resume
+In the terminal, a turn runs at most 50 rounds of tool calls before it stops
+unfinished, and a message continues it. Unattended, nobody can, so a turn runs
+until it answers. `--max-tool-rounds N` or `[agent] max_tool_rounds` in the
+configuration file sets that bound for both; the flag is kept in the resume
 command.
 
 ## Terminal integrations
