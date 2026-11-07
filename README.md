@@ -547,8 +547,9 @@ on Linux and macOS.
 The engine owns persistence and bounded context restoration. The terminal
 adapter displays up to 500 stored events; the current provider uses the engine's
 bounded message/tool history, not the entire on-screen conversation. Model
-changes apply to future turns. Automatic compaction
-and a remote-engine transport are not implemented in this version.
+changes apply to future turns. An agent whose model's window is known compacts
+its conversation ([Compaction](#compaction)). A remote-engine transport is not
+implemented in this version.
 
 `code_outline` uses Tree-sitter to locate Rust/Python definitions, signatures and
 line ranges before a targeted `read`. It does not resolve types or index an
