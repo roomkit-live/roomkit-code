@@ -248,3 +248,21 @@ fn a_turn_left_running_leaves_the_total_partial_until_its_record_is_written() {
     summary.turn_running();
     assert!(summary.usage.as_ref().unwrap().complete);
 }
+
+#[test]
+fn an_unattended_launch_reports_the_processes_it_left_running() {
+    let summary = Summary {
+        session: None,
+        resume: None,
+        usage: None,
+        cost: None,
+        running: vec![process("p2", "python3 server.py", 61)],
+    };
+    assert_eq!(
+        summary.process_report(super::Fate::LeftRunning),
+        [
+            "Left 1 background process running:",
+            "  p2 · python3 server.py · 1m 01s"
+        ]
+    );
+}

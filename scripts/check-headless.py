@@ -234,6 +234,42 @@ def long_shell(root, model):
     assert (root / "project" / "long").read_text() == "ran"
 
 
+def alive(pid):
+    """Whether pid runs, neither gone nor a zombie."""
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1][0] not in "ZX"
+    except FileNotFoundError:
+        return False
+
+
+def pid_in(path):
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        text = path.read_text().strip() if path.exists() else ""
+        if text:
+            return int(text)
+        time.sleep(0.01)
+    raise AssertionError(f"no pid in {path}")
+
+
+def left_running(root, model):
+    # Unattended, what the agent started runs on past the launch: a job a
+    # command put in the background, and a process it started.
+    code, out, err = run(root, model, "--mode", "yolo", "--prompt", "Start the servers.")
+    project = root / "project"
+    pids = [pid_in(project / "job.pid"), pid_in(project / "server.pid")]
+    try:
+        assert code == 0, (code, err)
+        assert [alive(pid) for pid in pids] == [True, True], pids
+        assert "Left 1 background process running:" in err, err
+    finally:
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
 def refused_without_agent(root, model):
     # An empty message is refused before anything opens.
     code, out, err = run(root, model, "--prompt", "   ")
@@ -261,5 +297,6 @@ scenario("SIGINT interrupts the turn", [call("shell", command="sleep 30", timeou
 scenario("SIGTERM interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], lambda root, model: interrupted(root, model, signal.SIGTERM))
 scenario("the engine's stored results are read", [call("read_stored_result", result_id="evicted_unknown"), ANSWER], stored_result)
 scenario("a shell command past two minutes", [call("shell", command="printf ran > long", timeout_ms=130000), ANSWER], long_shell)
+scenario("what the agent started runs on", [call("shell", command="sleep 60 > /dev/null 2>&1 & echo $! > job.pid"), call("process_start", command="echo $$ > server.pid; exec sleep 60"), ANSWER], left_running)
 scenario("invalid launches", [ANSWER], refused_without_agent)
 print("headless checks passed")

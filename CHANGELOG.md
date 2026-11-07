@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- An unattended launch leaves what its agent started running as it exits: a
+  job a command put in the background, and a `process_start` process, reported
+  as `Left N background processes running:`. The shell keeps the latest 16 KiB
+  of each stream, instead of its first and last 4 KiB.
+
 - A `--prompt` launch gives the agent no plan, guide or web tool (`plan_*`,
   `docs_*`, `web_search`, `web_fetch`), whatever its profile selects, and its
   system prompt leaves out its paragraphs on them and on the mode tools: on an

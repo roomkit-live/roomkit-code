@@ -103,7 +103,11 @@ impl Application {
         step("hooks");
         self.services.hooks.close().await;
         step("tools");
-        let tools = self.profiles.resources.close().await;
+        let tools = self
+            .profiles
+            .resources
+            .close(self.profiles.unattended())
+            .await;
         self.profiles.diagnostics.close().await;
         engine?;
         if !tools {
@@ -212,7 +216,7 @@ async fn abandon(kit: &RoomKit<SqliteStore>, profiles: &Profiles) {
     let _ = kit.close().await;
     profiles.mcp_runtime.close().await;
     profiles.diagnostics.close().await;
-    let _ = profiles.resources.close().await;
+    let _ = profiles.resources.close(false).await;
 }
 
 /// Events the terminal and the engine may queue for each other.

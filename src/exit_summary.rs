@@ -226,7 +226,7 @@ impl Summary {
 
     /// Write the processes closing stopped, once it has.
     pub fn print_processes(&self, stopped: bool) {
-        for line in self.process_report(stopped) {
+        for line in self.process_report(Fate::closed(stopped)) {
             println!("{line}");
         }
     }
@@ -236,14 +236,15 @@ impl Summary {
     #[cfg(test)]
     pub fn lines(&self, stopped: bool) -> Vec<String> {
         let mut lines = self.conversation_report();
-        lines.extend(self.process_report(stopped));
+        lines.extend(self.process_report(Fate::closed(stopped)));
         lines
     }
 
-    /// The processes closing stopped, or may have left running.
-    pub fn process_report(&self, stopped: bool) -> Vec<String> {
+    /// The processes still running as the application closed, and what
+    /// closing did to them.
+    pub fn process_report(&self, fate: Fate) -> Vec<String> {
         let mut lines = Vec::new();
-        self.processes(&mut lines, stopped);
+        self.processes(&mut lines, fate);
         lines
     }
 
@@ -268,16 +269,16 @@ impl Summary {
         lines
     }
 
-    fn processes(&self, lines: &mut Vec<String>, stopped: bool) {
+    fn processes(&self, lines: &mut Vec<String>, fate: Fate) {
         let count = self.running.len();
         if count == 0 {
             return;
         }
         let noun = if count == 1 { "process" } else { "processes" };
-        lines.push(if stopped {
-            format!("Stopped {count} background {noun}:")
-        } else {
-            format!("{count} background {noun} may still be running:")
+        lines.push(match fate {
+            Fate::Stopped => format!("Stopped {count} background {noun}:"),
+            Fate::Unknown => format!("{count} background {noun} may still be running:"),
+            Fate::LeftRunning => format!("Left {count} background {noun} running:"),
         });
         for process in self.running.iter().take(LISTED) {
             lines.push(format!(
@@ -289,6 +290,29 @@ impl Summary {
         }
         if count > LISTED {
             lines.push(format!("  … {} more", count - LISTED));
+        }
+    }
+}
+
+/// What closing did to the processes still running as the application closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fate {
+    /// Closing confirmed they were stopped.
+    Stopped,
+    /// Closing could not confirm it: they may still run.
+    Unknown,
+    /// An unattended launch let them go, still running.
+    LeftRunning,
+}
+
+impl Fate {
+    /// What a close that stopped processes reports: `stopped` tells whether
+    /// it confirmed so.
+    pub fn closed(stopped: bool) -> Self {
+        if stopped {
+            Self::Stopped
+        } else {
+            Self::Unknown
         }
     }
 }

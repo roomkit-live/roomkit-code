@@ -96,7 +96,13 @@ pub(crate) async fn run(settings: Settings, prompt: Prompt) -> Result<ExitCode> 
     };
     let closed = app.close().await;
     if let Some(summary) = &summary {
-        for line in summary.process_report(closed.is_ok()) {
+        // Closing an unattended launch lets its processes go, still running.
+        let fate = if closed.is_ok() {
+            crate::exit_summary::Fate::LeftRunning
+        } else {
+            crate::exit_summary::Fate::Unknown
+        };
+        for line in summary.process_report(fate) {
             eprintln!("{line}");
         }
     }

@@ -136,9 +136,16 @@ impl Resources {
         })
     }
 
-    pub async fn close(&self) -> bool {
+    /// Release every resource. `leave_processes` lets the running processes
+    /// go instead of stopping them: an unattended launch exits while a server
+    /// it started must still answer the check that follows.
+    pub async fn close(&self, leave_processes: bool) -> bool {
         let plans = self.plans.close().await;
-        let processes = self.processes.close().await;
+        let processes = if leave_processes {
+            self.processes.detach().await
+        } else {
+            self.processes.close().await
+        };
         let outputs = self.outputs.close().await;
         plans && processes && outputs
     }
@@ -188,9 +195,10 @@ pub(crate) async fn create(
 ) -> Result<(CodeAgent, Inventory)> {
     profile.validate()?;
     let unattended = extensions.unattended;
-    let shell_maximum = crate::timeouts::shell_max_seconds(unattended) * 1000;
+    let shell = shell_limits(unattended);
+    let shell_maximum = shell.max_timeout_ms;
     let policy = extensions.policy.clone();
-    let tools = native_tools(root, resources, policy, shell_maximum).await?;
+    let tools = native_tools(root, resources, policy, shell).await?;
     let tools = selected(profile, tools, unattended);
     let native: Vec<AiTool> = tools
         .iter()
@@ -332,25 +340,32 @@ fn mcp_handler(mcp: &[crate::profiles::McpTools]) -> Result<Option<ToolHandler>>
     })
 }
 
+/// The shell's limits. Each stream keeps its latest 16 KiB, where a command
+/// reports how it ended. An unattended launch's command may run an hour, and
+/// what it leaves in the background runs on: a server the check that follows
+/// the launch needs, for one.
+pub(crate) fn shell_limits(unattended: bool) -> ShellLimits {
+    ShellLimits {
+        max_output_bytes: 16 * 1024,
+        max_timeout_ms: crate::timeouts::shell_max_seconds(unattended) * 1000,
+        keep_background_jobs: unattended,
+        ..ShellLimits::default()
+    }
+}
+
 /// Every tool the application can give an agent, in inventory order, each
 /// scoped to the instructions of what it reads and tracked for the files it
-/// changes; its shell refuses a command longer than `shell_maximum`
-/// milliseconds.
+/// changes; its shell runs within `shell`.
 async fn native_tools(
     root: &Path,
     resources: &Resources,
     policy: crate::permissions::Policy,
-    shell_maximum: u64,
+    shell: ShellLimits,
 ) -> Result<Vec<Arc<dyn Tool>>> {
     let mutations = resources.mutations.clone();
-    let shell_limits = ShellLimits {
-        max_output_bytes: 8192,
-        max_timeout_ms: shell_maximum,
-        ..ShellLimits::default()
-    };
     let shell = ShellTool::new(root)
         .await?
-        .with_limits(shell_limits)?
+        .with_limits(shell)?
         .with_env(resources.command_env.clone())?
         .with_output_store(resources.outputs.clone());
     let processes = &resources.processes;
@@ -393,4 +408,21 @@ async fn native_tools(
         .into_iter()
         .map(|tool| resources.files.wrap(resources.instructions.wrap(tool)))
         .collect())
+}
+
+#[cfg(test)]
+mod shell_tests {
+    use super::shell_limits;
+
+    #[test]
+    fn an_unattended_shell_keeps_its_background_jobs_and_both_keep_their_end() {
+        let terminal = shell_limits(false);
+        let unattended = shell_limits(true);
+        assert_eq!(terminal.max_output_bytes, 16 * 1024);
+        assert_eq!(unattended.max_output_bytes, 16 * 1024);
+        assert!(!terminal.keep_background_jobs);
+        assert!(unattended.keep_background_jobs);
+        assert_eq!(terminal.max_timeout_ms, 120_000);
+        assert_eq!(unattended.max_timeout_ms, 3_600_000);
+    }
 }

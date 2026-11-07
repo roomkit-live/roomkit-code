@@ -145,6 +145,11 @@ fn list_price(
 }
 
 impl Profiles {
+    /// No person answers approvals in this launch.
+    pub(crate) fn unattended(&self) -> bool {
+        self.unattended
+    }
+
     pub async fn load(
         settings: &Settings,
         storage: &Storage,

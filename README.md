@@ -223,6 +223,15 @@ waits for its answer, and a long build or test run need not move to a process
 the agent polls. A command still stops after 10 seconds unless its call asks for
 longer.
 
+What the agent starts runs on past the launch: a job a command puts in the
+background (`server &`) outlives the command, and a process started with
+`process_start` outlives roomkit-code, which reports them as `Left N background
+processes running:`. A check that follows the launch, such as a benchmark's
+verifier, can then reach a server the agent started. Their output after the
+exit is lost, so a program that dies on a closed pipe should redirect it. A
+command that times out or is interrupted still stops what it started. In the
+terminal, both stop with their command and with the application.
+
 In the terminal, a turn runs at most 50 rounds of tool calls before it stops
 unfinished, and a message continues it. Unattended, nobody can, so a turn runs
 until it answers. `--max-tool-rounds N` or `[agent] max_tool_rounds` in the
@@ -397,7 +406,9 @@ included and ignore files are not applied; choose a workspace appropriate to
 share with the configured model. Filesystem tools check paths under the configured
 root. Shell uses `/bin/sh -c` with your user permissions; its initial
 workspace directory is **not a sandbox**. It has closed stdin, bounded
-output (8 KiB per stream in the immediate result), a default 10-second runtime and a maximum requested runtime of 120 seconds, one hour in a `--prompt` launch.
+output (the latest 16 KiB per stream in the immediate result, where a command
+reports how it ended; a stream cut short keeps its full output in an archive
+`output_read` pages through), a default 10-second runtime and a maximum requested runtime of 120 seconds, one hour in a `--prompt` launch.
 Each command runs in its own session, without the terminal: a command that
 prompts on the terminal fails at once.
 
