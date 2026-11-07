@@ -211,9 +211,9 @@ Nobody answers approvals: each one is refused, and the agent reads the refusal.
 Ask, the default mode, therefore refuses every change and command; use
 `--mode yolo` to let the agent work, in a workspace you can afford to give it.
 Plan mode's tools are not offered, since leaving Plan needs a person's
-approval. Nor are the plan tools, this guide's tools and the web tools
-(`plan_*`, `docs_*`, `web_search`, `web_fetch`), whatever the agent selects, so
-that each request is smaller; the system prompt leaves out what it says of
+approval. Nor are the plan tools and this guide's tools (`plan_*`, `docs_*`),
+whatever the agent selects, so that each request is smaller; the web tools stay,
+for a prompt that asks to look something up; the system prompt leaves out what it says of
 them, as it does for any agent without them. The conversation is saved like any
 other: `--session NAME` continues it, and `/resume` lists it in the terminal.
 

@@ -286,10 +286,11 @@ fn memory(
 }
 
 /// The tools an unattended launch leaves out, whatever the profile selects:
-/// the plans the sidebar shows, the guide to the application and the web.
-/// Each request is smaller without their schemas, 15k of the 44k characters
-/// of a benchmark's first request (HITL cf0fc0eb).
-const ATTENDED_ONLY: [&str; 10] = [
+/// the plans the sidebar shows and the guide to the application itself, which
+/// a script or a benchmark has no use for; each request is smaller without
+/// their schemas (HITL cf0fc0eb). The web tools stay: a prompt may ask to look
+/// something up.
+const ATTENDED_ONLY: [&str; 8] = [
     "plan_create",
     "plan_read",
     "plan_list",
@@ -298,8 +299,6 @@ const ATTENDED_ONLY: [&str; 10] = [
     "docs_list",
     "docs_search",
     "docs_read",
-    "web_search",
-    "web_fetch",
 ];
 
 /// The tools of `tools` the profile selects, with their definitions, in

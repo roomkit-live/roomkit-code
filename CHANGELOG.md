@@ -7,12 +7,12 @@
   as `Left N background processes running:`. The shell keeps the latest 16 KiB
   of each stream, instead of its first and last 4 KiB.
 
-- A `--prompt` launch gives the agent no plan, guide or web tool (`plan_*`,
-  `docs_*`, `web_search`, `web_fetch`), whatever its profile selects, and its
-  system prompt leaves out its paragraphs on them and on the mode tools: on an
-  empty project the first request falls from 61,650 to 44,006 characters, its
-  tools from 28 to 18 (HITL cf0fc0eb). The terminal keeps them; there too, an
-  agent reads those paragraphs only when it has one of their tools.
+- A `--prompt` launch gives the agent no plan or guide tool (`plan_*`,
+  `docs_*`), whatever its profile selects, and its system prompt leaves out its
+  paragraphs on them and on the mode tools (HITL cf0fc0eb); the web tools stay,
+  for a prompt that asks to look something up. The terminal keeps them all;
+  there too, an agent reads those paragraphs only when it has one of their
+  tools.
 
 - In a `--prompt` launch, a shell command may run up to an hour (`timeout_ms` up
   to 3600000) instead of two minutes, and the system prompt states that maximum;

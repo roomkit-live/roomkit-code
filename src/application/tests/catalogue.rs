@@ -412,7 +412,7 @@ async fn an_unattended_shell_runs_a_command_up_to_an_hour() {
 /// whatever the profile selects, and its prompt says nothing of them, nor of
 /// the mode tools, which it does not give either; the terminal keeps them.
 #[tokio::test]
-async fn an_unattended_launch_leaves_out_plans_the_guide_and_the_web() {
+async fn an_unattended_launch_leaves_out_plans_and_the_guide() {
     let dropped = [
         "plan_create",
         "plan_read",
@@ -422,8 +422,6 @@ async fn an_unattended_launch_leaves_out_plans_the_guide_and_the_web() {
         "docs_list",
         "docs_search",
         "docs_read",
-        "web_search",
-        "web_fetch",
         "plan_mode_enter",
         "plan_mode_exit",
     ];
@@ -431,7 +429,6 @@ async fn an_unattended_launch_leaves_out_plans_the_guide_and_the_web() {
         "plan_mode_enter asks the user",
         "manage durable plans",
         "RoomKit Code's own user guide",
-        "Web search uses Exa",
     ];
     for unattended in [false, true] {
         let root = tempfile::tempdir().unwrap();
