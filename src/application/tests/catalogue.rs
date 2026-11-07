@@ -287,6 +287,41 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
     );
 }
 
+/// The engine's `read_stored_result`, which every agent declares to page an
+/// outcome the engine stored, runs without an approval in Ask, as the other
+/// reads do: the engine answers it. The gate refused it, with no rule for it.
+/// The engine reports an unknown result as a refusal of its own.
+#[tokio::test]
+async fn the_engine_s_stored_results_are_read_without_an_approval() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![(
+        "read_stored_result",
+        json!({"result_id":"evicted_unknown"}),
+    )])
+    .await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    assert_eq!(settings.mode, crate::permissions::Mode::Ask);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let session = turn(&app).await;
+    let snapshot = session.snapshot().unwrap();
+    let call = snapshot
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Tool { call, .. } if call.name == "read_stored_result" => Some(call),
+            _ => None,
+        })
+        .unwrap();
+    assert!(!call.text.contains("permission policy"), "{}", call.text);
+    assert!(
+        call.text.contains("Result 'evicted_unknown' not found"),
+        "{}",
+        call.text
+    );
+    app.close().await.unwrap();
+}
+
 /// A `timeout_ms` above the host maximum the prompt states is refused with
 /// that maximum, so the model can correct it, instead of being capped.
 #[tokio::test]

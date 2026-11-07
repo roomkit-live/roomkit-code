@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The engine's `read_stored_result`, which pages a long tool outcome the engine
+  stored, runs without approval like the other reads: it was refused in every
+  mode, Yolo included, for want of a permission rule.
+
 - A request the model refuses as past its window says so, on roomkit-tui
   14f2561. When compaction could not make room, the notice read `Engine
   execution failed`, and the gauge kept an earlier measurement, such as 9.6%

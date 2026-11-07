@@ -449,10 +449,10 @@ are scoped to the originating session and agent, survive reconfiguration, and
 `process_start`, `process_write`, `web_search` and `web_fetch` call waits for an
 explicit decision. The panel shows exact arguments and the kind of action;
 use PgUp/PgDn for longer details, **Ctrl+Y** to allow once or **Ctrl+N** to refuse.
-Read tools, `diff`, patch previews, process status/output, plan and guide tools,
-skill activation, stopping owned jobs and releasing owned archives do not need
-approval. Requests expire after five minutes;
-disconnecting refuses pending actions. Actions too large to show in full
+Read tools, `diff`, patch previews, process status/output, the engine's stored
+results (`read_stored_result`), plan and guide tools, skill activation, stopping
+owned jobs and releasing owned archives do not need approval. Requests expire
+after five minutes; disconnecting refuses pending actions. Actions too large to show in full
 (64 KiB of approval detail) are refused and must be split.
 
 Approval requests use a filled decision card. Use Up/Down and Enter or click
@@ -485,8 +485,8 @@ can select a different starting mode. Project files never implicitly select it.
 ## Plans and progress
 
 Switch to **Plan** and ask the agent to prepare a plan. This mode allows project
-exploration, skill reading, patch previews, reading existing process output,
-the five plan tools and this guide's three documentation tools. Web research still requires approval. File mutations,
+exploration, skill reading, patch previews, reading existing process output and
+stored results, the five plan tools and this guide's three documentation tools. Web research still requires approval. File mutations,
 arbitrary commands, process start/input/stop, archive cleanup and all MCP calls
 are blocked by the host, regardless of model instructions. MCP tools cannot yet
 be classified reliably as read-only. Already running jobs continue; you can

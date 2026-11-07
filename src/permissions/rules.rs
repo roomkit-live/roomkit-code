@@ -17,8 +17,9 @@ pub(crate) struct Rule {
 
 const CHANGE: &str = "Proposed workspace change · exact tool arguments";
 
-/// Reads of the workspace, the agent's processes and archives, its skills, its
-/// tool catalogue and the guide, and the agent's own plans, which it also writes.
+/// Reads of the workspace, the agent's processes and archives, the outcomes the
+/// engine stored, its skills, its tool catalogue and the guide, and the agent's
+/// own plans, which it also writes.
 const READ: Rule = Rule {
     direct: true,
     plan: true,
@@ -73,6 +74,9 @@ const RULES: &[(&str, Rule)] = &[
     ("process_status", READ),
     ("process_read", READ),
     ("output_read", READ),
+    // The engine's own, which every agent declares to page an outcome the
+    // engine stored in its place (roomkit-rs RMK-1228).
+    ("read_stored_result", READ),
     ("plan_create", READ),
     ("plan_read", READ),
     ("plan_list", READ),
@@ -195,6 +199,7 @@ mod tests {
             "read_skill_reference",
             "find_tools",
             "list_tools",
+            "read_stored_result",
             "plan_mode_enter",
             "plan_mode_exit",
         ];

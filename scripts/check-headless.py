@@ -209,6 +209,15 @@ def interrupted(root, model, sig=signal.SIGINT):
     assert outcomes == ["interrupted"], outcomes
 
 
+def stored_result(root, model):
+    # The engine's own read_stored_result runs as a read: the engine answers it.
+    code, out, err = run(root, model, "--mode", "yolo", "--prompt", "Read the stored result.")
+    assert code == 0, (code, err)
+    results = [message["content"] for message in model.tool_results()]
+    assert len(results) == 1 and "Result 'evicted_unknown' not found" in results[0], results
+    assert "permission policy" not in results[0], results
+
+
 def refused_without_agent(root, model):
     # An empty message is refused before anything opens.
     code, out, err = run(root, model, "--prompt", "   ")
@@ -234,5 +243,6 @@ scenario("standard output closed early", ["\n".join(["line"] * 20_000)], closed_
 scenario("a message too long", [ANSWER], too_long)
 scenario("SIGINT interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], interrupted)
 scenario("SIGTERM interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], lambda root, model: interrupted(root, model, signal.SIGTERM))
+scenario("the engine's stored results are read", [call("read_stored_result", result_id="evicted_unknown"), ANSWER], stored_result)
 scenario("invalid launches", [ANSWER], refused_without_agent)
 print("headless checks passed")
