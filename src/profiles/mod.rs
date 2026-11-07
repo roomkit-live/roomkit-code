@@ -41,6 +41,10 @@ pub(crate) struct Profiles {
     pub(crate) policy: crate::permissions::Policy,
     pub(crate) plans: Arc<crate::plans::PlanView>,
     require_tool_intent: bool,
+    /// Rounds of tool calls one turn of an agent may run.
+    max_tool_rounds: u32,
+    /// No person answers approvals in this launch.
+    unattended: bool,
     workspace: PathBuf,
     state_dir: PathBuf,
     pub(crate) diagnostics: Arc<crate::diagnostics::Diagnostics>,
@@ -174,6 +178,8 @@ impl Profiles {
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),
             require_tool_intent: settings.require_tool_intent,
+            max_tool_rounds: settings.max_tool_rounds,
+            unattended: settings.unattended,
             skill_catalogue: tokio::sync::RwLock::new(skill_catalogue),
             images: crate::images::Images::new(storage.database.with_file_name("attachments")),
             diagnostics,
@@ -329,6 +335,8 @@ impl Profiles {
             skill_roots,
             mcp: self.mcp_runtime.selected(profile).await?,
             intent_required: self.require_tool_intent,
+            max_tool_rounds: self.max_tool_rounds,
+            mode_tools: !self.unattended,
             policy: self.policy.clone(),
             images: self.images.clone(),
             ceiling: ceiling(profile),

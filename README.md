@@ -178,6 +178,44 @@ string hides either. Neither is included in messages sent to the model.
 The selected theme supplies its background and text colors; monochrome mode
 uses reverse video to keep the area visible.
 
+## Unattended runs
+
+`--prompt` (`-p`) sends one message without the terminal interface and exits
+when the agent's turn ends, for scripts, CI jobs and benchmark harnesses.
+Standard input and output may be pipes; `--prompt -` reads the message from
+standard input.
+
+```sh
+roomkit-code /path/to/project --mode yolo --prompt "Run the tests and fix what fails"
+roomkit-code /path/to/project --mode yolo --json -p - < task.md > events.jsonl
+```
+
+The turn runs as in the terminal: the same agent, tools, hooks, project
+instructions, history and compaction. Standard output receives the agent's last
+message; with `--json`, it receives every event of the conversation instead, one
+JSON object per line, in the terminal protocol's own form (`run_started`,
+`item` for each tool call and its result, `message_finalized`, `usage_updated`,
+`run_finished`…). Notices, refusals and the exit report (session, resume command,
+usage) go to standard error. The exit status is 0 when the turn ended with its
+answer, 1 when the message was refused or the turn ended without its answer (its
+round limit, an error), and 130 when SIGINT or SIGTERM cut it: the signal
+interrupts the turn, which stops its commands and records what it did. For
+now, a turn cut by its round limit or a failure right after a round that only
+called tools still exits 0: the engine records that end on the round's last
+call after the terminal protocol reports the turn finished.
+
+Nobody answers approvals: each one is refused, and the agent reads the refusal.
+Ask, the default mode, therefore refuses every change and command; use
+`--mode yolo` to let the agent work, in a workspace you can afford to give it.
+Plan mode's tools are not offered, since leaving Plan needs a person's
+approval. The conversation is saved like any other: `--session NAME` continues
+it, and `/resume` lists it in the terminal.
+
+A turn runs at most 50 rounds of tool calls before it stops unfinished, in the
+terminal too. `--max-tool-rounds N` or `[agent] max_tool_rounds` in the
+configuration file raises or lowers that bound; the flag is kept in the resume
+command.
+
 ## Terminal integrations
 
 Two independent integrations are enabled by default. Neither changes the tools,

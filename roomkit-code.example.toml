@@ -20,6 +20,7 @@ timeout_seconds = 600 # longest wait between two reads of a model answer
 
 [agent]
 require_tool_intent = true # false makes the public description optional in model-facing tool schemas
+max_tool_rounds = 50 # rounds of tool calls one turn may run; --max-tool-rounds overrides it
 
 [permissions]
 mode = "ask" # ask, plan, yolo; --mode overrides this explicit configuration

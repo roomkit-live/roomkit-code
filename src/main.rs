@@ -40,7 +40,7 @@ type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 #[tokio::main]
 async fn main() -> ExitCode {
     match launch().await {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(error) => {
             eprintln!("roomkit-code: {error}");
             ExitCode::FAILURE
@@ -48,18 +48,22 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn launch() -> Result<()> {
+async fn launch() -> Result<ExitCode> {
     let cli = config::Cli::parse();
     if updates::cli(&cli).await? {
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     }
     let settings = config::Settings::load(&cli)?;
     if cli.check_config {
         println!("Launch configuration valid. Provider and agent profiles are loaded at startup.");
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
+    }
+    if let Some(prompt) = application::headless::Prompt::from_cli(&cli)? {
+        return application::headless::run(settings, prompt).await;
     }
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         return Err("Interactive mode requires a terminal; use --help for options".into());
     }
-    application::run(settings).await
+    application::run(settings).await?;
+    Ok(ExitCode::SUCCESS)
 }

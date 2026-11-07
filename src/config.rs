@@ -55,6 +55,15 @@ pub(crate) struct Cli {
     /// Open or create a named conversation; without this, start a new session.
     #[arg(long)]
     pub session: Option<String>,
+    /// Send this message without the terminal interface, print the agent's
+    /// answer and exit; `-` reads the message from standard input. Nobody
+    /// answers approvals: they are refused.
+    #[arg(short, long, conflicts_with = "check_config")]
+    pub prompt: Option<String>,
+    /// With --prompt, write every event of the conversation to standard
+    /// output as one JSON object per line instead of the answer.
+    #[arg(long, requires = "prompt")]
+    pub json: bool,
     /// Permission mode: ask approves effects, plan explores, yolo runs directly.
     #[arg(long, value_enum)]
     pub mode: Option<Mode>,
@@ -67,6 +76,9 @@ pub(crate) struct Cli {
     /// Require the public intent field in tool schemas sent to the model.
     #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
     pub require_tool_intent: Option<bool>,
+    /// Rounds of tool calls one turn may run before it stops unfinished.
+    #[arg(long)]
+    pub max_tool_rounds: Option<u32>,
     /// Check launch options and workspace without loading profiles or connecting.
     #[arg(long)]
     pub check_config: bool,
@@ -149,15 +161,21 @@ impl Default for UpdateOptions {
 #[serde(default, deny_unknown_fields)]
 struct AgentOptions {
     require_tool_intent: bool,
+    max_tool_rounds: Option<u32>,
 }
 
 impl Default for AgentOptions {
     fn default() -> Self {
         Self {
             require_tool_intent: true,
+            max_tool_rounds: None,
         }
     }
 }
+
+/// The rounds of tool calls a turn runs when nothing sets them: the bound
+/// the engine has always applied (HITL 1603bb98 decides the default).
+pub(crate) const DEFAULT_TOOL_ROUNDS: u32 = 50;
 
 #[derive(Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -297,6 +315,11 @@ pub(crate) struct Settings {
     pub mode: Mode,
     /// Host variables commands receive beyond the development list.
     pub inherit_env: Vec<String>,
+    /// Rounds of tool calls one turn may run.
+    pub max_tool_rounds: u32,
+    /// Nobody watches this launch (`--prompt`): no person can answer an
+    /// approval, so agents get no tool that waits for one.
+    pub unattended: bool,
 }
 
 impl Settings {
@@ -365,6 +388,7 @@ impl Settings {
         if max_output_tokens == Some(0) {
             return Err("max output tokens must be a positive token count".into());
         }
+        let max_tool_rounds = tool_rounds(cli.max_tool_rounds.or(file.agent.max_tool_rounds))?;
         let pricing = file.provider.pricing.map(Pricing::read).transpose()?;
         let workspace = cli
             .workspace
@@ -469,7 +493,17 @@ impl Settings {
             max_output_tokens,
             pricing,
             ui,
+            max_tool_rounds,
+            unattended: cli.prompt.is_some(),
         })
+    }
+}
+
+/// The rounds of tool calls a turn may run: at least one.
+fn tool_rounds(rounds: Option<u32>) -> Result<u32> {
+    match rounds {
+        Some(0) => Err("max tool rounds must be at least 1".into()),
+        rounds => Ok(rounds.unwrap_or(DEFAULT_TOOL_ROUNDS)),
     }
 }
 
@@ -550,6 +584,9 @@ fn resume_options(cli: &Cli) -> Result<Option<Vec<String>>> {
     }
     if let Some(required) = cli.require_tool_intent {
         args.push(format!("--require-tool-intent={required}"));
+    }
+    if let Some(rounds) = cli.max_tool_rounds {
+        args.extend(["--max-tool-rounds".into(), rounds.to_string()]);
     }
     if let Some(path) = &cli.config {
         let path = std::path::absolute(path)?;

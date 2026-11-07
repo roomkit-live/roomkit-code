@@ -13,6 +13,7 @@ use roomkit_tui_engine::{ConversationChannel, LocalSession, SessionConfig};
 use crate::{Result, config::Settings, profiles::Profiles, services::Services, storage::Storage};
 
 mod gate;
+pub(crate) mod headless;
 mod integrations;
 
 pub(crate) struct Application {
@@ -263,7 +264,14 @@ async fn summarize(
         .and_then(|view| view.run.as_ref())
         .is_some_and(|run| run.outcome.is_none());
     let priced = match &view {
-        Some(view) => priced(app, view).await,
+        Some(view) => {
+            priced(
+                app,
+                view.conversation.as_str(),
+                view.selected_agent.as_str(),
+            )
+            .await
+        }
         None => None,
     };
     let shown = view.map(|view| {
@@ -281,13 +289,11 @@ async fn summarize(
     summary
 }
 
-/// The view shown at exit, priced as the profiles price its agent.
-async fn priced(
-    app: &Application,
-    view: &roomkit_tui::SessionObservation,
-) -> Option<SessionConfig> {
-    let room = roomkit::model::RoomId::new(view.conversation.as_str()).ok()?;
-    let agent = ChannelId::new(view.selected_agent.as_str()).ok()?;
+/// The conversation shown at exit with its agent, priced as the profiles
+/// price that agent.
+async fn priced(app: &Application, conversation: &str, agent: &str) -> Option<SessionConfig> {
+    let room = roomkit::model::RoomId::new(conversation).ok()?;
+    let agent = ChannelId::new(agent).ok()?;
     let mut config = SessionConfig::new(room, agent, "local-user");
     app.profiles.configure_view(&mut config).await;
     Some(config)

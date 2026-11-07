@@ -137,6 +137,11 @@ pub(crate) struct Extensions {
     pub mcp: Vec<crate::profiles::McpTools>,
     /// Whether every tool call must carry an intent.
     pub intent_required: bool,
+    /// Rounds of tool calls one turn may run.
+    pub max_tool_rounds: u32,
+    /// Whether the agent gets the mode tools, which wait for a person's
+    /// approval: not when nobody watches the launch.
+    pub mode_tools: bool,
     /// The mode policy the mode tools change.
     pub policy: crate::permissions::Policy,
     /// What resolves the conversation's image attachments for vision models.
@@ -155,7 +160,7 @@ pub(crate) async fn create(
 ) -> Result<(CodeAgent, Inventory)> {
     profile.validate()?;
     let tools = native_tools(root, resources, extensions.policy.clone()).await?;
-    let tools = selected(profile, tools);
+    let tools = selected(profile, tools, extensions.mode_tools);
     let native: Vec<AiTool> = tools
         .iter()
         .map(|(definition, _)| definition.clone())
@@ -165,6 +170,7 @@ pub(crate) async fn create(
         skill_roots,
         mcp,
         intent_required,
+        max_tool_rounds,
         images,
         ceiling,
         ..
@@ -201,6 +207,7 @@ pub(crate) async fn create(
         // before: the engine's five-minute bound on a turn's tool loop would
         // end it before the calls of its next round run.
         tool_loop_timeout: None,
+        max_tool_rounds,
         max_context_events: HISTORY,
         memory: memory(ceiling, &provider, resources)?,
         image_resolver: Some(images),
@@ -233,9 +240,14 @@ fn memory(
 /// The tools of `tools` the profile selects, with their definitions, in
 /// inventory order: every tool is named once, it joins the inventory, and
 /// the agent serves it. The mode tools come with plan writing: leaving Plan
-/// approves a plan.
-fn selected(profile: &Agent, tools: Vec<Arc<dyn Tool>>) -> Vec<(AiTool, Arc<dyn Tool>)> {
-    let plans = profile.tools.iter().any(|tool| tool == "plan_create");
+/// approves a plan. Without `mode_tools` they never come, since nobody could
+/// approve leaving Plan and the agent would stay unable to act.
+fn selected(
+    profile: &Agent,
+    tools: Vec<Arc<dyn Tool>>,
+    mode_tools: bool,
+) -> Vec<(AiTool, Arc<dyn Tool>)> {
+    let plans = mode_tools && profile.tools.iter().any(|tool| tool == "plan_create");
     let selected = |tool: &AiTool| {
         profile.tools.contains(&tool.name)
             || (plans && crate::permissions::MODE_TOOLS.contains(&tool.name.as_str()))

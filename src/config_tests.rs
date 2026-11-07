@@ -435,3 +435,60 @@ fn a_configured_price_is_read_and_a_wrong_one_refused() {
     std::fs::write(&config, "[provider]\n").unwrap();
     assert!(Settings::load(&cli).unwrap().pricing.is_none());
 }
+
+#[test]
+fn tool_rounds_default_to_the_engine_s_bound_and_survive_resume() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("settings.toml");
+    let mut cli = cli(root.path());
+    assert_eq!(Settings::load(&cli).unwrap().max_tool_rounds, 50);
+    std::fs::write(&path, "[agent]\nmax_tool_rounds = 200\n").unwrap();
+    cli.config = Some(path.clone());
+    assert_eq!(Settings::load(&cli).unwrap().max_tool_rounds, 200);
+    cli.max_tool_rounds = Some(400);
+    assert_eq!(Settings::load(&cli).unwrap().max_tool_rounds, 400);
+    // The flag reopens the session with the same bound; the file's is reread.
+    let options = resume_options(&cli).unwrap().unwrap();
+    assert!(
+        options
+            .windows(2)
+            .any(|pair| pair == ["--max-tool-rounds", "400"])
+    );
+    cli.max_tool_rounds = Some(0);
+    let error = Settings::load(&cli).err().unwrap();
+    assert_eq!(error.to_string(), "max tool rounds must be at least 1");
+    cli.max_tool_rounds = None;
+    std::fs::write(&path, "[agent]\nmax_tool_rounds = 0\n").unwrap();
+    assert!(Settings::load(&cli).is_err());
+}
+
+#[test]
+fn a_prompt_makes_the_launch_unattended_and_json_needs_one() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().to_str().unwrap();
+    let base = [
+        "roomkit-code",
+        workspace,
+        "--base-url",
+        "http://localhost:8000/v1",
+        "--model",
+        "m",
+    ];
+    let parsed = Cli::try_parse_from(base).unwrap();
+    assert!(!Settings::load(&parsed).unwrap().unattended);
+    let parsed = Cli::try_parse_from(base.into_iter().chain(["-p", "Fix it.", "--json"])).unwrap();
+    assert_eq!(parsed.prompt.as_deref(), Some("Fix it."));
+    assert!(parsed.json);
+    let settings = Settings::load(&parsed).unwrap();
+    assert!(settings.unattended);
+    // A resumed session opens in the terminal: the message is not replayed.
+    assert!(
+        !resume_options(&parsed)
+            .unwrap()
+            .unwrap()
+            .iter()
+            .any(|arg| arg.contains("Fix it") || arg == "--json" || arg == "-p")
+    );
+    assert!(Cli::try_parse_from(base.into_iter().chain(["--json"])).is_err());
+    assert!(Cli::try_parse_from(base.into_iter().chain(["-p", "x", "--check-config"])).is_err());
+}

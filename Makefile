@@ -43,6 +43,7 @@ terminal-check:
 	python3 scripts/check-instructions.py
 	python3 scripts/check-docs.py
 	python3 scripts/check-exit.py
+	python3 scripts/check-headless.py
 	python3 scripts/check-files.py
 	python3 scripts/check-context.py
 	python3 scripts/check-usage.py
