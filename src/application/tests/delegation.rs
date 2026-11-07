@@ -317,3 +317,103 @@ async fn a_target_works_with_its_connection_as_it_stands() {
     };
     assert_eq!((worker(&before), worker(&after)), (2, 2));
 }
+
+/// A model server whose workers each hand the task on to the other agent
+/// and answer once that is done, and whose delegating agent starts the chain:
+/// `code`, then `review`, `code` and `review` again, which is refused.
+async fn nesting_server() -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
+    let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let seen = requests.clone();
+    let router = Router::new().route(
+        "/v1/chat/completions",
+        post(move |Json(request): Json<Value>| {
+            let seen = seen.clone();
+            async move {
+                seen.lock().unwrap().push(request.clone());
+                let text = request.to_string();
+                let worker = text.contains(WORKER);
+                let last = request["messages"].as_array().unwrap().last().unwrap();
+                let (answered, handed_back) =
+                    (last["role"] == "tool", last.to_string().contains(RESULT));
+                let other = if text.contains("(ID: review)") {
+                    "code"
+                } else {
+                    "review"
+                };
+                let delta = if handed_back || (worker && answered) {
+                    json!({"content": RESULT})
+                } else if worker || !answered {
+                    call(
+                        "delegate_task",
+                        &json!({"agent": other, "task": "Go one level deeper"}),
+                    )
+                } else {
+                    json!({"content": "Handed on."})
+                };
+                let reason = if delta.get("tool_calls").is_some() {
+                    "tool_calls"
+                } else {
+                    "stop"
+                };
+                let body = format!(
+                    "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+                    json!({"choices":[{"index":0,"delta":delta}]}),
+                    json!({"choices":[{"index":0,"delta":{},"finish_reason":reason}]})
+                );
+                ([("content-type", "text/event-stream")], body)
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    (base, requests, task)
+}
+
+/// Two agents handing a task back and forth stop three delegated rooms deep:
+/// the third worker's `delegate_task` is refused, so a model that keeps
+/// handing work on spends no more.
+#[tokio::test]
+async fn a_task_is_handed_on_three_levels_deep_at_most() {
+    const REFUSED: &str = "handed on too many times";
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let (base, requests, server) = nesting_server().await;
+    let settings = settings(project.path(), state.path(), &base);
+    with_a_reviewer(&settings).await;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    turn(&app).await;
+    let refused = |requests: &Arc<Mutex<Vec<Value>>>| {
+        let requests = requests.lock().unwrap();
+        requests
+            .iter()
+            .filter(|r| r.to_string().contains(REFUSED))
+            .count()
+    };
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while refused(&requests) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    app.close().await.unwrap();
+    server.abort();
+
+    let requests = requests.lock().unwrap();
+    let delegated = requests
+        .iter()
+        .filter(|r| {
+            let last = r["messages"].as_array().unwrap().last().unwrap();
+            last["role"] == "tool" && last.to_string().contains("delegated")
+        })
+        .count();
+    // The conversation's agent, its worker and that worker's worker each
+    // handed the task on; the next one was refused.
+    assert_eq!(delegated, 3);
+    let deepest = requests
+        .iter()
+        .find(|r| r.to_string().contains(REFUSED))
+        .unwrap();
+    assert!(deepest.to_string().contains("(ID: review)") && deepest.to_string().contains(WORKER));
+}
