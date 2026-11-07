@@ -314,6 +314,24 @@ by another project, reopen `/agents` and select the agent again. Profile files
 are outside the source tree and are never loaded from project instructions or
 model output.
 
+### Delegation
+
+An agent can hand a task to another agent of the project, project or global,
+with `delegate_task`. Each turn's application instruction lists the agents it
+can choose, by ID and label; a task for itself or for no configured agent is
+refused. The other agent works in a conversation of its own, in the
+background, while the first goes on; when it is done, the first agent says its
+result, or that it failed, in a turn of its own. `task_status` lists the
+conversation's tasks and `cancel_task` stops one. An agent never selected is
+set up when a task is handed to it.
+
+The other agent reads the task and the `context` it was handed, not the
+conversation. It works under the conversation's mode, and nobody watches its
+conversation, so an action that needs an approval is refused: in Ask it reads
+and answers, in Yolo it can change files and run commands, in Plan it plans.
+The status line says when a task starts and how it ended. Its conversation is
+not listed by `/resume`, and its tokens are not counted in the conversation's.
+
 ## Tools and persistence
 
 Use **/tools** to browse the capabilities actually registered by the application,
@@ -523,9 +541,9 @@ Web cards show source titles, URLs and excerpts; process cards show lifecycle,
 exit status, output cursors and archive completeness without raw byte arrays.
 A completed shell tool does not imply a successful command.
 
-Sub-agent delegation, inter-agent messaging, a Python execution interpreter and
-plugin discovery are not selected. The available agent-tool facade still needs
-a native Rust backend and application orchestration before it can be enabled.
+Agents hand tasks to each other through the engine's delegation
+([Delegation](#delegation)). Inter-agent messaging, a Python execution
+interpreter and plugin discovery are not selected.
 Model messages use the CLI's Markdown renderer, including colored code blocks.
 Set `ui.markdown`, `ui.message_gap` and `ui.tool_preview_lines` in explicit TOML
 configuration to control formatting and density. Message source and stored

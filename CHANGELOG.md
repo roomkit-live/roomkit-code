@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- An agent can hand a task to another agent of the project with the engine's
+  `delegate_task`; `task_status` and `cancel_task` follow and stop the
+  conversation's tasks (RMK-1532; HITL 2b4cc82b, f7f700bc, a7392f28). The other
+  agent works in the background in a conversation of its own, reading the task
+  and its context, not the conversation, under the conversation's mode, refused
+  what needs an approval; the first agent then says its result. Each turn lists
+  the agents a task can go to, the status line says when a task starts and how
+  it ended, and an agent never selected is set up when a task is handed to it.
+  Its tokens are not counted in the conversation's.
+
 - A model request that fails before its answer begins is tried 3 more times, 1, 2
   then 4 seconds apart, when the failure may pass: a lost connection, a timeout,
   a 429, 5xx, 408 or 409 answer. A refused request and an answer that began

@@ -4,7 +4,7 @@ use roomkit::model::{
     ChannelOutput, ChannelType, EventType, InboundMessage, RoomContext, RoomEvent,
     SteeringDirective, TextContent,
 };
-use roomkit::{Channel, ChannelError};
+use roomkit::{Channel, ChannelDeclaration, ChannelError};
 use std::sync::{Arc, RwLock};
 
 use crate::agent::CodeAgent;
@@ -15,6 +15,8 @@ pub(super) struct AgentSlot {
     files: Arc<crate::files::Files>,
     compactions: Arc<crate::compaction::Compactions>,
     policy: crate::permissions::Policy,
+    /// The agents a turn can hand a task to.
+    roster: Arc<crate::delegation::Roster>,
     id: ChannelId,
     current: Arc<RwLock<Option<Arc<CodeAgent>>>>,
 }
@@ -26,14 +28,35 @@ impl AgentSlot {
         instructions: Arc<crate::instructions::Instructions>,
         files: Arc<crate::files::Files>,
         compactions: Arc<crate::compaction::Compactions>,
+        roster: Arc<crate::delegation::Roster>,
     ) -> Self {
         Self {
             instructions,
             files,
             compactions,
             policy,
+            roster,
             id,
             current: Arc::new(RwLock::new(agent.map(Arc::new))),
+        }
+    }
+    /// Whether the slot holds an agent to run.
+    pub fn ready(&self) -> bool {
+        crate::sync::read(&self.current).is_some()
+    }
+    /// Whether the agent answers `event`: one addressed to it, as the view
+    /// addresses a person's message to the selected agent, or in the room of
+    /// a task handed to it, where the engine writes the task to the room's
+    /// agents without addressing it (RMK-1532).
+    fn answers(&self, event: &RoomEvent, context: &RoomContext) -> bool {
+        match &event.addressed_to {
+            Some(ids) => ids.contains(&self.id),
+            None => context
+                .room
+                .metadata
+                .get("task_agent_id")
+                .and_then(|agent| agent.as_str())
+                .is_some_and(|agent| agent == self.id.as_str()),
         }
     }
     pub fn replace(&self, agent: CodeAgent) {
@@ -42,9 +65,10 @@ impl AgentSlot {
     pub fn disable(&self) {
         *crate::sync::write(&self.current) = None;
     }
-    /// What a turn reads as it starts: its mode's instruction, then what the
-    /// application tells it (`told`), then the project's instructions unless
-    /// the agent's history still holds them as they are.
+    /// What a turn reads as it starts: its mode's instruction, what a
+    /// delegated task's worker must know, the agents it can hand a task to,
+    /// then what the application tells it (`told`), then the project's
+    /// instructions unless the agent's history still holds them as they are.
     async fn instruction(
         &self,
         event: &RoomEvent,
@@ -56,6 +80,10 @@ impl AgentSlot {
         let project = self.instructions.load(vec![], true).await.render();
         self.compactions.tell_snapshot(room, agent, &project);
         let mut parts = vec![self.policy.instruction(room).to_owned()];
+        if self.policy.delegated(room) {
+            parts.push(crate::delegation::WORKER.to_owned());
+        }
+        parts.extend(self.roster.instruction(agent));
         parts.extend(told);
         if !self.still_read(&project, event, history) {
             parts.push(project);
@@ -169,6 +197,20 @@ impl Channel for AgentSlot {
         let agent = crate::sync::read(&self.current).clone()?;
         agent.steer_turn(directive, turn_id)
     }
+    /// The slot's own answers, and the tools a room serves its turns, as an AI
+    /// channel takes them: `delegate_task`, `task_status` and `cancel_task`
+    /// (RMK-1532). The kit reads this on the registered slot, once.
+    fn declaration(&self) -> ChannelDeclaration {
+        let mut declared = ChannelDeclaration::new(self.channel_id());
+        declared.channel_type = self.channel_type();
+        declared.category = self.category();
+        declared.capabilities = self.capabilities();
+        declared.takes_owner_tools = true;
+        declared.recent_events_window = self.recent_events_window();
+        declared.serializes_room_turns = self.serializes_room_turns();
+        declared.steers_room_turns = self.steers_room_turns();
+        declared
+    }
     async fn handle_inbound(
         &self,
         _: InboundMessage,
@@ -192,16 +234,14 @@ impl Channel for AgentSlot {
         binding: ChannelBinding,
         mut context: RoomContext,
     ) -> Result<ChannelOutput, ChannelError> {
-        if !event
-            .addressed_to
-            .as_ref()
-            .is_some_and(|ids| ids.contains(&self.id))
-        {
+        if !self.answers(&event, &context) {
             return Ok(ChannelOutput::default());
         }
         let agent = crate::sync::read(&self.current)
             .clone()
             .ok_or("Configure a provider and agent first")?;
+        // A delegated task's room takes its conversation's mode.
+        self.policy.adopt(&context.room);
         let input = self.turn_input(event, &mut context).await;
         agent.on_event(input, binding, context).await
     }
@@ -238,9 +278,12 @@ mod tests {
             crate::instructions::Instructions::new(root.path(), root.path()),
             crate::files::Files::new(root.path()),
             std::sync::Arc::new(crate::compaction::Compactions::new(root.path())),
+            std::sync::Arc::default(),
         );
         let declared = slot.declaration();
         assert!(declared.steers_room_turns && declared.serializes_room_turns);
+        // The tools a room serves reach its turns: delegation (RMK-1532).
+        assert!(declared.takes_owner_tools);
         assert_eq!(declared.recent_events_window, crate::compaction::WINDOW);
         assert_eq!(declared.category, ChannelCategory::Intelligence);
         assert!(declared.capabilities.supports_media);

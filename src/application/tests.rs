@@ -1850,6 +1850,7 @@ async fn stale_or_conflicting_forms_cannot_replace_a_working_agent() {
 mod breakdown;
 mod catalogue;
 mod compaction;
+mod delegation;
 mod docs;
 mod exit_summary;
 mod files;

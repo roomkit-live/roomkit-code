@@ -184,6 +184,9 @@ pub(crate) async fn approve_exit(
     if policy.mode(room) != Mode::Plan {
         return block("plan_mode_exit applies in Plan mode only; the mode is unchanged.");
     }
+    if policy.delegated(room) {
+        return block(super::DELEGATED);
+    }
     let plan = match shown_plan(plans, &event).await {
         Ok(plan) => plan,
         Err(refusal) => return block(refusal),

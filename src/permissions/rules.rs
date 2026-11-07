@@ -40,6 +40,15 @@ const COMMAND: Rule = Rule {
     plan: false,
     label: "Command · runs with your user permissions (not sandboxed)",
 };
+/// The engine's delegation: handing a task to another agent, following and
+/// cancelling the conversation's tasks. The worker takes the conversation's
+/// mode and is refused what needs an approval (`Policy::adopt`), so handing
+/// the task over asks none, in Plan too.
+const DELEGATION: Rule = Rule {
+    direct: true,
+    plan: true,
+    label: CHANGE,
+};
 /// Every MCP tool, whatever its name says: servers are configured outside
 /// the application and their effects are unknown.
 const MCP: Rule = Rule {
@@ -72,6 +81,9 @@ const RULES: &[(&str, Rule)] = &[
     ("docs_list", READ),
     ("docs_search", READ),
     ("docs_read", READ),
+    ("delegate_task", DELEGATION),
+    ("task_status", DELEGATION),
+    ("cancel_task", DELEGATION),
     ("process_stop", CLEANUP),
     ("output_forget", CLEANUP),
     // Runs as a read while it only previews; see `rule_for`.

@@ -86,6 +86,13 @@ impl State {
     /// Save `agent` in `scope`, moving it out of the other one: the form's
     /// create, edit and move. A new global ID is first claimed in every project.
     pub(super) fn save_agent(&mut self, agent: Agent, scope: Scope) -> Result<(), String> {
+        let saved = self.write_agent(agent, scope);
+        // Even a failed move may have written one file.
+        self.refresh_roster();
+        saved
+    }
+
+    fn write_agent(&mut self, agent: Agent, scope: Scope) -> Result<(), String> {
         let id = agent.id.clone();
         match scope {
             Scope::Global => {
@@ -112,10 +119,12 @@ impl State {
     /// Save a change to agent `agent.id` where it is defined, touching no other
     /// file: effort, MCP servers and skills.
     pub(super) fn update_agent(&mut self, agent: Agent) -> Result<(), String> {
-        match self.scope(&agent.id).ok_or("Unknown agent")? {
+        let updated = match self.scope(&agent.id).ok_or("Unknown agent")? {
             Scope::Global => self.write_global(agent),
             Scope::Project => self.write_project(agent),
-        }
+        };
+        self.refresh_roster();
+        updated
     }
 
     /// The shared definition in the global file, then this project's MCP
@@ -174,6 +183,12 @@ impl State {
 
     /// Delete agent `id` where it is defined; a global one leaves every project.
     pub(super) fn remove_agent(&mut self, id: &str, next: Option<&str>) -> Result<(), String> {
+        let removed = self.delete_agent(id, next);
+        self.refresh_roster();
+        removed
+    }
+
+    fn delete_agent(&mut self, id: &str, next: Option<&str>) -> Result<(), String> {
         let scope = self.scope(id).ok_or("Unknown agent")?;
         let mut project = self.project.value.clone();
         project.agents.remove(id);
@@ -276,8 +291,9 @@ impl State {
 
     /// Reread both agent files before a form or a change.
     pub(super) fn reload_agents(&mut self) -> Result<(), String> {
-        self.project.reload()?;
-        self.global.reload()?;
+        let reloaded = self.project.reload().and_then(|()| self.global.reload());
+        self.refresh_roster();
+        reloaded?;
         if self.project.value.schema != PROJECT_SCHEMA || self.global.value.schema != PROJECT_SCHEMA
         {
             return Err("Unsupported profile file version".into());

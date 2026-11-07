@@ -24,6 +24,8 @@ struct Sources {
     modes: watch::Receiver<()>,
     /// A conversation an agent's memory compacted.
     compactions: watch::Receiver<()>,
+    /// A task a conversation's agent handed over started or ended.
+    tasks: watch::Receiver<()>,
 }
 
 pub(super) fn subscribe(
@@ -44,6 +46,7 @@ pub(super) fn subscribe(
         hooks: sessions.services.hooks.changes.subscribe(),
         modes: sessions.policy.changes.subscribe(),
         compactions: sessions.profiles.resources.compactions.subscribe(),
+        tasks: sessions.profiles.resources.tasks.subscribe(),
     };
     let (profiles, services) = (sessions.profiles.clone(), sessions.services.clone());
     let policy = sessions.policy.clone();
@@ -87,7 +90,8 @@ async fn events(
     // In the status line, sent again while recent: a compaction is no lasting
     // state, and a list of events can be replaced before the view reads it.
     let room = current.room.as_str();
-    let notices = profiles.resources.compactions.notices(room);
+    let mut notices = profiles.resources.compactions.notices(room);
+    notices.extend(profiles.resources.tasks.notices(room));
     events.extend(notices.into_iter().map(|text| Event::Notice {
         conversation: room.into(),
         text,
@@ -118,6 +122,7 @@ impl Sources {
             changed = self.hooks.changed() => changed.is_ok(),
             changed = self.modes.changed() => changed.is_ok(),
             changed = self.compactions.changed() => changed.is_ok(),
+            changed = self.tasks.changed() => changed.is_ok(),
             // MCP exposes connection liveness, but no disconnect stream. Only
             // configured connections are inspected; unchanged state never
             // redraws the TUI.

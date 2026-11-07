@@ -65,10 +65,20 @@ impl Mode {
     }
 }
 
+/// What a call that needs an approval reads in a delegated task's room, which
+/// no view shows.
+const DELEGATED: &str = "This action needs the person's approval, which a delegated task cannot ask for: it was not executed. Do not retry it or use another tool to get around it; finish what the mode allows and say in your answer what you could not do.";
+
+/// How many rooms up a delegated task's room is followed to its conversation:
+/// past it, a chain of links is taken for a loop.
+const MAX_DELEGATION_DEPTH: usize = 16;
+
 #[derive(Clone)]
 pub(crate) struct Policy {
     initial: Mode,
     modes: Arc<Mutex<BTreeMap<String, Mode>>>,
+    /// The room each delegated task's room was opened from (RMK-1532).
+    parents: Arc<Mutex<BTreeMap<String, String>>>,
     /// Signals every mode change, so the view's live updates carry the
     /// latest.
     pub changes: Arc<tokio::sync::watch::Sender<()>>,
@@ -79,13 +89,45 @@ impl Policy {
         Self {
             initial,
             modes: Arc::default(),
+            parents: Arc::default(),
             changes: Arc::new(tokio::sync::watch::channel(()).0),
         }
     }
 
+    /// Learns from `room`'s metadata whether the engine opened it for a
+    /// delegated task, and from which room: its calls then take the mode of
+    /// the conversation that room belongs to (HITL f7f700bc). The engine
+    /// writes the parent as it creates the room, before its agent runs.
+    pub(crate) fn adopt(&self, room: &roomkit::model::Room) {
+        let Some(parent) = room.metadata.get("parent_room_id").and_then(|p| p.as_str()) else {
+            return;
+        };
+        crate::sync::lock(&self.parents).insert(room.id.as_str().into(), parent.into());
+    }
+
+    /// Whether `room` is a delegated task's.
+    pub(crate) fn delegated(&self, room: &str) -> bool {
+        crate::sync::lock(&self.parents).contains_key(room)
+    }
+
+    /// The conversation `room` belongs to: itself, or for a delegated task's
+    /// room the conversation its task was delegated from.
+    fn conversation(&self, room: &str) -> String {
+        let parents = crate::sync::lock(&self.parents);
+        let mut current = room;
+        for _ in 0..MAX_DELEGATION_DEPTH {
+            match parents.get(current) {
+                Some(parent) => current = parent,
+                None => break,
+            }
+        }
+        current.to_owned()
+    }
+
     pub(crate) fn mode(&self, room: &str) -> Mode {
+        let conversation = self.conversation(room);
         crate::sync::lock(&self.modes)
-            .get(room)
+            .get(&conversation)
             .copied()
             .unwrap_or(self.initial)
     }
@@ -166,6 +208,9 @@ impl Policy {
         // after approval; actions already dispatched are not revoked.
         if review.is_none() && self.mode(room_of(&event)) == Mode::Yolo {
             return allow();
+        }
+        if self.delegated(room_of(&event)) {
+            return block(DELEGATED);
         }
         let request = match card::request(&event, rule.label, review) {
             Ok(request) => request,

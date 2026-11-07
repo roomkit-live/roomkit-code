@@ -8,6 +8,7 @@ mod skills;
 mod slot;
 mod startup;
 mod store;
+mod targets;
 mod ui;
 
 use roomkit::model::{Access, ChannelId};
@@ -73,6 +74,10 @@ struct State {
     tools: BTreeMap<String, Vec<AiTool>>,
     /// What each configured agent's requests carry before their messages.
     compositions: BTreeMap<String, crate::agent::Composition>,
+    /// The agents a task can be handed to, kept as the agent files change.
+    roster: Arc<crate::delegation::Roster>,
+    /// What serves every agent's `delegate_task`, once the engine is up.
+    delegation: Option<roomkit::tasks::DelegateHandler<SqliteStore>>,
     pending: Option<ui::Pending>,
     pending_delete: Option<deletion::Pending>,
     setup_error: Option<String>,
@@ -174,7 +179,8 @@ impl Profiles {
         let instructions = resources.instructions.clone();
         let compactions = resources.compactions.clone();
         let files = resources.files.clone();
-        Ok(Arc::new(Self {
+        let roster = resources.roster.clone();
+        let profiles = Arc::new(Self {
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),
             require_tool_intent: settings.require_tool_intent,
@@ -202,6 +208,8 @@ impl Profiles {
                 slots: BTreeMap::new(),
                 tools: BTreeMap::new(),
                 compositions: BTreeMap::new(),
+                roster,
+                delegation: None,
                 pending: None,
                 pending_delete: None,
                 setup_error: None,
@@ -211,11 +219,14 @@ impl Profiles {
                     pricing,
                 }),
             }),
-        }))
+        });
+        profiles.state.lock().await.refresh_roster();
+        Ok(profiles)
     }
 
     pub async fn initialize(&self, kit: &RoomKit<SqliteStore>) -> Result<ChannelId, String> {
         let mut state = self.state.lock().await;
+        state.delegation = Some(crate::delegation::handler(kit));
         let id = state.selected().unwrap_or_else(|| "code".into());
         let channel = ChannelId::new(&id).map_err(|_| "Invalid agent ID")?;
         let assembled = if let Some(profile) = state.agent(&id) {
@@ -240,17 +251,7 @@ impl Profiles {
         let (agent, inventory) =
             assembled.map_or((None, Inventory::default()), |(a, i)| (Some(a), i));
         let configured = agent.is_some();
-        let slot = AgentSlot::new(
-            channel.clone(),
-            agent,
-            self.policy.clone(),
-            state.instructions.clone(),
-            state.files.clone(),
-            state.compactions.clone(),
-        );
-        kit.register_channel(slot.clone())
-            .map_err(|_| "Could not register the agent")?;
-        state.slots.insert(id.clone(), slot);
+        state.register(kit, &channel, agent)?;
         if configured {
             state.compositions.insert(id.clone(), inventory.composition);
             state.tools.insert(id, inventory.tools);
@@ -440,19 +441,38 @@ impl State {
         list_price(connection, &agent.model, self.configured_price.as_ref())
     }
 
+    /// Registers agent `id`'s slot, holding `agent`, with the engine, which
+    /// serves it the delegation tools.
+    fn register(
+        &mut self,
+        kit: &RoomKit<SqliteStore>,
+        id: &ChannelId,
+        agent: Option<CodeAgent>,
+    ) -> Result<(), String> {
+        let slot = AgentSlot::new(
+            id.clone(),
+            agent,
+            self.policy.clone(),
+            self.instructions.clone(),
+            self.files.clone(),
+            self.compactions.clone(),
+            self.roster.clone(),
+        );
+        kit.register_channel(slot.clone())
+            .map_err(|_| "Could not register the agent")?;
+        // Kept as soon as the engine holds it, which never registers it twice.
+        self.slots.insert(id.as_str().into(), slot);
+        if let Some(handler) = &self.delegation {
+            crate::delegation::serve(kit, handler, id)
+                .map_err(|_| "Could not serve the agent its delegation tools")?;
+        }
+        Ok(())
+    }
+
     fn ensure_slot(&mut self, kit: &RoomKit<SqliteStore>, id: &str) -> Result<(), String> {
         if !self.slots.contains_key(id) {
-            let slot = AgentSlot::new(
-                ChannelId::new(id).map_err(|_| "Invalid agent ID")?,
-                None,
-                self.policy.clone(),
-                self.instructions.clone(),
-                self.files.clone(),
-                self.compactions.clone(),
-            );
-            kit.register_channel(slot.clone())
-                .map_err(|_| "Could not register agent")?;
-            self.slots.insert(id.into(), slot);
+            let channel = ChannelId::new(id).map_err(|_| "Invalid agent ID")?;
+            self.register(kit, &channel, None)?;
         }
         Ok(())
     }
@@ -464,24 +484,27 @@ impl State {
         agent: CodeAgent,
         inventory: Inventory,
     ) -> Result<(), String> {
+        self.put(kit, id, agent, inventory)?;
+        self.setup_error = None;
+        Ok(())
+    }
+
+    /// Puts `agent` in agent `id`'s slot, registering the slot first if needed.
+    fn put(
+        &mut self,
+        kit: &RoomKit<SqliteStore>,
+        id: &str,
+        agent: CodeAgent,
+        inventory: Inventory,
+    ) -> Result<(), String> {
         if let Some(slot) = self.slots.get(id) {
             slot.replace(agent);
         } else {
-            let slot = AgentSlot::new(
-                ChannelId::new(id).map_err(|_| "Invalid agent ID")?,
-                Some(agent),
-                self.policy.clone(),
-                self.instructions.clone(),
-                self.files.clone(),
-                self.compactions.clone(),
-            );
-            kit.register_channel(slot.clone())
-                .map_err(|_| "Could not register agent")?;
-            self.slots.insert(id.into(), slot);
+            let channel = ChannelId::new(id).map_err(|_| "Invalid agent ID")?;
+            self.register(kit, &channel, Some(agent))?;
         }
         self.compositions.insert(id.into(), inventory.composition);
         self.tools.insert(id.into(), inventory.tools);
-        self.setup_error = None;
         Ok(())
     }
 }

@@ -81,6 +81,10 @@ pub(crate) struct Resources {
     pub outputs: OutputStore,
     pub search: WebSearchTool,
     pub fetch: WebFetchTool,
+    /// The agents a task can be handed to, which the profiles keep current.
+    pub roster: Arc<crate::delegation::Roster>,
+    /// What the status line says of each conversation's latest task.
+    pub tasks: Arc<crate::delegation::Tasks>,
 }
 
 impl Resources {
@@ -127,6 +131,8 @@ impl Resources {
             search: WebSearchTool::new(Arc::new(ExaSearch::new(SearchHttpConfig::default())?))
                 .with_limits(search_limits)?,
             fetch: WebFetchTool::new().with_limits(fetch_limits)?,
+            roster: Arc::default(),
+            tasks: Arc::default(),
         })
     }
 

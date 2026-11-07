@@ -130,13 +130,15 @@ impl Application {
 async fn setup(
     settings: &Settings,
     kit: &RoomKit<SqliteStore>,
-    profiles: &Profiles,
+    profiles: &std::sync::Arc<Profiles>,
     services: &Services,
     policy: &crate::permissions::Policy,
 ) -> Result<(ConversationChannel, SessionConfig)> {
     profiles.diagnostics.install(kit).await?;
     services.hooks.install(kit)?;
     profiles.resources.files.install(kit);
+    let resources = &profiles.resources;
+    crate::delegation::install(kit, resources.tasks.clone(), resources.roster.clone())?;
     let agent_id = profiles.initialize(kit).await?;
     let channel = ConversationChannel::new(ChannelId::new("terminal")?);
     kit.register_channel(channel.clone())?;
@@ -145,6 +147,8 @@ async fn setup(
         channel: channel.clone(),
         hooks: services.hooks.clone(),
         plans: profiles.resources.plans.clone(),
+        profiles: profiles.clone(),
+        kit: kit.downgrade(),
     };
     gate::install(kit, gate)?;
     let view = first_view(

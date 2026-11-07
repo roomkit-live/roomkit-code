@@ -7,6 +7,7 @@ mod branding;
 mod command_env;
 mod compaction;
 mod config;
+mod delegation;
 mod diagnostics;
 mod digest;
 mod docs;
