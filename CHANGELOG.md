@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A ChatGPT account's requests carry their prompt cache key as the `session-id`
+  header too, from which ChatGPT's backend derives its cache affinity, as Codex
+  sends it (RMK-1481).
+
 - A turn sends the project's `AGENTS.md` snapshot only when it changed since the
   latest one the agent read, or when that one has left the messages the agent
   still reads: the engine replays it otherwise, where the earlier turn read it,

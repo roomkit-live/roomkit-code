@@ -75,14 +75,19 @@ struct State {
     configured_price: Option<ConfiguredPrice>,
 }
 
-/// The member that asks OpenAI to route an agent's requests to one prompt
-/// cache: a digest of the workspace and the agent, which tells neither.
-fn prompt_cache_key(workspace: &Path, agent: &str) -> roomkit::model::Metadata {
+/// What asks OpenAI to route an agent's requests to one prompt cache: a key,
+/// a digest of the workspace and the agent which tells neither, as the body's
+/// `prompt_cache_key` and as the `session-id` header, from which ChatGPT's
+/// backend derives its cache affinity. Codex sends both, the same.
+fn cache_routing(
+    workspace: &Path,
+    agent: &str,
+) -> (roomkit::model::Metadata, BTreeMap<String, String>) {
     let digest = crate::digest::sha256_hex(format!("{}\0{agent}", workspace.display()));
-    let mut body = roomkit::model::Metadata::new();
     let key = format!("roomkit-code-{}", &digest[..32]);
-    body.insert("prompt_cache_key".into(), key.into());
-    body
+    let mut body = roomkit::model::Metadata::new();
+    body.insert("prompt_cache_key".into(), key.clone().into());
+    (body, BTreeMap::from([("session-id".to_owned(), key)]))
 }
 
 /// `[provider.pricing]`: the list price of `model` on `base_url`.
@@ -249,6 +254,10 @@ impl Profiles {
                 if !connected.plan_usage {
                     return Err("Authorize ChatGPT plan usage with /providers".into());
                 }
+                // An agent's requests share their prompt's start: one key
+                // routes them to one prompt cache. Without it, a turn's later
+                // steps mostly missed it too (RMK-1481).
+                let (extra_body, headers) = cache_routing(&self.workspace, &profile.id);
                 roomkit_openai::OpenAiConfig {
                     base_url: Some(roomkit_auth::CHATGPT_API_ROOT.into()),
                     api: roomkit_openai::OpenAiApi::Responses,
@@ -260,10 +269,8 @@ impl Profiles {
                         auth: self.accounts.auth.clone(),
                         account: account.clone(),
                     })),
-                    // An agent's requests share their prompt's start: one key
-                    // routes them to one prompt cache. Without it, a turn's
-                    // later steps mostly missed it too (RMK-1481).
-                    extra_body: Some(prompt_cache_key(&self.workspace, &profile.id)),
+                    extra_body: Some(extra_body),
+                    default_headers: Some(headers),
                     ..roomkit_openai::OpenAiConfig::new("", &profile.model)
                 }
             }
@@ -474,10 +481,10 @@ mod tests {
     #[test]
     fn an_agent_s_cache_key_is_its_own_and_stable() {
         let key = |workspace: &str, agent: &str| {
-            prompt_cache_key(Path::new(workspace), agent)["prompt_cache_key"]
-                .as_str()
-                .unwrap()
-                .to_owned()
+            let (body, headers) = cache_routing(Path::new(workspace), agent);
+            let key = body["prompt_cache_key"].as_str().unwrap().to_owned();
+            assert_eq!(headers, BTreeMap::from([("session-id".into(), key.clone())]));
+            key
         };
         let code = key("/work/project", "code");
         assert_eq!(code, key("/work/project", "code"));
