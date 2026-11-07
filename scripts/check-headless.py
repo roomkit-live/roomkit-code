@@ -164,7 +164,34 @@ def from_stdin(root, model):
     assert model.said("A message read from standard input."), model.requests[0]["messages"]
 
 
-def interrupted(root, model):
+def same_session(root, model):
+    # Each launch's message is new: the second one on a session is sent too.
+    code, out, err = run(root, model, "--session", "ci", "--prompt", "Task one.")
+    assert (code, out) == (0, "Answer one.\n"), (code, out, err)
+    code, out, err = run(root, model, "--session", "ci", "--prompt", "Task two.")
+    assert (code, out) == (0, "Answer two.\n"), (code, out, err)
+    assert len(model.requests) == 2, len(model.requests)
+    assert any("Task two." in json.dumps(m) for m in model.requests[1]["messages"])
+
+
+def closed_output(root, model):
+    # A reader that stops early does not crash the launch, which still closes.
+    process = launch(root, model, "--prompt", "Write a lot.")
+    process.stdout.readline()
+    process.stdout.close()
+    err = process.stderr.read()
+    process.wait(timeout=60)
+    assert process.returncode == 0, (process.returncode, err)
+    assert "panicked" not in err and "Session: " in err, err
+
+
+def too_long(root, model):
+    code, out, err = run(root, model, "--prompt", "-", stdin="x" * 70_000)
+    assert code == 1 and "65536 bytes" in err, (code, err)
+    assert not model.requests
+
+
+def interrupted(root, model, sig=signal.SIGINT):
     process = launch(root, model, "--mode", "yolo", "--json", "--prompt", "Wait for a while.")
     started = time.monotonic()
     # Wait until the shell call runs, then signal as a harness timeout would.
@@ -172,7 +199,7 @@ def interrupted(root, model):
         event = json.loads(line)
         if event["kind"] == "item" and event["item"].get("kind") == "tool" and event["item"]["call"]["state"] == "running":
             break
-    process.send_signal(signal.SIGINT)
+    process.send_signal(sig)
     rest, err = process.communicate(timeout=30)
     assert process.returncode == 130, (process.returncode, err)
     assert time.monotonic() - started < 20, "the sleep was not cut"
@@ -200,6 +227,10 @@ scenario("round limit fails the launch", [call("list", path="."), call("list", "
 # Each call differs: the engine stops a turn that repeats one exact call.
 scenario("no round limit unattended", [call("glob", pattern=f"*{i}*") for i in range(55)] + [ANSWER], past_fifty_rounds)
 scenario("message from standard input", [ANSWER], from_stdin)
-scenario("a signal interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], interrupted)
+scenario("a second launch on one session", ["Answer one.", "Answer two."], same_session)
+scenario("standard output closed early", ["\n".join(["line"] * 20_000)], closed_output)
+scenario("a message too long", [ANSWER], too_long)
+scenario("SIGINT interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], interrupted)
+scenario("SIGTERM interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], lambda root, model: interrupted(root, model, signal.SIGTERM))
 scenario("invalid launches", [ANSWER], refused_without_agent)
 print("headless checks passed")

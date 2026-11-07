@@ -199,7 +199,8 @@ JSON object per line, in the terminal protocol's own form (`run_started`,
 usage) go to standard error. The exit status is 0 when the turn ended with its
 answer, 1 when the message was refused or the turn ended without its answer (its
 round limit, an error), and 130 when SIGINT or SIGTERM cut it: the signal
-interrupts the turn, which stops its commands and records what it did. For
+interrupts the turn, which stops its commands and records what it did; a second
+signal exits at once, without waiting for that. A message holds at most 64 KiB. For
 now, a turn cut by its round limit or a failure right after a round that only
 called tools still exits 0: the engine records that end on the round's last
 call after the terminal protocol reports the turn finished.

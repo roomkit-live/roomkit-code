@@ -7,10 +7,11 @@
 use std::io::Write;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
+use roomkit_tui::protocol::limits::MAX_TEXT_BYTES;
 use roomkit_tui::{Client, connection};
 
 use super::{Application, QUEUE, integrations::Resume};
@@ -47,6 +48,11 @@ impl Prompt {
         if text.trim().is_empty() {
             return Err("The message to send is empty".into());
         }
+        if text.len() > MAX_TEXT_BYTES {
+            let error =
+                format!("The message exceeds {MAX_TEXT_BYTES} bytes, the most one may hold");
+            return Err(error.into());
+        }
         Ok(Some(Self {
             text,
             json: cli.json,
@@ -63,6 +69,9 @@ struct Outcome {
 }
 
 pub(crate) async fn run(settings: Settings, prompt: Prompt) -> Result<ExitCode> {
+    // Listen first: a signal while the application opens keeps the message
+    // from being sent, and the launch still closes what it opened.
+    let signals = listen()?;
     let api_key = std::env::var("ROOMKIT_API_KEY").unwrap_or_default();
     let app = Application::open(&settings, api_key).await?;
     if let Err(error) = app.session().snapshot().await {
@@ -74,10 +83,11 @@ pub(crate) async fn run(settings: Settings, prompt: Prompt) -> Result<ExitCode> 
         app.session()
             .run_with_commands(host, app.router(&settings.workspace)),
     );
-    let stop = listen()?;
     let Prompt { text, json } = prompt;
+    let launch = format!("headless-{}", uuid::Uuid::new_v4().simple());
+    let driver = Driver::new(text, launch);
     let driven =
-        tokio::task::spawn_blocking(move || drive(&client, Driver::new(text), json, &stop)).await;
+        tokio::task::spawn_blocking(move || drive(&client, driver, json, &signals.pending)).await;
     // The view ended with its client: the host stops serving it.
     let attached = adapter.await;
     let summary = match &driven {
@@ -110,7 +120,7 @@ async fn report(
     json: bool,
 ) -> Option<crate::exit_summary::Summary> {
     if !json && let Some(answer) = &outcome.answer {
-        println!("{answer}");
+        write_answer(answer);
     }
     let summary = summarize(app, settings, outcome).await?;
     for line in summary.conversation_report() {
@@ -140,9 +150,8 @@ fn drive(client: &Client, mut driver: Driver, json: bool, stop: &AtomicBool) -> 
         match client.recv_timeout(POLL) {
             Ok(event) => {
                 if json {
-                    serde_json::to_writer(&mut out, &event)?;
-                    out.write_all(b"\n")?;
-                    out.flush()?;
+                    write_event(&mut out, &event)
+                        .map_err(|error| format!("Cannot write the events: {error}"))?;
                 }
                 apply(client, driver.on_event(&event))?;
             }
@@ -151,6 +160,25 @@ fn drive(client: &Client, mut driver: Driver, json: bool, stop: &AtomicBool) -> 
                 return Err("The conversation stopped before its turn ended".into());
             }
         }
+    }
+}
+
+fn write_event(out: &mut impl Write, event: &roomkit_tui::protocol::Event) -> Result<()> {
+    serde_json::to_writer(&mut *out, event)?;
+    out.write_all(b"\n")?;
+    out.flush()?;
+    Ok(())
+}
+
+/// Write the answer on standard output. A reader that stopped reading, as
+/// `head` does, leaves the rest unread: the launch still closes and reports.
+fn write_answer(answer: &str) {
+    let mut out = std::io::stdout().lock();
+    let written = writeln!(out, "{answer}").and_then(|()| out.flush());
+    if let Err(error) = written
+        && error.kind() != std::io::ErrorKind::BrokenPipe
+    {
+        eprintln!("Cannot write the answer: {error}");
     }
 }
 
@@ -166,20 +194,31 @@ fn apply(client: &Client, steps: Vec<Step>) -> Result<()> {
     Ok(())
 }
 
-/// A flag every SIGINT or SIGTERM raises; the launch reads it between events.
-fn listen() -> Result<Arc<AtomicBool>> {
+/// The signals the launch received. The first SIGINT or SIGTERM raises
+/// `pending`, which the launch reads between events to cut its turn; the
+/// next one exits at once, should the cut or the close never end.
+struct Signals {
+    pending: Arc<AtomicBool>,
+}
+
+fn listen() -> Result<Signals> {
     use tokio::signal::unix::{SignalKind, signal};
-    let stop = Arc::new(AtomicBool::new(false));
+    let pending = Arc::new(AtomicBool::new(false));
+    let received = Arc::new(AtomicU32::new(0));
     for kind in [SignalKind::interrupt(), SignalKind::terminate()] {
         let mut signals = signal(kind)?;
-        let stop = stop.clone();
+        let (pending, received) = (pending.clone(), received.clone());
         tokio::spawn(async move {
             while signals.recv().await.is_some() {
-                stop.store(true, Ordering::SeqCst);
+                if received.fetch_add(1, Ordering::SeqCst) > 0 {
+                    eprintln!("Stopped without waiting for the turn to close.");
+                    std::process::exit(i32::from(INTERRUPTED));
+                }
+                pending.store(true, Ordering::SeqCst);
             }
         });
     }
-    Ok(stop)
+    Ok(Signals { pending })
 }
 
 /// The exit report of the launch's conversation, while the store and the
