@@ -200,10 +200,12 @@ usage) go to standard error. The exit status is 0 when the turn ended with its
 answer, 1 when the message was refused or the turn ended without its answer (its
 round limit, an error), and 130 when SIGINT or SIGTERM cut it: the signal
 interrupts the turn, which stops its commands and records what it did; a second
-signal exits at once, without waiting for that. A message holds at most 64 KiB. For
-now, a turn cut by its round limit or a failure right after a round that only
-called tools still exits 0: the engine records that end on the round's last
-call after the terminal protocol reports the turn finished.
+signal exits at once, without waiting for that, and commands the turn started
+may then keep running. A message holds at most 64 KiB. For now, a turn that wrote
+a message in an earlier round, then was cut by its round limit or a failure
+right after a round that only called tools, still exits 0 with that message: the
+engine records that end on the round's last call after the terminal protocol
+reports the turn finished.
 
 Nobody answers approvals: each one is refused, and the agent reads the refusal.
 Ask, the default mode, therefore refuses every change and command; use
