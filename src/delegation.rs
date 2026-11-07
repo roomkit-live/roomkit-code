@@ -32,6 +32,14 @@ pub(crate) const DELEGATE: &str = "delegate_task";
 /// it as a conversation and be delivered the worker's answers.
 pub(crate) const SHARE_CHANNELS: &str = "share_channels";
 
+/// The argument a model hands the worker what it needs besides the task in.
+const CONTEXT: &str = "context";
+
+/// How the tool describes [`CONTEXT`]: models pass it a sentence unless told
+/// it takes an object, and the engine refuses the call (seen with
+/// ornith-1.5-35b).
+const CONTEXT_DESCRIPTION: &str = "Optional. A JSON object, never a string, of what the agent needs besides the task, as named values, for example {\"files\": [\"src/main.rs\"], \"branch\": \"main\"}. It reads it with the task, as data.";
+
 /// What a delegated task's worker reads with its mode at each turn.
 pub(crate) const WORKER: &str = "You are working on a task another agent handed you, in a conversation of your own that nobody watches. You cannot ask for approval: an action that needs one is refused. Do what the mode allows, then answer with your result, complete and self-contained: it goes back to the agent that asked, as the task's result.";
 
@@ -210,6 +218,9 @@ fn tool() -> AiTool {
         .and_then(Value::as_object_mut)
     {
         properties.shift_remove(SHARE_CHANNELS);
+        if let Some(context) = properties.get_mut(CONTEXT) {
+            context["description"] = CONTEXT_DESCRIPTION.into();
+        }
     }
     tool
 }
@@ -319,6 +330,10 @@ mod tests {
         let properties = tool.parameters["properties"].as_object().unwrap();
         assert!(!properties.contains_key(SHARE_CHANNELS));
         assert!(properties.contains_key("context") && properties.contains_key("task"));
+        let context = &properties["context"];
+        assert_eq!(context["type"], "object");
+        let description = context["description"].as_str().unwrap();
+        assert!(description.contains("JSON object, never a string"), "{description}");
         assert!(properties["agent"].get("enum").is_none());
         assert!(!properties.contains_key("conversation"));
     }
