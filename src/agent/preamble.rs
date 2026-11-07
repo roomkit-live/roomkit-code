@@ -211,7 +211,7 @@ fn instructions(tools: &[AiTool], shell_maximum: u64) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n")
-        .replacen("{permissions}", &crate::permissions::summary(), 1)
+        .replacen("{permissions}", &crate::permissions::summary(has), 1)
         .replacen("{shell_maximum}", &shell_maximum.to_string(), 1)
 }
 
@@ -394,7 +394,7 @@ mod tests {
         }))
         .unwrap();
         let prompt = base_prompt(&profile, &[], false, 120_000);
-        assert!(prompt.contains(&crate::permissions::summary()));
+        assert!(prompt.contains(&crate::permissions::summary(|_| false)));
         assert!(!prompt.contains("{permissions}"));
     }
 

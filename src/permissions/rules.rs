@@ -140,19 +140,21 @@ const RULES: &[(&str, Rule)] = &[
     ),
 ];
 
-/// The rules as the system prompt states them: the lists come from the table,
-/// so the prompt follows it; the clauses on patch previews and MCP tools
-/// state `rule_for`.
-pub(crate) fn summary() -> String {
+/// The rules as the system prompt states them, for the tools `has` names:
+/// the lists come from the table, so the prompt follows it, and name no tool
+/// the agent lacks; the clauses on patch previews and MCP tools state
+/// `rule_for`.
+pub(crate) fn summary(has: impl Fn(&str) -> bool) -> String {
     let names = |keep: fn(&Rule) -> bool| {
         let names: Vec<&str> = RULES
             .iter()
-            .filter(|(_, rule)| keep(rule))
+            .filter(|(name, rule)| keep(rule) && has(name))
             .map(|(name, _)| *name)
             .collect();
         match names.split_last() {
             Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
-            _ => names.join(""),
+            Some(_) => names.join(""),
+            None => "none".into(),
         }
     };
     format!(
@@ -187,6 +189,23 @@ mod tests {
     #![allow(clippy::unwrap_used, reason = "A missing rule fails the test")]
     use super::*;
     use serde_json::{Map, json};
+
+    #[test]
+    fn the_summary_names_only_the_tools_an_agent_has() {
+        let summary = summary(|name| name == "read" || name == "shell");
+        assert!(
+            summary.contains("without approval: read, as does patch"),
+            "{summary}"
+        );
+        assert!(!summary.contains("plan_create"), "{summary}");
+        assert!(!summary.contains("shell"), "{summary}");
+        let none = summary_of_nothing();
+        assert!(none.contains("without approval: none,"), "{none}");
+    }
+
+    fn summary_of_nothing() -> String {
+        summary(|_| false)
+    }
 
     fn arguments(value: serde_json::Value) -> Map<String, serde_json::Value> {
         value.as_object().cloned().unwrap_or_default()

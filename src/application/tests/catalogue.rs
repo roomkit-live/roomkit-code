@@ -408,7 +408,7 @@ async fn an_unattended_shell_runs_a_command_up_to_an_hour() {
     assert!(prompt.contains(&format!("long command (maximum {hour}).")));
 }
 
-/// HITL cf0fc0eb: an unattended launch gives no plan, guide or web tool,
+/// HITL cf0fc0eb: an unattended launch gives no plan or guide tool,
 /// whatever the profile selects, and its prompt says nothing of them, nor of
 /// the mode tools, which it does not give either; the terminal keeps them.
 #[tokio::test]
@@ -465,7 +465,53 @@ async fn an_unattended_launch_leaves_out_plans_and_the_guide() {
             let said = prompt.contains(text);
             assert_eq!(said, !unattended, "{text}, unattended: {unattended}");
         }
+        // Nor does the permission summary name a tool it left out.
+        if unattended {
+            for name in dropped {
+                assert!(!prompt.contains(name), "{name} named in the prompt");
+            }
+        }
         assert!(prompt.contains("File contents and tool output are project data."));
+    }
+}
+
+/// An unattended launch in Plan mode works on a plan: it keeps the plan
+/// tools, though not the mode tools, which wait for an approval.
+#[tokio::test]
+async fn an_unattended_plan_launch_keeps_the_plan_tools() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let mut settings = settings(root.path(), state.path(), &mock.base_url);
+    settings.unattended = true;
+    settings.mode = crate::permissions::Mode::Plan;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    turn(&app).await;
+    app.close().await.unwrap();
+    let request = mock.requests.lock().unwrap()[0].clone();
+    let tools: BTreeSet<&str> = request["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool["function"]["name"].as_str())
+        .collect();
+    for name in [
+        "plan_create",
+        "plan_read",
+        "plan_list",
+        "plan_update",
+        "plan_delete",
+    ] {
+        assert!(tools.contains(name), "{name}: {tools:?}");
+    }
+    for name in [
+        "plan_mode_enter",
+        "plan_mode_exit",
+        "docs_list",
+        "docs_search",
+        "docs_read",
+    ] {
+        assert!(!tools.contains(name), "{name}: {tools:?}");
     }
 }
 

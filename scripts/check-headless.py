@@ -194,6 +194,28 @@ def closed_output(root, model):
     assert "panicked" not in err and "Session: " in err, err
 
 
+def closed_events(root, model):
+    # Events written to a reader that left fail the launch, which still says
+    # what it leaves running.
+    process = launch(root, model, "--mode", "yolo", "--json", "--prompt", "Start the server.")
+    # Leave once the server started, while the long answer still streams.
+    for line in process.stdout:
+        if '"process_start"' in line and '"succeeded"' in line:
+            break
+    process.stdout.close()
+    err = process.stderr.read()
+    process.wait(timeout=60)
+    pid = pid_in(root / "project" / "server.pid")
+    try:
+        assert process.returncode == 1 and "Cannot write the events" in err, (process.returncode, err)
+        assert "Left 1 background process running:" in err, err
+    finally:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def too_long(root, model):
     code, out, err = run(root, model, "--prompt", "-", stdin="x" * 70_000)
     assert code == 1 and "65536 bytes" in err, (code, err)
@@ -236,11 +258,28 @@ def long_shell(root, model):
 
 
 def alive(pid):
-    """Whether pid runs, neither gone nor a zombie."""
+    """Whether pid runs: it exists, and on Linux is no zombie."""
     try:
-        return Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1][0] not in "ZX"
-    except FileNotFoundError:
+        os.kill(pid, 0)
+    except ProcessLookupError:
         return False
+    stat = Path(f"/proc/{pid}/stat")
+    try:
+        return stat.read_text().rsplit(") ", 1)[1][0] not in "ZX"
+    except FileNotFoundError:
+        # No /proc (macOS): an orphan's zombie is reaped by init at once.
+        return True
+
+
+def count_in(path, at_least):
+    """The number a job keeps writing in path, once it reaches at_least."""
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        text = path.read_text().strip() if path.exists() else ""
+        if text.isdigit() and int(text) >= at_least:
+            return int(text)
+        time.sleep(0.01)
+    raise AssertionError(f"{path} stopped short of {at_least}")
 
 
 def pid_in(path):
@@ -255,12 +294,16 @@ def pid_in(path):
 
 def left_running(root, model):
     # Unattended, what the agent started runs on past the launch: a job a
-    # command put in the background, and a process it started.
+    # command put in the background, writing to the pipes it inherited, and a
+    # process it started. Only the process is listed in the report.
     code, out, err = run(root, model, "--mode", "yolo", "--prompt", "Start the servers.")
     project = root / "project"
     pids = [pid_in(project / "job.pid"), pid_in(project / "server.pid")]
     try:
         assert code == 0, (code, err)
+        # Fifty more lines, written to its pipes after roomkit-code exited.
+        written = count_in(project / "count", 0)
+        count_in(project / "count", written + 50)
         assert [alive(pid) for pid in pids] == [True, True], pids
         assert "Left 1 background process running:" in err, err
     finally:
@@ -293,11 +336,13 @@ scenario("no round limit unattended", [call("glob", pattern=f"*{i}*") for i in r
 scenario("message from standard input", [ANSWER], from_stdin)
 scenario("a second launch on one session", ["Answer one.", "Answer two."], same_session)
 scenario("standard output closed early", ["\n".join(["line"] * 20_000)], closed_output)
+scenario("events to a reader that left", [call("process_start", command="echo $$ > server.pid; exec sleep 60"), "\n".join(["line"] * 20_000)], closed_events)
 scenario("a message too long", [ANSWER], too_long)
 scenario("SIGINT interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], interrupted)
 scenario("SIGTERM interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], lambda root, model: interrupted(root, model, signal.SIGTERM))
 scenario("the engine's stored results are read", [call("read_stored_result", result_id="evicted_unknown"), ANSWER], stored_result)
 scenario("a shell command past two minutes", [call("shell", command="printf ran > long", timeout_ms=130000), ANSWER], long_shell)
-scenario("what the agent started runs on", [call("shell", command="sleep 60 > /dev/null 2>&1 & echo $! > job.pid"), call("process_start", command="echo $$ > server.pid; exec sleep 60"), ANSWER], left_running)
+WRITER = "(i=0; while :; do echo line; i=$((i+1)); echo $i > count; sleep 0.02; done) & echo $! > job.pid"
+scenario("what the agent started runs on", [call("shell", command=WRITER), call("process_start", command="echo $$ > server.pid; exec sleep 60"), ANSWER], left_running)
 scenario("invalid launches", [ANSWER], refused_without_agent)
 print("headless checks passed")

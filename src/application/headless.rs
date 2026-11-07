@@ -92,7 +92,11 @@ pub(crate) async fn run(settings: Settings, prompt: Prompt) -> Result<ExitCode> 
     let attached = adapter.await;
     let summary = match &driven {
         Ok(Ok(outcome)) => report(&app, &settings, outcome, json).await,
-        _ => None,
+        // A launch cut short, its output closed for one, still says what it
+        // leaves running.
+        _ => Some(
+            crate::exit_summary::Summary::of_processes(&app.profiles.resources.processes).await,
+        ),
     };
     let closed = app.close().await;
     if let Some(summary) = &summary {
@@ -118,7 +122,7 @@ pub(crate) async fn run(settings: Settings, prompt: Prompt) -> Result<ExitCode> 
 
 /// Write the answer, unless the events were, then the conversation's part of
 /// the exit report: before closing, which can take a while. The rest of the
-/// report, the processes closing stops, comes once it has.
+/// report, the processes closing leaves running, comes once it has.
 async fn report(
     app: &Application,
     settings: &Settings,

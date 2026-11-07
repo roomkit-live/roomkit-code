@@ -173,6 +173,9 @@ pub(crate) struct Extensions {
     /// for a person's approval, nor `ATTENDED_ONLY`, and its shell commands
     /// may run longer (`timeouts::shell_max_seconds`).
     pub unattended: bool,
+    /// An unattended launch in Plan mode, whose work is a plan: it keeps the
+    /// plan tools `ATTENDED_ONLY` otherwise leaves out.
+    pub planning: bool,
     /// Whether the agent is told of the delegation tools the engine serves it:
     /// not when nobody watches the launch, which ends with its turn, before a
     /// delegated task could end (RMK-1532).
@@ -199,7 +202,7 @@ pub(crate) async fn create(
     let shell_maximum = shell.max_timeout_ms;
     let policy = extensions.policy.clone();
     let tools = native_tools(root, resources, policy, shell).await?;
-    let tools = selected(profile, tools, unattended);
+    let tools = selected(profile, tools, (unattended, extensions.planning));
     let native: Vec<AiTool> = tools
         .iter()
         .map(|(definition, _)| definition.clone())
@@ -306,16 +309,16 @@ const ATTENDED_ONLY: [&str; 8] = [
 /// the agent serves it. The mode tools come with plan writing: leaving Plan
 /// approves a plan. An `unattended` launch gets none of them, since nobody
 /// could approve leaving Plan and the agent would stay unable to act, nor
-/// `ATTENDED_ONLY`.
+/// `ATTENDED_ONLY`, but for the plan tools when it is `planning`.
 fn selected(
     profile: &Agent,
     tools: Vec<Arc<dyn Tool>>,
-    unattended: bool,
+    (unattended, planning): (bool, bool),
 ) -> Vec<(AiTool, Arc<dyn Tool>)> {
-    let chosen = |name: &str| {
-        profile.tools.iter().any(|tool| tool == name)
-            && !(unattended && ATTENDED_ONLY.contains(&name))
+    let left_out = |name: &str| {
+        unattended && ATTENDED_ONLY.contains(&name) && !(planning && name.starts_with("plan_"))
     };
+    let chosen = |name: &str| profile.tools.iter().any(|tool| tool == name) && !left_out(name);
     let plans = !unattended && chosen("plan_create");
     let selected = |tool: &AiTool| {
         chosen(&tool.name)

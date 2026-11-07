@@ -199,9 +199,10 @@ form (`run_started`, `item` for each tool call and its result,
 usage) go to standard error. The exit status is 0 when the turn ended with its
 answer, 1 when the message was refused or the turn ended without its answer (its
 round limit, an error), and 130 when SIGINT or SIGTERM cut it: the signal
-interrupts the turn, which stops its commands and records what it did; a second
-signal exits at once, without waiting for that, and commands the turn started
-may then keep running. A message holds at most 64 KiB. For now, a turn that wrote
+interrupts the turn, which stops the commands still running and records what it
+did; what the agent had started in the background runs on, as after any
+unattended launch (below). A second signal exits at once, without waiting for
+that, and commands the turn started may then keep running. A message holds at most 64 KiB. For now, a turn that wrote
 a message in an earlier round, then was cut by its round limit or a failure
 right after a round that only called tools, still exits 0 with that message: the
 engine records that end on the round's last call after the terminal protocol
@@ -211,10 +212,11 @@ Nobody answers approvals: each one is refused, and the agent reads the refusal.
 Ask, the default mode, therefore refuses every change and command; use
 `--mode yolo` to let the agent work, in a workspace you can afford to give it.
 Plan mode's tools are not offered, since leaving Plan needs a person's
-approval. Nor are the plan tools and this guide's tools (`plan_*`, `docs_*`),
-whatever the agent selects, so that each request is smaller; the web tools stay,
-for a prompt that asks to look something up; the system prompt leaves out what it says of
-them, as it does for any agent without them. The conversation is saved like any
+approval. Nor are the plan tools, unless the launch is in Plan mode, nor this
+guide's tools (`plan_*`, `docs_*`), whatever the agent selects, so that each
+request is smaller. The system prompt says nothing of the tools left out, as for
+any agent without them, its permission summary included. The web tools stay,
+for a prompt that asks to look something up. The conversation is saved like any
 other: `--session NAME` continues it, and `/resume` lists it in the terminal.
 
 A shell command may run up to an hour (`timeout_ms` up to 3600000) instead of
@@ -225,12 +227,13 @@ longer.
 
 What the agent starts runs on past the launch: a job a command puts in the
 background (`server &`) outlives the command, and a process started with
-`process_start` outlives roomkit-code, which reports them as `Left N background
-processes running:`. A check that follows the launch, such as a benchmark's
-verifier, can then reach a server the agent started. Their output after the
-exit is lost, so a program that dies on a closed pipe should redirect it. A
-command that times out or is interrupted still stops what it started. In the
-terminal, both stop with their command and with the application.
+`process_start` outlives roomkit-code, which lists those as `Left N background
+processes running:` (jobs a command put in the background are not listed). A
+check that follows the launch, such as a benchmark's verifier, can then reach a
+server the agent started. What they write after their command returned or the
+launch ended goes to a drainer that discards it, so their writes never fail. A
+command that times out or is cut still stops what it started. In the terminal,
+both stop with their command and with the application.
 
 In the terminal, a turn runs at most 50 rounds of tool calls before it stops
 unfinished, and a message continues it. Unattended, nobody can, so a turn runs
@@ -440,7 +443,8 @@ hour), with eight retained jobs per session/agent and 32 total. Read stdout and
 stderr with independent byte cursors (4 KiB pages per stream); `process_write` sends exact stdin text,
 including any explicitly supplied newline, and can deliver EOF. Inspect partial
 writes before deciding what to do next. Stop unneeded jobs and set `forget` to
-release their retained records. The application closes remaining processes on exit.
+release their retained records. The application closes remaining processes on exit,
+but for an unattended launch (`--prompt`), which leaves them running.
 
 **/processes**, **F6**, or the clickable **Processes** status open the live process
 monitor. The list and footer show only running jobs from accessible conversations,

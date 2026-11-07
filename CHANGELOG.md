@@ -3,14 +3,16 @@
 ## Unreleased
 
 - An unattended launch leaves what its agent started running as it exits: a
-  job a command put in the background, and a `process_start` process, reported
-  as `Left N background processes running:`. The shell keeps the latest 16 KiB
-  of each stream, instead of its first and last 4 KiB.
+  job a command put in the background, and a `process_start` process, listed
+  as `Left N background processes running:`, even when the launch is cut short;
+  what they write afterwards is drained, so it never fails them. The shell
+  keeps the latest 16 KiB of each stream, instead of its first and last 4 KiB.
 
 - A `--prompt` launch gives the agent no plan or guide tool (`plan_*`,
-  `docs_*`), whatever its profile selects, and its system prompt leaves out its
-  paragraphs on them and on the mode tools (HITL cf0fc0eb); the web tools stay,
-  for a prompt that asks to look something up. The terminal keeps them all;
+  `docs_*`), whatever its profile selects, but for the plan tools in Plan mode,
+  and its system prompt, permission summary included, says nothing of them nor
+  of the mode tools (HITL cf0fc0eb); the web tools stay, for a prompt that asks
+  to look something up. The terminal keeps them all;
   there too, an agent reads those paragraphs only when it has one of their
   tools.
 

@@ -50,6 +50,20 @@ pub(crate) struct Summary {
     pub running: Vec<Process>,
 }
 
+impl Summary {
+    /// Only the processes still running: the report of a launch that ended
+    /// before it could gather the rest, which still says what it leaves.
+    pub(crate) async fn of_processes(processes: &ProcessSession) -> Self {
+        Self {
+            session: None,
+            resume: None,
+            usage: None,
+            cost: None,
+            running: running(processes).await,
+        }
+    }
+}
+
 /// Gather the report for the conversation shown at exit, given with the
 /// command that reopens it, and `priced`, its view priced as the profiles
 /// price it. An untouched draft has nothing to resume.

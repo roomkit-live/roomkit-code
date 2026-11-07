@@ -46,6 +46,8 @@ pub(crate) struct Profiles {
     max_tool_rounds: u32,
     /// No person answers approvals in this launch.
     unattended: bool,
+    /// An unattended launch in Plan mode, which keeps the plan tools.
+    planning: bool,
     workspace: PathBuf,
     state_dir: PathBuf,
     pub(crate) diagnostics: Arc<crate::diagnostics::Diagnostics>,
@@ -191,6 +193,7 @@ impl Profiles {
             require_tool_intent: settings.require_tool_intent,
             max_tool_rounds: settings.max_tool_rounds,
             unattended: settings.unattended,
+            planning: settings.unattended && settings.mode == crate::permissions::Mode::Plan,
             skill_catalogue: tokio::sync::RwLock::new(skill_catalogue),
             images: crate::images::Images::new(storage.database.with_file_name("attachments")),
             diagnostics,
@@ -346,6 +349,7 @@ impl Profiles {
             intent_required: self.require_tool_intent,
             max_tool_rounds: self.max_tool_rounds,
             unattended: self.unattended,
+            planning: self.planning,
             delegation: !self.unattended,
             policy: self.policy.clone(),
             images: self.images.clone(),
