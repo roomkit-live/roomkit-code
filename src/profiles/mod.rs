@@ -483,7 +483,10 @@ mod tests {
         let key = |workspace: &str, agent: &str| {
             let (body, headers) = cache_routing(Path::new(workspace), agent);
             let key = body["prompt_cache_key"].as_str().unwrap().to_owned();
-            assert_eq!(headers, BTreeMap::from([("session-id".into(), key.clone())]));
+            assert_eq!(
+                headers,
+                BTreeMap::from([("session-id".into(), key.clone())])
+            );
             key
         };
         let code = key("/work/project", "code");

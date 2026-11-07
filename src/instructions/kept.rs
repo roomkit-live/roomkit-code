@@ -4,25 +4,31 @@
 //! replays it where that turn read it in the agent's later turns (roomkit-rs
 //! RMK-1407). A turn therefore sends the project's snapshot again only when
 //! the latest one the agent read differs, or no longer replays: its row
-//! precedes every message the agent's memory still reads.
+//! precedes every message the agent's memory still reads, or comes at or
+//! after the event the turn answers, which the kit replays nothing after.
 
 use roomkit::model::{ChannelId, EventDirection, EventType, RoomEvent};
 use roomkit_core::rules::{edits::is_deleted, transcoding::text_of};
 
 use super::GUIDANCE;
 
-/// Whether the turn of `channel` that reads `history`, through a memory
-/// keeping its latest `window` events (0 keeping every one), still replays
-/// `snapshot` as the latest project snapshot the agent read.
+/// Whether the turn of `channel` on `trigger` that reads `history`, through
+/// a memory keeping its latest `window` events (0 keeping every one), still
+/// replays `snapshot` as the latest project snapshot the agent read.
 pub(crate) fn still_read(
     snapshot: &str,
     history: &[RoomEvent],
     channel: &ChannelId,
+    trigger: &RoomEvent,
     window: usize,
 ) -> bool {
+    // The kit replays what an earlier turn read only before the turn's
+    // event; one never numbered has nothing before it (roomkit-core's
+    // `rounds_before`). A turn that started earlier may keep its row later.
+    let before = |index: u64| trigger.index == 0 || index < trigger.index;
     let latest = history
         .iter()
-        .filter(|event| is_kept_instruction(event, channel))
+        .filter(|event| is_kept_instruction(event, channel) && before(event.index))
         .map(|event| (event.index, text_of(&event.content)))
         .filter(|(_, text)| text.contains(GUIDANCE))
         .max_by_key(|(index, _)| *index);
@@ -82,14 +88,16 @@ fn is_kept_instruction(event: &RoomEvent, channel: &ChannelId) -> bool {
 mod tests {
     #![allow(clippy::unwrap_used, reason = "A broken fixture fails the test")]
     use super::*;
-    use roomkit::model::{ChannelType, EventSource, RoomId, TextContent};
+    use roomkit::model::{ChannelType, EventSource, Room, RoomContext, RoomId, TextContent};
+    use roomkit_core::rules::transcript::conversation;
 
     const AGENT: &str = "code";
 
     fn event(index: u64, kind: EventType, channel: &str, text: &str) -> RoomEvent {
         let mut source = EventSource::new(ChannelId::new(channel).unwrap(), ChannelType::AI);
         source.direction = EventDirection::Outbound;
-        let mut event = RoomEvent::new(RoomId::new("room").unwrap(), source, TextContent::new(text));
+        let mut event =
+            RoomEvent::new(RoomId::new("room").unwrap(), source, TextContent::new(text));
         event.r#type = kind;
         event.index = index;
         event
@@ -111,6 +119,37 @@ mod tests {
         ChannelId::new(AGENT).unwrap()
     }
 
+    /// The message a turn answers, the newest of its history.
+    fn trigger() -> RoomEvent {
+        message(100)
+    }
+
+    /// `still_read` for the agent, checked against the kit's own transcript
+    /// of the turn: what it says replays must be in what the kit sends, the
+    /// history read as an AI channel reads it, its own rows apart and its
+    /// memory's window over the rest (roomkit-ai's `recalled` and
+    /// `SlidingWindowMemory`).
+    fn replayed(snapshot: &str, history: &[RoomEvent], trigger: &RoomEvent, window: usize) -> bool {
+        let read = still_read(snapshot, history, &agent(), trigger, window);
+        let (rows, viewed): (Vec<RoomEvent>, Vec<RoomEvent>) = history
+            .iter()
+            .cloned()
+            .partition(|event| is_own_row(event, &agent()));
+        let skip = match window {
+            0 => 0,
+            window => viewed.len().saturating_sub(window),
+        };
+        let mut context = RoomContext::new(Room::new(RoomId::new("room").unwrap()));
+        context.recent_events = viewed.into_iter().skip(skip).chain(rows).collect();
+        let sent = conversation(&agent(), trigger, &context, usize::MAX);
+        let kit = sent.iter().any(|message| message.text.contains(snapshot));
+        assert!(
+            !read || kit,
+            "said replayed, but the kit sends no snapshot: {sent:?}"
+        );
+        read
+    }
+
     #[test]
     fn the_latest_snapshot_read_since_the_first_message_read_is_still_read() {
         let one = snapshot("ROOT_ONE");
@@ -121,21 +160,31 @@ mod tests {
             read(4, "Application mode: Ask."),
             message(5),
         ];
-        assert!(still_read(&one, &history, &agent(), 50));
+        assert!(replayed(&one, &history, &trigger(), 50));
         // Another agent's turn reads none of this agent's rows.
-        assert!(!still_read(&one, &history, &ChannelId::new("other").unwrap(), 50));
+        assert!(!still_read(
+            &one,
+            &history,
+            &ChannelId::new("other").unwrap(),
+            &trigger(),
+            50
+        ));
         // A turn told something by the application ends with the snapshot.
-        let told = vec![message(1), read(2, &format!("Mode.\n\nAnswer it.\n\n{one}")), message(3)];
-        assert!(still_read(&one, &told, &agent(), 50));
+        let told = vec![
+            message(1),
+            read(2, &format!("Mode.\n\nAnswer it.\n\n{one}")),
+            message(3),
+        ];
+        assert!(replayed(&one, &told, &trigger(), 50));
     }
 
     #[test]
     fn a_changed_snapshot_or_a_first_turn_reads_none() {
         let one = snapshot("ROOT_ONE");
         let two = snapshot("ROOT_TWO");
-        assert!(!still_read(&one, &[message(1)], &agent(), 50));
+        assert!(!replayed(&one, &[message(1)], &trigger(), 50));
         let history = vec![message(1), read(2, &format!("Mode.\n\n{one}")), message(3)];
-        assert!(!still_read(&two, &history, &agent(), 50));
+        assert!(!replayed(&two, &history, &trigger(), 50));
         // Back to the first rules: the latest snapshot read is the second.
         let back = vec![
             message(1),
@@ -144,11 +193,15 @@ mod tests {
             read(4, &format!("Mode.\n\n{two}")),
             message(5),
         ];
-        assert!(!still_read(&one, &back, &agent(), 50));
+        assert!(!replayed(&one, &back, &trigger(), 50));
         // A longer snapshot that only begins as the current one is another.
         let longer = format!("{one}\n\nSource: \"nested\"");
-        let grown = vec![message(1), read(2, &format!("Mode.\n\n{longer}")), message(3)];
-        assert!(!still_read(&one, &grown, &agent(), 50));
+        let grown = vec![
+            message(1),
+            read(2, &format!("Mode.\n\n{longer}")),
+            message(3),
+        ];
+        assert!(!replayed(&one, &grown, &trigger(), 50));
     }
 
     #[test]
@@ -158,10 +211,22 @@ mod tests {
         // The agent's own rows take none of the window.
         history.extend((3..=6).map(|index| event(index, EventType::ToolCallStart, AGENT, "")));
         history.extend((7..=9).map(message));
-        assert!(still_read(&one, &history, &agent(), 4));
-        assert!(!still_read(&one, &history, &agent(), 3));
+        assert!(replayed(&one, &history, &trigger(), 4));
+        assert!(!replayed(&one, &history, &trigger(), 3));
         // A window of 0 reads every event.
-        assert!(still_read(&one, &history, &agent(), 0));
+        assert!(replayed(&one, &history, &trigger(), 0));
+    }
+
+    /// A turn that started before the message this turn answers may keep
+    /// its instruction after it: the kit replays no row from there on.
+    #[test]
+    fn a_snapshot_kept_after_the_turn_s_event_is_not_read() {
+        let one = snapshot("ROOT_ONE");
+        let history = vec![message(1), message(2), read(3, &format!("Mode.\n\n{one}"))];
+        assert!(!replayed(&one, &history, &message(2), 50));
+        assert!(replayed(&one, &history, &message(4), 50));
+        // An event the store never numbered has nothing before it.
+        assert!(replayed(&one, &history, &message(0), 50));
     }
 
     #[test]
@@ -169,10 +234,25 @@ mod tests {
         let one = snapshot("ROOT_ONE");
         let mut inbound = read(2, &one);
         inbound.source.direction = EventDirection::Inbound;
-        assert!(!still_read(&one, &[message(1), inbound, message(3)], &agent(), 50));
+        assert!(!replayed(
+            &one,
+            &[message(1), inbound, message(3)],
+            &trigger(),
+            50
+        ));
         let mut deleted = read(2, &one);
         deleted.metadata.insert("deleted".into(), true.into());
-        assert!(!still_read(&one, &[message(1), deleted, message(3)], &agent(), 50));
-        assert!(still_read(&one, &[message(1), read(2, &one), message(3)], &agent(), 50));
+        assert!(!replayed(
+            &one,
+            &[message(1), deleted, message(3)],
+            &trigger(),
+            50
+        ));
+        assert!(replayed(
+            &one,
+            &[message(1), read(2, &one), message(3)],
+            &trigger(),
+            50
+        ));
     }
 }

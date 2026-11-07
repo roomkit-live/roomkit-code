@@ -55,7 +55,13 @@ impl AgentSlot {
         let mut parts = vec![self.policy.instruction(event.room_id.as_str()).to_owned()];
         parts.extend(told);
         let replayed = !roomkit_core::rules::instructions::is_standalone(event)
-            && crate::instructions::still_read(&project, history, &self.id, crate::agent::HISTORY);
+            && crate::instructions::still_read(
+                &project,
+                history,
+                &self.id,
+                event,
+                crate::agent::HISTORY,
+            );
         if !replayed {
             parts.push(project);
         }
@@ -75,9 +81,7 @@ impl AgentSlot {
                 if !context.recent_events.iter().any(|past| past.id == event.id) {
                     context.recent_events.push(event.clone());
                 }
-                let instruction = self
-                    .instruction(&event, &context.recent_events, None)
-                    .await;
+                let instruction = self.instruction(&event, &context.recent_events, None).await;
                 let mut input = RoomEvent::new(
                     event.room_id.clone(),
                     event.source.clone(),

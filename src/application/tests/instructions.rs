@@ -143,7 +143,11 @@ async fn a_later_turn_replays_unchanged_project_rules_and_extends_the_previous_r
         "the later turn's request opens with the earlier turn's last"
     );
     let (first, later) = (requests[0].to_string(), requests[2].to_string());
-    assert_eq!(later.matches("ROOT_ONE").count(), 1, "the rules are not sent again");
+    assert_eq!(
+        later.matches("ROOT_ONE").count(),
+        1,
+        "the rules are not sent again"
+    );
     let modes = |text: &str| text.matches("Application mode: Ask.").count();
     assert_eq!(modes(&later), modes(&first) + 1, "each turn reads its mode");
     app.close().await.unwrap();

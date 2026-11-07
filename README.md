@@ -1133,7 +1133,8 @@ or switching agents. They enter an application instruction after the user's
 message, preserving the system prompt and the user's original text and images.
 The engine keeps each turn's instruction as the agent's own row and replays it in
 the agent's later turns where it was read, so that a request extends the one
-before it and a provider's prompt cache keeps it. A turn therefore carries the
+before it and a provider's prompt cache keeps it, while the history fits the
+agent's window. A turn therefore carries the
 mode rule each time, but the files' snapshot only when it changed since the
 latest one the agent read, or when that one has left the messages the agent
 still reads; a newer snapshot supersedes the earlier ones. The host does not
