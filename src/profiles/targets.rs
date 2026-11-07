@@ -1,6 +1,6 @@
 //! The agents a delegated task can be handed to (RMK-1532): the roster every
 //! turn reads, kept as the agent files change, and a target's agent assembled
-//! as a task is handed to it, when it was never selected.
+//! from its current settings as a task is handed to it.
 
 use super::*;
 
@@ -19,7 +19,11 @@ impl State {
 
 impl Profiles {
     /// Makes agent `id` ready for a task handed to it: its slot holds its
-    /// agent, assembled now if it was never selected. The view's selection is
+    /// agent, assembled now from its profile, its connection, its skills and
+    /// its MCP servers as they stand. A connection, skill or server edit
+    /// reinstalls only the selected agent, so an agent assembled earlier may
+    /// hold a key or an endpoint since replaced. A turn of that agent already
+    /// running keeps the agent it began with. The view's selection is
     /// unchanged.
     ///
     /// # Errors
@@ -32,9 +36,6 @@ impl Profiles {
         id: &str,
     ) -> Result<(), String> {
         let mut state = self.state.lock().await;
-        if state.slots.get(id).is_some_and(AgentSlot::ready) {
-            return Ok(());
-        }
         let agent = state.agent(id).ok_or("Unknown agent")?;
         let provider = state
             .providers

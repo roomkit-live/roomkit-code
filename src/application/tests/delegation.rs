@@ -12,39 +12,44 @@ const RESULT: &str = "WORKER_RESULT_THE_DIFF_IS_FINE";
 /// What the delegating agent says once it is handed the result.
 const RELAYED: &str = "RELAYED_THE_REVIEW";
 
-/// A model server whose answer depends on who asks: the worker writes a file,
-/// then answers; the delegating agent hands the task over, then says it did,
-/// then relays the result it is handed. `target` is the agent the task is
-/// handed to.
-async fn server(
-    target: &'static str,
-) -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
+/// The task `code` hands `target`, with a context.
+fn task_for(target: &str) -> Value {
+    json!({"agent": target, "task": "Review the diff", "context": {"branch": "BRANCH_MARK"}})
+}
+
+/// A model server whose answer depends on who asks and what it was told
+/// last: the worker writes a file, then answers; the delegating agent calls
+/// `delegate_task` with `arguments`, then says it did, then relays the result
+/// it is handed.
+async fn server(arguments: Value) -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
     let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
     let seen = requests.clone();
     let router = Router::new().route(
         "/v1/chat/completions",
         post(move |Json(request): Json<Value>| {
-            let seen = seen.clone();
+            let (seen, arguments) = (seen.clone(), arguments.clone());
             async move {
-                let text = request.to_string();
                 seen.lock().unwrap().push(request.clone());
-                let answered = request["messages"]
-                    .as_array()
-                    .is_some_and(|messages| messages.iter().any(|m| m["role"] == "tool"));
-                let delta = if text.contains(RESULT) && !text.contains(WORKER) {
+                let worker = request.to_string().contains(WORKER);
+                let last = request["messages"].as_array().unwrap().last().unwrap();
+                let answered = last["role"] == "tool";
+                let delta = if !worker && last.to_string().contains(RESULT) {
                     json!({"content": RELAYED})
-                } else if text.contains(WORKER) && !answered {
+                } else if worker && !answered {
                     let args = json!({"path": "worker.txt", "content": "from the worker"});
                     call("write", &args)
-                } else if text.contains(WORKER) {
+                } else if worker {
                     json!({"content": RESULT})
                 } else if !answered {
-                    let args = json!({"agent": target, "task": "Review the diff", "context": {"branch": "BRANCH_MARK"}});
-                    call("delegate_task", &args)
+                    call("delegate_task", &arguments)
                 } else {
                     json!({"content": "Handed to the reviewer."})
                 };
-                let reason = if delta.get("tool_calls").is_some() { "tool_calls" } else { "stop" };
+                let reason = if delta.get("tool_calls").is_some() {
+                    "tool_calls"
+                } else {
+                    "stop"
+                };
                 let body = format!(
                     "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
                     json!({"choices":[{"index":0,"delta":delta}]}),
@@ -79,20 +84,12 @@ async fn with_a_reviewer(settings: &Settings) {
     std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
 }
 
-/// Waits until `requests` hold one that satisfies `found`.
-async fn until_asked(requests: &Arc<Mutex<Vec<Value>>>, found: impl Fn(&str) -> bool) {
-    tokio::time::timeout(Duration::from_secs(15), async {
-        while !requests
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|r| found(&r.to_string()))
-        {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .unwrap();
+/// Whether `request` is the delegating agent's turn on a result handed back:
+/// its last message carries the worker's answer, which earlier turns of the
+/// conversation may carry too.
+fn hands_back(request: &Value) -> bool {
+    let last = request["messages"].as_array().unwrap().last().unwrap();
+    !request.to_string().contains(WORKER) && last.to_string().contains(RESULT)
 }
 
 /// What a conversation in `mode` showed once `code` handed `review` a task
@@ -114,22 +111,23 @@ impl Delegated {
     }
 }
 
-async fn delegated(project: &std::path::Path, mode: &str) -> Delegated {
-    let state = tempfile::tempdir().unwrap();
-    let (base, requests, server) = server("review").await;
-    let settings = settings(project, state.path(), &base);
-    with_a_reviewer(&settings).await;
-    let app = Application::open(&settings, String::new()).await.unwrap();
-    assert_eq!(app.view.agent.as_str(), "code");
-    app.policy.set("main", mode).unwrap();
+/// Waits until the delegating agent was handed a result: the hand-back opens
+/// a turn of its own once the worker is done.
+async fn until_handed_back(requests: &Arc<Mutex<Vec<Value>>>) {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while !requests.lock().unwrap().iter().any(hands_back) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
 
-    turn(&app).await;
-    // The hand-back opens a turn of the delegating agent once the worker is done.
-    until_asked(&requests, |r| r.contains(RESULT) && !r.contains(WORKER)).await;
-    // The delegating agent says the result in the conversation.
+/// Waits until the delegating agent said the result in the conversation and
+/// its turn ended: the view is busy while it runs.
+async fn until_relayed(app: &Application) {
     tokio::time::timeout(Duration::from_secs(15), async {
         loop {
-            // The view is busy while the hand-back's turn runs.
             if let Ok(snapshot) = app.session().snapshot().await
                 && snapshot
                     .items
@@ -143,6 +141,20 @@ async fn delegated(project: &std::path::Path, mode: &str) -> Delegated {
     })
     .await
     .unwrap();
+}
+
+async fn delegated(project: &std::path::Path, mode: &str) -> Delegated {
+    let state = tempfile::tempdir().unwrap();
+    let (base, requests, server) = server(task_for("review")).await;
+    let settings = settings(project, state.path(), &base);
+    with_a_reviewer(&settings).await;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    assert_eq!(app.view.agent.as_str(), "code");
+    app.policy.set("main", mode).unwrap();
+
+    turn(&app).await;
+    until_handed_back(&requests).await;
+    until_relayed(&app).await;
     let notices = app.profiles.resources.tasks.notices("main");
     app.close().await.unwrap();
     server.abort();
@@ -215,13 +227,12 @@ async fn a_worker_takes_its_conversation_s_mode() {
     assert_eq!(written, "from the worker");
 }
 
-/// A task handed to no other configured agent is refused, naming those it
-/// can be handed to, and no worker runs.
-#[tokio::test]
-async fn a_task_for_an_unknown_agent_is_refused() {
+/// What the gate answered a `delegate_task` call with `arguments`, which it
+/// refused: no worker ran.
+async fn refusal(arguments: Value) -> String {
     let project = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
-    let (base, requests, server) = server("terminal").await;
+    let (base, requests, server) = server(arguments).await;
     let settings = settings(project.path(), state.path(), &base);
     with_a_reviewer(&settings).await;
     let app = Application::open(&settings, String::new()).await.unwrap();
@@ -238,13 +249,71 @@ async fn a_task_for_an_unknown_agent_is_refused() {
         })
         .unwrap();
     assert_ne!(refused.state, ToolState::Succeeded);
-    assert!(
-        refused
-            .text
-            .contains("Hand a task only to one of these agents: review."),
-        "{}",
-        refused.text
-    );
     let requests = requests.lock().unwrap();
     assert!(!requests.iter().any(|r| r.to_string().contains(WORKER)));
+    refused.text
+}
+
+/// A task handed to no other configured agent is refused, naming those it
+/// can be handed to.
+#[tokio::test]
+async fn a_task_for_an_unknown_agent_is_refused() {
+    let refused = refusal(task_for("terminal")).await;
+    assert!(
+        refused.contains("Hand a task only to one of these agents: review."),
+        "{refused}"
+    );
+}
+
+/// A model that shares a channel with the worker anyway, the terminal's here,
+/// is refused: the terminal would be delivered the worker's answers.
+#[tokio::test]
+async fn a_task_sharing_a_channel_is_refused() {
+    let mut arguments = task_for("review");
+    arguments["share_channels"] = json!(["terminal"]);
+    let refused = refusal(arguments).await;
+    assert!(
+        refused.contains("share_channels is not available"),
+        "{refused}"
+    );
+}
+
+/// A task handed to an agent set up by an earlier task reaches the agent as
+/// its connection stands now: a connection edited since reinstalls only the
+/// selected agent.
+#[tokio::test]
+async fn a_target_works_with_its_connection_as_it_stands() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let (first, before, first_server) = server(task_for("review")).await;
+    let (second, after, second_server) = server(task_for("review")).await;
+    let settings = settings(project.path(), state.path(), &first);
+    with_a_reviewer(&settings).await;
+    let mut app = Application::open(&settings, String::new()).await.unwrap();
+    turn(&app).await;
+    until_handed_back(&before).await;
+    until_relayed(&app).await;
+
+    let provider = saved_provider_id(&settings);
+    edit_profile(
+        &mut app,
+        "providers",
+        &format!("edit:{provider}"),
+        &[("url", second.as_str())],
+    )
+    .await;
+    turn_operation(&app, "second-task").await;
+    until_handed_back(&after).await;
+    app.close().await.unwrap();
+    first_server.abort();
+    second_server.abort();
+
+    let worker = |requests: &Arc<Mutex<Vec<Value>>>| {
+        let requests = requests.lock().unwrap();
+        requests
+            .iter()
+            .filter(|r| r.to_string().contains(WORKER))
+            .count()
+    };
+    assert_eq!((worker(&before), worker(&after)), (2, 2));
 }

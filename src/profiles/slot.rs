@@ -40,10 +40,6 @@ impl AgentSlot {
             current: Arc::new(RwLock::new(agent.map(Arc::new))),
         }
     }
-    /// Whether the slot holds an agent to run.
-    pub fn ready(&self) -> bool {
-        crate::sync::read(&self.current).is_some()
-    }
     /// Whether the agent answers `event`: one addressed to it, as the view
     /// addresses a person's message to the selected agent, or in the room of
     /// a task handed to it, where the engine writes the task to the room's

@@ -80,8 +80,9 @@ async fn decide(gate: &Gate, event: ToolCallEvent, context: &RoomContext) -> Ver
 }
 
 /// Why a `delegate_task` call cannot hand its task over, if it cannot: a
-/// channel to share, an agent that is no other configured agent, or one that
-/// cannot run, which is assembled here when it was never selected.
+/// channel to share, a task handed on too many times already, an agent that
+/// is no other configured agent, or one that cannot run, assembled here from
+/// its current settings.
 async fn delegation_refusal(gate: &Gate, event: &ToolCallEvent) -> Option<String> {
     if event
         .arguments
@@ -91,6 +92,10 @@ async fn delegation_refusal(gate: &Gate, event: &ToolCallEvent) -> Option<String
         return Some(
             "share_channels is not available here: the agent works on its own. Put what it needs in the task or its context.".into(),
         );
+    }
+    let depth = gate.policy.depth(crate::permissions::room_of(event));
+    if let Some(refusal) = crate::delegation::nesting_refusal(depth) {
+        return Some(refusal);
     }
     let target = event
         .arguments

@@ -187,8 +187,14 @@ const SUMMARY: &str = "SUMMARY_OF_THE_EARLIER_TURNS";
 
 /// The engine's own tools, which every agent declares beside the application's:
 /// `read_stored_result` pages through an outcome the engine stored (roomkit-rs
-/// RMK-1228).
-const ENGINE_TOOLS: [&str; 1] = ["read_stored_result"];
+/// RMK-1228); the delegation tools hand a task to another agent and follow it
+/// (RMK-1532).
+const ENGINE_TOOLS: [&str; 4] = [
+    "read_stored_result",
+    "delegate_task",
+    "task_status",
+    "cancel_task",
+];
 
 fn settings(workspace: &std::path::Path, state: &std::path::Path, base: &str) -> Settings {
     let cli = Cli::try_parse_from([

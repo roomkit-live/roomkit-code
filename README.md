@@ -322,8 +322,10 @@ can choose, by ID and label; a task for itself or for no configured agent is
 refused. The other agent works in a conversation of its own, in the
 background, while the first goes on; when it is done, the first agent says its
 result, or that it failed, in a turn of its own. `task_status` lists the
-conversation's tasks and `cancel_task` stops one. An agent never selected is
-set up when a task is handed to it.
+conversation's tasks and `cancel_task` stops one. Each task sets its agent up
+from its current connection, skills and MCP servers, so an edit since applies,
+whether or not the agent was ever selected. The other agent can hand a task on
+in turn, three levels deep at most.
 
 The other agent reads the task and the `context` it was handed, not the
 conversation. It works under the conversation's mode, and nobody watches its

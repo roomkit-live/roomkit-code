@@ -9,8 +9,9 @@
   and its context, not the conversation, under the conversation's mode, refused
   what needs an approval; the first agent then says its result. Each turn lists
   the agents a task can go to, the status line says when a task starts and how
-  it ended, and an agent never selected is set up when a task is handed to it.
-  Its tokens are not counted in the conversation's.
+  it ended, and each task sets its agent up from its current settings. A task
+  is handed on three levels deep at most. Its tokens are not counted in the
+  conversation's.
 
 - A model request that fails before its answer begins is tried 3 more times, 1, 2
   then 4 seconds apart, when the failure may pass: a lost connection, a timeout,

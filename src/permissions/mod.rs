@@ -70,7 +70,9 @@ impl Mode {
 const DELEGATED: &str = "This action needs the person's approval, which a delegated task cannot ask for: it was not executed. Do not retry it or use another tool to get around it; finish what the mode allows and say in your answer what you could not do.";
 
 /// How many rooms up a delegated task's room is followed to its conversation:
-/// past it, a chain of links is taken for a loop.
+/// past it, the chain is taken for a loop and the room for one whose
+/// conversation is unknown. The gate stops nesting well before
+/// (`delegation::MAX_DEPTH`).
 const MAX_DELEGATION_DEPTH: usize = 16;
 
 #[derive(Clone)]
@@ -110,22 +112,35 @@ impl Policy {
         crate::sync::lock(&self.parents).contains_key(room)
     }
 
-    /// The conversation `room` belongs to: itself, or for a delegated task's
-    /// room the conversation its task was delegated from.
-    fn conversation(&self, room: &str) -> String {
+    /// The conversation `room` belongs to, and how many delegated tasks' rooms
+    /// deep `room` is: itself at 0, or for a delegated task's room the
+    /// conversation its task was delegated from. None past
+    /// `MAX_DELEGATION_DEPTH` rooms.
+    fn conversation(&self, room: &str) -> Option<(String, usize)> {
         let parents = crate::sync::lock(&self.parents);
         let mut current = room;
-        for _ in 0..MAX_DELEGATION_DEPTH {
+        for depth in 0..=MAX_DELEGATION_DEPTH {
             match parents.get(current) {
                 Some(parent) => current = parent,
-                None => break,
+                None => return Some((current.to_owned(), depth)),
             }
         }
-        current.to_owned()
+        None
     }
 
+    /// How many delegated tasks' rooms deep `room` is: 0 for a conversation;
+    /// `usize::MAX` when its conversation is unknown.
+    pub(crate) fn depth(&self, room: &str) -> usize {
+        self.conversation(room)
+            .map_or(usize::MAX, |(_, depth)| depth)
+    }
+
+    /// The mode of `room`'s conversation; Plan, the narrowest, for a room
+    /// whose conversation is unknown, rather than the launch mode.
     pub(crate) fn mode(&self, room: &str) -> Mode {
-        let conversation = self.conversation(room);
+        let Some((conversation, _)) = self.conversation(room) else {
+            return Mode::Plan;
+        };
         crate::sync::lock(&self.modes)
             .get(&conversation)
             .copied()
@@ -235,4 +250,52 @@ impl Policy {
 
 fn plan_allowed(event: &ToolCallEvent) -> bool {
     rules::rule(event).is_some_and(|rule| rule.plan)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, reason = "A broken fixture fails the test")]
+    use super::*;
+    use roomkit::model::{Room, RoomId};
+
+    /// The room `id` the engine opened for a task delegated from `parent`.
+    fn child(id: &str, parent: &str) -> Room {
+        let mut room = Room::new(RoomId::new(id).unwrap());
+        room.metadata.insert("parent_room_id".into(), parent.into());
+        room
+    }
+
+    /// RMK-1532: a delegated task's room takes its conversation's mode, at any
+    /// depth the chain resolves.
+    #[test]
+    fn a_delegated_room_takes_its_conversation_s_mode() {
+        let policy = Policy::new(Mode::Yolo);
+        policy.apply("main", Mode::Ask);
+        policy.adopt(&child("main::a", "main"));
+        policy.adopt(&child("main::a::b", "main::a"));
+        policy.adopt(&Room::new(RoomId::new("other").unwrap()));
+        assert_eq!(policy.mode("main::a::b"), Mode::Ask);
+        assert_eq!((policy.depth("main"), policy.depth("main::a::b")), (0, 2));
+        assert!(policy.delegated("main::a") && !policy.delegated("main"));
+        assert!(!policy.delegated("other"));
+    }
+
+    /// A chain deeper than the walk, or a loop, never falls back to the launch
+    /// mode: the room is held to Plan.
+    #[test]
+    fn a_room_whose_conversation_is_unknown_is_held_to_plan() {
+        let policy = Policy::new(Mode::Yolo);
+        policy.apply("main", Mode::Ask);
+        let mut parent = "main".to_owned();
+        for level in 0..=MAX_DELEGATION_DEPTH {
+            let room = format!("main::{level}");
+            policy.adopt(&child(&room, &parent));
+            parent = room;
+        }
+        assert_eq!(policy.mode(&parent), Mode::Plan);
+        assert_eq!(policy.depth(&parent), usize::MAX);
+        policy.adopt(&child("loop-a", "loop-b"));
+        policy.adopt(&child("loop-b", "loop-a"));
+        assert_eq!(policy.mode("loop-a"), Mode::Plan);
+    }
 }

@@ -147,11 +147,16 @@ pub(super) fn preamble(
     for server in mcp {
         tools.extend(server.tools.iter().cloned());
     }
-    let base = base_prompt(profile, &tools, hidden);
+    // The engine serves every agent the delegation tools (RMK-1532): listed
+    // and declared outright with the native ones, though no agent selects them.
+    let delegation = crate::delegation::definitions();
+    let served = [native.as_slice(), &delegation].concat();
+    let listed = [tools.as_slice(), &delegation].concat();
+    let base = base_prompt(profile, &listed, hidden);
     let context = skill_context(skills, skill_roots);
     let composition = measure(
         (&base, &context),
-        &native,
+        &served,
         skills,
         mcp,
         intent_required,
@@ -161,7 +166,7 @@ pub(super) fn preamble(
         prompt: format!("{base}\n{context}\n{ACTIVITY_INSTRUCTIONS}"),
         inventory: Inventory { tools, composition },
         hides_mcp: hidden,
-        pinned: native.into_iter().map(|tool| tool.name).collect(),
+        pinned: served.into_iter().map(|tool| tool.name).collect(),
     }
 }
 

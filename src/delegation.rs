@@ -35,6 +35,19 @@ pub(crate) const SHARE_CHANNELS: &str = "share_channels";
 /// What a delegated task's worker reads with its mode at each turn.
 pub(crate) const WORKER: &str = "You are working on a task another agent handed you, in a conversation of your own that nobody watches. You cannot ask for approval: an action that needs one is refused. Do what the mode allows, then answer with your result, complete and self-contained: it goes back to the agent that asked, as the task's result.";
 
+/// How many delegated tasks' rooms deep a task can still be handed on from:
+/// the conversation's agent, its worker and that worker's worker. Two agents
+/// would otherwise hand a task back and forth without end.
+pub(crate) const MAX_DEPTH: usize = 3;
+
+/// Why an agent `depth` delegated tasks' rooms deep cannot hand a task on, if
+/// it cannot.
+pub(crate) fn nesting_refusal(depth: usize) -> Option<String> {
+    (depth >= MAX_DEPTH).then(|| {
+        "This task was handed on too many times to hand it on again: do the work yourself, or say in your answer what is left.".to_owned()
+    })
+}
+
 /// How long a view shows a task's latest notice again whenever it is sent its
 /// live events, as a compaction's.
 const NOTICE_FOR: Duration = Duration::from_secs(10);
@@ -159,6 +172,26 @@ pub(crate) fn serve(
     setup_delegation(agent.clone(), handler, options)?;
     kit.setup_task_tools(agent)?;
     Ok(())
+}
+
+/// The three tools as every agent's requests declare them, which its system
+/// prompt lists and its context breakdown counts: the engine serves them to
+/// the agent's turns, so they are no tool the agent was built with.
+pub(crate) fn definitions() -> Vec<AiTool> {
+    let engine = |definition: Value| AiTool {
+        name: definition["name"].as_str().unwrap_or_default().to_owned(),
+        description: definition["description"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
+        parameters: definition["parameters"].clone(),
+        tags: Vec::new(),
+    };
+    vec![
+        tool(),
+        engine(roomkit::tasks::task_status_definition()),
+        engine(roomkit::tasks::cancel_task_definition()),
+    ]
 }
 
 /// The engine's generic tool without `share_channels`, its agents listed in
@@ -311,6 +344,16 @@ mod tests {
                 .unwrap()
                 .starts_with("No other agent")
         );
+    }
+
+    /// A worker's worker can still hand a task on; one level deeper cannot,
+    /// nor a room whose conversation is unknown.
+    #[test]
+    fn a_task_is_handed_on_at_most_three_rooms_deep() {
+        assert_eq!(nesting_refusal(0), None);
+        assert_eq!(nesting_refusal(MAX_DEPTH - 1), None);
+        assert!(nesting_refusal(MAX_DEPTH).is_some());
+        assert!(nesting_refusal(usize::MAX).is_some());
     }
 
     #[test]
