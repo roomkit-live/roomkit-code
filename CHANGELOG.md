@@ -8,8 +8,8 @@
   meanwhile waits and reads the compacted conversation, and every compaction
   leaves a line in the conversation, shown to the terminal only and kept for a
   resumed conversation: `Conversation compacted · 42 messages summarized · ≈180k →
-  ≈40k tokens · 12 s`. The count is of messages, not of the rows of tool calls
-  and read instructions between them.
+  ≈40k tokens · 12 s`: the messages that compaction summarized, not the rows of
+  tool calls and read instructions between them, which a summary never reads.
 
 - An agent can hand a task to another agent of the project with the engine's
   `delegate_task`; `task_status` and `cancel_task` follow and stop the

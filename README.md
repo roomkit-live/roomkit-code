@@ -678,7 +678,8 @@ to the agent, and comes back in its place when the conversation is resumed. The
 summary is kept in the project's state, so a resumed conversation reads the same
 one.
 
-**/compact** compacts at once whatever the tier, keeping only the latest turn.
+**/compact** compacts at once whatever the tier, keeping only the latest turns
+whole, four messages at least.
 Sent while the agent works, it is queued and runs as soon as the turn ends; a
 message you send while the summary is written waits for it, then the agent reads
 the compacted conversation. A compaction only happens between turns: a turn whose

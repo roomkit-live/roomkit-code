@@ -41,6 +41,7 @@ terminal-check:
 	python3 scripts/check-mcp.py
 	python3 scripts/check-hooks.py
 	python3 scripts/check-instructions.py
+	python3 scripts/check-compaction.py
 	python3 scripts/check-docs.py
 	python3 scripts/check-exit.py
 	python3 scripts/check-headless.py

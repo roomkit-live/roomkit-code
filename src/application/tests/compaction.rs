@@ -2,7 +2,7 @@
 //! a2daedfe), and at once on `/compact`, leaving a line in the conversation
 //! (HITL a2dfba34); one without keeps its latest messages.
 use super::*;
-use roomkit::model::EventType;
+use roomkit::model::{ChannelId, ChannelSet, EventType, Visibility};
 use roomkit_tui::protocol::Item;
 use roomkit_tui_engine::{CommandHandler, CommandResult};
 
@@ -128,7 +128,10 @@ async fn a_conversation_compacts_past_its_tier_and_resumes_on_its_summary() {
     let mut compacted = None;
     for turn in 1..=14 {
         let notices = turn_noticing(&app, &settings, &format!("turn-{turn}"), |notices| {
-            asked() == 0 || notices.iter().any(|n| n.contains("compacted"))
+            asked() == 0
+                || notices
+                    .iter()
+                    .any(|n| n.starts_with("Conversation compacted · "))
         })
         .await;
         if asked() > 0 {
@@ -140,10 +143,16 @@ async fn a_conversation_compacts_past_its_tier_and_resumes_on_its_summary() {
         panic!("the conversation does not compact within 14 turns");
     };
     assert!(turn >= 3, "compacted at turn {turn}, before its tier");
+    // The line reaches the view watching as it is made; the status line
+    // only says "Conversation compacted".
     assert!(
         notices
             .iter()
             .any(|n| n.starts_with("Conversation compacted · ")),
+        "{notices:?}"
+    );
+    assert!(
+        notices.iter().any(|n| n == "Conversation compacted"),
         "{notices:?}"
     );
     let requests = mock.requests.lock().unwrap().clone();
@@ -278,10 +287,15 @@ async fn compact_starts_at_once_and_leaves_its_line_in_the_conversation() {
         stored[0].source.channel_id.as_str(),
         crate::application::TERMINAL
     );
+    let terminal = ChannelId::new(crate::application::TERMINAL).unwrap();
+    let only = ChannelSet::new([terminal])
+        .map(Visibility::Channels)
+        .unwrap();
+    assert_eq!(stored[0].visibility, only, "the terminal's alone");
     let line = roomkit_core::rules::transcoding::text_of(&stored[0].content);
     assert!(
-        line.starts_with("Conversation compacted · 4 messages summarized · ≈"),
-        "the first two turns' messages: {line}"
+        line.starts_with("Conversation compacted · 2 messages summarized · ≈"),
+        "the first turn's: four messages at least are kept whole: {line}"
     );
 
     let session = turn_operation(&app, "fourth").await;
@@ -312,11 +326,44 @@ async fn compact_starts_at_once_and_leaves_its_line_in_the_conversation() {
     let opening = fourth["messages"][1]["content"].as_str().unwrap();
     assert!(opening.contains(SUMMARY), "{opening}");
     let asked = fourth.to_string().matches("Inspect the project.").count();
-    assert_eq!(asked, 2, "the summary stands for the first two turns");
+    assert_eq!(asked, 3, "the summary stands for the first turn");
     assert!(
         !fourth.to_string().contains("Conversation compacted"),
         "the agent never reads the line"
     );
+    app.close().await.unwrap();
+}
+
+/// A compaction outside the turns summarizes what a turn's would: the
+/// messages, not the agent's tool calls nor the instructions its turns read.
+#[tokio::test]
+async fn compact_summarizes_the_messages_alone() {
+    let (root, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    write(root.path(), "AGENTS.md", "PROJECT_RULES_TEXT");
+    let mock = Mock::start(vec![("list", json!({"path":"."}))]).await;
+    let (app, settings) = three_turns(root.path(), state.path(), &mock).await;
+    let called = mock.requests.lock().unwrap()[1].to_string();
+    assert!(called.contains("PROJECT_RULES_TEXT") && called.contains("tool_calls"));
+    handler(&app, &settings)
+        .handle(invoke(&app, "compact"), app.view.clone())
+        .await
+        .unwrap();
+    let room = app.view.room.to_string();
+    let compactions = app.profiles.resources.compactions.clone();
+    until("the conversation compacts", || {
+        compactions.lines(&room).is_some()
+    })
+    .await;
+    let requests = mock.requests.lock().unwrap().clone();
+    let asked = requests
+        .iter()
+        .find(|r| r["stream"] != true)
+        .unwrap()
+        .to_string();
+    assert!(asked.contains("Inspect the project."), "{asked}");
+    for read in ["tool_call", "Application mode", "PROJECT_RULES_TEXT"] {
+        assert!(!asked.contains(read), "the summary read {read}: {asked}");
+    }
     app.close().await.unwrap();
 }
 

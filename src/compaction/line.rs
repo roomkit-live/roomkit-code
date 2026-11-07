@@ -50,11 +50,14 @@ impl Journal {
         self.kit.get().map(|(kit, _)| kit)
     }
 
-    /// Stores `told`'s line in its room, shows it to the views, and returns
-    /// it.
-    pub async fn write(&self, told: &Told<'_>) -> String {
+    /// Stores `told`'s line in its room, and shows it to the views.
+    pub async fn write(&self, told: &Told<'_>) {
         let text = text(told);
-        let seed = format!("{}\0{}\0{}", told.room, told.agent, told.from);
+        // A compaction whose record was lost can cut where it did again.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        let seed = format!("{}\0{}\0{}\0{nanos}", told.room, told.agent, told.from);
         let id = format!("compaction-{}", &crate::digest::sha256_hex(seed)[..32]);
         let terminal = match self.kit.get() {
             Some((kit, terminal)) => {
@@ -63,9 +66,8 @@ impl Journal {
             }
             None => crate::application::TERMINAL.to_owned(),
         };
-        let line = Item::Message(Message::new(id, ActorId::new(terminal), text.clone()));
+        let line = Item::Message(Message::new(id, ActorId::new(terminal), text));
         crate::sync::lock(&self.recent).insert(told.room.into(), (Instant::now(), line));
-        text
     }
 
     /// The line the views of `room` are shown, while it is recent.

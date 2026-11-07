@@ -86,6 +86,8 @@ pub(crate) struct Compactions {
     runs: Arc<runs::Runs>,
     /// Where the compactions' lines go.
     journal: line::Journal,
+    /// The compactions running outside the turns.
+    tasks: Mutex<Vec<tokio::task::AbortHandle>>,
     changes: Arc<watch::Sender<()>>,
 }
 
@@ -114,6 +116,7 @@ impl Compactions {
             notices: Mutex::default(),
             runs: Arc::new(runs::Runs::new(changes.clone())),
             journal: line::Journal::default(),
+            tasks: Mutex::default(),
             changes,
         }
     }
@@ -151,15 +154,15 @@ impl Compactions {
     }
 
     /// Records `compacted` for `agent` in `room`, in its file first, and
-    /// leaves its line in the conversation: how many messages it summarized,
-    /// the estimated request before and after, and how long it `took`.
+    /// leaves its line in the conversation: how many messages it summarized
+    /// anew, the estimated request before and after, and how long it `took`.
     pub async fn record(
         &self,
         (room, agent): (&str, &str),
-        compacted: Compacted,
+        (compacted, summarized): (Compacted, usize),
         (sizes, took): ((usize, usize), Duration),
     ) {
-        let (from, summarized) = (compacted.from, compacted.summarized);
+        let from = compacted.from;
         // Written outside the lock: another conversation's turn need not
         // wait for this one's file.
         let record = {
@@ -180,10 +183,10 @@ impl Compactions {
             took,
             unsaved,
         };
-        let line = self.journal.write(&told).await;
+        self.journal.write(&told).await;
         // A view keeps its status line's last notice: this one replaces the
-        // compaction's seconds.
-        self.notice(room, &line);
+        // compaction's seconds, the line in the conversation saying the rest.
+        self.notice(room, "Conversation compacted");
     }
 
     /// Tells the views of `room` `text`, in their status line.
@@ -216,12 +219,17 @@ impl Compactions {
     /// once the turns under way end, its next turn compacting it should one
     /// start first.
     pub fn request(self: &Arc<Self>, room: &str, agent: &str) -> Requested {
-        if !self.force(room, agent) {
+        if !self.bounded(agent) {
             return Requested::Unbounded;
         }
+        let key = (room.to_owned(), agent.to_owned());
+        let set = crate::sync::lock(&self.forced).insert(key.clone());
         match self.runs.ask(room, agent) {
             runs::Asked::Running => {
-                crate::sync::lock(&self.forced).remove(&(room.into(), agent.into()));
+                // A compaction starting may not have taken its own yet.
+                if set {
+                    crate::sync::lock(&self.forced).remove(&key);
+                }
                 Requested::Running
             }
             runs::Asked::Queued => Requested::Queued,
@@ -261,10 +269,22 @@ impl Compactions {
     /// `running` shows.
     fn start(self: &Arc<Self>, room: &str, agent: &str, running: runs::Running) {
         let (compactions, room, agent) = (self.clone(), room.to_owned(), agent.to_owned());
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let _running = running;
             compactions.compact_now(&room, &agent).await;
         });
+        let mut tasks = crate::sync::lock(&self.tasks);
+        tasks.retain(|task| !task.is_finished());
+        tasks.push(task.abort_handle());
+    }
+
+    /// Stops the compactions running outside the turns, before the engine
+    /// closes: one cut short records nothing, and the conversation compacts
+    /// again when it is resumed.
+    pub fn close(&self) {
+        for task in crate::sync::lock(&self.tasks).drain(..) {
+            task.abort();
+        }
     }
 
     /// Compacts `agent`'s conversation in `room` outside its turns, unless a
@@ -392,7 +412,11 @@ mod tests {
         let compactions = Compactions::new(&dir.path().join("compactions"));
         assert_eq!(compactions.get("room", "code"), None);
         compactions
-            .record(("room", "code"), compacted(40), ((90_000, 31_000), TOOK))
+            .record(
+                ("room", "code"),
+                (compacted(40), 12),
+                ((90_000, 31_000), TOOK),
+            )
             .await;
         assert_eq!(compactions.get("room", "code"), Some(compacted(40)));
         // Another instance, as after a restart, reads the same.
@@ -427,7 +451,7 @@ mod tests {
         std::fs::write(compactions.path("room"), "not json").unwrap();
         assert_eq!(compactions.get("room", "code"), None);
         compactions
-            .record(("room", "code"), compacted(7), ((1, 1), TOOK))
+            .record(("room", "code"), (compacted(7), 12), ((1, 1), TOOK))
             .await;
         let reopened = Compactions::new(dir.path());
         assert_eq!(reopened.get("room", "code"), Some(compacted(7)));

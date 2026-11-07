@@ -53,6 +53,13 @@ impl Measured {
     fn now(&self, compacted: Option<&Compacted>) -> usize {
         self.total(compacted, 0).max(self.last.unwrap_or(0))
     }
+
+    /// What the latest measured request took besides its history, as no turn
+    /// of this run measured it yet: the system prompt and the tools.
+    fn fixed_measured(&self, compacted: Option<&Compacted>) -> usize {
+        let history = self.total(compacted, 0).saturating_sub(self.fixed);
+        self.last.unwrap_or(0).saturating_sub(history)
+    }
 }
 
 impl<P: AiProvider> TieredMemory<P> {
@@ -157,7 +164,7 @@ impl<P: AiProvider> TieredMemory<P> {
         let sizes = (measured.now(compacted), measured.total(Some(&made), cut));
         let told = (sizes, began.elapsed());
         self.compactions
-            .record((room, agent), made.clone(), told)
+            .record((room, agent), (made.clone(), summarized), told)
             .await;
         Some(made)
     }
@@ -201,11 +208,14 @@ impl<P: AiProvider> Compactor for TieredMemory<P> {
         Box::pin(async move {
             let agent = self.agent.as_str();
             let compacted = self.compactions.get(room, agent);
-            let after = compacted.as_ref().map_or(0, |c| c.at);
-            let fixed = crate::sync::lock(&self.fixed).get(room).copied();
-            let footprint = TurnFootprint::new(fixed.unwrap_or(0), 0);
-            let measured = measure(&events, (agent, after), &footprint);
             let compacted = compacted.as_ref();
+            let after = compacted.map_or(0, |c| c.at);
+            let known = crate::sync::lock(&self.fixed).get(room).copied();
+            let fixed = known.unwrap_or_else(|| {
+                let unknown = measure(&events, (agent, after), &TurnFootprint::new(0, 0));
+                unknown.fixed_measured(compacted)
+            });
+            let measured = measure(&events, (agent, after), &TurnFootprint::new(fixed, 0));
             self.compact((room, agent), compacted, &mut events, &measured, true)
                 .await;
         })
@@ -341,5 +351,22 @@ mod tests {
         let stale = measure(&events, ("code", 2), &none);
         assert_eq!(stale.last, None);
         assert!(!tiers::due(stale.now(None), 60_000));
+    }
+
+    /// After a restart no turn measured the rest of the request: the latest
+    /// measured one says what it took besides the history.
+    #[test]
+    fn the_rest_of_a_request_is_read_from_the_latest_measured_one() {
+        let events = [
+            said(1, "terminal", None),
+            said(2, "code", Some(50_000)),
+            said(3, "terminal", None),
+        ];
+        let none = TurnFootprint::new(0, 0);
+        let measured = measure(&events, ("code", 0), &none);
+        let history: usize = measured.costs.iter().sum();
+        assert_eq!(measured.fixed_measured(None), 51_000 - measured.costs[0]);
+        assert!(history < 100, "{history}");
+        assert_eq!(measure(&events, ("code", 2), &none).fixed_measured(None), 0);
     }
 }
