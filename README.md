@@ -604,8 +604,8 @@ carrying over the previous summary, and the latest messages are kept whole withi
 there, unchanged, up to the next tier: one cache loss per compaction. The status
 line says when it happens and what it saved. The summary is kept in the project's
 state, so a resumed conversation reads the same one. **/compact** asks the next
-turn to compact whatever its tier, keeping at most its latest four messages, from
-a turn's start.
+turn to compact whatever its tier, keeping only its latest turns, about four
+messages.
 
 The summary reads the messages, not the tool calls' results, the newest first
 within half the ceiling. A summary the model does not write compacts nothing:

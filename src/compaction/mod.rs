@@ -44,6 +44,10 @@ pub(crate) struct Compacted {
     /// How many messages the summary stands for, earlier compactions'
     /// included.
     pub summarized: usize,
+    /// The index of the newest event when it was made: a request the agent
+    /// sent until then measured the history before the cut.
+    #[serde(default)]
+    pub at: u64,
 }
 
 /// One conversation's file: each agent's compaction.
@@ -244,6 +248,7 @@ mod tests {
             summary: "The user asked for tests.".into(),
             snapshot: Some("Project instruction snapshot".into()),
             summarized: 12,
+            at: from + 9,
         }
     }
 

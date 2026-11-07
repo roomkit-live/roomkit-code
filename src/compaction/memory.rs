@@ -75,7 +75,8 @@ impl<P: AiProvider> TieredMemory<P> {
             .cloned()
             .collect();
         events.sort_by_key(|event| event.index);
-        let measured = measure(&events, agent);
+        let after = compacted.as_ref().map_or(0, |c| c.at);
+        let measured = measure(&events, agent, after);
         let forced = self.compactions.take_forced(room, agent);
         if !forced && !tiers::due(measured.now(compacted.as_ref()), self.ceiling) {
             return result(compacted.as_ref(), events);
@@ -106,12 +107,18 @@ impl<P: AiProvider> TieredMemory<P> {
             .iter()
             .map(|event| event.source.channel_id.as_str() == agent)
             .collect();
+        let ended: Vec<bool> = events
+            .iter()
+            .zip(&written)
+            .map(|(event, own)| *own && event.metadata.contains_key("loop_end_reason"))
+            .collect();
+        let starts = tiers::turn_starts(&written, &ended);
         let budget = if forced {
             0
         } else {
             tiers::kept_budget(self.ceiling)
         };
-        let cut = tiers::cut(&measured.costs, &tiers::turn_starts(&written), budget);
+        let cut = tiers::cut(&measured.costs, &starts, budget);
         if cut == 0 {
             if forced {
                 self.compactions.notice(
@@ -134,12 +141,14 @@ impl<P: AiProvider> TieredMemory<P> {
             );
             return None;
         };
+        let newest = events.last().map_or(0, |event| event.index);
         let summarized = events.drain(..cut).count();
         let made = Compacted {
             from: events.first().map_or(0, |event| event.index),
             summary: written,
             snapshot: self.compactions.snapshot(room, agent),
             summarized: compacted.map_or(0, |c| c.summarized) + summarized,
+            at: newest,
         };
         let sizes = (measured.now(compacted), measured.total(Some(&made), cut));
         self.compactions.record((room, agent), made.clone(), sizes);
@@ -149,13 +158,16 @@ impl<P: AiProvider> TieredMemory<P> {
 
 /// What a turn on `events`, `agent`'s history, takes: each event with what
 /// the turn replays after it, the rest of the turn, and the agent's latest
-/// request as measured.
-fn measure(events: &[RoomEvent], agent: &str) -> Measured {
+/// request as measured, one sent after the event at `after`: the latest
+/// compaction's newest, before which a request measured the history it cut.
+fn measure(events: &[RoomEvent], agent: &str, after: u64) -> Measured {
     let footprint = current_turn_footprint().unwrap_or_else(|| TurnFootprint::new(0, 0));
     let costs = costs(events, &footprint);
-    let latest = events
-        .iter()
-        .rposition(|event| event.source.channel_id.as_str() == agent && reported(event).is_some());
+    let latest = events.iter().rposition(|event| {
+        event.index > after
+            && event.source.channel_id.as_str() == agent
+            && reported(event).is_some()
+    });
     let last = latest.and_then(|at| tiers::measured(reported(&events[at]), &costs[at..]));
     Measured {
         costs,
@@ -224,5 +236,49 @@ impl<P: AiProvider> MemoryProvider for TieredMemory<P> {
                 .read((room_id.as_str(), &agent), current_event, context)
                 .await)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, reason = "A broken fixture fails the test")]
+    use super::*;
+    use roomkit::model::{ChannelId, ChannelType, EventSource, TextContent};
+
+    fn said(index: u64, channel: &str, usage: Option<u64>) -> RoomEvent {
+        let source = EventSource::new(ChannelId::new(channel).unwrap(), ChannelType::AI);
+        let mut event = RoomEvent::new(
+            RoomId::new("room").unwrap(),
+            source,
+            TextContent::new("Text."),
+        );
+        event.index = index;
+        if let Some(input) = usage {
+            let usage =
+                serde_json::json!({"input_tokens": input, "cache_read_input_tokens": 1_000});
+            event.metadata.insert("ai_last_usage".into(), usage);
+        }
+        event
+    }
+
+    /// A request the provider measured past the estimate counts toward the
+    /// tier, unless it was sent before the latest compaction: it measured
+    /// the history that compaction cut, and would compact it again.
+    #[test]
+    fn the_latest_measured_request_since_the_compaction_counts() {
+        let events = [
+            said(1, "terminal", None),
+            said(2, "code", Some(50_000)),
+            said(3, "terminal", None),
+        ];
+        let measured = measure(&events, "code", 0);
+        let since: usize = measured.costs[1..].iter().sum();
+        assert_eq!(measured.last, Some(51_000 + since));
+        assert_eq!(measured.now(None), 51_000 + since);
+        assert!(tiers::due(measured.now(None), 60_000));
+        // Measured at or before the compaction's newest event: estimated.
+        let stale = measure(&events, "code", 2);
+        assert_eq!(stale.last, None);
+        assert!(!tiers::due(stale.now(None), 60_000));
     }
 }

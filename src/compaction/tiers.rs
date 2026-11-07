@@ -74,15 +74,18 @@ pub(crate) fn costs(events: &[(u64, usize)], replayed: &[(u64, usize)]) -> Vec<u
     costs
 }
 
-/// Which of a history's events start a turn, from which ones its agent
-/// wrote, oldest first: a message it did not write that follows one it
-/// wrote, or opens the history. A message steered into a running turn, or
-/// written while it ran, follows another person's: it opens no turn.
-pub(crate) fn turn_starts(written: &[bool]) -> Vec<bool> {
+/// Which of a history's events start a turn, oldest first, from which ones
+/// its agent wrote and which of those ended a turn (its answer, which holds
+/// the turn's record): a message the agent did not write that follows an
+/// answer, or opens the history. A message steered into a running turn
+/// follows a question, or the text the agent wrote beside its calls: it
+/// opens no turn.
+pub(crate) fn turn_starts(written: &[bool], ended: &[bool]) -> Vec<bool> {
+    let ended = |at: usize| ended.get(at).copied().unwrap_or(false);
     written
         .iter()
         .enumerate()
-        .map(|(at, own)| !own && (at == 0 || written[at - 1]))
+        .map(|(at, own)| !own && (at == 0 || ended(at - 1)))
         .collect()
 }
 
@@ -144,16 +147,25 @@ mod tests {
     }
 
     #[test]
-    fn a_turn_starts_with_the_first_message_after_the_agent_s() {
+    fn a_turn_starts_with_the_first_message_after_an_answer() {
         // A question, its answer; a question, a message steered in, the
-        // answer; a question.
-        let written = [false, true, false, false, true, false];
+        // agent's text beside its calls, another steered in, the answer; a
+        // question.
+        let written = [false, true, false, false, true, false, true, false];
+        let ended = [false, true, false, false, false, false, true, false];
         assert_eq!(
-            turn_starts(&written),
-            vec![true, false, true, false, false, true]
+            turn_starts(&written, &ended),
+            vec![true, false, true, false, false, false, false, true]
         );
-        assert_eq!(turn_starts(&[true, false]), vec![false, true]);
-        assert!(turn_starts(&[]).is_empty());
+        assert_eq!(
+            turn_starts(&[true, false], &[true, false]),
+            vec![false, true]
+        );
+        assert_eq!(
+            turn_starts(&[true, false], &[false, false]),
+            vec![false, false]
+        );
+        assert!(turn_starts(&[], &[]).is_empty());
     }
 
     #[test]
