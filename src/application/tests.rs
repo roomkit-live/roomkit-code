@@ -161,6 +161,11 @@ async fn answer(
     ([("content-type", "text/event-stream")], body)
 }
 
+/// The engine's own tools, which every agent declares beside the application's:
+/// `read_stored_result` pages through an outcome the engine stored (roomkit-rs
+/// RMK-1228).
+const ENGINE_TOOLS: [&str; 1] = ["read_stored_result"];
+
 fn settings(workspace: &std::path::Path, state: &std::path::Path, base: &str) -> Settings {
     let cli = Cli::try_parse_from([
         "roomkit-code",
@@ -331,6 +336,7 @@ async fn real_tools_stream_results_and_resume_without_reexecution() {
         crate::profiles::model::TOOLS
             .iter()
             .chain(&crate::permissions::MODE_TOOLS)
+            .chain(&ENGINE_TOOLS)
             .copied()
             .collect()
     );
@@ -382,7 +388,8 @@ async fn resumed_history_cannot_replace_the_current_wire_inventory_or_host_catal
         .iter()
         .map(|tool| tool["function"]["name"].as_str().unwrap())
         .collect();
-    assert_eq!(declared, expected);
+    let engine: BTreeSet<_> = ENGINE_TOOLS.into_iter().collect();
+    assert_eq!(declared, &expected | &engine);
     let messages = wire["messages"].as_array().unwrap();
     assert_eq!(messages[0]["role"], "system");
     let prompt = messages[0]["content"].as_str().unwrap();
@@ -1530,7 +1537,13 @@ async fn profiles_select_independent_providers_tools_and_auth_in_one_durable_con
         .iter()
         .map(|t| t["function"]["name"].as_str().unwrap())
         .collect();
-    assert_eq!(tools, BTreeSet::from(["read", "code_outline"]));
+    assert_eq!(
+        tools,
+        BTreeSet::from(["read", "code_outline"])
+            .into_iter()
+            .chain(ENGINE_TOOLS)
+            .collect()
+    );
     let snapshot = second_session.snapshot().cloned().unwrap();
     assert!(
         snapshot

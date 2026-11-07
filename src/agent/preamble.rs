@@ -43,6 +43,11 @@ const SERVERS_BLOCK: usize = 345 + 6;
 /// does not make public either: its preamble, and the two tools as sent.
 const SEARCH_PREAMBLE: usize = 1388 + 2;
 const DISCOVERY_TOOLS: usize = 1477;
+/// The engine's own `read_stored_result`, which every agent declares to page
+/// through an outcome the engine stored (roomkit-rs RMK-1228), and which it does
+/// not make public either: its definition as sent, the intent optional, then
+/// required.
+const REREAD_TOOL: [usize; 2] = [1271, 1289];
 /// The engine keeps at most this many characters of a server's instructions.
 const SERVER_INSTRUCTIONS_MAX: usize = 8192;
 
@@ -202,7 +207,9 @@ fn measure(
             + ACTIVITY_INSTRUCTIONS.len()
             + only_if(servers, SERVERS_BLOCK)
             + only_if(hidden, SEARCH_PREAMBLE),
-        tools: schema_chars(native, intent_required) + only_if(hidden, DISCOVERY_TOOLS),
+        tools: schema_chars(native, intent_required)
+            + REREAD_TOOL[usize::from(intent_required)]
+            + only_if(hidden, DISCOVERY_TOOLS),
         skills: context.len()
             + preamble
             + skills.to_prompt_xml().len()

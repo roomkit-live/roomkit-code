@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Follows roomkit-rs ee5d724, roomkit-tui cf0840e and roomkit-tools c7be169
+  (RMK-1460). A `<think>` tag in the middle of an answer no longer swallows the rest
+  of it (RMK-1327); a fenced block's closing tag is read whatever its separator
+  (RMK-1320); compacting memories leave the turn its room (RMK-450). A tool's
+  outcome past 5,000 estimated tokens reaches the model as a preview, stored whole
+  for the engine's `read_stored_result`, which every agent now declares and the
+  context breakdown counts (RMK-1228).
+
 - A ChatGPT account's requests carry a prompt cache key, one per agent and
   workspace, so that OpenAI routes them to one prompt cache: in a conversation of
   43 turns, a turn's last request, which extends the one before it, read 13% of
