@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- On roomkit-tools 66202f6: the model reads a shell result's `data` once, not
+  also its text rendering; tool descriptions are shorter; a shell stream keeps
+  its end, and only a stream cut short keeps an archive.
+
 - An unattended launch leaves what its agent started running as it exits: a
   job a command put in the background, and a `process_start` process; the
   latter are listed as `Left N background processes running:`, even when the
