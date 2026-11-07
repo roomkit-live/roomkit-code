@@ -14,6 +14,7 @@
 
 mod board;
 pub(crate) mod panel;
+mod render;
 mod transcript;
 
 pub(crate) use board::{Outcome, Task, Tasks};

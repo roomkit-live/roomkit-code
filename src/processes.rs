@@ -112,10 +112,7 @@ impl Processes {
                     p.room == current.room.as_str() && p.agent == current.agent.as_str()
                 });
                 let jobs = this.jobs(&kit, &viewer, &current).await;
-                let running = jobs
-                    .iter()
-                    .filter(|j| j.process.status.state == ProcessState::Running)
-                    .count();
+                let running = running(&jobs);
                 let mut events = Vec::from(this.background(&current, running, &tasks).await);
                 if let Some(panel) = &panel {
                     events.push(Event::PanelUpdated {
@@ -123,16 +120,7 @@ impl Processes {
                         panel: this.render(panel, &jobs).await,
                     });
                 }
-                let section = sidebar(&jobs);
-                // A cancelled observer can finish its in-flight read after a
-                // view switch. It must not overwrite the new observer's section.
-                let section_changed = this.sidebar.send_if_modified(|(current, previous)| {
-                    if *current != observation || *previous == section {
-                        return false;
-                    }
-                    *previous = section;
-                    true
-                });
+                let section_changed = this.publish(observation, sidebar(&jobs));
                 let changed = *tx.borrow() != events || section_changed;
                 if changed && tx.send(events).is_err() {
                     break;
@@ -148,6 +136,19 @@ impl Processes {
             }
         });
         rx
+    }
+
+    /// Publishes `section` as observer `observation`'s, and whether it
+    /// changed. A cancelled observer can finish its in-flight read after a
+    /// view switch: it must not overwrite the new observer's section.
+    fn publish(&self, observation: uuid::Uuid, section: SidebarSection) -> bool {
+        self.sidebar.send_if_modified(|(current, previous)| {
+            if *current != observation || *previous == section {
+                return false;
+            }
+            *previous = section;
+            true
+        })
     }
 
     async fn jobs(
@@ -474,6 +475,13 @@ async fn room_access(
             Access::ReadOnly => Some(false),
             _ => None,
         })
+}
+
+/// How many of `jobs` run.
+fn running(jobs: &[Job]) -> usize {
+    jobs.iter()
+        .filter(|job| job.process.status.state == ProcessState::Running)
+        .count()
 }
 
 fn offsets(panel: &Panel, job: &Job) -> (u64, u64) {
