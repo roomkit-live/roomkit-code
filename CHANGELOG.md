@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- A request the model refuses as past its window says so, on roomkit-tui
+  14f2561. When compaction could not make room, the notice read `Engine
+  execution failed`, and the gauge kept an earlier measurement, such as 9.6%
+  used, beside the refusal. The notice now names the context limit and suggests
+  disconnecting tools, compacting or a new conversation, or a model with more
+  capacity, and the sidebar shows `Refused: over capacity` above the last
+  measurement until the next turn.
+
 - `/compact` compacts at once instead of at the next message, and is accepted
   while the agent works: it is then queued and runs as the turn ends (HITL
   a2dfba34). The status line counts the summary's seconds, a message sent

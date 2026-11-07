@@ -18,8 +18,12 @@ import unicodedata
 metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True))
 binary = Path(metadata["target_directory"]) / "debug" / "roomkit-code"
 requests = []
-# A turn whose request measured 40,000 tokens of a 131,072-token window.
-replies = ["Context fixture complete."]
+# A turn whose request measured 40,000 tokens of a 131,072-token window, then
+# a request the server refuses past that window, as vLLM does.
+REFUSED = object()
+replies = ["Context fixture complete.", REFUSED]
+REFUSAL = {"error": {"object": "error", "type": "BadRequestError", "code": 400,
+                     "message": "This model's maximum context length is 131072 tokens. However, you requested 131521 tokens."}}
 usage = {"prompt_tokens": 40000, "completion_tokens": 40, "prompt_tokens_details": {"cached_tokens": 0}}
 
 
@@ -31,6 +35,14 @@ class Model(BaseHTTPRequestHandler):
         requests.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
         index = len(requests) - 1
         reply = replies[min(index, len(replies) - 1)]
+        if reply is REFUSED:
+            body = json.dumps(REFUSAL).encode()
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if isinstance(reply, tuple):
             name, args = reply
             delta = {"tool_calls": [{"index": 0, "id": f"call-{index}", "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}]}
@@ -146,10 +158,23 @@ try:
         assert legend[:3] == ["System", "Instructions", "Tools"] and legend[-1] == "Messages", section
         assert any(row.startswith("█ System prompt  ≈") for row in section), section
         assert "40040 / 131072 tokens" in section, section
+        # The next request is refused past the window, and the conversation is
+        # too short for the kit to compact: the notice names the context limit,
+        # and the sidebar says the request was refused above the last report.
+        offset = app.send("Read everything\r")
+        app.wait("Disconnect tools", offset)
+        app.settle()
+        assert "context limit" in app.screen(offset)
+        assert "Engine execution failed" not in app.screen(offset)
+        assert "Start a new session" not in app.screen(offset)
+        rows = app.sidebar()
+        section = rows[rows.index("Context") + 1:]
+        assert section[:3] == ["Refused: over capacity", "Last report", "40040 / 131072 tokens"], section
         app.close()
 finally:
     server.shutdown()
     server.server_close()
     thread.join(timeout=5)
 
-print("PTY context passed: the sidebar splits the measured context into estimated parts and messages.")
+print("PTY context passed: the sidebar splits the measured context into estimated parts and messages,"
+      " and a request refused past the window says so above the last report.")

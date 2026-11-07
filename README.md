@@ -659,6 +659,14 @@ A refused request (an invalid key, a malformed request) is not retried, nor an
 answer that has begun streaming. The screen does not show these retries.
 Existing completed tool actions remain in the project and conversation.
 
+A request the model refuses as past its window, when compaction cannot make
+room, says so: the notice names the context limit and what frees room
+(disconnecting tools, compacting the conversation or starting a new one, or a
+model with more capacity). The sidebar shows `Refused: over capacity` above the
+last measurement, and the footer `context refused`, until the next turn: that
+request was never measured. The **Context** breakdown still shows what each
+request carries, so a server whose schemas fill the window stands out.
+
 ### Compaction
 
 An agent whose model's window is known compacts its conversation by tiers, so
