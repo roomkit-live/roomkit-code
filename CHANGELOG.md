@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A ChatGPT account's requests carry a prompt cache key, one per agent and
+  workspace, so that OpenAI routes them to one prompt cache: in a conversation of
+  43 turns, a turn's last request, which extends the one before it, read 13% of
+  its input from the cache (RMK-1481).
+
 - The footer and the sidebar show what a turn read from the prompt cache and wrote
   there, and the conversation's cost at its model's list price: `≈ $0.42`, every
   turn of the conversation, earlier sessions included; the exit summary ends with
