@@ -594,24 +594,30 @@ the engine's catalogue lists for its model; when the catalogue says the model's
 price rises past a number of input tokens (272,000 for `gpt-6-astra`), that
 number is the ceiling instead.
 
-While a request, estimated at four characters per token, stays under 80 % of the
-ceiling, the conversation is read as it is, every earlier round of tool calls
-whole. Past it, the agent's own model writes a summary of the oldest messages,
+While a request stays under 80 % of the ceiling, the conversation is read as it
+is, every earlier round of tool calls whole. The request is estimated at four
+characters per token, or taken as the provider measured the agent's latest one
+plus what came since, when that says more. Past it, the agent's own model writes a summary of the oldest messages,
 carrying over the previous summary, and the latest messages are kept whole within
 30 % of the ceiling, whole turns only. The summary, followed by the project's
 `AGENTS.md` snapshot, then opens every request, and the history grows again from
 there, unchanged, up to the next tier: one cache loss per compaction. The status
 line says when it happens and what it saved. The summary is kept in the project's
 state, so a resumed conversation reads the same one. **/compact** asks the next
-turn to compact whatever its tier, keeping its latest four messages.
+turn to compact whatever its tier, keeping at most its latest four messages, from
+a turn's start.
 
-The summary reads the messages, not the tool calls' results. Its request is not
-counted in the turn's tokens or the conversation's cost.
+The summary reads the messages, not the tool calls' results, the newest first
+within half the ceiling. A summary the model does not write compacts nothing:
+the status line says so and the next turn tries again. The summary's request is
+not counted in the turn's tokens or the conversation's cost.
 
 An agent without a known window reads its latest 50 messages instead, as before,
 and each of its turns carries the project's `AGENTS.md` snapshot: a request past
 the model's window is compacted by the engine, which keeps only the turn's input
-whole.
+whole. Since the engine replays each turn's instruction, its requests then hold
+one copy of the snapshot per turn in that window; set the agent's **Context
+capacity** to avoid it.
 
 ## Boundaries
 

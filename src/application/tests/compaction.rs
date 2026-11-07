@@ -249,5 +249,50 @@ async fn compact_compacts_at_the_next_turn_and_a_window_of_messages_keeps_the_ru
     turn_operation(&app, "fifth").await;
     let requests = mock.requests.lock().unwrap().clone();
     assert_eq!(summaries(&requests[before..]), 1, "and only that one");
+    // Rules changed since: the next turn sends them, once; the one after
+    // reads them where that turn did.
+    write(root.path(), "AGENTS.md", "ROOT_TWO");
+    turn_operation(&app, "sixth").await;
+    let sixth = mock.requests.lock().unwrap().last().unwrap().to_string();
+    assert_eq!(sixth.matches("ROOT_TWO").count(), 1, "{sixth}");
+    turn_operation(&app, "seventh").await;
+    let seventh = mock.requests.lock().unwrap().last().unwrap().to_string();
+    assert_eq!(
+        seventh.matches("ROOT_TWO").count(),
+        1,
+        "sent once, then replayed"
+    );
+    app.close().await.unwrap();
+}
+
+/// A summary the model does not write compacts nothing: the turn reads the
+/// conversation as it is, says so, and the next one tries again.
+#[tokio::test]
+async fn a_failed_summary_compacts_nothing_and_is_tried_again() {
+    use roomkit_tui_engine::CommandHandler;
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::summarizing("An answer.", "").await;
+    let mut settings = settings(root.path(), state.path(), &mock.base_url);
+    settings.context_window = Some(200_000);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    for turn in ["first", "second", "third"] {
+        turn_operation(&app, turn).await;
+    }
+    handler(&app, &settings)
+        .handle(invoke(&app, "compact"), app.view.clone())
+        .await
+        .unwrap();
+    let (room, agent) = (app.view.room.to_string(), app.view.agent.to_string());
+    let compactions = app.profiles.resources.compactions.clone();
+    turn_operation(&app, "fourth").await;
+    assert_eq!(summaries(&mock.requests.lock().unwrap()), 1);
+    assert_eq!(compactions.get(&room, &agent), None, "nothing is compacted");
+    let notices = compactions.notices(&room);
+    assert!(notices[0].starts_with("Compaction failed"), "{notices:?}");
+    *mock.summary.lock().unwrap() = SUMMARY.into();
+    turn_operation(&app, "fifth").await;
+    assert_eq!(summaries(&mock.requests.lock().unwrap()), 2, "tried again");
+    assert_eq!(compactions.get(&room, &agent).unwrap().summary, SUMMARY);
     app.close().await.unwrap();
 }

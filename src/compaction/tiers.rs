@@ -13,6 +13,8 @@ pub(crate) const TRIGGER: f64 = 0.8;
 pub(crate) const KEPT: f64 = 0.3;
 /// The fewest messages a compaction keeps whole.
 pub(crate) const MIN_KEPT: usize = 4;
+/// The share of the ceiling a summary's request may read.
+const SUMMARY_READS: f64 = 0.5;
 
 /// The tokens a history compacts under: the model's window, or the input
 /// past which its price rises when that is smaller (HITL db06dd3d). None
@@ -43,6 +45,12 @@ pub(crate) fn due(tokens: usize, ceiling: u64) -> bool {
     tokens > share(ceiling, TRIGGER)
 }
 
+/// The characters a summary's request under `ceiling` may read, at four a
+/// token: what it summarizes never overflows the model.
+pub(crate) fn summary_chars(ceiling: u64) -> usize {
+    share(ceiling, SUMMARY_READS).saturating_mul(4)
+}
+
 /// What a compaction under `ceiling` keeps whole.
 pub(crate) fn kept_budget(ceiling: u64) -> usize {
     share(ceiling, KEPT)
@@ -50,9 +58,11 @@ pub(crate) fn kept_budget(ceiling: u64) -> usize {
 
 /// What each event of `events`, `(index, tokens)` oldest first, costs with
 /// what the turn replays of its agent's earlier turns, `replayed`: each piece
-/// at its index, charged to the latest event before it, as the kit places it
-/// (roomkit-ai's `TurnFootprint::replayed`). A piece before every event
-/// replays with none and costs nothing.
+/// at its index (roomkit-ai's `TurnFootprint::replayed`), charged to the
+/// latest event before it, which belongs to the piece's turn. A cut falls on
+/// a turn's start, so that a turn's pieces stay with it, kept or summarized:
+/// the kit charges them to the turn's answer, which comes to the same total.
+/// A piece before every event replays with none and costs nothing.
 pub(crate) fn costs(events: &[(u64, usize)], replayed: &[(u64, usize)]) -> Vec<usize> {
     let mut costs: Vec<usize> = events.iter().map(|(_, tokens)| *tokens).collect();
     for (index, tokens) in replayed {
@@ -64,11 +74,30 @@ pub(crate) fn costs(events: &[(u64, usize)], replayed: &[(u64, usize)]) -> Vec<u
     costs
 }
 
+/// Which of a history's events start a turn, from which ones its agent
+/// wrote, oldest first: a message it did not write that follows one it
+/// wrote, or opens the history. A message steered into a running turn, or
+/// written while it ran, follows another person's: it opens no turn.
+pub(crate) fn turn_starts(written: &[bool]) -> Vec<bool> {
+    written
+        .iter()
+        .enumerate()
+        .map(|(at, own)| !own && (at == 0 || written[at - 1]))
+        .collect()
+}
+
+/// The tokens a turn's request takes as last measured: `last`, what the
+/// provider reported of the agent's latest request, then what came since,
+/// the answer that request wrote among it, `since`.
+pub(crate) fn measured(last: Option<usize>, since: &[usize]) -> Option<usize> {
+    last.map(|last| last + since.iter().sum::<usize>())
+}
+
 /// Where a compaction cuts a history whose events cost `costs`, oldest
 /// first: the first of the latest events kept whole within `budget`,
 /// `MIN_KEPT` of them at least, moved to the next event that `starts` a turn
-/// (one its agent did not write), so that a turn is kept or summarized
-/// whole. 0 when nothing would be summarized.
+/// ([`turn_starts`]), so that a turn is kept or summarized whole. 0 when
+/// nothing would be summarized.
 pub(crate) fn cut(costs: &[usize], starts: &[bool], budget: usize) -> usize {
     let mut running = 0;
     let mut cut = 0;
@@ -102,6 +131,7 @@ mod tests {
         assert_eq!(ceiling(Some(128_000), Some(272_000)), Some(128_000));
         assert!(!due(80_000, 100_000) && due(80_001, 100_000));
         assert_eq!(kept_budget(100_000), 30_000);
+        assert_eq!(summary_chars(100_000), 200_000);
     }
 
     #[test]
@@ -111,6 +141,25 @@ mod tests {
         let replayed = [(5, 100), (25, 40), (31, 2), (21, 3)];
         assert_eq!(costs(&events, &replayed), vec![5, 50, 3]);
         assert_eq!(costs(&[], &replayed), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn a_turn_starts_with_the_first_message_after_the_agent_s() {
+        // A question, its answer; a question, a message steered in, the
+        // answer; a question.
+        let written = [false, true, false, false, true, false];
+        assert_eq!(
+            turn_starts(&written),
+            vec![true, false, true, false, false, true]
+        );
+        assert_eq!(turn_starts(&[true, false]), vec![false, true]);
+        assert!(turn_starts(&[]).is_empty());
+    }
+
+    #[test]
+    fn the_last_request_measured_counts_what_came_since() {
+        assert_eq!(measured(Some(50_000), &[4_000, 10]), Some(54_010));
+        assert_eq!(measured(None, &[4_000]), None);
     }
 
     #[test]

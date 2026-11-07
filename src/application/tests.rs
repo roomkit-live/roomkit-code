@@ -25,6 +25,7 @@ use crate::config::Cli;
 
 struct Mock {
     base_url: String,
+    summary: Arc<Mutex<String>>,
     requests: Arc<Mutex<Vec<Value>>>,
     headers: Arc<Mutex<Vec<String>>>,
     task: tokio::task::JoinHandle<()>,
@@ -33,6 +34,8 @@ struct Mock {
 #[derive(Clone)]
 struct Fixture {
     reasoning: Option<String>,
+    /// What a request asked whole, a compaction's summary, is answered.
+    summary: Arc<Mutex<String>>,
     answer: String,
     calls: Vec<(&'static str, Value)>,
     usage: Vec<Option<Value>>,
@@ -57,6 +60,13 @@ impl Mock {
         Self::serving(calls, answer_text, usage, None).await
     }
 
+    /// A server whose summaries, the requests asked whole, read `summary`.
+    async fn summarizing(answer_text: &str, summary: &str) -> Self {
+        let mock = Self::serving(vec![], answer_text, vec![], None).await;
+        *mock.summary.lock().unwrap() = summary.into();
+        mock
+    }
+
     /// A server that writes `reasoning` apart from each of its answers.
     async fn reasoning(
         calls: Vec<(&'static str, Value)>,
@@ -76,6 +86,7 @@ impl Mock {
         let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
         let headers = Arc::new(Mutex::new(Vec::new()));
+        let summary = Arc::new(Mutex::new(SUMMARY.to_owned()));
         let router = Router::new()
             .route("/v1/chat/completions", post(answer))
             .route(
@@ -86,6 +97,7 @@ impl Mock {
             )
             .with_state(Fixture {
                 reasoning,
+                summary: summary.clone(),
                 answer: answer_text.into(),
                 calls,
                 usage,
@@ -97,6 +109,7 @@ impl Mock {
         });
         Self {
             base_url,
+            summary,
             requests,
             headers,
             task,
@@ -132,7 +145,7 @@ async fn answer(
     // A compaction's summary is asked whole, apart from the agent's turns.
     if whole {
         let summary = json!({
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": SUMMARY}, "finish_reason": "stop"}],
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": *fixture.summary.lock().unwrap()}, "finish_reason": "stop"}],
         });
         return ([("content-type", "application/json")], summary.to_string());
     }

@@ -3,6 +3,7 @@
 //! each conversation's compactions, kept on disk so that a resumed
 //! conversation reads the same summary, its prompt's prefix with it.
 mod memory;
+mod summary;
 mod tiers;
 
 pub(crate) use memory::TieredMemory;
@@ -14,6 +15,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::Mutex,
+    time::{Duration, Instant},
 };
 use tokio::sync::watch;
 
@@ -21,6 +23,10 @@ use tokio::sync::watch;
 /// memory to read: the kit's ceiling for a memory that does not keep a
 /// number of them (roomkit-ai's `DEFAULT_RECENT_EVENTS_WINDOW`).
 pub(crate) const WINDOW: usize = 2_000;
+
+/// How long a view shows a room's latest notice again whenever it is sent its
+/// live events: one sent once could be replaced before the view read it.
+const NOTICE_FOR: Duration = Duration::from_secs(10);
 
 /// A file holding more than this is no record of compactions.
 const MAX_BYTES: u64 = 4 * 1024 * 1024;
@@ -58,8 +64,8 @@ pub(crate) struct Compactions {
     forced: Mutex<HashSet<(String, String)>>,
     /// The project snapshot each agent's latest turn read, by room and agent.
     snapshots: Mutex<HashMap<(String, String), String>>,
-    /// What the views have yet to show, by room.
-    notices: Mutex<Vec<(String, String)>>,
+    /// The latest notice of each room, and when it came.
+    notices: Mutex<HashMap<String, (Instant, String)>>,
     changes: watch::Sender<()>,
 }
 
@@ -112,16 +118,25 @@ impl Compactions {
             thousands(before),
             thousands(after)
         );
-        let kept = {
+        // Written outside the lock: another conversation's turn need not
+        // wait for this one's file.
+        let record = {
             let mut rooms = crate::sync::lock(&self.rooms);
             let record = rooms.entry(room.into()).or_insert_with(|| self.read(room));
             record.agents.insert(agent.into(), compacted);
-            self.write(room, record)
+            Record {
+                agents: record.agents.clone(),
+            }
         };
-        if kept.is_err() {
+        if self.write(room, &record).is_err() {
             notice.push_str(" · not saved: a resumed conversation compacts again");
         }
-        crate::sync::lock(&self.notices).push((room.into(), notice));
+        self.notice(room, &notice);
+    }
+
+    /// Tells the views of `room` `text`, in their status line.
+    pub fn notice(&self, room: &str, text: &str) {
+        crate::sync::lock(&self.notices).insert(room.into(), (Instant::now(), text.into()));
         self.changes.send_replace(());
     }
 
@@ -153,13 +168,14 @@ impl Compactions {
             .cloned()
     }
 
-    /// What the views of `room` have yet to show, once.
-    pub fn take_notices(&self, room: &str) -> Vec<String> {
-        let mut notices = crate::sync::lock(&self.notices);
-        let (shown, kept): (Vec<_>, Vec<_>) =
-            notices.drain(..).partition(|(noticed, _)| noticed == room);
-        *notices = kept;
-        shown.into_iter().map(|(_, text)| text).collect()
+    /// The notice the views of `room` show, while it is recent.
+    pub fn notices(&self, room: &str) -> Vec<String> {
+        crate::sync::lock(&self.notices)
+            .get(room)
+            .filter(|(at, _)| at.elapsed() < NOTICE_FOR)
+            .map(|(_, text)| text.clone())
+            .into_iter()
+            .collect()
     }
 
     pub fn subscribe(&self) -> watch::Receiver<()> {
@@ -252,14 +268,11 @@ mod tests {
             let dir = std::fs::metadata(dir.path().join("compactions")).unwrap();
             assert_eq!(dir.permissions().mode() & 0o077, 0);
         }
-        assert_eq!(
-            compactions.take_notices("room"),
-            vec![
-                "Conversation compacted: a summary stands for 12 earlier messages · ≈90,000 → ≈31,000 tokens"
-                    .to_owned()
-            ]
-        );
-        assert!(compactions.take_notices("room").is_empty());
+        let notice = "Conversation compacted: a summary stands for 12 earlier messages · ≈90,000 → ≈31,000 tokens";
+        // Every view of the room shows it, each time it is sent its events.
+        assert_eq!(compactions.notices("room"), vec![notice.to_owned()]);
+        assert_eq!(compactions.notices("room"), vec![notice.to_owned()]);
+        assert!(compactions.notices("other").is_empty());
     }
 
     #[test]

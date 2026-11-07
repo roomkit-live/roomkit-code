@@ -9,7 +9,8 @@
   is. Past it, the agent's model summarizes the oldest messages, the latest kept
   whole within 30 % of the ceiling, and the history stays as it is again up to the
   next tier: one prompt cache loss per compaction instead of one per turn. The
-  status line says so; the summary is kept in the project's state for a resumed
+  status line says so; a summary the model does not write compacts nothing and is
+  tried again; the summary is kept in the project's state for a resumed
   conversation; `/compact` compacts at the next message. An agent without a known
   window keeps its 50 messages.
 
@@ -21,15 +22,15 @@
   snapshot only when it changed since the latest one the agent still reads: the
   engine replays it otherwise, where the earlier turn read it, or the compaction's
   summary carries it, and the request keeps the prompt cache's prefix. An agent
-  reading its latest 50 messages sends it every turn. The mode rule is sent each
-  turn (RMK-1407).
+  reading its latest 50 messages sends it every turn, one copy per turn in its
+  window then. The mode rule is sent each turn (RMK-1407).
 
 - Follows roomkit-rs 3b885524, roomkit-tui 4eed1d9 and roomkit-tools 5d05c29
   (RMK-1460). Every earlier round of tool calls replays whole, as its turn sent it
   (RMK-1370), and each turn's application instruction replays where the turn read
-  it (RMK-1407): while the history fits the agent's 50-message window, a later
-  turn's first request opens with the previous turn's last one. Past it, the
-  window drops the oldest messages at every turn.
+  it (RMK-1407): a later turn's first request opens with the previous turn's last
+  one, until a compaction for an agent with a known window, at every turn past 50
+  messages for one without.
 
 - Follows roomkit-rs ee5d724, roomkit-tui cf0840e and roomkit-tools c7be169
   (RMK-1460). A `<think>` tag in the middle of an answer no longer swallows the rest

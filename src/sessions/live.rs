@@ -84,19 +84,14 @@ async fn events(
         // the UI ignores updates to a dismissed or different view.
         events.push(event);
     }
-    // Shown once, in the status line: a compaction is no lasting state.
+    // In the status line, sent again while recent: a compaction is no lasting
+    // state, and a list of events can be replaced before the view reads it.
     let room = current.room.as_str();
-    events.extend(
-        (profiles
-            .resources
-            .compactions
-            .take_notices(room)
-            .into_iter())
-        .map(|text| Event::Notice {
-            conversation: room.into(),
-            text,
-        }),
-    );
+    let notices = profiles.resources.compactions.notices(room);
+    events.extend(notices.into_iter().map(|text| Event::Notice {
+        conversation: room.into(),
+        text,
+    }));
     let (mut sidebar, poll) = profiles.sidebar(current).await;
     if let Some(section) = services.hooks.sidebar(current) {
         sidebar.sections.push(section);
