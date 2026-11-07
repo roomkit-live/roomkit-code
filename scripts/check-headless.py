@@ -203,8 +203,7 @@ def closed_events(root, model):
         if '"process_start"' in line and '"succeeded"' in line:
             break
     process.stdout.close()
-    err = process.stderr.read()
-    process.wait(timeout=60)
+    _, err = process.communicate(timeout=60)
     pid = pid_in(root / "project" / "server.pid")
     try:
         assert process.returncode == 1 and "Cannot write the events" in err, (process.returncode, err)

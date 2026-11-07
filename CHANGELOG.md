@@ -3,8 +3,9 @@
 ## Unreleased
 
 - An unattended launch leaves what its agent started running as it exits: a
-  job a command put in the background, and a `process_start` process, listed
-  as `Left N background processes running:`, even when the launch is cut short;
+  job a command put in the background, and a `process_start` process; the
+  latter are listed as `Left N background processes running:`, even when the
+  launch is cut short;
   what they write afterwards is drained, so it never fails them. The shell
   keeps the latest 16 KiB of each stream, instead of its first and last 4 KiB.
 
