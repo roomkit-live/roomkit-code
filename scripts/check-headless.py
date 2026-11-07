@@ -158,8 +158,10 @@ def past_fifty_rounds(root, model):
 
 
 def from_stdin(root, model):
-    code, out, err = run(root, model, "--prompt", "-", stdin="A message read from standard input.\n")
+    code, out, err = run(root, model, "--reasoning-effort", "low", "--prompt", "-", stdin="A message read from standard input.\n")
     assert code == 0, (code, err)
+    # A benchmark pins the effort from the command line, as a new project's agent starts.
+    assert model.requests[0].get("reasoning_effort") == "low", model.requests[0].get("reasoning_effort")
     assert out == ANSWER + "\n", out
     assert model.said("A message read from standard input."), model.requests[0]["messages"]
 

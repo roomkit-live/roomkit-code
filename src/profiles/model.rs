@@ -301,4 +301,4 @@ impl Agent {
     }
 }
 
-pub(super) const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+pub(crate) const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];

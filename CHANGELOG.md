@@ -11,6 +11,9 @@
   ≈40k tokens · 12 s`: the messages that compaction summarized, not the rows of
   tool calls and read instructions between them, which a summary never reads.
 
+- `--reasoning-effort` and `[provider] reasoning_effort` set a new project's first
+  agent's reasoning effort, as `--model` sets its model: an unattended run pins it.
+
 - An agent can hand a task to another agent of the project with the engine's
   `delegate_task`; `task_status` and `cancel_task` follow and stop the
   conversation's tasks (RMK-1532; HITL 2b4cc82b, f7f700bc, a7392f28). The other

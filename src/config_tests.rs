@@ -500,3 +500,34 @@ fn a_prompt_makes_the_launch_unattended_and_json_needs_one() {
     assert!(Cli::try_parse_from(base.into_iter().chain(["--json"])).is_err());
     assert!(Cli::try_parse_from(base.into_iter().chain(["-p", "x", "--check-config"])).is_err());
 }
+
+#[test]
+fn the_first_agent_s_reasoning_effort_is_explicit_and_checked() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("settings.toml");
+    let mut cli = cli(root.path());
+    assert_eq!(Settings::load(&cli).unwrap().reasoning_effort, None);
+    std::fs::write(&path, "[provider]\nreasoning_effort = \"high\"\n").unwrap();
+    cli.config = Some(path.clone());
+    assert_eq!(
+        Settings::load(&cli).unwrap().reasoning_effort.as_deref(),
+        Some("high")
+    );
+    cli.reasoning_effort = Some("low".into());
+    assert_eq!(
+        Settings::load(&cli).unwrap().reasoning_effort.as_deref(),
+        Some("low")
+    );
+    cli.reasoning_effort = None;
+    std::fs::write(&path, "[provider]\nreasoning_effort = \"turbo\"\n").unwrap();
+    let error = Settings::load(&cli).err().unwrap();
+    assert_eq!(
+        error.to_string(),
+        "reasoning effort must be low, medium, high, xhigh or max"
+    );
+    let workspace = root.path().to_str().unwrap();
+    assert!(
+        Cli::try_parse_from(["roomkit-code", workspace, "--reasoning-effort", "turbo"]).is_err()
+    );
+    assert!(Cli::try_parse_from(["roomkit-code", workspace, "--reasoning-effort", "max"]).is_ok());
+}

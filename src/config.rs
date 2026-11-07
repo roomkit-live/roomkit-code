@@ -52,6 +52,9 @@ pub(crate) struct Cli {
     /// Initial limit on the tokens one model reply may write; none by default.
     #[arg(long)]
     pub max_output_tokens: Option<u32>,
+    /// Initial reasoning effort; the provider's default when omitted.
+    #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(crate::profiles::model::EFFORTS))]
+    pub reasoning_effort: Option<String>,
     /// Open or create a named conversation; without this, start a new session.
     #[arg(long)]
     pub session: Option<String>,
@@ -208,6 +211,7 @@ struct Provider {
     timeout_seconds: Option<u64>,
     context_window: Option<u64>,
     max_output_tokens: Option<u32>,
+    reasoning_effort: Option<String>,
     pricing: Option<Pricing>,
 }
 
@@ -313,6 +317,8 @@ pub(crate) struct Settings {
     pub provider_timeout_seconds: u64,
     pub context_window: Option<u64>,
     pub max_output_tokens: Option<u32>,
+    /// The reasoning effort a project's first agent starts with.
+    pub reasoning_effort: Option<String>,
     /// The list price `[provider.pricing]` states for `model` on `base_url`.
     pub pricing: Option<roomkit_ai::ModelPricing>,
     pub debug: bool,
@@ -390,6 +396,16 @@ impl Settings {
             return Err("context window must be a positive token count".into());
         }
         let max_output_tokens = cli.max_output_tokens.or(file.provider.max_output_tokens);
+        let reasoning_effort = cli
+            .reasoning_effort
+            .clone()
+            .or(file.provider.reasoning_effort);
+        if reasoning_effort
+            .as_deref()
+            .is_some_and(|effort| !crate::profiles::model::EFFORTS.contains(&effort))
+        {
+            return Err("reasoning effort must be low, medium, high, xhigh or max".into());
+        }
         if max_output_tokens == Some(0) {
             return Err("max output tokens must be a positive token count".into());
         }
@@ -499,6 +515,7 @@ impl Settings {
             provider_timeout_seconds,
             context_window,
             max_output_tokens,
+            reasoning_effort,
             pricing,
             ui,
             max_tool_rounds,

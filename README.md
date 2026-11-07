@@ -794,7 +794,9 @@ effort** in `/agents`. The setting is saved per agent and applies to subsequent
 requests, including tool rounds. `default` leaves the parameter out; other levels
 must be supported by the chosen model. On OpenAI's own endpoint, some models take
 the effort RoomKit's catalogue states on a turn with tools, whatever this setting
-says. Changing effort keeps the current session.
+says. Changing effort keeps the current session. For a new project,
+`--reasoning-effort` or `[provider] reasoning_effort` sets the first agent's
+effort, as `--model` sets its model; an unattended run uses it to pin the effort.
 
 `/diagnostics` shows recent operational records and the exact log location. Each
 project's private state directory contains `diagnostics.jsonl` and, after rotation,
