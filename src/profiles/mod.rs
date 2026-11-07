@@ -340,7 +340,7 @@ impl Profiles {
             mcp: self.mcp_runtime.selected(profile).await?,
             intent_required: self.require_tool_intent,
             max_tool_rounds: self.max_tool_rounds,
-            mode_tools: !self.unattended,
+            unattended: self.unattended,
             delegation: !self.unattended,
             policy: self.policy.clone(),
             images: self.images.clone(),

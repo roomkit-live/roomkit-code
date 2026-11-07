@@ -132,8 +132,9 @@ pub(super) struct Preamble {
 }
 
 /// The preamble of `profile` with its selected `native` tools, its skills
-/// and its MCP servers, whether every call carries an intent, and whether the
-/// engine serves it the delegation tools.
+/// and its MCP servers, whether every call carries an intent, whether the
+/// engine serves it the delegation tools, and the longest command its shell
+/// runs, in milliseconds.
 pub(super) fn preamble(
     profile: &Agent,
     native: Vec<AiTool>,
@@ -141,6 +142,7 @@ pub(super) fn preamble(
     skill_roots: &[PathBuf],
     mcp: &[McpTools],
     (intent_required, delegates): (bool, bool),
+    shell_maximum: u64,
 ) -> Preamble {
     let hidden = hides_mcp(mcp, intent_required, profile.context_window);
     let mut tools = native.clone();
@@ -157,7 +159,7 @@ pub(super) fn preamble(
     };
     let served = [native.as_slice(), &delegation].concat();
     let listed = [tools.as_slice(), &delegation].concat();
-    let base = base_prompt(profile, &listed, hidden);
+    let base = base_prompt(profile, &listed, hidden, shell_maximum);
     let context = skill_context(skills, skill_roots);
     let composition = measure(
         (&base, &context),
@@ -175,10 +177,10 @@ pub(super) fn preamble(
     }
 }
 
-/// The application's instructions, the agent's identity and instructions,
-/// and the names of every tool it has, those it finds its other tools with
-/// when they are `hidden`.
-fn base_prompt(profile: &Agent, tools: &[AiTool], hidden: bool) -> String {
+/// The application's instructions, stating the longest command its shell
+/// runs, the agent's identity and instructions, and the names of every tool
+/// it has, those it finds its other tools with when they are `hidden`.
+fn base_prompt(profile: &Agent, tools: &[AiTool], hidden: bool, shell_maximum: u64) -> String {
     let discovery = TOOL_SEARCH_INFRA_TOOL_NAMES.into_iter().filter(|_| hidden);
     let inventory = tools
         .iter()
@@ -186,7 +188,9 @@ fn base_prompt(profile: &Agent, tools: &[AiTool], hidden: bool) -> String {
         .chain(discovery)
         .collect::<Vec<_>>()
         .join(", ");
-    let instructions = INSTRUCTIONS.replacen("{permissions}", &crate::permissions::summary(), 1);
+    let instructions = INSTRUCTIONS
+        .replacen("{permissions}", &crate::permissions::summary(), 1)
+        .replacen("{shell_maximum}", &shell_maximum.to_string(), 1);
     format!(
         "{instructions}\nCurrent agent: {} (ID: {}). Answer as this selected participant. Other participants may have different tools and providers.\nAgent instructions:\n{}\nCurrent capability inventory (provided by the application for this run):\n{inventory}\nOnly tools in this inventory are available to you. Apply tool-specific guidance only when that tool is present.\n",
         profile.label, profile.id, profile.instructions
@@ -288,9 +292,16 @@ mod tests {
     }
 
     #[test]
-    fn the_prompt_states_the_shell_maximum_the_tool_enforces() {
-        let maximum = crate::timeouts::SHELL_MAX_SECONDS * 1000;
-        assert!(INSTRUCTIONS.contains(&format!("(maximum {maximum})")));
+    fn the_prompt_states_the_shell_maximum_it_is_given() {
+        assert_eq!(INSTRUCTIONS.matches("{shell_maximum}").count(), 1);
+        let profile: Agent = serde_json::from_value(serde_json::json!({
+            "id": "code", "label": "Code", "provider": "local", "model": "m",
+            "instructions": "", "tools": [],
+        }))
+        .unwrap();
+        let prompt = base_prompt(&profile, &[], false, 3_600_000);
+        assert!(prompt.contains("long command (maximum 3600000)."));
+        assert!(!prompt.contains("{shell_maximum}"));
     }
 
     #[test]
@@ -308,7 +319,7 @@ mod tests {
             "instructions": "", "tools": [],
         }))
         .unwrap();
-        let prompt = base_prompt(&profile, &[], false);
+        let prompt = base_prompt(&profile, &[], false, 120_000);
         assert!(prompt.contains(&crate::permissions::summary()));
         assert!(!prompt.contains("{permissions}"));
     }
@@ -335,9 +346,9 @@ mod tests {
         }))
         .unwrap();
         let run = "for this run):\n";
-        assert!(base_prompt(&profile, &[], false).contains(&format!("{run}\nOnly tools")));
+        assert!(base_prompt(&profile, &[], false, 120_000).contains(&format!("{run}\nOnly tools")));
         assert!(
-            base_prompt(&profile, &[], true)
+            base_prompt(&profile, &[], true, 120_000)
                 .contains(&format!("{run}find_tools, list_tools\nOnly tools"))
         );
     }

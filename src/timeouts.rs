@@ -8,15 +8,31 @@ use std::time::Duration;
 /// killing a process.
 const MARGIN_MILLIS: u64 = 10_000;
 
-/// The longest command a shell tool call may request; the system prompt
-/// states it to the model.
-pub(crate) const SHELL_MAX_SECONDS: u64 = 120;
+/// The longest command a shell tool call may request in the terminal.
+const SHELL_MAX_SECONDS: u64 = 120;
 
-/// One tool call. The longest is a shell command at its maximum; the margin
-/// also covers the project snapshots the file tracker takes around it,
-/// bounded at 50,000 files and 64 MiB read (`files::snapshot`).
-pub(crate) const TOOL_CALL: Duration =
-    Duration::from_millis(SHELL_MAX_SECONDS * 1000 + MARGIN_MILLIS);
+/// The longest in an unattended launch: an hour, as for a process. Nobody
+/// waits for its answer there, and a longer command would have to move to a
+/// process the agent polls (HITL 884d7bf5).
+const UNATTENDED_SHELL_MAX_SECONDS: u64 = 3600;
+
+/// The longest command a shell tool call may request, in an unattended
+/// launch or not; the system prompt states it to the model.
+pub(crate) const fn shell_max_seconds(unattended: bool) -> u64 {
+    if unattended {
+        UNATTENDED_SHELL_MAX_SECONDS
+    } else {
+        SHELL_MAX_SECONDS
+    }
+}
+
+/// One tool call, in an unattended launch or not. The longest is a shell
+/// command at its maximum; the margin also covers the project snapshots the
+/// file tracker takes around it, bounded at 50,000 files and 64 MiB read
+/// (`files::snapshot`).
+pub(crate) const fn tool_call(unattended: bool) -> Duration {
+    Duration::from_millis(shell_max_seconds(unattended) * 1000 + MARGIN_MILLIS)
+}
 
 /// How long an approval card waits for the user's decision.
 pub(crate) const APPROVAL: Duration = Duration::from_millis(APPROVAL_MILLIS);
@@ -46,7 +62,11 @@ mod tests {
 
     #[test]
     fn every_deadline_outlasts_what_it_covers() {
-        assert!(TOOL_CALL > Duration::from_secs(SHELL_MAX_SECONDS));
+        for unattended in [false, true] {
+            let shell = Duration::from_secs(shell_max_seconds(unattended));
+            assert!(tool_call(unattended) > shell, "unattended: {unattended}");
+        }
+        assert!(shell_max_seconds(true) > shell_max_seconds(false));
         // The most handlers a source allows, each at its timeout and drained.
         let handlers = roomkit_hooks::SOURCE_BUDGET_SECONDS / roomkit_hooks::MIN_HANDLER_SECONDS;
         let source = Duration::from_secs(roomkit_hooks::SOURCE_BUDGET_SECONDS)

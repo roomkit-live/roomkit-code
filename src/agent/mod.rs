@@ -162,9 +162,10 @@ pub(crate) struct Extensions {
     pub intent_required: bool,
     /// Rounds of tool calls one turn may run.
     pub max_tool_rounds: u32,
-    /// Whether the agent gets the mode tools, which wait for a person's
-    /// approval: not when nobody watches the launch.
-    pub mode_tools: bool,
+    /// Nobody watches the launch: the agent gets no mode tools, which wait
+    /// for a person's approval, and its shell commands may run longer
+    /// (`timeouts::shell_max_seconds`).
+    pub unattended: bool,
     /// Whether the agent is told of the delegation tools the engine serves it:
     /// not when nobody watches the launch, which ends with its turn, before a
     /// delegated task could end (RMK-1532).
@@ -186,8 +187,11 @@ pub(crate) async fn create(
     extensions: Extensions,
 ) -> Result<(CodeAgent, Inventory)> {
     profile.validate()?;
-    let tools = native_tools(root, resources, extensions.policy.clone()).await?;
-    let tools = selected(profile, tools, extensions.mode_tools);
+    let unattended = extensions.unattended;
+    let shell_maximum = crate::timeouts::shell_max_seconds(unattended) * 1000;
+    let policy = extensions.policy.clone();
+    let tools = native_tools(root, resources, policy, shell_maximum).await?;
+    let tools = selected(profile, tools, !unattended);
     let native: Vec<AiTool> = tools
         .iter()
         .map(|(definition, _)| definition.clone())
@@ -210,6 +214,7 @@ pub(crate) async fn create(
         &skill_roots,
         &mcp,
         (intent_required, delegation),
+        shell_maximum,
     );
     let mut entries: Vec<ToolEntry> = tools
         .into_iter()
@@ -230,7 +235,7 @@ pub(crate) async fn create(
         skills: Some(skills),
         tool_call_intents: true,
         tool_call_intents_required: intent_required,
-        tool_timeout: Some(crate::timeouts::TOOL_CALL),
+        tool_timeout: Some(crate::timeouts::tool_call(unattended)),
         // A coding turn runs as long as its calls and approvals take, as
         // before: the engine's five-minute bound on a turn's tool loop would
         // end it before the calls of its next round run.
@@ -307,16 +312,18 @@ fn mcp_handler(mcp: &[crate::profiles::McpTools]) -> Result<Option<ToolHandler>>
 
 /// Every tool the application can give an agent, in inventory order, each
 /// scoped to the instructions of what it reads and tracked for the files it
-/// changes.
+/// changes; its shell refuses a command longer than `shell_maximum`
+/// milliseconds.
 async fn native_tools(
     root: &Path,
     resources: &Resources,
     policy: crate::permissions::Policy,
+    shell_maximum: u64,
 ) -> Result<Vec<Arc<dyn Tool>>> {
     let mutations = resources.mutations.clone();
     let shell_limits = ShellLimits {
         max_output_bytes: 8192,
-        max_timeout_ms: crate::timeouts::SHELL_MAX_SECONDS * 1000,
+        max_timeout_ms: shell_maximum,
         ..ShellLimits::default()
     };
     let shell = ShellTool::new(root)

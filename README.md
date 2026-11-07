@@ -214,6 +214,12 @@ Plan mode's tools are not offered, since leaving Plan needs a person's
 approval. The conversation is saved like any other: `--session NAME` continues
 it, and `/resume` lists it in the terminal.
 
+A shell command may run up to an hour (`timeout_ms` up to 3600000) instead of
+the terminal's two minutes, and the system prompt states that maximum: nobody
+waits for its answer, and a long build or test run need not move to a process
+the agent polls. A command still stops after 10 seconds unless its call asks for
+longer.
+
 In the terminal, a turn runs at most 50 rounds of tool calls before it stops
 unfinished, and a message continues it. Unattended, nobody can, so a turn runs
 until it answers. `--max-tool-rounds N` or `[agent] max_tool_rounds` in the
@@ -388,7 +394,7 @@ included and ignore files are not applied; choose a workspace appropriate to
 share with the configured model. Filesystem tools check paths under the configured
 root. Shell uses `/bin/sh -c` with your user permissions; its initial
 workspace directory is **not a sandbox**. It has closed stdin, bounded
-output (8 KiB per stream in the immediate result), a default 10-second runtime and a maximum requested runtime of 120 seconds.
+output (8 KiB per stream in the immediate result), a default 10-second runtime and a maximum requested runtime of 120 seconds, one hour in a `--prompt` launch.
 Each command runs in its own session, without the terminal: a command that
 prompts on the terminal fails at once.
 

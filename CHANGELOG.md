@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- In a `--prompt` launch, a shell command may run up to an hour (`timeout_ms` up
+  to 3600000) instead of two minutes, and the system prompt states that maximum;
+  the terminal keeps two minutes and the default stays 10 seconds (HITL 884d7bf5).
+
 - The engine's `read_stored_result`, which pages a long tool outcome the engine
   stored, runs without approval like the other reads: it was refused in every
   mode, Yolo included, for want of a permission rule.

@@ -218,6 +218,16 @@ def stored_result(root, model):
     assert "permission policy" not in results[0], results
 
 
+def long_shell(root, model):
+    # Unattended, a shell command may ask for up to an hour, as the prompt says.
+    code, out, err = run(root, model, "--mode", "yolo", "--prompt", "Run the long build.")
+    assert code == 0, (code, err)
+    assert "long command (maximum 3600000)." in model.requests[0]["messages"][0]["content"]
+    results = [message["content"] for message in model.tool_results()]
+    assert len(results) == 1 and '"exit_code":0' in results[0].replace(" ", ""), results
+    assert (root / "project" / "long").read_text() == "ran"
+
+
 def refused_without_agent(root, model):
     # An empty message is refused before anything opens.
     code, out, err = run(root, model, "--prompt", "   ")
@@ -244,5 +254,6 @@ scenario("a message too long", [ANSWER], too_long)
 scenario("SIGINT interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], interrupted)
 scenario("SIGTERM interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], lambda root, model: interrupted(root, model, signal.SIGTERM))
 scenario("the engine's stored results are read", [call("read_stored_result", result_id="evicted_unknown"), ANSWER], stored_result)
+scenario("a shell command past two minutes", [call("shell", command="printf ran > long", timeout_ms=130000), ANSWER], long_shell)
 scenario("invalid launches", [ANSWER], refused_without_agent)
 print("headless checks passed")

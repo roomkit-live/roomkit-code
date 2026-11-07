@@ -328,7 +328,7 @@ async fn the_engine_s_stored_results_are_read_without_an_approval() {
 async fn a_timeout_above_the_host_maximum_is_refused_with_the_maximum() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
-    let shell = crate::timeouts::SHELL_MAX_SECONDS * 1000;
+    let shell = crate::timeouts::shell_max_seconds(false) * 1000;
     let process = crate::agent::process_limits().max_timeout_ms;
     let mock = Mock::start(vec![
         ("shell", json!({"command":"true","timeout_ms":shell + 1})),
@@ -358,6 +358,54 @@ async fn a_timeout_above_the_host_maximum_is_refused_with_the_maximum() {
     }
     assert!(app.profiles.resources.processes.observe().await.is_empty());
     app.close().await.unwrap();
+    // The terminal keeps two minutes, which its prompt states.
+    assert_eq!(shell, 120_000);
+    let request = mock.requests.lock().unwrap()[0].clone();
+    let prompt = request["messages"][0]["content"].as_str().unwrap();
+    assert!(prompt.contains("long command (maximum 120000)."));
+}
+
+/// HITL 884d7bf5: in an unattended launch the shell runs a command up to an
+/// hour, and the prompt states that maximum; past it, the call is refused
+/// with it.
+#[tokio::test]
+async fn an_unattended_shell_runs_a_command_up_to_an_hour() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let hour = 3_600_000;
+    let mock = Mock::start(vec![
+        (
+            "shell",
+            json!({"command":"printf ran > long","timeout_ms":hour}),
+        ),
+        ("shell", json!({"command":"true","timeout_ms":hour + 1})),
+    ])
+    .await;
+    let mut settings = settings(root.path(), state.path(), &mock.base_url);
+    settings.mode = crate::permissions::Mode::Yolo;
+    settings.unattended = true;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let session = turn(&app).await;
+    app.close().await.unwrap();
+    let calls: Vec<_> = session
+        .snapshot()
+        .unwrap()
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Tool { call, .. } if call.name == "shell" => Some(call.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(calls[0].state, ToolState::Succeeded, "{}", calls[0].text);
+    let written = std::fs::read_to_string(root.path().join("long")).unwrap();
+    assert_eq!(written, "ran");
+    assert_eq!(calls[1].state, ToolState::Denied, "{}", calls[1].text);
+    let message = format!("timeout_ms exceeds the host maximum of {hour} ms");
+    assert!(calls[1].text.contains(&message), "{}", calls[1].text);
+    let request = mock.requests.lock().unwrap()[0].clone();
+    let prompt = request["messages"][0]["content"].as_str().unwrap();
+    assert!(prompt.contains(&format!("long command (maximum {hour}).")));
 }
 
 #[tokio::test]
