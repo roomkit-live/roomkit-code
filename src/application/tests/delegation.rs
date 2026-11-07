@@ -5,6 +5,8 @@
 
 use super::*;
 
+mod tasks;
+
 /// What tells the worker's requests apart: the line its turns read.
 const WORKER: &str = "nobody watches";
 /// The worker's answer, which the hand-back carries to the delegating agent.

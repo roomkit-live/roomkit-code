@@ -354,12 +354,24 @@ whether or not the agent was ever selected. The other agent can hand a task on
 in turn, three levels deep at most. A `--prompt` launch offers no delegation:
 it ends with its turn, before a task could end.
 
-The other agent reads the task and the `context` it was handed, not the
-conversation. It works under the conversation's mode, and nobody watches its
-conversation, so an action that needs an approval is refused: in Ask it reads
-and answers, in Yolo it can change files and run commands, in Plan it plans.
-The status line says when a task starts and how it ended. Its conversation is
-not listed by `/resume`, and its tokens are not counted in the conversation's.
+The other agent reads the task and the `context` it was handed, a JSON
+object, not the conversation. It works under the conversation's mode, and
+nobody watches its conversation, so an action that needs an approval is
+refused: in Ask it reads and answers, in Yolo it can change files and run
+commands, in Plan it plans. Its conversation is not listed by `/resume`, and
+its tokens are not counted in the conversation's.
+
+The status line says when a task starts and how it ended. The sidebar's
+**Tasks** lists the conversation's tasks that run, then the latest ended,
+with how long they ran. **/tasks**, a click on a task, or the footer's
+**Tasks** status, which F6 opens while no process runs, show the
+conversation's tasks since the application started, those their agents handed
+on included. Open one to see its agent, state and the task it was given,
+then its conversation as text, refreshed each second while it runs: what its
+agent said, and each tool it called with how the call ended or that it still
+runs. **Stop task** cancels one that runs: its agent stops, and the agent
+that handed it over is told it was cancelled. Closing the application stops
+the tasks that run, and Ctrl+D says so first, as for processes.
 
 ## Tools and persistence
 
@@ -752,6 +764,8 @@ and owns the hook that awaits actual approval.
 `src/application.rs` assembles and closes the engine.
 `src/config.rs` and `src/storage.rs` own application settings and project state.
 `src/processes.rs` owns scoped process monitoring and human controls.
+`src/delegation/` serves the engine's delegation, records the tasks it runs
+and owns `/tasks`.
 `src/files.rs` records the files each conversation's agents change or read.
 `src/plans/` supplies durable storage through `roomkit-tools-plans::PlanBackend`
 and projects those records into generic CLI panels and sidebar entries. The

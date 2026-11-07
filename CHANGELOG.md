@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- The view lists and stops the tasks its agents hand over (RMK-1532 follow-up).
+  The sidebar's **Tasks** lists the conversation's tasks that run and the
+  latest ended; `/tasks`, a click on a task or the footer's **Tasks** status
+  shows each one's agent, state and task, then its conversation as text,
+  refreshed each second while it runs (HITL a0875053), and **Stop task**
+  cancels it. Ctrl+D warns that closing stops the delegated tasks that run.
+  Before, only the status line said that a task started and ended.
+
+- `delegate_task` describes its `context` as a JSON object. A model passed a
+  sentence there and the engine refused the call, read as `1 declined`; on
+  roomkit-tui cc79af0 a refused call reads `refused`.
+
 - On roomkit-tools 66202f6: the model reads a shell result's `data` once, not
   also its text rendering; tool descriptions are shorter; a shell stream keeps
   its end, and only a stream cut short keeps an archive.

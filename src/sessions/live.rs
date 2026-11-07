@@ -1,8 +1,9 @@
-//! The live events a view receives: process and account panels, plan, hook
-//! and update notices, a compaction's notice and line, the sidebar and the
-//! mode, sent again whenever a source changes.
+//! The live events a view receives: process, task and account panels, plan,
+//! hook and update notices, a compaction's notice and line, the sidebar and
+//! the mode, sent again whenever a source changes.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use roomkit_tui::protocol::Event;
 use roomkit_tui_engine::SessionConfig;
@@ -10,6 +11,17 @@ use tokio::sync::watch;
 
 use super::Sessions;
 use crate::{profiles::Profiles, services::Services};
+
+/// How often a view is polled while it needs it, unless a source asks sooner.
+const POLL: Duration = Duration::from_secs(2);
+
+/// What a view's live events are read for.
+type View<'a> = (
+    &'a roomkit::RoomKit<roomkit_sqlite::SqliteStore>,
+    &'a Arc<Profiles>,
+    &'a Services,
+    &'a SessionConfig,
+);
 
 /// Every source of a view's live events.
 struct Sources {
@@ -37,6 +49,7 @@ pub(super) fn subscribe(
             sessions.kit.clone(),
             sessions.channel.clone(),
             current.clone(),
+            sessions.profiles.resources.tasks.clone(),
         ),
         accounts: sessions.profiles.accounts.subscribe(),
         sidebar: sessions.services.sidebar_changes.subscribe(),
@@ -49,11 +62,12 @@ pub(super) fn subscribe(
         tasks: sessions.profiles.resources.tasks.subscribe(),
     };
     let (profiles, services) = (sessions.profiles.clone(), sessions.services.clone());
-    let policy = sessions.policy.clone();
+    let (policy, kit) = (sessions.policy.clone(), sessions.kit.clone());
     let (tx, rx) = watch::channel(Vec::new());
     tokio::spawn(async move {
         loop {
-            let (mut events, poll) = events(&profiles, &services, &current, &mut sources).await;
+            let view = (&kit, &profiles, &*services, &current);
+            let (mut events, poll) = events(view, &mut sources).await;
             // The view always shows the mode the policy applies, whoever set it.
             events.push(Event::ModeChanged {
                 conversation: current.room.as_str().into(),
@@ -71,14 +85,12 @@ pub(super) fn subscribe(
     rx
 }
 
-/// What the view shows now, and whether it needs polling: MCP connections,
-/// or a running compaction's seconds.
+/// What the view shows now, and how soon it needs polling: MCP connections,
+/// a running compaction's or task's seconds, a task's conversation.
 async fn events(
-    profiles: &Arc<Profiles>,
-    services: &Services,
-    current: &SessionConfig,
+    (kit, profiles, services, current): View<'_>,
     sources: &mut Sources,
-) -> (Vec<Event>, bool) {
+) -> (Vec<Event>, Option<Duration>) {
     let mut events = sources.processes.borrow_and_update().clone();
     events.extend(profiles.plans.updates(current).await);
     events.extend(services.hooks.updates(current));
@@ -93,8 +105,11 @@ async fn events(
     // stored for the views attached later, is shown at once to this one.
     let room = current.room.as_str();
     let compactions = &profiles.resources.compactions;
+    let tasks = &profiles.resources.tasks;
     let mut notices = compactions.notices(room);
-    notices.extend(profiles.resources.tasks.notices(room));
+    notices.extend(tasks.notices(room));
+    let delegated = crate::delegation::panel::live(kit, tasks, current).await;
+    events.extend(delegated.panel);
     events.extend(notices.into_iter().map(|text| Event::Notice {
         conversation: room.into(),
         text,
@@ -105,7 +120,9 @@ async fn events(
     }));
     let (mut sidebar, poll) = profiles.sidebar(current).await;
     // A running compaction's seconds are counted on screen.
-    let poll = poll || compactions.compacting(room);
+    let poll = (poll || compactions.compacting(room)).then_some(POLL);
+    let poll = poll.into_iter().chain(delegated.poll).min();
+    sidebar.sections.push(delegated.section);
     if let Some(section) = services.hooks.sidebar(current) {
         sidebar.sections.push(section);
     }
@@ -118,9 +135,9 @@ async fn events(
 }
 
 impl Sources {
-    /// Wait until a source changes, or two seconds while the view needs
-    /// polling; false once a source is gone.
-    async fn changed(&mut self, poll: bool) -> bool {
+    /// Wait until a source changes, or `poll` while the view needs polling;
+    /// false once a source is gone.
+    async fn changed(&mut self, poll: Option<Duration>) -> bool {
         tokio::select! {
             changed = self.processes.changed() => changed.is_ok(),
             changed = self.accounts.changed() => changed.is_ok(),
@@ -135,7 +152,7 @@ impl Sources {
             // MCP exposes connection liveness, but no disconnect stream. Only
             // configured connections are inspected; unchanged state never
             // redraws the TUI.
-            () = tokio::time::sleep(std::time::Duration::from_secs(2)), if poll => true,
+            () = tokio::time::sleep(poll.unwrap_or(POLL)), if poll.is_some() => true,
         }
     }
 }

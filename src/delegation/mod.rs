@@ -9,10 +9,16 @@
 //! A child room takes its conversation's mode, and an action there that needs
 //! the person's approval is refused, since no view shows a child room
 //! (`permissions::Policy::adopt`). The view's status line says when a task
-//! starts and how it ended.
+//! starts and how it ended; its sidebar lists the conversation's tasks, and
+//! `/tasks` shows and stops them (`board`, `panel`).
 
-use std::collections::HashMap;
-use std::sync::{Mutex, RwLock};
+mod board;
+pub(crate) mod panel;
+mod transcript;
+
+pub(crate) use board::{Outcome, Task, Tasks};
+
+use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 use roomkit::model::{ChannelId, RoomEvent};
@@ -22,7 +28,6 @@ use roomkit_ai::AiTool;
 use roomkit_ai::tasks::{DELEGATE_TOOL, SetupDelegationOptions, setup_delegation};
 use roomkit_sqlite::SqliteStore;
 use serde_json::Value;
-use tokio::sync::watch;
 
 /// The engine's tool that hands a task over.
 pub(crate) const DELEGATE: &str = "delegate_task";
@@ -55,13 +60,6 @@ pub(crate) fn nesting_refusal(depth: usize) -> Option<String> {
         "This task was handed on too many times to hand it on again: do the work yourself, or say in your answer what is left.".to_owned()
     })
 }
-
-/// How long a view shows a task's latest notice again whenever it is sent its
-/// live events, as a compaction's.
-const NOTICE_FOR: Duration = Duration::from_secs(10);
-
-/// How many characters of a task its notice quotes.
-const TASK_PREVIEW: usize = 60;
 
 /// The agents a task can be handed to, by ID with their labels, as the
 /// project's and the global agent files list them now.
@@ -123,42 +121,6 @@ impl Roster {
                 ids.join(", ")
             )
         })
-    }
-}
-
-/// What the view's status line says of each conversation's latest task.
-pub(crate) struct Tasks {
-    notices: Mutex<HashMap<String, (Instant, String)>>,
-    changes: watch::Sender<()>,
-}
-
-impl Default for Tasks {
-    fn default() -> Self {
-        Self {
-            notices: Mutex::default(),
-            changes: watch::channel(()).0,
-        }
-    }
-}
-
-impl Tasks {
-    fn notice(&self, room: &str, text: String) {
-        crate::sync::lock(&self.notices).insert(room.into(), (Instant::now(), text));
-        self.changes.send_replace(());
-    }
-
-    /// The latest notice of `room` while it is recent.
-    pub(crate) fn notices(&self, room: &str) -> Vec<String> {
-        crate::sync::lock(&self.notices)
-            .get(room)
-            .filter(|(at, _)| at.elapsed() < NOTICE_FOR)
-            .map(|(_, text)| text.clone())
-            .into_iter()
-            .collect()
-    }
-
-    pub(crate) fn subscribe(&self) -> watch::Receiver<()> {
-        self.changes.subscribe()
     }
 }
 
@@ -225,8 +187,8 @@ fn tool() -> AiTool {
     tool
 }
 
-/// Notes in the parent conversation's status line when a task starts and how
-/// it ended, naming its agent by label.
+/// Records each task as it starts and ends, naming its agent by label: the
+/// parent conversation's status line, sidebar and `/tasks` show it.
 pub(crate) fn install(
     kit: &RoomKit<SqliteStore>,
     tasks: std::sync::Arc<Tasks>,
@@ -237,14 +199,7 @@ pub(crate) fn install(
         HookTrigger::OnTaskDelegated,
         move |event: RoomEvent, _| {
             let (tasks, roster) = (started.clone(), roster.clone());
-            async move {
-                let agent = roster.label(text(&event, "agent_id"));
-                let task = preview(text(&event, "task_input"));
-                tasks.notice(
-                    event.room_id.as_str(),
-                    format!("Task for {agent} started: {task}"),
-                );
-            }
+            async move { tasks.started(task(&event, &roster)) }
         },
         observer("code-delegation-started"),
     )?;
@@ -253,24 +208,33 @@ pub(crate) fn install(
         move |event: RoomEvent, _| {
             let (tasks, roster) = (tasks.clone(), ended.clone());
             async move {
-                let agent = roster.label(text(&event, "agent_id"));
-                let outcome = match text(&event, "task_status") {
-                    "completed" => {
-                        let ms = event.metadata.get("duration_ms").and_then(Value::as_f64);
-                        format!("completed in {} s", seconds(ms.unwrap_or_default()))
-                    }
-                    "cancelled" => "cancelled".to_owned(),
-                    _ => "failed".to_owned(),
-                };
-                tasks.notice(
-                    event.room_id.as_str(),
-                    format!("Task for {agent} {outcome}"),
-                );
+                let mut task = task(&event, &roster);
+                let ms = event.metadata.get("duration_ms").and_then(Value::as_f64);
+                // A start told late leaves no start to measure from.
+                let took = ms
+                    .and_then(|ms| Duration::try_from_secs_f64(ms / 1000.0).ok())
+                    .unwrap_or_default();
+                task.ended = Some((took, Outcome::of(text(&event, "task_status"))));
+                tasks.ended(task);
             }
         },
         observer("code-delegation-ended"),
     )?;
     Ok(())
+}
+
+/// The task a task hook's `event` reports, as it started. The event is posted
+/// in the room of the agent that handed it over.
+fn task(event: &RoomEvent, roster: &Roster) -> Task {
+    Task {
+        id: text(event, "task_id").to_owned(),
+        parent: event.room_id.as_str().to_owned(),
+        room: text(event, "child_room_id").to_owned(),
+        agent: roster.label(text(event, "agent_id")),
+        input: text(event, "task_input").to_owned(),
+        started: Instant::now(),
+        ended: None,
+    }
 }
 
 fn observer(name: &str) -> HookOptions {
@@ -288,23 +252,6 @@ fn text<'a>(event: &'a RoomEvent, key: &str) -> &'a str {
         .get(key)
         .and_then(Value::as_str)
         .unwrap_or_default()
-}
-
-/// `task` on one line, cut at [`TASK_PREVIEW`] characters.
-fn preview(task: &str) -> String {
-    let line = task.split_whitespace().collect::<Vec<_>>().join(" ");
-    if line.chars().count() <= TASK_PREVIEW {
-        return line;
-    }
-    let cut: String = line.chars().take(TASK_PREVIEW - 1).collect();
-    format!("{cut}…")
-}
-
-/// `ms` milliseconds in whole seconds, at least 1.
-fn seconds(ms: f64) -> u64 {
-    let seconds = (ms / 1000.0).round();
-    // A float cast saturates; NaN fails the comparison.
-    if seconds >= 1.0 { seconds as u64 } else { 1 }
 }
 
 #[cfg(test)]
@@ -333,7 +280,10 @@ mod tests {
         let context = &properties["context"];
         assert_eq!(context["type"], "object");
         let description = context["description"].as_str().unwrap();
-        assert!(description.contains("JSON object, never a string"), "{description}");
+        assert!(
+            description.contains("JSON object, never a string"),
+            "{description}"
+        );
         assert!(properties["agent"].get("enum").is_none());
         assert!(!properties.contains_key("conversation"));
     }
@@ -369,16 +319,5 @@ mod tests {
         assert_eq!(nesting_refusal(MAX_DEPTH - 1), None);
         assert!(nesting_refusal(MAX_DEPTH).is_some());
         assert!(nesting_refusal(usize::MAX).is_some());
-    }
-
-    #[test]
-    fn a_notice_quotes_a_task_on_one_short_line() {
-        assert_eq!(preview("Review\n  the   diff"), "Review the diff");
-        let long = "word ".repeat(30);
-        let cut = preview(&long);
-        assert_eq!(cut.chars().count(), TASK_PREVIEW);
-        assert!(cut.ends_with('…'));
-        assert_eq!(seconds(0.0), 1);
-        assert_eq!(seconds(12_400.0), 12);
     }
 }

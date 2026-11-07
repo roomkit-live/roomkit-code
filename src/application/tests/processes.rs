@@ -251,6 +251,7 @@ async fn monitor_pages_output_without_consuming_it_and_does_not_tick_when_closed
         app.kit.clone(),
         app.channel.id().clone(),
         app.view.clone(),
+        app.profiles.resources.tasks.clone(),
     );
     let owner = serde_json::to_string(&(app.view.room.as_str(), app.view.agent.as_str())).unwrap();
     let p = manager.start(Some(&owner), ProcessStartInput::new("printf FIRST; i=0; while [ $i -lt 5000 ]; do printf .; i=$((i+1)); done; printf LAST; cat"), &CancellationToken::new()).await.unwrap().data;

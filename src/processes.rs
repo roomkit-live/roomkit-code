@@ -52,9 +52,10 @@ impl Processes {
         self.sidebar.borrow().1.clone()
     }
 
-    /// Closing the application stops every running process, whatever its
-    /// owner or conversation; the terminal states it before detaching.
-    async fn exit_warning(&self, conversation: &str) -> Event {
+    /// Closing the application stops every running process and delegated
+    /// task, whatever its owner or conversation; the terminal states it
+    /// before detaching.
+    async fn exit_warning(&self, conversation: &str, tasks: usize) -> Event {
         let running = self
             .manager
             .observe()
@@ -64,20 +65,18 @@ impl Processes {
             .count();
         Event::ExitWarning {
             conversation: conversation.into(),
-            text: match running {
-                0 => None,
-                1 => Some("1 running process will be stopped".into()),
-                n => Some(format!("{n} running processes will be stopped")),
-            },
+            text: stopped(running, tasks),
         }
     }
 
-    /// The UI owns observation lifetime. No periodic work while panels are closed.
+    /// The UI owns observation lifetime. No periodic work while panels are
+    /// closed. The exit warning and the background status count `tasks`' too.
     pub fn subscribe(
         self: &Arc<Self>,
         kit: RoomKit<SqliteStore>,
         viewer: ChannelId,
         current: SessionConfig,
+        tasks: Arc<crate::delegation::Tasks>,
     ) -> watch::Receiver<Vec<Event>> {
         self.panel.send_replace(None);
         let observation = uuid::Uuid::new_v4();
@@ -86,6 +85,7 @@ impl Processes {
         let this = self.clone();
         let mut lifecycle = this.manager.subscribe();
         let mut panel_changes = this.panel.subscribe();
+        let mut task_changes = tasks.subscribe();
         tokio::spawn(async move {
             loop {
                 let panel = panel_changes.borrow_and_update().clone().filter(|p| {
@@ -99,17 +99,17 @@ impl Processes {
                 // The terminal applies events in order but reads keys between
                 // bounded batches: send the warning first, so a visible badge
                 // means Ctrl+D already asks for confirmation.
+                let delegated = tasks
+                    .of(current.room.as_str())
+                    .iter()
+                    .filter(|(_, task)| task.running())
+                    .count();
                 let mut events = vec![
-                    this.exit_warning(current.room.as_str()).await,
+                    this.exit_warning(current.room.as_str(), tasks.running())
+                        .await,
                     Event::BackgroundChanged {
                         conversation: current.room.as_str().into(),
-                        status: (running > 0).then(|| {
-                            BackgroundStatus::new(
-                                format!("Processes: {running} running"),
-                                "processes",
-                                "",
-                            )
-                        }),
+                        status: background(running, delegated),
                     },
                 ];
                 if let Some(panel) = &panel {
@@ -137,6 +137,7 @@ impl Processes {
                     () = tx.closed() => break,
                     changed = lifecycle.changed() => if changed.is_err() { break; },
                     changed = panel_changes.changed() => if changed.is_err() { break; },
+                    changed = task_changes.changed() => if changed.is_err() { break; },
                     () = tokio::time::sleep(Duration::from_secs(1)), if panel.is_some() => {},
                 }
             }
@@ -470,6 +471,48 @@ async fn room_access(
         })
 }
 
+/// What closing stops, if anything: `processes` running processes and
+/// `tasks` delegated tasks.
+fn stopped(processes: usize, tasks: usize) -> Option<String> {
+    let count = |n: usize, one: &str, many: &str| match n {
+        0 => None,
+        1 => Some(format!("1 {one}")),
+        n => Some(format!("{n} {many}")),
+    };
+    let parts: Vec<String> = [
+        count(processes, "running process", "running processes"),
+        count(tasks, "delegated task", "delegated tasks"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!parts.is_empty()).then(|| format!("{} will be stopped", parts.join(" and ")))
+}
+
+/// The view's background status: its running processes, which it opens, and
+/// its conversation's running tasks, which it opens when no process runs.
+fn background(processes: usize, tasks: usize) -> Option<BackgroundStatus> {
+    let tasks_label = format!("Tasks: {tasks} running");
+    match (processes, tasks) {
+        (0, 0) => None,
+        (0, _) => Some(BackgroundStatus::new(
+            tasks_label,
+            crate::delegation::panel::COMMAND,
+            "",
+        )),
+        (_, 0) => Some(BackgroundStatus::new(
+            format!("Processes: {processes} running"),
+            "processes",
+            "",
+        )),
+        _ => Some(BackgroundStatus::new(
+            format!("Processes: {processes} running · {tasks_label}"),
+            "processes",
+            "",
+        )),
+    }
+}
+
 fn offsets(panel: &Panel, job: &Job) -> (u64, u64) {
     panel.offsets.unwrap_or_else(|| {
         (
@@ -567,4 +610,41 @@ fn sidebar(jobs: &[Job]) -> SidebarSection {
     }
     SidebarSection::new("Processes", SidebarContent::Entries { entries })
         .with_action(crate::profiles::sidebar::action("processes", ""))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Closing names what it stops, processes and delegated tasks alike; the
+    /// background status opens the processes while one runs, else the tasks.
+    #[test]
+    fn closing_and_the_background_status_count_processes_and_tasks() {
+        assert_eq!(stopped(0, 0), None);
+        assert_eq!(
+            stopped(1, 0).as_deref(),
+            Some("1 running process will be stopped")
+        );
+        assert_eq!(
+            stopped(2, 1).as_deref(),
+            Some("2 running processes and 1 delegated task will be stopped")
+        );
+        assert_eq!(
+            stopped(0, 3).as_deref(),
+            Some("3 delegated tasks will be stopped")
+        );
+        assert_eq!(background(0, 0), None);
+        let status = |p, t| background(p, t).map(|s| (s.label, s.command));
+        assert_eq!(
+            status(0, 2),
+            Some(("Tasks: 2 running".into(), "tasks".into()))
+        );
+        assert_eq!(
+            status(1, 1),
+            Some((
+                "Processes: 1 running · Tasks: 1 running".into(),
+                "processes".into()
+            ))
+        );
+    }
 }

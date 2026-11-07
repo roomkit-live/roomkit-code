@@ -68,6 +68,11 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "[process-id]",
         ),
         (
+            "tasks",
+            "See the tasks agents handed to other agents, and stop them",
+            "[task-id]",
+        ),
+        (
             "files",
             "List the files this conversation's agents changed or read",
             "",
@@ -201,6 +206,7 @@ impl CommandHandler for Sessions {
                 | "rename"
                 | "tools"
                 | "processes"
+                | "tasks"
                 | "files"
                 | "diagnostics"
                 | "plans"
@@ -278,6 +284,17 @@ impl Sessions {
                     .processes
                     .handle(&self.kit, &self.channel, &current, arguments)
                     .await
+            }
+            "tasks" => {
+                let tasks = &self.profiles.resources.tasks;
+                crate::delegation::panel::handle(
+                    &self.kit,
+                    tasks,
+                    &tasks.panel,
+                    &current,
+                    arguments,
+                )
+                .await
             }
             "tools" => self.tools(&current, arguments).await,
             "mode" => self.mode(&current, arguments).await,
