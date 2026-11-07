@@ -2,15 +2,27 @@
 
 ## Unreleased
 
+- An agent whose model's window is known compacts its conversation by tiers
+  instead of reading its latest 50 messages (HITL a2daedfe, db06dd3d). Under 80 %
+  of its ceiling, the window or, when smaller, the input past which the model's
+  price rises (272,000 tokens for `gpt-6-astra`), the conversation is read as it
+  is. Past it, the agent's model summarizes the oldest messages, the latest kept
+  whole within 30 % of the ceiling, and the history stays as it is again up to the
+  next tier: one prompt cache loss per compaction instead of one per turn. The
+  status line says so; the summary is kept in the project's state for a resumed
+  conversation; `/compact` compacts at the next message. An agent without a known
+  window keeps its 50 messages.
+
 - A ChatGPT account's requests carry their prompt cache key as the `session-id`
   header too, from which ChatGPT's backend derives its cache affinity, as Codex
   sends it (RMK-1481).
 
-- A turn sends the project's `AGENTS.md` snapshot only when it changed since the
-  latest one the agent read, or when that one has left the messages the agent
-  still reads: the engine replays it otherwise, where the earlier turn read it,
-  and the request keeps the prompt cache's prefix. The mode rule is sent each turn
-  (RMK-1407).
+- A turn of an agent whose conversation compacts sends the project's `AGENTS.md`
+  snapshot only when it changed since the latest one the agent still reads: the
+  engine replays it otherwise, where the earlier turn read it, or the compaction's
+  summary carries it, and the request keeps the prompt cache's prefix. An agent
+  reading its latest 50 messages sends it every turn. The mode rule is sent each
+  turn (RMK-1407).
 
 - Follows roomkit-rs 3b885524, roomkit-tui 4eed1d9 and roomkit-tools 5d05c29
   (RMK-1460). Every earlier round of tool calls replays whole, as its turn sent it

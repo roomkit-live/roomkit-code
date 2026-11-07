@@ -92,6 +92,11 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "Change permissions (also Shift+Tab)",
             "[ask|plan|yolo]",
         ),
+        (
+            "compact",
+            "Summarize the conversation's earlier messages at the next message",
+            "",
+        ),
         ("new", "Start a new conversation in this project", ""),
         ("rename", "Name this conversation", "<name>"),
         (
@@ -274,6 +279,7 @@ impl Sessions {
             }
             "tools" => self.tools(&current, arguments).await,
             "mode" => self.mode(&current, arguments).await,
+            "compact" => Ok(self.compact(&current)),
             "new" => {
                 self.new_session(current, arguments, request.operation.as_str())
                     .await
@@ -282,6 +288,21 @@ impl Sessions {
             "rename" => self.rename(current, arguments).await,
             _ => Err("Unknown application command".into()),
         }
+    }
+
+    /// Asks the agent's next turn to compact the conversation, whatever its
+    /// tier; an agent without a known window keeps its latest messages.
+    fn compact(&self, current: &SessionConfig) -> CommandResult {
+        let compactions = &self.profiles.resources.compactions;
+        let text = if compactions.force(current.room.as_str(), current.agent.as_str()) {
+            "The conversation compacts at your next message"
+        } else {
+            "This agent reads its latest 50 messages: set its context capacity in /agents for it to compact"
+        };
+        CommandResult::Events(vec![Event::Notice {
+            conversation: current.room.as_str().into(),
+            text: text.into(),
+        }])
     }
 
     /// The user's own `!` command, refused in Plan.

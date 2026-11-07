@@ -50,6 +50,8 @@ pub(crate) const HISTORY: usize = 50;
 /// Tool adapters derive archive/process ownership from the room and agent IDs.
 pub(crate) struct Resources {
     pub instructions: Arc<crate::instructions::Instructions>,
+    /// Each conversation's compactions, for the agents whose memory compacts.
+    pub compactions: Arc<crate::compaction::Compactions>,
     pub plans: Arc<crate::plans::Plans>,
     /// Files each conversation's agents changed or read.
     pub files: Arc<crate::files::Files>,
@@ -95,6 +97,9 @@ impl Resources {
         };
         Ok(Self {
             instructions: crate::instructions::Instructions::new(root, global),
+            compactions: Arc::new(crate::compaction::Compactions::new(
+                &state.join("compactions"),
+            )),
             plans: Arc::new(crate::plans::Plans::new(state.join("plans"))),
             files: crate::files::Files::new(root),
             docs: crate::docs::guide(global)?,
@@ -136,6 +141,9 @@ pub(crate) struct Extensions {
     pub policy: crate::permissions::Policy,
     /// What resolves the conversation's image attachments for vision models.
     pub images: Arc<dyn ImageResolver>,
+    /// The tokens the agent's history compacts under; none keeps its window
+    /// of `HISTORY` messages.
+    pub ceiling: Option<u64>,
 }
 
 pub(crate) async fn create(
@@ -158,6 +166,7 @@ pub(crate) async fn create(
         mcp,
         intent_required,
         images,
+        ceiling,
         ..
     } = extensions;
     let preamble = preamble(
@@ -193,6 +202,7 @@ pub(crate) async fn create(
         // end it before the calls of its next round run.
         tool_loop_timeout: None,
         max_context_events: HISTORY,
+        memory: memory(ceiling, &provider, resources)?,
         image_resolver: Some(images),
         // Native tools stay declared; only MCP tools wait behind find_tools.
         tool_search: Some(preamble.hides_mcp),
@@ -202,6 +212,22 @@ pub(crate) async fn create(
     let provider = OpenAiAiProvider::new(provider)?;
     let agent = AiChannel::new(ChannelId::new(&profile.id)?, provider, options)?;
     Ok((agent, preamble.inventory))
+}
+
+/// The memory of an agent whose history compacts under `ceiling` tokens,
+/// summarized by its own model; none keeps its window of `HISTORY` messages.
+fn memory(
+    ceiling: Option<u64>,
+    provider: &OpenAiConfig,
+    resources: &Resources,
+) -> Result<Option<Arc<dyn roomkit_ai::memory::MemoryProvider>>> {
+    let Some(ceiling) = ceiling else {
+        return Ok(None);
+    };
+    let summarizer = OpenAiAiProvider::new(provider.clone())?;
+    let memory =
+        crate::compaction::TieredMemory::new(summarizer, ceiling, resources.compactions.clone());
+    Ok(Some(Arc::new(memory)))
 }
 
 /// The tools of `tools` the profile selects, with their definitions, in

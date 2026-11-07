@@ -3,7 +3,7 @@ mod discovery;
 mod kept;
 mod tools;
 
-pub(crate) use kept::still_read;
+pub(crate) use kept::{View, still_read};
 
 use roomkit_core::rules::transcript::{fence, json_text_line};
 use roomkit_tui::protocol::{Event, PanelSpec};

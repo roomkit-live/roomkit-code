@@ -119,9 +119,10 @@ async fn instructions_reach_model_in_scope_before_edit_and_refresh_on_resume() {
     app.close().await.unwrap();
 }
 
-/// A later turn reads its mode again, but the project's unchanged rules only
-/// as the earlier turn read them, so that its first request extends the
-/// earlier turn's last one and a provider's prompt cache keeps it (RMK-1407).
+/// A later turn of an agent whose history compacts reads its mode again, but
+/// the project's unchanged rules only as the earlier turn read them, so that
+/// its first request extends the earlier turn's last one and a provider's
+/// prompt cache keeps it (RMK-1407).
 #[tokio::test]
 async fn a_later_turn_replays_unchanged_project_rules_and_extends_the_previous_request() {
     let root = tempfile::tempdir().unwrap();
@@ -129,7 +130,9 @@ async fn a_later_turn_replays_unchanged_project_rules_and_extends_the_previous_r
     write(root.path(), "AGENTS.md", "ROOT_ONE");
     write(root.path(), "src/file.rs", "contents");
     let mock = Mock::start(vec![("read", json!({"path":"src/file.rs"}))]).await;
-    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let mut settings = settings(root.path(), state.path(), &mock.base_url);
+    // A known window: the agent's history compacts by tiers, never past it.
+    settings.context_window = Some(200_000);
     let app = Application::open(&settings, String::new()).await.unwrap();
     turn_operation(&app, "first-turn").await;
     turn_operation(&app, "later-turn").await;

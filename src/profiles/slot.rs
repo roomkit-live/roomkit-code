@@ -13,6 +13,7 @@ use crate::agent::CodeAgent;
 pub(super) struct AgentSlot {
     instructions: Arc<crate::instructions::Instructions>,
     files: Arc<crate::files::Files>,
+    compactions: Arc<crate::compaction::Compactions>,
     policy: crate::permissions::Policy,
     id: ChannelId,
     current: Arc<RwLock<Option<Arc<CodeAgent>>>>,
@@ -24,10 +25,12 @@ impl AgentSlot {
         policy: crate::permissions::Policy,
         instructions: Arc<crate::instructions::Instructions>,
         files: Arc<crate::files::Files>,
+        compactions: Arc<crate::compaction::Compactions>,
     ) -> Self {
         Self {
             instructions,
             files,
+            compactions,
             policy,
             id,
             current: Arc::new(RwLock::new(agent.map(Arc::new))),
@@ -41,31 +44,46 @@ impl AgentSlot {
     }
     /// What a turn reads as it starts: its mode's instruction, then what the
     /// application tells it (`told`), then the project's instructions unless
-    /// the agent's history still replays them as they are. A standalone
-    /// instruction reads none of that history.
+    /// the agent's history still holds them as they are.
     async fn instruction(
         &self,
         event: &RoomEvent,
         history: &[RoomEvent],
         told: Option<String>,
     ) -> String {
-        self.instructions
-            .begin(event.room_id.as_str(), self.id.as_str());
+        let (room, agent) = (event.room_id.as_str(), self.id.as_str());
+        self.instructions.begin(room, agent);
         let project = self.instructions.load(vec![], true).await.render();
-        let mut parts = vec![self.policy.instruction(event.room_id.as_str()).to_owned()];
+        self.compactions.tell_snapshot(room, agent, &project);
+        let mut parts = vec![self.policy.instruction(room).to_owned()];
         parts.extend(told);
-        let replayed = !roomkit_core::rules::instructions::is_standalone(event)
-            && crate::instructions::still_read(
-                &project,
-                history,
-                &self.id,
-                event,
-                crate::agent::HISTORY,
-            );
-        if !replayed {
+        if !self.still_read(&project, event, history) {
             parts.push(project);
         }
         parts.join("\n\n")
+    }
+
+    /// Whether the agent's turn on `event`, reading `history`, still holds
+    /// `project` as the latest snapshot it read. Only a history that compacts
+    /// by tiers is trusted to: a window of messages may overflow the model's,
+    /// and the kit's emergency compaction keeps whole only the turn's input,
+    /// where the snapshot then rides. A standalone instruction reads no
+    /// history.
+    fn still_read(&self, project: &str, event: &RoomEvent, history: &[RoomEvent]) -> bool {
+        let (room, agent) = (event.room_id.as_str(), self.id.as_str());
+        if roomkit_core::rules::instructions::is_standalone(event)
+            || !self.compactions.bounded(agent)
+        {
+            return false;
+        }
+        let compacted = self.compactions.get(room, agent);
+        let view = crate::instructions::View {
+            from: compacted.as_ref().map_or(0, |compacted| compacted.from),
+            carried: compacted
+                .as_ref()
+                .and_then(|compacted| compacted.snapshot.as_deref()),
+        };
+        crate::instructions::still_read(project, history, &self.id, event, &view)
     }
 
     /// What the agent receives for `event`. Keep the delivered user event intact,
@@ -125,11 +143,12 @@ impl Channel for AgentSlot {
         capabilities.supports_media = true;
         capabilities
     }
-    /// The history each agent's turn reads: the kit sizes the context it
+    /// The history each agent's turn reads, a memory that compacts reading
+    /// all of it since its last compaction: the kit sizes the context it
     /// hands the slot by it, as it reads the slot's declaration once, when
-    /// the slot is registered.
+    /// the slot is registered, whatever agent it holds then.
     fn recent_events_window(&self) -> usize {
-        crate::agent::HISTORY
+        crate::compaction::WINDOW
     }
     /// A message written while an agent's turn runs goes to that turn, which
     /// reads it at its next step. The kit reads this on the registered
@@ -218,10 +237,11 @@ mod tests {
             crate::permissions::Policy::new(crate::permissions::Mode::Ask),
             crate::instructions::Instructions::new(root.path(), root.path()),
             crate::files::Files::new(root.path()),
+            std::sync::Arc::new(crate::compaction::Compactions::new(root.path())),
         );
         let declared = slot.declaration();
         assert!(declared.steers_room_turns && declared.serializes_room_turns);
-        assert_eq!(declared.recent_events_window, crate::agent::HISTORY);
+        assert_eq!(declared.recent_events_window, crate::compaction::WINDOW);
         assert_eq!(declared.category, ChannelCategory::Intelligence);
         assert!(declared.capabilities.supports_media);
         assert!(

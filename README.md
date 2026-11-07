@@ -551,8 +551,8 @@ prediction including an unsent message or new tool definitions.
 The sidebar's **Context** section splits that measurement. A stacked bar and
 its legend show what every request of the selected agent carries before its
 messages: the **System prompt** (application and agent instructions, tool
-inventory), the **Instructions** (the mode rule each turn adds and the project's
-`AGENTS.md`, sent once and replayed), the native **Tools** schemas, the **Skills** manifest and tools,
+inventory), the **Instructions** each turn reads (the mode rule and the project's
+`AGENTS.md`), the native **Tools** schemas, the **Skills** manifest and tools,
 and one **MCP** part per server with its instructions and tool schemas; beyond
 sixteen parts, the smallest servers are summed into one. **Messages** is what
 remains of the measurement, including the instructions of skills activated in
@@ -584,6 +584,34 @@ ChatGPT sign-in connections send no limit, whatever the setting. Failures
 explain timeout, access, rate limit, server and protocol errors without echoing
 raw provider responses or keys. Failed requests are not automatically retried.
 Existing completed tool actions remain in the project and conversation.
+
+### Compaction
+
+An agent whose model's window is known compacts its conversation by tiers, so
+that its requests stay within the window and the provider's prompt cache keeps
+them. The window is the agent's **Context capacity** in `/agents`, or the window
+the engine's catalogue lists for its model; when the catalogue says the model's
+price rises past a number of input tokens (272,000 for `gpt-6-astra`), that
+number is the ceiling instead.
+
+While a request, estimated at four characters per token, stays under 80 % of the
+ceiling, the conversation is read as it is, every earlier round of tool calls
+whole. Past it, the agent's own model writes a summary of the oldest messages,
+carrying over the previous summary, and the latest messages are kept whole within
+30 % of the ceiling, whole turns only. The summary, followed by the project's
+`AGENTS.md` snapshot, then opens every request, and the history grows again from
+there, unchanged, up to the next tier: one cache loss per compaction. The status
+line says when it happens and what it saved. The summary is kept in the project's
+state, so a resumed conversation reads the same one. **/compact** asks the next
+turn to compact whatever its tier, keeping its latest four messages.
+
+The summary reads the messages, not the tool calls' results. Its request is not
+counted in the turn's tokens or the conversation's cost.
+
+An agent without a known window reads its latest 50 messages instead, as before,
+and each of its turns carries the project's `AGENTS.md` snapshot: a request past
+the model's window is compacted by the engine, which keeps only the turn's input
+whole.
 
 ## Boundaries
 
@@ -1133,11 +1161,12 @@ or switching agents. They enter an application instruction after the user's
 message, preserving the system prompt and the user's original text and images.
 The engine keeps each turn's instruction as the agent's own row and replays it in
 the agent's later turns where it was read, so that a request extends the one
-before it and a provider's prompt cache keeps it, while the history fits the
-agent's window. A turn therefore carries the
-mode rule each time, but the files' snapshot only when it changed since the
-latest one the agent read, or when that one has left the messages the agent
-still reads; a newer snapshot supersedes the earlier ones. The host does not
+before it and a provider's prompt cache keeps it. A turn of an agent whose
+conversation compacts therefore carries the mode rule each time, but the files'
+snapshot only when it changed since the latest one the agent still reads, which a
+compaction's summary carries; a newer snapshot supersedes the earlier ones. An
+agent reading its latest 50 messages carries the snapshot every turn (see
+[Compaction](#compaction)). The host does not
 rewrite earlier conversation rows. Nested rules are loaded
 progressively alongside `read`, `code_outline`, `list`, `grep`, `glob` and `diff`.
 Only the supplied target paths' ancestor chains are inspected, not every search

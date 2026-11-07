@@ -1,6 +1,6 @@
 //! The live events a view receives: process and account panels, plan, hook
-//! and update notices, the sidebar and the mode, sent again whenever a source
-//! changes.
+//! and update notices, a compaction's notice, the sidebar and the mode, sent
+//! again whenever a source changes.
 
 use std::sync::Arc;
 
@@ -22,6 +22,8 @@ struct Sources {
     hooks: watch::Receiver<()>,
     /// A mode set by a mode tool, outside `/mode`.
     modes: watch::Receiver<()>,
+    /// A conversation an agent's memory compacted.
+    compactions: watch::Receiver<()>,
 }
 
 pub(super) fn subscribe(
@@ -41,6 +43,7 @@ pub(super) fn subscribe(
         updates: sessions.services.updates.changes.subscribe(),
         hooks: sessions.services.hooks.changes.subscribe(),
         modes: sessions.policy.changes.subscribe(),
+        compactions: sessions.profiles.resources.compactions.subscribe(),
     };
     let (profiles, services) = (sessions.profiles.clone(), sessions.services.clone());
     let policy = sessions.policy.clone();
@@ -81,6 +84,19 @@ async fn events(
         // the UI ignores updates to a dismissed or different view.
         events.push(event);
     }
+    // Shown once, in the status line: a compaction is no lasting state.
+    let room = current.room.as_str();
+    events.extend(
+        (profiles
+            .resources
+            .compactions
+            .take_notices(room)
+            .into_iter())
+        .map(|text| Event::Notice {
+            conversation: room.into(),
+            text,
+        }),
+    );
     let (mut sidebar, poll) = profiles.sidebar(current).await;
     if let Some(section) = services.hooks.sidebar(current) {
         sidebar.sections.push(section);
@@ -106,6 +122,7 @@ impl Sources {
             changed = self.updates.changed() => changed.is_ok(),
             changed = self.hooks.changed() => changed.is_ok(),
             changed = self.modes.changed() => changed.is_ok(),
+            changed = self.compactions.changed() => changed.is_ok(),
             // MCP exposes connection liveness, but no disconnect stream. Only
             // configured connections are inspected; unchanged state never
             // redraws the TUI.

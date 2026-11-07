@@ -55,6 +55,7 @@ pub(crate) struct Profiles {
 
 struct State {
     instructions: Arc<crate::instructions::Instructions>,
+    compactions: Arc<crate::compaction::Compactions>,
     /// The files the agents' tools change, which a slot settles as it closes.
     files: Arc<crate::files::Files>,
     policy: crate::permissions::Policy,
@@ -88,6 +89,23 @@ fn cache_routing(
     let mut body = roomkit::model::Metadata::new();
     body.insert("prompt_cache_key".into(), key.clone().into());
     (body, BTreeMap::from([("session-id".to_owned(), key)]))
+}
+
+/// The tokens `profile`'s history compacts under: its context capacity, else
+/// the kit's catalogue's window for its model, or the input past which the
+/// catalogue's price for it rises when that is smaller (HITL a2daedfe,
+/// db06dd3d). None without a window: the agent keeps its window of messages.
+fn ceiling(profile: &Agent) -> Option<u64> {
+    let listed = <roomkit_openai::OpenAiAiProvider as roomkit_ai::AiProvider>::available_models()
+        .into_iter()
+        .find(|entry| entry.id == profile.model);
+    let window = profile
+        .context_window
+        .or_else(|| listed.as_ref().and_then(|entry| entry.context_window));
+    let price = listed
+        .and_then(|entry| entry.pricing)
+        .and_then(|pricing| pricing.long_context_threshold_tokens);
+    crate::compaction::ceiling(window, price)
 }
 
 /// `[provider.pricing]`: the list price of `model` on `base_url`.
@@ -150,6 +168,7 @@ impl Profiles {
             skills::Catalogue::load(settings.workspace.clone(), settings.state_dir.clone()).await?;
         let policy = crate::permissions::Policy::new(settings.mode);
         let instructions = resources.instructions.clone();
+        let compactions = resources.compactions.clone();
         let files = resources.files.clone();
         Ok(Arc::new(Self {
             policy: policy.clone(),
@@ -166,6 +185,7 @@ impl Profiles {
             mcp_runtime: mcp::Runtime::default(),
             state: Mutex::new(State {
                 instructions,
+                compactions,
                 files,
                 policy,
                 mcp,
@@ -220,6 +240,7 @@ impl Profiles {
             self.policy.clone(),
             state.instructions.clone(),
             state.files.clone(),
+            state.compactions.clone(),
         );
         kit.register_channel(slot.clone())
             .map_err(|_| "Could not register the agent")?;
@@ -310,8 +331,9 @@ impl Profiles {
             intent_required: self.require_tool_intent,
             policy: self.policy.clone(),
             images: self.images.clone(),
+            ceiling: ceiling(profile),
         };
-        crate::agent::create(
+        let created = crate::agent::create(
             &self.workspace,
             &self.resources,
             profile,
@@ -321,8 +343,10 @@ impl Profiles {
         .await
         .map_err(
             |_| "Could not configure this agent; verify its provider, credential and workspace",
-        )
-        .map_err(String::from)
+        )?;
+        let compactions = &self.resources.compactions;
+        compactions.set_bounded(&profile.id, ceiling(profile).is_some());
+        Ok(created)
     }
 
     pub async fn configure_view(&self, view: &mut SessionConfig) {
@@ -416,6 +440,7 @@ impl State {
                 self.policy.clone(),
                 self.instructions.clone(),
                 self.files.clone(),
+                self.compactions.clone(),
             );
             kit.register_channel(slot.clone())
                 .map_err(|_| "Could not register agent")?;
@@ -440,6 +465,7 @@ impl State {
                 self.policy.clone(),
                 self.instructions.clone(),
                 self.files.clone(),
+                self.compactions.clone(),
             );
             kit.register_channel(slot.clone())
                 .map_err(|_| "Could not register agent")?;

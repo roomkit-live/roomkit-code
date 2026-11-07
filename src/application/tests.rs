@@ -122,12 +122,20 @@ async fn answer(
             .unwrap_or_default()
             .into(),
     );
+    let whole = request["stream"] != true;
     let index = {
         let mut requests = fixture.requests.lock().unwrap();
         let index = requests.len();
         requests.push(request);
         index
     };
+    // A compaction's summary is asked whole, apart from the agent's turns.
+    if whole {
+        let summary = json!({
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": SUMMARY}, "finish_reason": "stop"}],
+        });
+        return ([("content-type", "application/json")], summary.to_string());
+    }
     // A call named "" answers: a later request may call a tool.
     let (delta, reason) = match fixture.calls.get(index) {
         Some((name, args)) if !name.is_empty() => (
@@ -160,6 +168,9 @@ async fn answer(
     );
     ([("content-type", "text/event-stream")], body)
 }
+
+/// What the mock server answers a request asked whole: a compaction's summary.
+const SUMMARY: &str = "SUMMARY_OF_THE_EARLIER_TURNS";
 
 /// The engine's own tools, which every agent declares beside the application's:
 /// `read_stored_result` pages through an outcome the engine stored (roomkit-rs
@@ -1767,6 +1778,7 @@ async fn stale_or_conflicting_forms_cannot_replace_a_working_agent() {
 
 mod breakdown;
 mod catalogue;
+mod compaction;
 mod docs;
 mod exit_summary;
 mod files;

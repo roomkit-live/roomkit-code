@@ -5,6 +5,7 @@ mod agent;
 mod application;
 mod branding;
 mod command_env;
+mod compaction;
 mod config;
 mod diagnostics;
 mod digest;
