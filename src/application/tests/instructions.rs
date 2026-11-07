@@ -87,8 +87,11 @@ async fn instructions_reach_model_in_scope_before_edit_and_refresh_on_resume() {
     {
         let requests = mock.requests.lock().unwrap();
         let last = requests.last().unwrap();
-        assert!(last.to_string().contains("ROOT_TWO"));
-        assert!(!last.to_string().contains("ROOT_ONE"));
+        // The first turn's snapshot replays where it read it (roomkit-rs
+        // RMK-1407); the changed rules follow it, once, and supersede it.
+        let text = last.to_string();
+        assert_eq!(text.matches("ROOT_TWO").count(), 1);
+        assert!(text.find("ROOT_ONE").unwrap() < text.find("ROOT_TWO").unwrap());
         assert_eq!(
             last["messages"][0], first_system,
             "system prefix remains stable"

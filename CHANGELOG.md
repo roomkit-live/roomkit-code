@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Follows roomkit-rs 3b885524, roomkit-tui 4eed1d9 and roomkit-tools 5d05c29
+  (RMK-1460). A later turn's first request now opens with the previous turn's last
+  one: every earlier round of tool calls replays whole, as its turn sent it
+  (RMK-1370), and each turn's application instruction replays where the turn read
+  it (RMK-1407).
+
 - Follows roomkit-rs ee5d724, roomkit-tui cf0840e and roomkit-tools c7be169
   (RMK-1460). A `<think>` tag in the middle of an answer no longer swallows the rest
   of it (RMK-1327); a fenced block's closing tag is read whatever its separator
