@@ -416,6 +416,12 @@ impl State {
             .into_iter()
             .map(|(a, _)| (a.id.as_str().into(), a.label))
             .collect();
+        // What the application tells its views in a conversation, such as a
+        // compaction's line, comes from the terminal's channel.
+        view.actor_names.insert(
+            crate::application::TERMINAL.into(),
+            env!("CARGO_PKG_NAME").into(),
+        );
         if let Some(profile) = agent {
             // Match the engine's usage identity, including Responses over OAuth.
             view.model = Some(

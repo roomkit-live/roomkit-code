@@ -1,7 +1,10 @@
 //! An agent with a known window compacts its conversation by tiers (HITL
-//! a2daedfe); one without keeps its latest messages.
+//! a2daedfe), and at once on `/compact`, leaving a line in the conversation
+//! (HITL a2dfba34); one without keeps its latest messages.
 use super::*;
-use roomkit_tui_engine::CommandResult;
+use roomkit::model::EventType;
+use roomkit_tui::protocol::Item;
+use roomkit_tui_engine::{CommandHandler, CommandResult};
 
 /// How many words make an answer of about 4,000 estimated tokens.
 const ANSWER_WORDS: usize = 2_000;
@@ -22,8 +25,9 @@ fn handler(app: &Application, settings: &Settings) -> crate::sessions::Sessions 
 }
 
 /// Runs a turn named `operation` in a view with the application's commands
-/// and live events, and returns the notices it showed: once the turn is over,
-/// it waits up to two seconds more until `done` says it saw enough.
+/// and live events, and returns the notices and the application's lines it
+/// showed: once the turn is over, it waits up to two seconds more until
+/// `done` says it saw enough.
 async fn turn_noticing(
     app: &Application,
     settings: &Settings,
@@ -42,8 +46,15 @@ async fn turn_noticing(
         loop {
             match client.try_recv() {
                 Ok(event) => {
-                    if let Event::Notice { text, .. } = &event {
-                        notices.push(text.clone());
+                    match &event {
+                        Event::Notice { text, .. } => notices.push(text.clone()),
+                        Event::Item {
+                            item: Item::Message(message),
+                            ..
+                        } if message.actor.as_str() == crate::application::TERMINAL => {
+                            notices.push(message.text.clone());
+                        }
+                        _ => {}
                     }
                     if let Event::OperationFinished {
                         operation: id,
@@ -132,7 +143,7 @@ async fn a_conversation_compacts_past_its_tier_and_resumes_on_its_summary() {
     assert!(
         notices
             .iter()
-            .any(|n| n.starts_with("Conversation compacted: a summary stands for")),
+            .any(|n| n.starts_with("Conversation compacted · ")),
         "{notices:?}"
     );
     let requests = mock.requests.lock().unwrap().clone();
@@ -195,12 +206,283 @@ fn notice(result: CommandResult) -> String {
     }
 }
 
-/// `/compact` makes the next turn compact whatever its tier; an agent without
-/// a known window keeps its latest messages, and its turns carry the
-/// project's rules every time.
+/// Waits up to fifteen seconds until `done`.
+async fn until(what: &str, done: impl Fn() -> bool) {
+    let waited = tokio::time::timeout(Duration::from_secs(15), async {
+        while !done() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await;
+    assert!(waited.is_ok(), "timed out waiting until {what}");
+}
+
+/// The requests a turn streamed, not a summary's.
+fn streamed(requests: &[Value]) -> usize {
+    requests.len() - summaries(requests)
+}
+
+/// An application on `mock` whose agent's window is known, after three
+/// turns.
+async fn three_turns(
+    root: &std::path::Path,
+    state: &std::path::Path,
+    mock: &Mock,
+) -> (Application, Settings) {
+    let mut settings = settings(root, state, &mock.base_url);
+    settings.context_window = Some(200_000);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    for turn in ["first", "second", "third"] {
+        turn_operation(&app, turn).await;
+    }
+    (app, settings)
+}
+
+/// `/compact` compacts at once, with no message to wait for, and leaves its
+/// line in the conversation: stored for the terminal alone, it is shown in
+/// its place once the conversation is reloaded, and the agent never reads it.
 #[tokio::test]
-async fn compact_compacts_at_the_next_turn_and_a_window_of_messages_keeps_the_rules_each_turn() {
-    use roomkit_tui_engine::CommandHandler;
+async fn compact_starts_at_once_and_leaves_its_line_in_the_conversation() {
+    let (root, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let mock = Mock::start(vec![]).await;
+    let (app, settings) = three_turns(root.path(), state.path(), &mock).await;
+    let asked = handler(&app, &settings)
+        .handle(invoke(&app, "compact"), app.view.clone())
+        .await
+        .unwrap();
+    assert_eq!(notice(asked), "Compacting the conversation…");
+    let room = app.view.room.to_string();
+    let compactions = app.profiles.resources.compactions.clone();
+    // Its line is written last.
+    until("the conversation compacts", || {
+        compactions.lines(&room).is_some()
+    })
+    .await;
+    let requests = mock.requests.lock().unwrap().clone();
+    assert_eq!(
+        (streamed(&requests), summaries(&requests)),
+        (3, 1),
+        "the summary is asked with no message sent"
+    );
+    let options = roomkit::GetTimelineOptions {
+        limit: 1_000,
+        ..Default::default()
+    };
+    let rows = app.kit.get_timeline(&app.view.room, options).await.unwrap();
+    let stored: Vec<_> = rows
+        .iter()
+        .filter(|row| row.r#type == EventType::System)
+        .collect();
+    assert_eq!(stored.len(), 1, "{stored:?}");
+    assert_eq!(
+        stored[0].source.channel_id.as_str(),
+        crate::application::TERMINAL
+    );
+    let line = roomkit_core::rules::transcoding::text_of(&stored[0].content);
+    assert!(
+        line.starts_with("Conversation compacted · 4 messages summarized · ≈"),
+        "the first two turns' messages: {line}"
+    );
+
+    let session = turn_operation(&app, "fourth").await;
+    let texts: Vec<&str> = session
+        .snapshot()
+        .unwrap()
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Message(message) => Some(message.text.as_str()),
+            _ => None,
+        })
+        .collect();
+    let at = texts.iter().position(|text| *text == line).unwrap();
+    assert_eq!(
+        &texts[at - 1..],
+        [
+            "Project inspection complete.",
+            line.as_str(),
+            "Inspect the project.",
+            "Project inspection complete."
+        ],
+        "the line stands between the third turn and the fourth"
+    );
+    let requests = mock.requests.lock().unwrap().clone();
+    assert_eq!(summaries(&requests), 1, "the next turn compacts no more");
+    let fourth = requests.last().unwrap();
+    let opening = fourth["messages"][1]["content"].as_str().unwrap();
+    assert!(opening.contains(SUMMARY), "{opening}");
+    let asked = fourth.to_string().matches("Inspect the project.").count();
+    assert_eq!(asked, 2, "the summary stands for the first two turns");
+    assert!(
+        !fourth.to_string().contains("Conversation compacted"),
+        "the agent never reads the line"
+    );
+    app.close().await.unwrap();
+}
+
+/// `/compact` sent while a turn runs waits for it: it is queued, the view
+/// says so, then it runs as the turn ends, with no message to wait for.
+#[tokio::test]
+async fn compact_during_a_turn_runs_once_the_turn_ends() {
+    let (root, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let mock = Mock::start(vec![]).await;
+    let (app, settings) = three_turns(root.path(), state.path(), &mock).await;
+    assert!(handler(&app, &settings).allow_while_busy("compact"));
+    let (room, agent) = (app.view.room.to_string(), app.view.agent.to_string());
+    let compactions = app.profiles.resources.compactions.clone();
+    let mut held = Some(mock.turns_held.lock().await);
+    let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+    let task = tokio::spawn(
+        app.session()
+            .run_with_commands(host, handler(&app, &settings)),
+    );
+    let mut notices = Vec::new();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let mut session = Session::default();
+        let (mut submitted, mut invoked) = (false, false);
+        loop {
+            let event = match client.try_recv() {
+                Ok(event) => event,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    // The turn's request waits at the server: the turn runs.
+                    if submitted && !invoked && streamed(&mock.requests.lock().unwrap()) == 4 {
+                        let compact = Command::Invoke {
+                            name: "compact".into(),
+                            arguments: String::new(),
+                        };
+                        let request =
+                            Request::new(RequestId::new(2), "compact", room.as_str(), compact);
+                        client.try_send(request).unwrap();
+                        invoked = true;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    continue;
+                }
+                Err(error) => panic!("Unexpected attachment failure: {error}"),
+            };
+            match &event {
+                Event::Notice { text, .. } => notices.push(text.clone()),
+                Event::Reply { request, error } if request.get() == 2 => {
+                    assert_eq!(*error, None, "allowed during the turn");
+                    assert_eq!(summaries(&mock.requests.lock().unwrap()), 0);
+                    assert_eq!(
+                        compactions.notices(&room),
+                        ["Compaction queued: it runs when the agent's turn ends"]
+                    );
+                    held = None;
+                }
+                Event::OperationFinished {
+                    operation, outcome, ..
+                } if operation.as_str() == "fourth" => {
+                    assert_eq!(*outcome, RunOutcome::Completed);
+                    break;
+                }
+                _ => {}
+            }
+            session.apply(event);
+            if !submitted && let Some(snapshot) = session.snapshot() {
+                let submit = Command::Submit {
+                    agent: snapshot.selected_agent.clone(),
+                    text: "Inspect the project.".into(),
+                };
+                let conversation = snapshot.conversation.clone();
+                client
+                    .try_send(Request::new(
+                        RequestId::new(1),
+                        "fourth",
+                        conversation,
+                        submit,
+                    ))
+                    .unwrap();
+                submitted = true;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(held.is_none());
+    assert!(
+        notices.contains(&"Compaction queued: it runs when the agent's turn ends".to_owned()),
+        "{notices:?}"
+    );
+    until("the conversation compacts", || {
+        compactions.get(&room, &agent).is_some()
+    })
+    .await;
+    let requests = mock.requests.lock().unwrap().clone();
+    assert_eq!((streamed(&requests), summaries(&requests)), (4, 1));
+    let fourth = requests.iter().rfind(|r| r["stream"] == true).unwrap();
+    assert!(
+        !fourth.to_string().contains(SUMMARY),
+        "the turn read its history whole"
+    );
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.close().await.unwrap();
+}
+
+/// A message sent while a compaction runs waits for it, the status line
+/// counting its seconds, then reads what it made.
+#[tokio::test]
+async fn a_message_sent_during_a_compaction_reads_what_it_made() {
+    let (root, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let mock = Mock::start(vec![]).await;
+    let (app, settings) = three_turns(root.path(), state.path(), &mock).await;
+    let held = mock.summaries_held.lock().await;
+    handler(&app, &settings)
+        .handle(invoke(&app, "compact"), app.view.clone())
+        .await
+        .unwrap();
+    let requests = &mock.requests;
+    until("the summary is asked", || {
+        summaries(&requests.lock().unwrap()) == 1
+    })
+    .await;
+    let room = app.view.room.to_string();
+    let compactions = app.profiles.resources.compactions.clone();
+    let status = compactions.notices(&room);
+    assert!(
+        status[0].starts_with("Compacting the conversation… "),
+        "{status:?}"
+    );
+    let asked = handler(&app, &settings)
+        .handle(invoke(&app, "compact"), app.view.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        notice(asked),
+        "A compaction is already running in this conversation"
+    );
+    let ((), _) = tokio::join!(
+        async move {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let streamed = streamed(&requests.lock().unwrap());
+            assert_eq!(streamed, 3, "the turn waits for the compaction");
+            drop(held);
+        },
+        turn_operation(&app, "fourth")
+    );
+    let requests = mock.requests.lock().unwrap().clone();
+    assert_eq!((streamed(&requests), summaries(&requests)), (4, 1));
+    let opening = requests.last().unwrap()["messages"][1]["content"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(opening.contains(SUMMARY), "{opening}");
+    assert!(
+        compactions
+            .notices(&room)
+            .iter()
+            .all(|n| !n.starts_with("Compacting"))
+    );
+    app.close().await.unwrap();
+}
+
+/// An agent without a known window keeps its latest messages, and its turns
+/// carry the project's rules every time; with one, the turns after
+/// `/compact` read its summary, and rules that changed since once.
+#[tokio::test]
+async fn a_window_of_messages_keeps_the_rules_each_turn_and_compacted_rules_go_once() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     write(root.path(), "AGENTS.md", "ROOT_ONE");
@@ -228,27 +510,22 @@ async fn compact_compacts_at_the_next_turn_and_a_window_of_messages_keeps_the_ru
 
     // A new project state: its agent is created with a known window.
     let state = tempfile::tempdir().unwrap();
-    let mut settings = super::settings(root.path(), state.path(), &mock.base_url);
-    settings.context_window = Some(200_000);
-    let app = Application::open(&settings, String::new()).await.unwrap();
-    for turn in ["first", "second", "third"] {
-        turn_operation(&app, turn).await;
-    }
-    let asked = handler(&app, &settings)
+    let before = mock.requests.lock().unwrap().len();
+    let (app, settings) = three_turns(root.path(), state.path(), &mock).await;
+    handler(&app, &settings)
         .handle(invoke(&app, "compact"), app.view.clone())
         .await
         .unwrap();
-    assert_eq!(
-        notice(asked),
-        "The conversation compacts at your next message"
-    );
-    let before = mock.requests.lock().unwrap().len();
+    let (room, agent) = (app.view.room.to_string(), app.view.agent.to_string());
+    let compactions = app.profiles.resources.compactions.clone();
+    until("the conversation compacts", || {
+        compactions.get(&room, &agent).is_some()
+    })
+    .await;
     turn_operation(&app, "fourth").await;
-    let requests = mock.requests.lock().unwrap().clone();
-    assert_eq!(summaries(&requests[before..]), 1, "the next turn compacts");
     turn_operation(&app, "fifth").await;
     let requests = mock.requests.lock().unwrap().clone();
-    assert_eq!(summaries(&requests[before..]), 1, "and only that one");
+    assert_eq!(summaries(&requests[before..]), 1, "compacted once");
     // Rules changed since: the next turn sends them, once; the one after
     // reads them where that turn did.
     write(root.path(), "AGENTS.md", "ROOT_TWO");
@@ -265,34 +542,42 @@ async fn compact_compacts_at_the_next_turn_and_a_window_of_messages_keeps_the_ru
     app.close().await.unwrap();
 }
 
-/// A summary the model does not write compacts nothing: the turn reads the
-/// conversation as it is, says so, and the next one tries again.
+/// A summary the model does not write compacts nothing: the conversation is
+/// read as it is, the view says so, and the next turn tries again.
 #[tokio::test]
 async fn a_failed_summary_compacts_nothing_and_is_tried_again() {
-    use roomkit_tui_engine::CommandHandler;
-    let root = tempfile::tempdir().unwrap();
-    let state = tempfile::tempdir().unwrap();
+    let (root, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let mock = Mock::summarizing("An answer.", "").await;
-    let mut settings = settings(root.path(), state.path(), &mock.base_url);
-    settings.context_window = Some(200_000);
-    let app = Application::open(&settings, String::new()).await.unwrap();
-    for turn in ["first", "second", "third"] {
-        turn_operation(&app, turn).await;
-    }
+    let (app, settings) = three_turns(root.path(), state.path(), &mock).await;
     handler(&app, &settings)
         .handle(invoke(&app, "compact"), app.view.clone())
         .await
         .unwrap();
     let (room, agent) = (app.view.room.to_string(), app.view.agent.to_string());
     let compactions = app.profiles.resources.compactions.clone();
-    turn_operation(&app, "fourth").await;
+    let failed = || {
+        compactions
+            .notices(&room)
+            .first()
+            .is_some_and(|n| n.starts_with("Compaction failed"))
+    };
+    until("the compaction fails", failed).await;
     assert_eq!(summaries(&mock.requests.lock().unwrap()), 1);
     assert_eq!(compactions.get(&room, &agent), None, "nothing is compacted");
-    let notices = compactions.notices(&room);
-    assert!(notices[0].starts_with("Compaction failed"), "{notices:?}");
+    turn_operation(&app, "fourth").await;
+    assert_eq!(
+        summaries(&mock.requests.lock().unwrap()),
+        2,
+        "the turn tries again"
+    );
+    assert_eq!(compactions.get(&room, &agent), None);
     *mock.summary.lock().unwrap() = SUMMARY.into();
     turn_operation(&app, "fifth").await;
-    assert_eq!(summaries(&mock.requests.lock().unwrap()), 2, "tried again");
+    assert_eq!(
+        summaries(&mock.requests.lock().unwrap()),
+        3,
+        "and the next one"
+    );
     assert_eq!(compactions.get(&room, &agent).unwrap().summary, SUMMARY);
     app.close().await.unwrap();
 }

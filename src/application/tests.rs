@@ -26,6 +26,10 @@ use crate::config::Cli;
 struct Mock {
     base_url: String,
     summary: Arc<Mutex<String>>,
+    /// Held, the summaries wait: a request asked whole is answered once free.
+    summaries_held: Arc<tokio::sync::Mutex<()>>,
+    /// Held, the turns' requests wait.
+    turns_held: Arc<tokio::sync::Mutex<()>>,
     requests: Arc<Mutex<Vec<Value>>>,
     headers: Arc<Mutex<Vec<String>>>,
     task: tokio::task::JoinHandle<()>,
@@ -36,6 +40,8 @@ struct Fixture {
     reasoning: Option<String>,
     /// What a request asked whole, a compaction's summary, is answered.
     summary: Arc<Mutex<String>>,
+    summaries_held: Arc<tokio::sync::Mutex<()>>,
+    turns_held: Arc<tokio::sync::Mutex<()>>,
     answer: String,
     calls: Vec<(&'static str, Value)>,
     usage: Vec<Option<Value>>,
@@ -87,6 +93,7 @@ impl Mock {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let headers = Arc::new(Mutex::new(Vec::new()));
         let summary = Arc::new(Mutex::new(SUMMARY.to_owned()));
+        let (summaries_held, turns_held) = (Arc::default(), Arc::default());
         let router = Router::new()
             .route("/v1/chat/completions", post(answer))
             .route(
@@ -98,6 +105,8 @@ impl Mock {
             .with_state(Fixture {
                 reasoning,
                 summary: summary.clone(),
+                summaries_held: Arc::clone(&summaries_held),
+                turns_held: Arc::clone(&turns_held),
                 answer: answer_text.into(),
                 calls,
                 usage,
@@ -110,6 +119,8 @@ impl Mock {
         Self {
             base_url,
             summary,
+            summaries_held,
+            turns_held,
             requests,
             headers,
             task,
@@ -144,11 +155,13 @@ async fn answer(
     };
     // A compaction's summary is asked whole, apart from the agent's turns.
     if whole {
+        let _held = fixture.summaries_held.lock().await;
         let summary = json!({
             "choices": [{"index": 0, "message": {"role": "assistant", "content": *fixture.summary.lock().unwrap()}, "finish_reason": "stop"}],
         });
         return ([("content-type", "application/json")], summary.to_string());
     }
+    let _held = fixture.turns_held.lock().await;
     // A call named "" answers: a later request may call a tool.
     let (delta, reason) = match fixture.calls.get(index) {
         Some((name, args)) if !name.is_empty() => (

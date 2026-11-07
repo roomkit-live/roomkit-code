@@ -94,7 +94,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         ),
         (
             "compact",
-            "Summarize the conversation's earlier messages at the next message",
+            "Summarize the conversation's earlier messages now, or once the turn ends",
             "",
         ),
         ("new", "Start a new conversation in this project", ""),
@@ -206,6 +206,8 @@ impl CommandHandler for Sessions {
                 | "plans"
                 | "hooks"
                 | "instructions"
+                // Queued until the turn ends (HITL a2dfba34).
+                | "compact"
         )
     }
 
@@ -290,14 +292,19 @@ impl Sessions {
         }
     }
 
-    /// Asks the agent's next turn to compact the conversation, whatever its
-    /// tier; an agent without a known window keeps its latest messages.
+    /// Compacts the conversation whatever its tier: at once, or once the
+    /// turn under way ends (HITL a2dfba34); an agent without a known window
+    /// keeps its latest messages.
     fn compact(&self, current: &SessionConfig) -> CommandResult {
+        use crate::compaction::Requested;
         let compactions = &self.profiles.resources.compactions;
-        let text = if compactions.force(current.room.as_str(), current.agent.as_str()) {
-            "The conversation compacts at your next message"
-        } else {
-            "This agent reads its latest 50 messages: set its context capacity in /agents for it to compact"
+        let text = match compactions.request(current.room.as_str(), current.agent.as_str()) {
+            Requested::Started => "Compacting the conversation…",
+            Requested::Queued => "Compaction queued: it runs when the agent's turn ends",
+            Requested::Running => "A compaction is already running in this conversation",
+            Requested::Unbounded => {
+                "This agent reads its latest 50 messages: set its context capacity in /agents for it to compact"
+            }
         };
         CommandResult::Events(vec![Event::Notice {
             conversation: current.room.as_str().into(),

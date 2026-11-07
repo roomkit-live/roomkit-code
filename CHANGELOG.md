@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `/compact` compacts at once instead of at the next message, and is accepted
+  while the agent works: it is then queued and runs as the turn ends (HITL
+  a2dfba34). The status line counts the summary's seconds, a message sent
+  meanwhile waits and reads the compacted conversation, and every compaction
+  leaves a line in the conversation, shown to the terminal only and kept for a
+  resumed conversation: `Conversation compacted · 42 messages summarized · ≈180k →
+  ≈40k tokens · 12 s`. The count is of messages, not of the rows of tool calls
+  and read instructions between them.
+
 - An agent can hand a task to another agent of the project with the engine's
   `delegate_task`; `task_status` and `cancel_task` follow and stop the
   conversation's tasks (RMK-1532; HITL 2b4cc82b, f7f700bc, a7392f28). The other
@@ -34,7 +43,7 @@
   next tier: one prompt cache loss per compaction instead of one per turn. The
   status line says so; a summary the model does not write compacts nothing and is
   tried again; the summary is kept in the project's state for a resumed
-  conversation; `/compact` compacts at the next message. An agent without a known
+  conversation; `/compact` compacts whatever the tier. An agent without a known
   window keeps its 50 messages.
 
 - A ChatGPT account's requests carry their prompt cache key as the `session-id`

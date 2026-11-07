@@ -238,7 +238,7 @@ pub(crate) async fn create(
         max_tool_rounds,
         max_context_events: HISTORY,
         retry_policy: Some(retry_policy()),
-        memory: memory(ceiling, &provider, resources)?,
+        memory: memory((ceiling, &profile.id), &provider, resources)?,
         image_resolver: Some(images),
         // Native tools stay declared; only MCP tools wait behind find_tools.
         tool_search: Some(preamble.hides_mcp),
@@ -250,10 +250,11 @@ pub(crate) async fn create(
     Ok((agent, preamble.inventory))
 }
 
-/// The memory of an agent whose history compacts under `ceiling` tokens,
-/// summarized by its own model; none keeps its window of `HISTORY` messages.
+/// The memory of `agent`, whose history compacts under `ceiling` tokens,
+/// summarized by its own model, which also compacts its conversations
+/// outside its turns; none keeps its window of `HISTORY` messages.
 fn memory(
-    ceiling: Option<u64>,
+    (ceiling, agent): (Option<u64>, &str),
     provider: &OpenAiConfig,
     resources: &Resources,
 ) -> Result<Option<Arc<dyn roomkit_ai::memory::MemoryProvider>>> {
@@ -261,9 +262,14 @@ fn memory(
         return Ok(None);
     };
     let summarizer = OpenAiAiProvider::new(provider.clone())?;
-    let memory =
-        crate::compaction::TieredMemory::new(summarizer, ceiling, resources.compactions.clone());
-    Ok(Some(Arc::new(memory)))
+    let compactions = resources.compactions.clone();
+    let memory = Arc::new(crate::compaction::TieredMemory::new(
+        summarizer,
+        (ceiling, agent),
+        compactions.clone(),
+    ));
+    compactions.register(agent, memory.clone());
+    Ok(Some(memory))
 }
 
 /// The tools of `tools` the profile selects, with their definitions, in

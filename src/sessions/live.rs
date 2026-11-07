@@ -1,6 +1,6 @@
 //! The live events a view receives: process and account panels, plan, hook
-//! and update notices, a compaction's notice, the sidebar and the mode, sent
-//! again whenever a source changes.
+//! and update notices, a compaction's notice and line, the sidebar and the
+//! mode, sent again whenever a source changes.
 
 use std::sync::Arc;
 
@@ -71,7 +71,8 @@ pub(super) fn subscribe(
     rx
 }
 
-/// What the view shows now, and whether MCP connections need polling.
+/// What the view shows now, and whether it needs polling: MCP connections,
+/// or a running compaction's seconds.
 async fn events(
     profiles: &Arc<Profiles>,
     services: &Services,
@@ -87,16 +88,24 @@ async fn events(
         // the UI ignores updates to a dismissed or different view.
         events.push(event);
     }
-    // In the status line, sent again while recent: a compaction is no lasting
-    // state, and a list of events can be replaced before the view reads it.
+    // In the status line, sent again while recent or running: a list of
+    // events can be replaced before the view reads it. A compaction's line,
+    // stored for the views attached later, is shown at once to this one.
     let room = current.room.as_str();
-    let mut notices = profiles.resources.compactions.notices(room);
+    let compactions = &profiles.resources.compactions;
+    let mut notices = compactions.notices(room);
     notices.extend(profiles.resources.tasks.notices(room));
     events.extend(notices.into_iter().map(|text| Event::Notice {
         conversation: room.into(),
         text,
     }));
+    events.extend(compactions.lines(room).map(|item| Event::Item {
+        conversation: room.into(),
+        item,
+    }));
     let (mut sidebar, poll) = profiles.sidebar(current).await;
+    // A running compaction's seconds are counted on screen.
+    let poll = poll || compactions.compacting(room);
     if let Some(section) = services.hooks.sidebar(current) {
         sidebar.sections.push(section);
     }
@@ -109,7 +118,7 @@ async fn events(
 }
 
 impl Sources {
-    /// Wait until a source changes, or two seconds while MCP connections need
+    /// Wait until a source changes, or two seconds while the view needs
     /// polling; false once a source is gone.
     async fn changed(&mut self, poll: bool) -> bool {
         tokio::select! {

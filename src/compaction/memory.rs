@@ -1,11 +1,15 @@
 //! The memory an agent with a known window reads its history through: the
 //! room's messages since its last compaction, whole, after the summary that
-//! stands for the earlier ones; a new compaction once they pass the tier.
+//! stands for the earlier ones; a new compaction once they pass the tier, or
+//! at once when `/compact` asks outside the agent's turns.
 
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use std::{future::Future, pin::Pin};
 
 use roomkit::ChannelError;
-use roomkit::model::{RoomContext, RoomEvent, RoomId};
+use roomkit::model::{EventType, RoomContext, RoomEvent, RoomId};
 use roomkit_ai::AiProvider;
 use roomkit_ai::memory::{
     EstimateEventTokensOptions, MemoryProvider, MemoryResult, RetrieveOptions, TurnFootprint,
@@ -13,15 +17,18 @@ use roomkit_ai::memory::{
 };
 use serde_json::Value;
 
-use super::{Compacted, Compactions, WINDOW, summary, tiers};
+use super::{Compacted, Compactions, Compactor, WINDOW, summary, tiers};
 
-/// Reads an agent's history under `ceiling` tokens, compacting it by tiers
-/// with `provider`, the agent's own model; `compactions` keeps each
-/// conversation's.
+/// Reads `agent`'s history under `ceiling` tokens, compacting it by tiers
+/// with `provider`, its own model; `compactions` keeps each conversation's.
 pub(crate) struct TieredMemory<P> {
     provider: P,
     ceiling: u64,
+    agent: String,
     compactions: Arc<Compactions>,
+    /// What the rest of the agent's latest turn in each room took besides
+    /// its history, for a compaction outside its turns to estimate by.
+    fixed: Mutex<HashMap<String, usize>>,
 }
 
 /// What a turn's request costs besides its summary: its history's events,
@@ -49,23 +56,27 @@ impl Measured {
 }
 
 impl<P: AiProvider> TieredMemory<P> {
-    pub fn new(provider: P, ceiling: u64, compactions: Arc<Compactions>) -> Self {
+    pub fn new(provider: P, (ceiling, agent): (u64, &str), compactions: Arc<Compactions>) -> Self {
         Self {
             provider,
             ceiling,
+            agent: agent.into(),
             compactions,
+            fixed: Mutex::default(),
         }
     }
 
     /// What `agent`'s turn on `current` reads of `context` in `room`: the
     /// events since its last compaction after its summary, compacted anew
-    /// once they pass the tier, or when `/compact` asked.
+    /// once they pass the tier, or when `/compact` asked. A compaction
+    /// running outside the turns ends first: the turn reads what it made.
     async fn read(
         &self,
         (room, agent): (&str, &str),
         current: &RoomEvent,
         context: &RoomContext,
     ) -> MemoryResult {
+        let _held = self.compactions.hold(room).await;
         let compacted = self.compactions.get(room, agent);
         let mut events: Vec<RoomEvent> = context
             .recent_events
@@ -76,7 +87,9 @@ impl<P: AiProvider> TieredMemory<P> {
             .collect();
         events.sort_by_key(|event| event.index);
         let after = compacted.as_ref().map_or(0, |c| c.at);
-        let measured = measure(&events, agent, after);
+        let footprint = current_turn_footprint().unwrap_or_else(|| TurnFootprint::new(0, 0));
+        let measured = measure(&events, (agent, after), &footprint);
+        crate::sync::lock(&self.fixed).insert(room.into(), measured.fixed);
         let forced = self.compactions.take_forced(room, agent);
         if !forced && !tiers::due(measured.now(compacted.as_ref()), self.ceiling) {
             return result(compacted.as_ref(), events);
@@ -103,6 +116,61 @@ impl<P: AiProvider> TieredMemory<P> {
         measured: &Measured,
         forced: bool,
     ) -> Option<Compacted> {
+        let cut = self.cut((events, agent), measured, forced);
+        if cut == 0 {
+            if forced {
+                self.compactions.notice(
+                    room,
+                    "Nothing to compact yet: the conversation is too short",
+                );
+            }
+            return None;
+        }
+        let prior = compacted.map(|c| c.summary.as_str());
+        let read = (&events[..cut], agent);
+        let chars = tiers::summary_chars(self.ceiling);
+        let (_running, began) = (self.compactions.running(room), Instant::now());
+        let Some(written) = summary::summarize(&self.provider, prior, read, chars).await else {
+            if forced {
+                self.compactions.force(room, agent);
+            }
+            self.compactions.notice(
+                room,
+                "Compaction failed: the model wrote no summary; it is tried again at the next message",
+            );
+            return None;
+        };
+        let newest = events.last().map_or(0, |event| event.index);
+        // The messages the summary stands for, not the rows of tool calls
+        // and read instructions between them.
+        let summarized = events
+            .drain(..cut)
+            .filter(|event| event.r#type == EventType::Message)
+            .count();
+        let made = Compacted {
+            from: events.first().map_or(0, |event| event.index),
+            summary: written,
+            snapshot: self.compactions.snapshot(room, agent),
+            summarized: compacted.map_or(0, |c| c.summarized) + summarized,
+            at: newest,
+        };
+        let sizes = (measured.now(compacted), measured.total(Some(&made), cut));
+        let told = (sizes, began.elapsed());
+        self.compactions
+            .record((room, agent), made.clone(), told)
+            .await;
+        Some(made)
+    }
+
+    /// How many of `events`, `agent`'s history, a compaction summarizes: the
+    /// events before the latest within the tier's budget, or before the
+    /// latest turn when `forced`, a turn's start the cut.
+    fn cut(
+        &self,
+        (events, agent): (&[RoomEvent], &str),
+        measured: &Measured,
+        forced: bool,
+    ) -> usize {
         let written: Vec<bool> = events
             .iter()
             .map(|event| event.source.channel_id.as_str() == agent)
@@ -118,51 +186,43 @@ impl<P: AiProvider> TieredMemory<P> {
         } else {
             tiers::kept_budget(self.ceiling)
         };
-        let cut = tiers::cut(&measured.costs, &starts, budget);
-        if cut == 0 {
-            if forced {
-                self.compactions.notice(
-                    room,
-                    "Nothing to compact yet: the conversation is too short",
-                );
-            }
-            return None;
-        }
-        let prior = compacted.map(|c| c.summary.as_str());
-        let read = (&events[..cut], agent);
-        let chars = tiers::summary_chars(self.ceiling);
-        let Some(written) = summary::summarize(&self.provider, prior, read, chars).await else {
-            if forced {
-                self.compactions.force(room, agent);
-            }
-            self.compactions.notice(
-                room,
-                "Compaction failed: the model wrote no summary; it is tried again at the next message",
-            );
-            return None;
-        };
-        let newest = events.last().map_or(0, |event| event.index);
-        let summarized = events.drain(..cut).count();
-        let made = Compacted {
-            from: events.first().map_or(0, |event| event.index),
-            summary: written,
-            snapshot: self.compactions.snapshot(room, agent),
-            summarized: compacted.map_or(0, |c| c.summarized) + summarized,
-            at: newest,
-        };
-        let sizes = (measured.now(compacted), measured.total(Some(&made), cut));
-        self.compactions.record((room, agent), made.clone(), sizes);
-        Some(made)
+        tiers::cut(&measured.costs, &starts, budget)
+    }
+}
+
+impl<P: AiProvider> Compactor for TieredMemory<P> {
+    /// Compacts `events` whatever their tier, as the agent's latest turn in
+    /// `room` measured the rest of its request.
+    fn compact_now<'a>(
+        &'a self,
+        room: &'a str,
+        mut events: Vec<RoomEvent>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            let agent = self.agent.as_str();
+            let compacted = self.compactions.get(room, agent);
+            let after = compacted.as_ref().map_or(0, |c| c.at);
+            let fixed = crate::sync::lock(&self.fixed).get(room).copied();
+            let footprint = TurnFootprint::new(fixed.unwrap_or(0), 0);
+            let measured = measure(&events, (agent, after), &footprint);
+            let compacted = compacted.as_ref();
+            self.compact((room, agent), compacted, &mut events, &measured, true)
+                .await;
+        })
     }
 }
 
 /// What a turn on `events`, `agent`'s history, takes: each event with what
-/// the turn replays after it, the rest of the turn, and the agent's latest
-/// request as measured, one sent after the event at `after`: the latest
-/// compaction's newest, before which a request measured the history it cut.
-fn measure(events: &[RoomEvent], agent: &str, after: u64) -> Measured {
-    let footprint = current_turn_footprint().unwrap_or_else(|| TurnFootprint::new(0, 0));
-    let costs = costs(events, &footprint);
+/// the turn replays after it, the rest of the turn as `footprint` says, and
+/// the agent's latest request as measured, one sent after the event at
+/// `after`: the latest compaction's newest, before which a request measured
+/// the history it cut.
+fn measure(
+    events: &[RoomEvent],
+    (agent, after): (&str, u64),
+    footprint: &TurnFootprint,
+) -> Measured {
+    let costs = costs(events, footprint);
     let latest = events.iter().rposition(|event| {
         event.index > after
             && event.source.channel_id.as_str() == agent
@@ -271,13 +331,14 @@ mod tests {
             said(2, "code", Some(50_000)),
             said(3, "terminal", None),
         ];
-        let measured = measure(&events, "code", 0);
+        let none = TurnFootprint::new(0, 0);
+        let measured = measure(&events, ("code", 0), &none);
         let since: usize = measured.costs[1..].iter().sum();
         assert_eq!(measured.last, Some(51_000 + since));
         assert_eq!(measured.now(None), 51_000 + since);
         assert!(tiers::due(measured.now(None), 60_000));
         // Measured at or before the compaction's newest event: estimated.
-        let stale = measure(&events, "code", 2);
+        let stale = measure(&events, ("code", 2), &none);
         assert_eq!(stale.last, None);
         assert!(!tiers::due(stale.now(None), 60_000));
     }

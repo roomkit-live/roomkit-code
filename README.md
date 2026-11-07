@@ -670,11 +670,19 @@ plus what came since, when that says more. Past it, the agent's own model writes
 carrying over the previous summary, and the latest messages are kept whole within
 30 % of the ceiling, whole turns only. The summary, followed by the project's
 `AGENTS.md` snapshot, then opens every request, and the history grows again from
-there, unchanged, up to the next tier: one cache loss per compaction. The status
-line says when it happens and what it saved. The summary is kept in the project's
-state, so a resumed conversation reads the same one. **/compact** asks the next
-turn to compact whatever its tier, keeping only its latest turns, about four
-messages.
+there, unchanged, up to the next tier: one cache loss per compaction. While the
+summary is written, the status line says `Compacting the conversation… 4 s`; then
+a line stays in the conversation, for instance `Conversation compacted · 42
+messages summarized · ≈180k → ≈40k tokens · 12 s`. It is shown to you only, never
+to the agent, and comes back in its place when the conversation is resumed. The
+summary is kept in the project's state, so a resumed conversation reads the same
+one.
+
+**/compact** compacts at once whatever the tier, keeping only the latest turn.
+Sent while the agent works, it is queued and runs as soon as the turn ends; a
+message you send while the summary is written waits for it, then the agent reads
+the compacted conversation. A compaction only happens between turns: a turn whose
+tool calls pass the window falls back on the engine's own compaction.
 
 The summary reads the messages, not the tool calls' results, the newest first
 within half the ceiling. A summary the model does not write compacts nothing:

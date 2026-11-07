@@ -2,19 +2,31 @@
 //! agent with a known window reads its history through, and the record of
 //! each conversation's compactions, kept on disk so that a resumed
 //! conversation reads the same summary, its prompt's prefix with it.
+//! `/compact` compacts at once, or once the turns under way end, and every
+//! compaction leaves a line in its conversation (HITL a2dfba34).
+mod history;
+mod line;
 mod memory;
+mod runs;
 mod summary;
 mod tiers;
+mod turns;
 
 pub(crate) use memory::TieredMemory;
+pub(crate) use runs::Compactor;
 pub(crate) use tiers::ceiling;
+pub(crate) use turns::lifecycle;
 
+use roomkit::RoomKit;
+use roomkit::model::ChannelId;
+use roomkit_sqlite::SqliteStore;
+use roomkit_tui::protocol::Item;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     io::Write,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tokio::sync::watch;
@@ -70,11 +82,29 @@ pub(crate) struct Compactions {
     snapshots: Mutex<HashMap<(String, String), String>>,
     /// The latest notice of each room, and when it came.
     notices: Mutex<HashMap<String, (Instant, String)>>,
-    changes: watch::Sender<()>,
+    /// The compactions running or waiting in each room, and the turns.
+    runs: Arc<runs::Runs>,
+    /// Where the compactions' lines go.
+    journal: line::Journal,
+    changes: Arc<watch::Sender<()>>,
+}
+
+/// What `/compact` did.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Requested {
+    /// The agent reads its latest messages: it never compacts.
+    Unbounded,
+    /// A compaction is already running in the room.
+    Running,
+    /// A turn is under way: the compaction runs once the room's turns end.
+    Queued,
+    /// The compaction started.
+    Started,
 }
 
 impl Compactions {
     pub fn new(dir: &Path) -> Self {
+        let changes = Arc::new(watch::channel(()).0);
         Self {
             dir: dir.into(),
             rooms: Mutex::default(),
@@ -82,8 +112,21 @@ impl Compactions {
             forced: Mutex::default(),
             snapshots: Mutex::default(),
             notices: Mutex::default(),
-            changes: watch::channel(()).0,
+            runs: Arc::new(runs::Runs::new(changes.clone())),
+            journal: line::Journal::default(),
+            changes,
         }
+    }
+
+    /// The engine whose rooms the compactions read and write their lines
+    /// to, from the terminal's channel.
+    pub fn install(&self, kit: &RoomKit<SqliteStore>, terminal: &ChannelId) {
+        self.journal.install(kit, terminal);
+    }
+
+    /// What compacts `agent`'s conversations outside its turns.
+    pub fn register(&self, agent: &str, compactor: Arc<dyn Compactor>) {
+        self.runs.register(agent, compactor);
     }
 
     /// States whether `agent`'s memory compacts, as its agent is assembled.
@@ -108,20 +151,15 @@ impl Compactions {
     }
 
     /// Records `compacted` for `agent` in `room`, in its file first, and
-    /// what the views show of it: how many messages it summarized and the
-    /// estimated request before and after.
-    pub fn record(
+    /// leaves its line in the conversation: how many messages it summarized,
+    /// the estimated request before and after, and how long it `took`.
+    pub async fn record(
         &self,
         (room, agent): (&str, &str),
         compacted: Compacted,
-        (before, after): (usize, usize),
+        (sizes, took): ((usize, usize), Duration),
     ) {
-        let mut notice = format!(
-            "Conversation compacted: a summary stands for {} earlier messages · ≈{} → ≈{} tokens",
-            compacted.summarized,
-            thousands(before),
-            thousands(after)
-        );
+        let (from, summarized) = (compacted.from, compacted.summarized);
         // Written outside the lock: another conversation's turn need not
         // wait for this one's file.
         let record = {
@@ -132,10 +170,20 @@ impl Compactions {
                 agents: record.agents.clone(),
             }
         };
-        if self.write(room, &record).is_err() {
-            notice.push_str(" · not saved: a resumed conversation compacts again");
-        }
-        self.notice(room, &notice);
+        let unsaved = self.write(room, &record).is_err();
+        let told = line::Told {
+            room,
+            agent,
+            from,
+            summarized,
+            sizes,
+            took,
+            unsaved,
+        };
+        let line = self.journal.write(&told).await;
+        // A view keeps its status line's last notice: this one replaces the
+        // compaction's seconds.
+        self.notice(room, &line);
     }
 
     /// Tells the views of `room` `text`, in their status line.
@@ -155,9 +203,91 @@ impl Compactions {
     }
 
     /// Whether `agent`'s turn in `room` was asked to compact, which it now
-    /// does.
+    /// does: no compaction of its waits for the turns to end any more.
     pub fn take_forced(&self, room: &str, agent: &str) -> bool {
-        crate::sync::lock(&self.forced).remove(&(room.into(), agent.into()))
+        let forced = crate::sync::lock(&self.forced).remove(&(room.into(), agent.into()));
+        if forced {
+            self.runs.unqueue(room, agent);
+        }
+        forced
+    }
+
+    /// `/compact`: compacts `agent`'s conversation in `room` at once, or
+    /// once the turns under way end, its next turn compacting it should one
+    /// start first.
+    pub fn request(self: &Arc<Self>, room: &str, agent: &str) -> Requested {
+        if !self.force(room, agent) {
+            return Requested::Unbounded;
+        }
+        match self.runs.ask(room, agent) {
+            runs::Asked::Running => {
+                crate::sync::lock(&self.forced).remove(&(room.into(), agent.into()));
+                Requested::Running
+            }
+            runs::Asked::Queued => Requested::Queued,
+            runs::Asked::Start(running) => {
+                self.start(room, agent, running);
+                Requested::Started
+            }
+        }
+    }
+
+    /// A turn was admitted in `room`.
+    pub fn turn_admitted(&self, room: &str) {
+        self.runs.admitted(room);
+    }
+
+    /// A turn of `room`'s finished: the compaction that waited for the
+    /// turns starts once none is left.
+    pub fn turn_finished(self: &Arc<Self>, room: &str) {
+        if let Some((agent, running)) = self.runs.finished(room) {
+            self.start(room, &agent, running);
+        }
+    }
+
+    /// Waits for the compaction running in `room`, then keeps the next one
+    /// from starting until the returned guard drops.
+    pub async fn hold(&self, room: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        self.runs.lock(room).lock_owned().await
+    }
+
+    /// The views of `room` show a compaction running until the returned
+    /// value drops.
+    pub fn running(&self, room: &str) -> runs::Running {
+        self.runs.running(room)
+    }
+
+    /// Compacts `agent`'s conversation in `room` in a task of its own, as
+    /// `running` shows.
+    fn start(self: &Arc<Self>, room: &str, agent: &str, running: runs::Running) {
+        let (compactions, room, agent) = (self.clone(), room.to_owned(), agent.to_owned());
+        tokio::spawn(async move {
+            let _running = running;
+            compactions.compact_now(&room, &agent).await;
+        });
+    }
+
+    /// Compacts `agent`'s conversation in `room` outside its turns, unless a
+    /// turn compacted it meanwhile.
+    async fn compact_now(&self, room: &str, agent: &str) {
+        let _held = self.hold(room).await;
+        if !self.take_forced(room, agent) {
+            return;
+        }
+        let (Some(compactor), Some(kit)) = (self.runs.compactor(agent), self.journal.kit()) else {
+            return;
+        };
+        let from = self.get(room, agent).map_or(0, |compacted| compacted.from);
+        match history::read(kit, room, agent, from).await {
+            Some(events) => compactor.compact_now(room, events).await,
+            None => {
+                self.force(room, agent);
+                self.notice(
+                    room,
+                    "Compaction failed: the conversation could not be read; it is tried again at the next message",
+                );
+            }
+        }
     }
 
     /// Keeps the project snapshot `agent`'s turn in `room` read, which a
@@ -172,14 +302,29 @@ impl Compactions {
             .cloned()
     }
 
-    /// The notice the views of `room` show, while it is recent.
+    /// The notice the views of `room` show: a compaction running or
+    /// waiting, else the latest notice while it is recent.
     pub fn notices(&self, room: &str) -> Vec<String> {
+        if let Some(status) = self.runs.status(room) {
+            return vec![status];
+        }
         crate::sync::lock(&self.notices)
             .get(room)
             .filter(|(at, _)| at.elapsed() < NOTICE_FOR)
             .map(|(_, text)| text.clone())
             .into_iter()
             .collect()
+    }
+
+    /// The latest compaction's line in `room`, while it is recent: the views
+    /// watching show it at once, the others read it from the conversation.
+    pub fn lines(&self, room: &str) -> Option<Item> {
+        self.journal.recent(room)
+    }
+
+    /// Whether a compaction runs in `room`, whose views count its seconds.
+    pub fn compacting(&self, room: &str) -> bool {
+        self.runs.compacting(room)
     }
 
     pub fn subscribe(&self) -> watch::Receiver<()> {
@@ -224,19 +369,6 @@ impl Compactions {
     }
 }
 
-/// `tokens` with a comma between thousands: `120,000`.
-fn thousands(tokens: usize) -> String {
-    let digits = tokens.to_string();
-    let mut out = String::new();
-    for (at, digit) in digits.chars().enumerate() {
-        if at > 0 && (digits.len() - at).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(digit);
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, reason = "A broken fixture fails the test")]
@@ -252,12 +384,16 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_compaction_is_kept_on_disk_privately_and_read_back() {
+    const TOOK: Duration = Duration::from_secs(3);
+
+    #[tokio::test]
+    async fn a_compaction_is_kept_on_disk_privately_and_read_back() {
         let dir = tempfile::tempdir().unwrap();
         let compactions = Compactions::new(&dir.path().join("compactions"));
         assert_eq!(compactions.get("room", "code"), None);
-        compactions.record(("room", "code"), compacted(40), (90_000, 31_000));
+        compactions
+            .record(("room", "code"), compacted(40), ((90_000, 31_000), TOOK))
+            .await;
         assert_eq!(compactions.get("room", "code"), Some(compacted(40)));
         // Another instance, as after a restart, reads the same.
         let reopened = Compactions::new(&dir.path().join("compactions"));
@@ -273,20 +409,26 @@ mod tests {
             let dir = std::fs::metadata(dir.path().join("compactions")).unwrap();
             assert_eq!(dir.permissions().mode() & 0o077, 0);
         }
-        let notice = "Conversation compacted: a summary stands for 12 earlier messages · ≈90,000 → ≈31,000 tokens";
-        // Every view of the room shows it, each time it is sent its events.
-        assert_eq!(compactions.notices("room"), vec![notice.to_owned()]);
-        assert_eq!(compactions.notices("room"), vec![notice.to_owned()]);
-        assert!(compactions.notices("other").is_empty());
+        let text = "Conversation compacted · 12 messages summarized · ≈90k → ≈31k tokens · 3 s";
+        // Every view of the room is shown its line, each time it is sent its
+        // events, as long as it is recent.
+        for _ in 0..2 {
+            assert!(
+                matches!(compactions.lines("room"), Some(Item::Message(line)) if line.text == text)
+            );
+        }
+        assert!(compactions.lines("other").is_none());
     }
 
-    #[test]
-    fn an_unreadable_record_is_none_and_the_next_compaction_replaces_it() {
+    #[tokio::test]
+    async fn an_unreadable_record_is_none_and_the_next_compaction_replaces_it() {
         let dir = tempfile::tempdir().unwrap();
         let compactions = Compactions::new(dir.path());
         std::fs::write(compactions.path("room"), "not json").unwrap();
         assert_eq!(compactions.get("room", "code"), None);
-        compactions.record(("room", "code"), compacted(7), (1, 1));
+        compactions
+            .record(("room", "code"), compacted(7), ((1, 1), TOOK))
+            .await;
         let reopened = Compactions::new(dir.path());
         assert_eq!(reopened.get("room", "code"), Some(compacted(7)));
     }

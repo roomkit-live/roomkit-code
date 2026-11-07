@@ -16,6 +16,10 @@ mod gate;
 pub(crate) mod headless;
 mod integrations;
 
+/// The channel of the application's views, the terminal's: what a row the
+/// application writes for its views alone comes from.
+pub(crate) const TERMINAL: &str = "terminal";
+
 pub(crate) struct Application {
     pub kit: RoomKit<SqliteStore>,
     pub channel: ConversationChannel,
@@ -120,8 +124,10 @@ impl Application {
     }
 
     pub fn session(&self) -> LocalSession<SqliteStore> {
+        let compactions = self.profiles.resources.compactions.clone();
+        let lifecycle = crate::compaction::lifecycle(self.services.hooks.lifecycle(), compactions);
         LocalSession::new(self.kit.clone(), self.channel.clone(), self.view.clone())
-            .with_lifecycle(self.services.hooks.lifecycle())
+            .with_lifecycle(lifecycle)
     }
 }
 
@@ -140,8 +146,9 @@ async fn setup(
     let resources = &profiles.resources;
     crate::delegation::install(kit, resources.tasks.clone(), resources.roster.clone())?;
     let agent_id = profiles.initialize(kit).await?;
-    let channel = ConversationChannel::new(ChannelId::new("terminal")?);
+    let channel = ConversationChannel::new(ChannelId::new(TERMINAL)?);
     kit.register_channel(channel.clone())?;
+    profiles.resources.compactions.install(kit, channel.id());
     let gate = gate::Gate {
         policy: policy.clone(),
         channel: channel.clone(),
