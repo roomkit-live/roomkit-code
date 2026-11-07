@@ -404,7 +404,11 @@ impl Settings {
             .as_deref()
             .is_some_and(|effort| !crate::profiles::model::EFFORTS.contains(&effort))
         {
-            return Err("reasoning effort must be low, medium, high, xhigh or max".into());
+            return Err(format!(
+                "reasoning effort must be one of {}",
+                crate::profiles::model::EFFORTS.join(", ")
+            )
+            .into());
         }
         if max_output_tokens == Some(0) {
             return Err("max output tokens must be a positive token count".into());

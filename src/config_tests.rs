@@ -20,6 +20,7 @@ fn resume_options_exclude_provider_bootstrap_values() {
     let mut cli = cli(root.path());
     cli.base_url = Some("https://example.invalid/private-provider".into());
     cli.model = Some("private-model".into());
+    cli.reasoning_effort = Some("high".into());
     cli.no_logo = true;
     assert_eq!(resume_options(&cli).unwrap().unwrap(), ["--no-logo"]);
 }
@@ -523,7 +524,7 @@ fn the_first_agent_s_reasoning_effort_is_explicit_and_checked() {
     let error = Settings::load(&cli).err().unwrap();
     assert_eq!(
         error.to_string(),
-        "reasoning effort must be low, medium, high, xhigh or max"
+        "reasoning effort must be one of low, medium, high, xhigh, max"
     );
     let workspace = root.path().to_str().unwrap();
     assert!(

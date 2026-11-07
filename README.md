@@ -220,6 +220,11 @@ until it answers. `--max-tool-rounds N` or `[agent] max_tool_rounds` in the
 configuration file sets that bound for both; the flag is kept in the resume
 command.
 
+`--model`, `--context-window` and `--reasoning-effort` set up a new project's
+first agent: a project that already has agents, its own or global ones, keeps
+their saved settings. A benchmark that pins them gives each run a fresh
+`--state-dir`.
+
 ## Terminal integrations
 
 Two independent integrations are enabled by default. Neither changes the tools,
