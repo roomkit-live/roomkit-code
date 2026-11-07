@@ -417,3 +417,42 @@ async fn a_task_is_handed_on_three_levels_deep_at_most() {
         .unwrap();
     assert!(deepest.to_string().contains("(ID: review)") && deepest.to_string().contains(WORKER));
 }
+
+/// A launch nobody watches ends with its turn, before a task handed over
+/// could end: its agents are neither served the delegation tools nor told of
+/// other agents.
+#[tokio::test]
+async fn an_unattended_launch_offers_no_delegation() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let mut settings = settings(project.path(), state.path(), &mock.base_url);
+    with_a_reviewer(&settings).await;
+    settings.unattended = true;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    turn(&app).await;
+    app.close().await.unwrap();
+
+    let request = mock.requests.lock().unwrap()[0].clone();
+    let tools: Vec<&str> = request["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool["function"]["name"].as_str())
+        .collect();
+    let text = request.to_string();
+    // The permissions summary names every tool of its table, as for a tool
+    // an agent did not select; the inventory names the agent's own.
+    let inventory = text
+        .split("Current capability inventory")
+        .nth(1)
+        .and_then(|rest| rest.split("Only tools in this inventory").next())
+        .unwrap();
+    for name in ["delegate_task", "task_status", "cancel_task"] {
+        assert!(
+            !tools.contains(&name) && !inventory.contains(name),
+            "{name}"
+        );
+    }
+    assert!(!text.contains("hand a task to"));
+}

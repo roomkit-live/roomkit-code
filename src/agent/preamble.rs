@@ -132,14 +132,15 @@ pub(super) struct Preamble {
 }
 
 /// The preamble of `profile` with its selected `native` tools, its skills
-/// and its MCP servers.
+/// and its MCP servers, whether every call carries an intent, and whether the
+/// engine serves it the delegation tools.
 pub(super) fn preamble(
     profile: &Agent,
     native: Vec<AiTool>,
     skills: &SkillRegistry,
     skill_roots: &[PathBuf],
     mcp: &[McpTools],
-    intent_required: bool,
+    (intent_required, delegates): (bool, bool),
 ) -> Preamble {
     let hidden = hides_mcp(mcp, intent_required, profile.context_window);
     let mut tools = native.clone();
@@ -147,9 +148,13 @@ pub(super) fn preamble(
     for server in mcp {
         tools.extend(server.tools.iter().cloned());
     }
-    // The engine serves every agent the delegation tools (RMK-1532): listed
-    // and declared outright with the native ones, though no agent selects them.
-    let delegation = crate::delegation::definitions();
+    // The engine serves the delegation tools (RMK-1532): listed and declared
+    // outright with the native ones, though no agent selects them.
+    let delegation = if delegates {
+        crate::delegation::definitions()
+    } else {
+        Vec::new()
+    };
     let served = [native.as_slice(), &delegation].concat();
     let listed = [tools.as_slice(), &delegation].concat();
     let base = base_prompt(profile, &listed, hidden);

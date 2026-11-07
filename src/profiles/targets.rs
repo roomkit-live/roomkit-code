@@ -6,13 +6,16 @@ use super::*;
 
 impl State {
     /// Sets the roster to the agents this project can use, as the agent files
-    /// read last list them.
+    /// read last list them; none while no agent is served `delegate_task`.
     pub(super) fn refresh_roster(&self) {
-        let agents = self
-            .agents()
-            .into_iter()
-            .map(|(agent, _)| (agent.id, agent.label))
-            .collect();
+        let agents = match self.delegation {
+            Some(_) => self
+                .agents()
+                .into_iter()
+                .map(|(agent, _)| (agent.id, agent.label))
+                .collect(),
+            None => Vec::new(),
+        };
         self.roster.set(agents);
     }
 }

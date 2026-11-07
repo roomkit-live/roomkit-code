@@ -165,6 +165,10 @@ pub(crate) struct Extensions {
     /// Whether the agent gets the mode tools, which wait for a person's
     /// approval: not when nobody watches the launch.
     pub mode_tools: bool,
+    /// Whether the agent is told of the delegation tools the engine serves it:
+    /// not when nobody watches the launch, which ends with its turn, before a
+    /// delegated task could end (RMK-1532).
+    pub delegation: bool,
     /// The mode policy the mode tools change.
     pub policy: crate::permissions::Policy,
     /// What resolves the conversation's image attachments for vision models.
@@ -194,6 +198,7 @@ pub(crate) async fn create(
         mcp,
         intent_required,
         max_tool_rounds,
+        delegation,
         images,
         ceiling,
         ..
@@ -204,7 +209,7 @@ pub(crate) async fn create(
         &skills,
         &skill_roots,
         &mcp,
-        intent_required,
+        (intent_required, delegation),
     );
     let mut entries: Vec<ToolEntry> = tools
         .into_iter()

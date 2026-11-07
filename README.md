@@ -325,7 +325,8 @@ result, or that it failed, in a turn of its own. `task_status` lists the
 conversation's tasks and `cancel_task` stops one. Each task sets its agent up
 from its current connection, skills and MCP servers, so an edit since applies,
 whether or not the agent was ever selected. The other agent can hand a task on
-in turn, three levels deep at most.
+in turn, three levels deep at most. A `--prompt` launch offers no delegation:
+it ends with its turn, before a task could end.
 
 The other agent reads the task and the `context` it was handed, not the
 conversation. It works under the conversation's mode, and nobody watches its

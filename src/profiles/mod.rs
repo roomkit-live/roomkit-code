@@ -180,7 +180,7 @@ impl Profiles {
         let compactions = resources.compactions.clone();
         let files = resources.files.clone();
         let roster = resources.roster.clone();
-        let profiles = Arc::new(Self {
+        Ok(Arc::new(Self {
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),
             require_tool_intent: settings.require_tool_intent,
@@ -219,14 +219,17 @@ impl Profiles {
                     pricing,
                 }),
             }),
-        });
-        profiles.state.lock().await.refresh_roster();
-        Ok(profiles)
+        }))
     }
 
     pub async fn initialize(&self, kit: &RoomKit<SqliteStore>) -> Result<ChannelId, String> {
         let mut state = self.state.lock().await;
-        state.delegation = Some(crate::delegation::handler(kit));
+        // A launch nobody watches ends with its turn, before a task it handed
+        // over could end: no agent is served the delegation tools then.
+        if !self.unattended {
+            state.delegation = Some(crate::delegation::handler(kit));
+            state.refresh_roster();
+        }
         let id = state.selected().unwrap_or_else(|| "code".into());
         let channel = ChannelId::new(&id).map_err(|_| "Invalid agent ID")?;
         let assembled = if let Some(profile) = state.agent(&id) {
@@ -338,6 +341,7 @@ impl Profiles {
             intent_required: self.require_tool_intent,
             max_tool_rounds: self.max_tool_rounds,
             mode_tools: !self.unattended,
+            delegation: !self.unattended,
             policy: self.policy.clone(),
             images: self.images.clone(),
             ceiling: ceiling(profile),
