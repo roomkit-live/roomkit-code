@@ -115,20 +115,31 @@ fn call(event: &RoomEvent) -> Option<&ToolCallContent> {
     }
 }
 
-/// What the call did, in its intent's words when the model gave one.
+/// What the call did, in its intent's words when the model gave one, else
+/// by its arguments' names and short values.
 fn label(call: &ToolCallContent) -> String {
-    let label = match call
+    let intent = call
         .intent
         .as_deref()
-        .filter(|intent| !intent.trim().is_empty())
-    {
-        Some(intent) => format!("{} · {intent}", call.tool_name),
-        None => {
-            let arguments = serde_json::Value::Object(call.arguments.clone()).to_string();
-            format!("{} {arguments}", call.tool_name)
-        }
+        .filter(|intent| !intent.trim().is_empty());
+    let label = match intent {
+        Some(intent) => format!("{} · {}", call.tool_name, head(intent)),
+        None => format!("{} {}", call.tool_name, arguments(call)),
     };
     clip(&one_line(&label), LINE_CHARS)
+}
+
+/// `name=value` for each argument, read no further than a line shows: a
+/// write's argument can hold a whole file, and the panel is redrawn each
+/// second.
+fn arguments(call: &ToolCallContent) -> String {
+    let shown: Vec<String> = call
+        .arguments
+        .iter()
+        .take(LINE_CHARS / 4)
+        .map(|(name, value)| format!("{name}={}", short(value)))
+        .collect();
+    shown.join(" ")
 }
 
 fn ended_line(call: &ToolCallContent) -> String {
@@ -144,15 +155,28 @@ fn ended_line(call: &ToolCallContent) -> String {
     }
 }
 
-/// The call's error, else its result, as text.
+/// The start of the call's error, else of its result.
 fn result(call: &ToolCallContent) -> String {
-    if let Some(error) = &call.error {
-        return error.clone();
+    match &call.error {
+        Some(error) => head(error),
+        None => short(&call.result),
     }
-    match &call.result {
-        serde_json::Value::String(text) => text.clone(),
+}
+
+/// The start of `value` as a line shows it, without reading a long text or
+/// a structure through.
+fn short(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => head(text),
+        serde_json::Value::Array(_) => "[…]".to_owned(),
+        serde_json::Value::Object(_) => "{…}".to_owned(),
         other => other.to_string(),
     }
+}
+
+/// The start of `text`, enough for a line once its spaces are folded.
+fn head(text: &str) -> String {
+    text.chars().take(LINE_CHARS * 4).collect()
 }
 
 fn message(content: &EventContent) -> String {
@@ -229,7 +253,7 @@ mod tests {
         assert_eq!(
             render(&events, "Review"),
             "Task: Review the diff\n\
-             ⊘ shell {\"command\":\"cargo test\"} · refused: needs the person's approval more\n\
+             ⊘ shell command=cargo test · refused: needs the person's approval more\n\
              Review: I could not run it.\n\
              … shell · Run the tests\n"
         );

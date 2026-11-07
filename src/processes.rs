@@ -8,8 +8,7 @@ use roomkit_tools_process::{
     ObservedProcess, ProcessChunk, ProcessReadInput, ProcessSession, ProcessState, ProcessStopInput,
 };
 use roomkit_tui::protocol::{
-    BackgroundStatus, Choice, Event, PanelSpec, SidebarContent, SidebarEntry, SidebarSection,
-    SidebarTone,
+    Choice, Event, PanelSpec, SidebarContent, SidebarEntry, SidebarSection, SidebarTone,
 };
 use roomkit_tui_engine::{CommandResult, SessionConfig};
 use tokio::sync::watch;
@@ -52,6 +51,27 @@ impl Processes {
         self.sidebar.borrow().1.clone()
     }
 
+    /// The exit warning, then the background status, both counting the
+    /// delegated tasks that run too. The terminal applies events in order but
+    /// reads keys between bounded batches: the warning goes first, so a
+    /// visible badge means Ctrl+D already asks for confirmation.
+    async fn background(
+        &self,
+        current: &SessionConfig,
+        running: usize,
+        tasks: &crate::delegation::Tasks,
+    ) -> [Event; 2] {
+        let room = current.room.as_str();
+        let delegated = tasks.of(room).iter().filter(|(_, t)| t.running()).count();
+        [
+            self.exit_warning(room, tasks.running()).await,
+            Event::BackgroundChanged {
+                conversation: room.into(),
+                status: crate::background::status(running, delegated),
+            },
+        ]
+    }
+
     /// Closing the application stops every running process and delegated
     /// task, whatever its owner or conversation; the terminal states it
     /// before detaching.
@@ -65,7 +85,7 @@ impl Processes {
             .count();
         Event::ExitWarning {
             conversation: conversation.into(),
-            text: stopped(running, tasks),
+            text: crate::background::stopped(running, tasks),
         }
     }
 
@@ -96,22 +116,7 @@ impl Processes {
                     .iter()
                     .filter(|j| j.process.status.state == ProcessState::Running)
                     .count();
-                // The terminal applies events in order but reads keys between
-                // bounded batches: send the warning first, so a visible badge
-                // means Ctrl+D already asks for confirmation.
-                let delegated = tasks
-                    .of(current.room.as_str())
-                    .iter()
-                    .filter(|(_, task)| task.running())
-                    .count();
-                let mut events = vec![
-                    this.exit_warning(current.room.as_str(), tasks.running())
-                        .await,
-                    Event::BackgroundChanged {
-                        conversation: current.room.as_str().into(),
-                        status: background(running, delegated),
-                    },
-                ];
+                let mut events = Vec::from(this.background(&current, running, &tasks).await);
                 if let Some(panel) = &panel {
                     events.push(Event::PanelUpdated {
                         conversation: current.room.as_str().into(),
@@ -471,48 +476,6 @@ async fn room_access(
         })
 }
 
-/// What closing stops, if anything: `processes` running processes and
-/// `tasks` delegated tasks.
-fn stopped(processes: usize, tasks: usize) -> Option<String> {
-    let count = |n: usize, one: &str, many: &str| match n {
-        0 => None,
-        1 => Some(format!("1 {one}")),
-        n => Some(format!("{n} {many}")),
-    };
-    let parts: Vec<String> = [
-        count(processes, "running process", "running processes"),
-        count(tasks, "delegated task", "delegated tasks"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    (!parts.is_empty()).then(|| format!("{} will be stopped", parts.join(" and ")))
-}
-
-/// The view's background status: its running processes, which it opens, and
-/// its conversation's running tasks, which it opens when no process runs.
-fn background(processes: usize, tasks: usize) -> Option<BackgroundStatus> {
-    let tasks_label = format!("Tasks: {tasks} running");
-    match (processes, tasks) {
-        (0, 0) => None,
-        (0, _) => Some(BackgroundStatus::new(
-            tasks_label,
-            crate::delegation::panel::COMMAND,
-            "",
-        )),
-        (_, 0) => Some(BackgroundStatus::new(
-            format!("Processes: {processes} running"),
-            "processes",
-            "",
-        )),
-        _ => Some(BackgroundStatus::new(
-            format!("Processes: {processes} running · {tasks_label}"),
-            "processes",
-            "",
-        )),
-    }
-}
-
 fn offsets(panel: &Panel, job: &Job) -> (u64, u64) {
     panel.offsets.unwrap_or_else(|| {
         (
@@ -610,41 +573,4 @@ fn sidebar(jobs: &[Job]) -> SidebarSection {
     }
     SidebarSection::new("Processes", SidebarContent::Entries { entries })
         .with_action(crate::profiles::sidebar::action("processes", ""))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Closing names what it stops, processes and delegated tasks alike; the
-    /// background status opens the processes while one runs, else the tasks.
-    #[test]
-    fn closing_and_the_background_status_count_processes_and_tasks() {
-        assert_eq!(stopped(0, 0), None);
-        assert_eq!(
-            stopped(1, 0).as_deref(),
-            Some("1 running process will be stopped")
-        );
-        assert_eq!(
-            stopped(2, 1).as_deref(),
-            Some("2 running processes and 1 delegated task will be stopped")
-        );
-        assert_eq!(
-            stopped(0, 3).as_deref(),
-            Some("3 delegated tasks will be stopped")
-        );
-        assert_eq!(background(0, 0), None);
-        let status = |p, t| background(p, t).map(|s| (s.label, s.command));
-        assert_eq!(
-            status(0, 2),
-            Some(("Tasks: 2 running".into(), "tasks".into()))
-        );
-        assert_eq!(
-            status(1, 1),
-            Some((
-                "Processes: 1 running · Tasks: 1 running".into(),
-                "processes".into()
-            ))
-        );
-    }
 }

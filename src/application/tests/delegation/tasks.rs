@@ -92,6 +92,27 @@ async fn tasks(
     }
 }
 
+/// Whether `/tasks` with `arguments` closed the panel, opening none.
+async fn tasks_dismissed(
+    handler: &crate::sessions::Sessions,
+    current: &SessionConfig,
+    arguments: &str,
+) -> bool {
+    let request = Request::new(
+        RequestId::new(2),
+        "tasks",
+        current.room.as_str(),
+        Command::Invoke {
+            name: "tasks".into(),
+            arguments: arguments.into(),
+        },
+    );
+    matches!(
+        handler.handle(request, current.clone()).await,
+        Ok(CommandResult::Events(events)) if events.is_empty()
+    )
+}
+
 /// The panel's action whose value ends with `action`.
 fn action(panel: &PanelSpec, action: &str) -> String {
     let value = format!("{}:{action}", panel.id);
@@ -201,7 +222,28 @@ async fn a_running_task_is_listed_and_stopped_from_the_view() {
     );
     assert!(followed.contains("Task: "), "{followed}");
 
-    // Stopping it cancels it: the worker never answers, and the view says so.
+    // The list's actions belong to the panel the list was: once the task is
+    // opened, they are refused.
+    let stale = action(&list, &format!("open:{}", task.id));
+    assert!(tasks(&handler, &app.view, &stale).await.is_err());
+
+    // Stopping it while its worker waits on the model cancels it: the
+    // engine tells the delegating agent, the view says so, and the worker
+    // asks nothing more.
+    let worker = |requests: &Arc<Mutex<Vec<Value>>>| {
+        let requests = requests.lock().unwrap();
+        requests
+            .iter()
+            .filter(|r| r.to_string().contains(WORKER))
+            .count()
+    };
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while worker(&requests) < 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
     let stopped = tasks(&handler, &app.view, &action(&open, "stop"))
         .await
         .unwrap();
@@ -211,6 +253,20 @@ async fn a_running_task_is_listed_and_stopped_from_the_view() {
             .iter()
             .any(|choice| choice.label == "Stop task")
     );
+    let told = |request: &Value| {
+        let last = request["messages"].as_array().unwrap().last().unwrap();
+        let last = last.to_string();
+        !request.to_string().contains(WORKER)
+            && last.contains("Background task from")
+            && last.contains("cancelled.")
+    };
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !requests.lock().unwrap().iter().any(told) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
     let notice = until(&mut updates, |event| match event {
         Event::Notice { text, .. } if text.starts_with("Task for Review cancelled") => {
             Some(text.clone())
@@ -230,14 +286,18 @@ async fn a_running_task_is_listed_and_stopped_from_the_view() {
         "{}",
         ended.state()
     );
-    // The worker made its call, then was stopped in its next request.
-    let worker = requests
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|request| request.to_string().contains(WORKER))
-        .count();
-    assert_eq!(worker, 2);
+    assert_eq!(worker(&requests), 2);
+
+    // Dismissing the panel stops following it.
+    assert!(tasks_dismissed(&handler, &app.view, &stopped.dismiss).await);
+    assert!(!app.profiles.resources.tasks.panel.is_open());
+
+    // A view attached shows no panel: the one open is no longer followed.
+    tasks(&handler, &app.view, "").await.unwrap();
+    assert!(app.profiles.resources.tasks.panel.is_open());
+    let attached = handler.subscribe(app.view.clone()).unwrap();
+    assert!(!app.profiles.resources.tasks.panel.is_open());
+    drop(attached);
 
     drop(updates);
     app.close().await.unwrap();

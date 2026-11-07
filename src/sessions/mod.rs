@@ -287,14 +287,7 @@ impl Sessions {
             }
             "tasks" => {
                 let tasks = &self.profiles.resources.tasks;
-                crate::delegation::panel::handle(
-                    &self.kit,
-                    tasks,
-                    &tasks.panel,
-                    &current,
-                    arguments,
-                )
-                .await
+                crate::delegation::panel::handle(&self.kit, tasks, &current, arguments).await
             }
             "tools" => self.tools(&current, arguments).await,
             "mode" => self.mode(&current, arguments).await,

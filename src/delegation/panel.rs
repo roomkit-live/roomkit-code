@@ -5,6 +5,7 @@
 //! run beside the processes. A view sees only its conversation's tasks, and
 //! those their workers handed on.
 
+use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -22,6 +23,23 @@ pub(crate) const COMMAND: &str = "tasks";
 
 /// How many ended tasks the sidebar lists under those that run.
 const ENDED_LISTED: usize = 3;
+
+/// How many tasks the list offers to open: the terminal shows no panel of
+/// more than 64 actions.
+const LISTED: usize = 60;
+
+/// How many characters of an agent's label a panel or the sidebar shows: a
+/// label the terminal takes holds 256 bytes at most.
+const AGENT_CHARS: usize = 40;
+
+/// How many bytes of a task's text the panel shows above its conversation.
+const INPUT_BYTES: usize = 4096;
+
+/// How often the panel is refreshed while it follows a task that runs.
+const FOLLOW: Duration = Duration::from_secs(1);
+
+/// How often the sidebar counts a running task's seconds.
+const COUNT: Duration = Duration::from_secs(2);
 
 /// The panel a view opened: one at a time, as the processes'.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,6 +65,17 @@ impl Panel {
     fn set(&self, open: Option<Open>) {
         *crate::sync::lock(&self.0) = open;
     }
+
+    /// Forgets the open panel: a view attached shows none, and the terminal
+    /// drops one without saying so.
+    pub(crate) fn close(&self) {
+        self.set(None);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_open(&self) -> bool {
+        self.get().is_some()
+    }
 }
 
 fn shown_in(open: &Open, current: &SessionConfig) -> bool {
@@ -57,7 +86,6 @@ fn shown_in(open: &Open, current: &SessionConfig) -> bool {
 pub(crate) async fn handle(
     kit: &RoomKit<SqliteStore>,
     tasks: &Tasks,
-    panel: &Panel,
     current: &SessionConfig,
     arguments: &str,
 ) -> Result<CommandResult, String> {
@@ -78,14 +106,15 @@ pub(crate) async fn handle(
             }
         }
         Some((id, action)) => {
-            let open = panel
+            let open = tasks
+                .panel
                 .get()
                 .filter(|open| open.id == id && shown_in(open, current))
                 .ok_or("This task action belongs to an older view")?;
             match act(kit, tasks, current, open, action).await? {
                 Some(open) => open,
                 None => {
-                    panel.set(None);
+                    tasks.panel.close();
                     return Ok(CommandResult::Events(Vec::new()));
                 }
             }
@@ -93,7 +122,7 @@ pub(crate) async fn handle(
     };
     open.id = uuid::Uuid::new_v4().to_string();
     let spec = render(kit, tasks, &open, current.organization.clone()).await;
-    panel.set(Some(open));
+    tasks.panel.set(Some(open));
     Ok(CommandResult::Events(vec![Event::Panel {
         conversation: room.into(),
         panel: spec,
@@ -118,22 +147,7 @@ async fn act(
                 .as_deref()
                 .and_then(|id| tasks.find(room, id))
                 .ok_or("This conversation has no such task")?;
-            if !task.running() {
-                return Err("This task already ended".into());
-            }
-            let options = CancelTaskOptions {
-                organization_id: current.organization.clone(),
-            };
-            if !kit.cancel_task(&task.id, options).await {
-                return Err("This task already ended".into());
-            }
-            // The engine's hook records the end too, but runs apart: the
-            // panel shows the task stopped at once.
-            let took = task.started.elapsed();
-            tasks.ended(Task {
-                ended: Some((took, Outcome::Cancelled)),
-                ..task
-            });
+            stop(kit, tasks, current, task).await?;
         }
         _ => {
             let id = action.strip_prefix("open:").ok_or("Unknown task action")?;
@@ -146,14 +160,36 @@ async fn act(
     Ok(Some(open))
 }
 
+/// Cancels `task`, which the engine ends cancelled: its worker stops, and
+/// the agent that handed it over is told.
+async fn stop(
+    kit: &RoomKit<SqliteStore>,
+    tasks: &Tasks,
+    current: &SessionConfig,
+    task: Task,
+) -> Result<(), String> {
+    let options = CancelTaskOptions {
+        organization_id: current.organization.clone(),
+    };
+    if !task.running() || !kit.cancel_task(&task.id, options).await {
+        return Err("This task already ended".into());
+    }
+    // The engine's hook records the end too, but runs apart: the panel shows
+    // the task stopped at once.
+    let took = task.started.elapsed();
+    tasks.ended(Task {
+        ended: Some((took, Outcome::Cancelled)),
+        ..task
+    });
+    Ok(())
+}
+
 /// What a view's live events show of its conversation's tasks.
 pub(crate) struct Live {
     /// The open panel as it stands now.
     pub(crate) panel: Option<Event>,
     pub(crate) section: SidebarSection,
-    /// How soon the view needs them again: each second while the panel
-    /// follows a task that runs, every two while the sidebar counts one's
-    /// seconds.
+    /// How soon the view needs them again, if it does.
     pub(crate) poll: Option<Duration>,
 }
 
@@ -163,19 +199,23 @@ pub(crate) async fn live(
     current: &SessionConfig,
 ) -> Live {
     let room = current.room.as_str();
-    let update = update(kit, tasks, &tasks.panel, current).await;
+    let update = update(kit, tasks, current).await;
     let follows = update.as_ref().is_some_and(|(_, follows)| *follows);
     let counting = tasks.of(room).iter().any(|(_, task)| task.running());
-    let poll = if follows {
-        Some(Duration::from_secs(1))
-    } else {
-        counting.then(|| Duration::from_secs(2))
-    };
     Live {
         panel: update.map(|(event, _)| event),
         section: sidebar(tasks, room),
-        poll,
+        poll: poll(follows, counting),
     }
+}
+
+/// Each second while the panel follows a task that runs, every two while the
+/// sidebar counts one's seconds, else never.
+fn poll(follows: bool, counting: bool) -> Option<Duration> {
+    if follows {
+        return Some(FOLLOW);
+    }
+    counting.then_some(COUNT)
 }
 
 /// The open panel as it stands now, for `current`'s view if it has it open,
@@ -183,10 +223,9 @@ pub(crate) async fn live(
 async fn update(
     kit: &RoomKit<SqliteStore>,
     tasks: &Tasks,
-    panel: &Panel,
     current: &SessionConfig,
 ) -> Option<(Event, bool)> {
-    let open = panel.get().filter(|open| shown_in(open, current))?;
+    let open = tasks.panel.get().filter(|open| shown_in(open, current))?;
     let follows = open
         .selected
         .as_deref()
@@ -205,60 +244,102 @@ async fn render(
     open: &Open,
     organization: Option<String>,
 ) -> PanelSpec {
-    let mut spec = PanelSpec::new(open.id.clone(), COMMAND, "Tasks · this conversation", "")
+    let spec = PanelSpec::new(open.id.clone(), COMMAND, "Tasks · this conversation", "")
         .with_dismiss(format!("{}:dismiss", open.id));
-    let action = |value: &str, label: &str, description: &str| {
-        Choice::new(format!("{}:{value}", open.id), label).with_description(description)
-    };
-    let Some(id) = &open.selected else {
-        spec.body = "Tasks this conversation's agents handed to other agents, and those they \
-            handed on, since the application started. Closing the application stops the \
-            tasks that run.\n\n"
-            .into();
-        let listed = tasks.of(&open.room);
-        if listed.is_empty() {
-            spec.body.push_str("No tasks.\n");
-        }
-        for (depth, task) in listed {
-            let indent = "  ".repeat(depth);
-            let label = format!("{indent}{} · {}", task.agent, task.state());
-            spec.body
-                .push_str(&format!("{label}\n{indent}  {}\n", task.preview()));
-            spec.actions.push(action(
-                &format!("open:{}", task.id),
-                &label,
-                &task.preview(),
-            ));
-        }
-        return spec;
-    };
-    spec.actions.push(action("list", "Back to task list", ""));
+    match &open.selected {
+        None => list(spec, tasks, open),
+        Some(id) => detail(spec, kit, tasks, open, id, organization).await,
+    }
+}
+
+fn action(open: &Open, value: &str, label: &str, description: &str) -> Choice {
+    Choice::new(format!("{}:{value}", open.id), label).with_description(description)
+}
+
+/// The conversation's tasks, at most [`LISTED`]: those that run, then the
+/// latest ended, each after the task that handed it on.
+fn list(mut spec: PanelSpec, tasks: &Tasks, open: &Open) -> PanelSpec {
+    spec.body = "Tasks this conversation's agents handed to other agents, and those they \
+        handed on, the latest ended among them. Closing the application stops the tasks \
+        that run.\n\n"
+        .into();
+    let listed = tasks.of(&open.room);
+    if listed.is_empty() {
+        spec.body.push_str("No tasks.\n");
+    }
+    let shown = shown(&listed);
+    for (depth, task) in listed.iter().filter(|(_, task)| shown.contains(&task.id)) {
+        let indent = "  ".repeat(*depth);
+        let label = format!(
+            "{indent}{} · {}",
+            clip(&task.agent, AGENT_CHARS),
+            task.state()
+        );
+        spec.body
+            .push_str(&format!("{label}\n{indent}  {}\n", task.preview()));
+        let value = format!("open:{}", task.id);
+        spec.actions
+            .push(action(open, &value, &label, &task.preview()));
+    }
+    let hidden = listed.len() - shown.len();
+    if hidden > 0 {
+        spec.body
+            .push_str(&format!("\n{hidden} older ended tasks are not listed.\n"));
+    }
+    spec
+}
+
+/// The IDs of the tasks the list shows: every one that runs, then the latest
+/// ended, [`LISTED`] in all.
+fn shown(listed: &[(usize, Task)]) -> HashSet<String> {
+    let running = listed.iter().filter(|(_, task)| task.running());
+    let ended = listed.iter().rev().filter(|(_, task)| !task.running());
+    running
+        .chain(ended)
+        .take(LISTED)
+        .map(|(_, task)| task.id.clone())
+        .collect()
+}
+
+/// Task `id`: its agent, state and task, then its conversation as text.
+async fn detail(
+    mut spec: PanelSpec,
+    kit: &RoomKit<SqliteStore>,
+    tasks: &Tasks,
+    open: &Open,
+    id: &str,
+    organization: Option<String>,
+) -> PanelSpec {
+    spec.actions
+        .push(action(open, "list", "Back to task list", ""));
     let Some(task) = tasks.find(&open.room, id) else {
         spec.body = "This task is no longer listed.".into();
         return spec;
     };
-    spec.title = format!("Task for {} · {}", task.agent, task.state());
+    let agent = clip(&task.agent, AGENT_CHARS);
+    spec.title = format!("Task for {agent} · {}", task.state());
     spec.body = details(&task);
     spec.body.push_str("\nIts conversation, the latest last:\n");
-    let conversation = super::transcript::read(kit, &task.room, &task.agent, organization);
+    let conversation = super::transcript::read(kit, &task.room, &agent, organization);
     spec.body.push_str(&conversation.await);
     if task.running() {
-        spec.actions.push(action(
-            "stop",
-            "Stop task",
-            "Cancel this task; its agent stops working on it",
-        ));
+        let description = "Cancel this task; its agent stops working on it";
+        spec.actions
+            .push(action(open, "stop", "Stop task", description));
     }
     spec
 }
 
 fn details(task: &Task) -> String {
+    let mut input = cut(&task.input, INPUT_BYTES).to_owned();
+    if input.len() < task.input.len() {
+        input.push_str("… (cut)");
+    }
     format!(
-        "Agent: {}\nState: {}\nConversation: {}\n\nTask:\n{}\n",
-        task.agent,
+        "Agent: {}\nState: {}\nConversation: {}\n\nTask:\n{input}\n",
+        clip(&task.agent, AGENT_CHARS),
         task.state(),
         task.room,
-        task.input
     )
 }
 
@@ -277,8 +358,8 @@ fn sidebar(tasks: &Tasks, room: &str) -> SidebarSection {
                 SidebarTone::Muted
             };
             let mark = if task.running() { "●" } else { "○" };
-            SidebarEntry::new(format!("{mark} {}", clip(&task.agent, 60)))
-                .with_detail(clip(&task.state(), 64))
+            SidebarEntry::new(format!("{mark} {}", clip(&task.agent, AGENT_CHARS)))
+                .with_detail(task.state())
                 .with_tone(tone)
                 .with_action(crate::profiles::sidebar::action(COMMAND, task.id.clone()))
         })
@@ -292,4 +373,110 @@ fn sidebar(tasks: &Tasks, room: &str) -> SidebarSection {
 
 fn clip(text: &str, limit: usize) -> String {
     text.chars().take(limit).collect()
+}
+
+/// `text` within `bytes`, cut at a character's boundary.
+fn cut(text: &str, bytes: usize) -> &str {
+    if text.len() <= bytes {
+        return text;
+    }
+    let end = (0..=bytes)
+        .rev()
+        .find(|index| text.is_char_boundary(*index))
+        .unwrap_or_default();
+    &text[..end]
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::panic, reason = "A broken fixture fails the test")]
+    use std::time::Instant;
+
+    use super::*;
+
+    fn task(id: &str, ended: bool) -> Task {
+        Task {
+            id: id.into(),
+            parent: "main".into(),
+            room: format!("main::{id}"),
+            agent: "Review".into(),
+            input: format!("Task {id}"),
+            started: Instant::now(),
+            ended: ended.then_some((Duration::from_secs(3), Outcome::Completed)),
+        }
+    }
+
+    fn open(selected: Option<&str>) -> Open {
+        Open {
+            id: "p1".into(),
+            room: "main".into(),
+            agent: "code".into(),
+            selected: selected.map(String::from),
+        }
+    }
+
+    /// The panel follows a running task each second; the sidebar counts one's
+    /// seconds every two; nothing polls without a task that runs.
+    #[test]
+    fn the_view_is_polled_only_while_a_task_runs() {
+        assert_eq!(poll(true, true), Some(FOLLOW));
+        assert_eq!(poll(false, true), Some(COUNT));
+        assert_eq!(poll(false, false), None);
+    }
+
+    /// The sidebar lists every task that runs, then the three latest ended.
+    #[test]
+    fn the_sidebar_lists_running_tasks_then_the_latest_ended() {
+        let tasks = Tasks::default();
+        for n in 0..5 {
+            tasks.ended(task(&format!("e{n}"), true));
+        }
+        tasks.started(task("r", false));
+        let SidebarContent::Entries { entries } = sidebar(&tasks, "main").content else {
+            panic!("Expected entries");
+        };
+        let details: Vec<&str> = entries.iter().map(|e| e.detail.as_str()).collect();
+        assert_eq!(entries.len(), 1 + ENDED_LISTED, "{details:?}");
+        assert!(details[0].starts_with("running"), "{details:?}");
+        let SidebarContent::Entries { entries } = sidebar(&tasks, "other").content else {
+            panic!("Expected entries");
+        };
+        assert_eq!(entries[0].label, "No tasks");
+    }
+
+    /// The list offers at most [`LISTED`] tasks, every one that runs among
+    /// them, and says how many it leaves out.
+    #[test]
+    fn the_list_stays_within_the_terminal_s_actions() {
+        let tasks = Tasks::default();
+        for n in 0..15 {
+            tasks.started(task(&format!("r{n}"), false));
+        }
+        for n in 0..50 {
+            tasks.ended(task(&format!("e{n}"), true));
+        }
+        let spec = list(PanelSpec::new("p1", COMMAND, "", ""), &tasks, &open(None));
+        assert_eq!(spec.actions.len(), LISTED);
+        let running = spec.actions.iter().filter(|a| a.value.contains(":open:r"));
+        assert_eq!(running.count(), 15);
+        assert!(
+            spec.body
+                .contains("\n5 older ended tasks are not listed.\n")
+        );
+    }
+
+    /// A long task and a long label are cut to what the terminal takes.
+    #[test]
+    fn long_texts_are_cut_to_the_terminal_s_limits() {
+        let mut long = task("t", false);
+        long.input = "é".repeat(INPUT_BYTES);
+        long.agent = "a".repeat(300);
+        let text = details(&long);
+        assert!(text.len() < INPUT_BYTES + 400, "{}", text.len());
+        assert!(text.contains("… (cut)"));
+        let tasks = Tasks::default();
+        tasks.started(long);
+        let spec = list(PanelSpec::new("p1", COMMAND, "", ""), &tasks, &open(None));
+        assert!(spec.actions[0].label.len() <= 256);
+    }
 }

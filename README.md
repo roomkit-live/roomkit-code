@@ -365,13 +365,14 @@ The status line says when a task starts and how it ended. The sidebar's
 **Tasks** lists the conversation's tasks that run, then the latest ended,
 with how long they ran. **/tasks**, a click on a task, or the footer's
 **Tasks** status, which F6 opens while no process runs, show the
-conversation's tasks since the application started, those their agents handed
-on included. Open one to see its agent, state and the task it was given,
-then its conversation as text, refreshed each second while it runs: what its
-agent said, and each tool it called with how the call ended or that it still
-runs. **Stop task** cancels one that runs: its agent stops, and the agent
-that handed it over is told it was cancelled. Closing the application stops
-the tasks that run, and Ctrl+D says so first, as for processes.
+conversation's tasks, those their agents handed on included: every one that
+runs, and the latest ended while the application runs. Open one to see its
+agent, state and the task it was given, then its conversation as text,
+refreshed each second while it runs: what its agent said, and each tool it
+called with how the call ended or that it still runs. **Stop task** cancels
+one that runs: its agent stops, and the agent that handed it over is told it
+was cancelled. Closing the application stops the tasks that run, and Ctrl+D
+says so first, as for processes.
 
 ## Tools and persistence
 

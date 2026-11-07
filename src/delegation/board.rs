@@ -104,11 +104,17 @@ impl Default for Tasks {
 }
 
 impl Tasks {
-    /// Records `task` started. A task already recorded stays as it is: the
-    /// hooks run apart, and a quick task's end can be told first.
+    /// Records `task` started. A task already recorded stays ended: the hooks
+    /// run apart, and a quick task's end can be told first, without the task
+    /// it was given, which its start then fills in.
     pub(crate) fn started(&self, task: Task) {
         let mut board = crate::sync::lock(&self.board);
-        if board.tasks.iter().any(|known| known.id == task.id) {
+        if let Some(known) = board.tasks.iter_mut().find(|known| known.id == task.id) {
+            if known.input.is_empty() {
+                known.input = task.input;
+            }
+            drop(board);
+            self.changes.send_replace(());
             return;
         }
         let text = format!("Task for {} started: {}", task.agent, task.preview());
@@ -209,16 +215,35 @@ fn descend(tasks: &[Task], room: &str, depth: usize, listed: &mut Vec<(usize, Ta
     }
 }
 
-/// Drops the oldest ended tasks past [`KEPT`].
+/// Drops the oldest ended tasks past [`KEPT`], never one that runs nor one a
+/// running task was handed on from, which lists it.
 fn trim(tasks: &mut Vec<Task>) {
+    let needed = handing_on(tasks);
     let mut ended = tasks.iter().filter(|task| !task.running()).count();
     tasks.retain(|task| {
-        if ended <= KEPT || task.running() {
+        if ended <= KEPT || task.running() || needed.contains(&task.id) {
             return true;
         }
         ended -= 1;
         false
     });
+}
+
+/// The IDs of the tasks a running task was handed on from, at any depth.
+fn handing_on(tasks: &[Task]) -> std::collections::HashSet<String> {
+    let mut needed = std::collections::HashSet::new();
+    for task in tasks.iter().filter(|task| task.running()) {
+        let mut room = task.parent.as_str();
+        // The depth bound only guards against a cycle.
+        for _ in 0..=crate::delegation::MAX_DEPTH {
+            let Some(parent) = tasks.iter().find(|known| known.room == room) else {
+                break;
+            };
+            needed.insert(parent.id.clone());
+            room = parent.parent.as_str();
+        }
+    }
+    needed
 }
 
 /// `task` on one line, cut at [`TASK_PREVIEW`] characters.
@@ -301,11 +326,14 @@ mod tests {
         let a = tasks.find("main", "a").unwrap();
         assert_eq!(a.state(), "completed in 58 s");
 
-        tasks.ended(ended(task("quick", "main", "main::q"), Outcome::Cancelled));
+        let mut told = ended(task("quick", "main", "main::q"), Outcome::Cancelled);
+        told.input = String::new();
+        tasks.ended(told);
         tasks.started(task("quick", "main", "main::q"));
         assert_eq!(tasks.notices("main"), ["Task for Review cancelled"]);
         let quick = tasks.find("main", "quick").unwrap();
         assert_eq!(quick.state(), "cancelled after 58 s");
+        assert_eq!(quick.input, "Task quick");
         assert_eq!(tasks.running(), 0);
     }
 
@@ -321,5 +349,20 @@ mod tests {
         assert_eq!(listed.len(), KEPT + 1);
         assert_eq!(listed[0].1.id, "running");
         assert_eq!(listed[1].1.id, "3");
+    }
+
+    /// A task that ended stays while a task handed on from it runs: the list
+    /// reaches the running one through it.
+    #[test]
+    fn an_ended_task_stays_while_one_handed_on_from_it_runs() {
+        let tasks = Tasks::default();
+        tasks.started(task("parent", "main", "main::p"));
+        tasks.started(task("child", "main::p", "main::p::c"));
+        tasks.ended(ended(task("parent", "main", "main::p"), Outcome::Completed));
+        for n in 0..KEPT + 3 {
+            tasks.ended(ended(task(&n.to_string(), "main", "x"), Outcome::Failed));
+        }
+        let listed: Vec<String> = tasks.of("main").into_iter().map(|(_, t)| t.id).collect();
+        assert_eq!(&listed[..2], ["parent", "child"]);
     }
 }

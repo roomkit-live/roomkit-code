@@ -44,6 +44,9 @@ pub(super) fn subscribe(
     sessions: &Sessions,
     current: SessionConfig,
 ) -> watch::Receiver<Vec<Event>> {
+    // A view attached shows no tasks panel, and the terminal drops one
+    // without saying so: the panel is no longer followed.
+    sessions.profiles.resources.tasks.panel.close();
     let mut sources = Sources {
         processes: sessions.profiles.processes.subscribe(
             sessions.kit.clone(),
