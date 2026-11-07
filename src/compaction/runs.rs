@@ -9,17 +9,18 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use roomkit::model::RoomEvent;
 use tokio::sync::watch;
+
+use super::history::History;
 
 /// What compacts an agent's conversation outside its turns.
 pub(crate) trait Compactor: Send + Sync {
-    /// Compacts `events`, `room`'s history since the agent's latest
-    /// compaction, whatever its tier.
+    /// Compacts `history`, `room`'s since the agent's latest compaction,
+    /// whatever its tier.
     fn compact_now<'a>(
         &'a self,
         room: &'a str,
-        events: Vec<RoomEvent>,
+        history: History,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 }
 

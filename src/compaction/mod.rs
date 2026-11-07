@@ -88,6 +88,8 @@ pub(crate) struct Compactions {
     journal: line::Journal,
     /// The compactions running outside the turns.
     tasks: Mutex<Vec<tokio::task::AbortHandle>>,
+    /// Set as the application closes: no compaction starts outside the turns.
+    closed: std::sync::atomic::AtomicBool,
     changes: Arc<watch::Sender<()>>,
 }
 
@@ -117,6 +119,7 @@ impl Compactions {
             runs: Arc::new(runs::Runs::new(changes.clone())),
             journal: line::Journal::default(),
             tasks: Mutex::default(),
+            closed: std::sync::atomic::AtomicBool::new(false),
             changes,
         }
     }
@@ -268,21 +271,30 @@ impl Compactions {
     /// Compacts `agent`'s conversation in `room` in a task of its own, as
     /// `running` shows.
     fn start(self: &Arc<Self>, room: &str, agent: &str, running: runs::Running) {
+        // Taken under the tasks' lock, as `close` sets it: a compaction
+        // starts before the close, which aborts it, or not at all.
+        let mut tasks = crate::sync::lock(&self.tasks);
+        if self.closed.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
         let (compactions, room, agent) = (self.clone(), room.to_owned(), agent.to_owned());
         let task = tokio::spawn(async move {
             let _running = running;
             compactions.compact_now(&room, &agent).await;
         });
-        let mut tasks = crate::sync::lock(&self.tasks);
         tasks.retain(|task| !task.is_finished());
         tasks.push(task.abort_handle());
     }
 
-    /// Stops the compactions running outside the turns, before the engine
-    /// closes: one cut short records nothing, and the conversation compacts
-    /// again when it is resumed.
+    /// Stops the compactions running outside the turns before the engine
+    /// closes, and starts no more: one cut short records nothing, so the
+    /// conversation compacts again when it is resumed, or, cut while its line
+    /// is stored, keeps its record without its line.
     pub fn close(&self) {
-        for task in crate::sync::lock(&self.tasks).drain(..) {
+        let mut tasks = crate::sync::lock(&self.tasks);
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Release);
+        for task in tasks.drain(..) {
             task.abort();
         }
     }
@@ -299,7 +311,7 @@ impl Compactions {
         };
         let from = self.get(room, agent).map_or(0, |compacted| compacted.from);
         match history::read(kit, room, agent, from).await {
-            Some(events) => compactor.compact_now(room, events).await,
+            Some(history) => compactor.compact_now(room, history).await,
             None => {
                 self.force(room, agent);
                 self.notice(
@@ -455,6 +467,32 @@ mod tests {
             .await;
         let reopened = Compactions::new(dir.path());
         assert_eq!(reopened.get("room", "code"), Some(compacted(7)));
+    }
+
+    /// A second `/compact` while the first has not taken its flag yet leaves
+    /// it: the first still compacts.
+    #[tokio::test]
+    async fn a_compaction_asked_twice_keeps_the_first_one_s_flag() {
+        let compactions = Arc::new(Compactions::new(Path::new("/nonexistent")));
+        compactions.set_bounded("code", true);
+        // The task it spawns runs once this test yields.
+        assert_eq!(compactions.request("room", "code"), Requested::Started);
+        assert_eq!(compactions.request("room", "code"), Requested::Running);
+        assert!(compactions.take_forced("room", "code"));
+    }
+
+    /// Once the application closes, a compaction that waited for the turns
+    /// starts no more.
+    #[tokio::test]
+    async fn no_compaction_starts_once_closed() {
+        let compactions = Arc::new(Compactions::new(Path::new("/nonexistent")));
+        compactions.set_bounded("code", true);
+        compactions.turn_admitted("room");
+        assert_eq!(compactions.request("room", "code"), Requested::Queued);
+        compactions.close();
+        compactions.turn_finished("room");
+        assert!(crate::sync::lock(&compactions.tasks).is_empty());
+        assert!(!compactions.compacting("room"));
     }
 
     #[test]

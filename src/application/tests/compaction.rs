@@ -367,6 +367,139 @@ async fn compact_summarizes_the_messages_alone() {
     app.close().await.unwrap();
 }
 
+/// A size on a line, `≈19.9k` read as 19,900 tokens.
+fn tokens(size: &str) -> usize {
+    match size.strip_suffix('k') {
+        Some(thousands) => (thousands.parse::<f64>().unwrap() * 1_000.0) as usize,
+        None => size.parse().unwrap(),
+    }
+}
+
+/// The size after a line's arrow.
+fn after(line: &str) -> usize {
+    tokens(line.split("→ ≈").nth(1).unwrap().split(' ').next().unwrap())
+}
+
+/// The size before a line's arrow.
+fn before(line: &str) -> usize {
+    tokens(
+        line.split(" · ≈")
+            .nth(1)
+            .unwrap()
+            .split(' ')
+            .next()
+            .unwrap(),
+    )
+}
+
+/// Outside a turn, the sizes count what a turn replays of the agent's tool
+/// calls: the first turn's read, which the summary stands for, is in the
+/// size before the compaction, not after.
+#[tokio::test]
+async fn a_compaction_s_sizes_count_the_rounds_a_turn_replays() {
+    let (root, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let large: String = (0..1_500)
+        .map(|line| format!("line {line} of notes\n"))
+        .collect();
+    write(root.path(), "notes.md", &large);
+    let mock = Mock::start(vec![("read", json!({"path":"notes.md"}))]).await;
+    let (app, settings) = three_turns(root.path(), state.path(), &mock).await;
+    // Past the engine's bound, the round replays the read's preview,
+    // about 2,000 tokens, as its stored row holds it.
+    let read = mock.requests.lock().unwrap()[1].to_string();
+    assert!(
+        read.contains("line 1 of notes"),
+        "the round replays the read"
+    );
+    handler(&app, &settings)
+        .handle(invoke(&app, "compact"), app.view.clone())
+        .await
+        .unwrap();
+    let room = app.view.room.to_string();
+    let compactions = app.profiles.resources.compactions.clone();
+    until("the conversation compacts", || {
+        compactions.lines(&room).is_some()
+    })
+    .await;
+    let Some(Item::Message(line)) = compactions.lines(&room) else {
+        panic!("no line");
+    };
+    let saved = before(&line.text).saturating_sub(after(&line.text));
+    assert!(saved > 1_500, "the read's tokens were saved: {}", line.text);
+    app.close().await.unwrap();
+}
+
+/// Resumed, no turn measured yet what a request takes besides its history:
+/// the line reads it from the latest measured request, the system prompt
+/// and the tools in the size after the compaction.
+#[tokio::test]
+async fn a_resumed_conversation_s_line_counts_the_rest_of_the_request() {
+    let (root, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let measured = json!({"prompt_tokens": 20_000, "completion_tokens": 10});
+    let reports = vec![Some(measured); 3];
+    let mock = Mock::with_reports(vec![], "Project inspection complete.", reports).await;
+    let (app, settings) = three_turns(root.path(), state.path(), &mock).await;
+    app.close().await.unwrap();
+    drop(app);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    handler(&app, &settings)
+        .handle(invoke(&app, "compact"), app.view.clone())
+        .await
+        .unwrap();
+    let room = app.view.room.to_string();
+    let compactions = app.profiles.resources.compactions.clone();
+    until("the conversation compacts", || {
+        compactions.lines(&room).is_some()
+    })
+    .await;
+    let Some(Item::Message(line)) = compactions.lines(&room) else {
+        panic!("no line");
+    };
+    assert!(after(&line.text) > 15_000, "{}", line.text);
+    app.close().await.unwrap();
+}
+
+/// Resumed, the rest of the request read from the latest measured one leaves
+/// out what it replayed of the agent's rounds: the first turn's read, which
+/// the summary stands for, is in no size after the compaction.
+#[tokio::test]
+async fn a_resumed_conversation_s_line_leaves_out_the_summarized_rounds() {
+    let (root, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let large: String = (0..1_500)
+        .map(|line| format!("line {line} of notes\n"))
+        .collect();
+    write(root.path(), "notes.md", &large);
+    let measured = json!({"prompt_tokens": 20_000, "completion_tokens": 10});
+    let calls = vec![("read", json!({"path":"notes.md"}))];
+    let mock = Mock::with_reports(
+        calls,
+        "Project inspection complete.",
+        vec![Some(measured); 4],
+    )
+    .await;
+    let (app, settings) = three_turns(root.path(), state.path(), &mock).await;
+    app.close().await.unwrap();
+    drop(app);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    handler(&app, &settings)
+        .handle(invoke(&app, "compact"), app.view.clone())
+        .await
+        .unwrap();
+    let room = app.view.room.to_string();
+    let compactions = app.profiles.resources.compactions.clone();
+    until("the conversation compacts", || {
+        compactions.lines(&room).is_some()
+    })
+    .await;
+    let Some(Item::Message(line)) = compactions.lines(&room) else {
+        panic!("no line");
+    };
+    // 20,000 measured, less the read's preview of about 2,000 tokens.
+    let after = after(&line.text);
+    assert!((15_000..=18_500).contains(&after), "{}", line.text);
+    app.close().await.unwrap();
+}
+
 /// `/compact` sent while a turn runs waits for it: it is queued, the view
 /// says so, then it runs as the turn ends, with no message to wait for.
 #[tokio::test]

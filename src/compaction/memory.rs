@@ -17,6 +17,7 @@ use roomkit_ai::memory::{
 };
 use serde_json::Value;
 
+use super::history::History;
 use super::{Compacted, Compactions, Compactor, WINDOW, summary, tiers};
 
 /// Reads `agent`'s history under `ceiling` tokens, compacting it by tiers
@@ -54,8 +55,9 @@ impl Measured {
         self.total(compacted, 0).max(self.last.unwrap_or(0))
     }
 
-    /// What the latest measured request took besides its history, as no turn
-    /// of this run measured it yet: the system prompt and the tools.
+    /// What the latest measured request took besides its history and what
+    /// it replays, as no turn of this run measured it yet: the system prompt
+    /// and the tools.
     fn fixed_measured(&self, compacted: Option<&Compacted>) -> usize {
         let history = self.total(compacted, 0).saturating_sub(self.fixed);
         self.last.unwrap_or(0).saturating_sub(history)
@@ -203,19 +205,23 @@ impl<P: AiProvider> Compactor for TieredMemory<P> {
     fn compact_now<'a>(
         &'a self,
         room: &'a str,
-        mut events: Vec<RoomEvent>,
+        History {
+            mut events,
+            replayed,
+        }: History,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
             let agent = self.agent.as_str();
             let compacted = self.compactions.get(room, agent);
             let compacted = compacted.as_ref();
             let after = compacted.map_or(0, |c| c.at);
+            let mut footprint = TurnFootprint::new(0, 0);
+            footprint.replayed = replayed;
             let known = crate::sync::lock(&self.fixed).get(room).copied();
-            let fixed = known.unwrap_or_else(|| {
-                let unknown = measure(&events, (agent, after), &TurnFootprint::new(0, 0));
-                unknown.fixed_measured(compacted)
+            footprint.input_tokens = known.unwrap_or_else(|| {
+                measure(&events, (agent, after), &footprint).fixed_measured(compacted)
             });
-            let measured = measure(&events, (agent, after), &TurnFootprint::new(fixed, 0));
+            let measured = measure(&events, (agent, after), &footprint);
             self.compact((room, agent), compacted, &mut events, &measured, true)
                 .await;
         })
