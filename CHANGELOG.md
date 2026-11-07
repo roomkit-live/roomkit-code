@@ -2,12 +2,18 @@
 
 ## Unreleased
 
+- A model request that fails before its answer begins is tried 3 more times, 1, 2
+  then 4 seconds apart, when the failure may pass: a lost connection, a timeout,
+  a 429, 5xx, 408 or 409 answer. A refused request and an answer that began
+  streaming are not retried (RMK-1531).
+
 - `--prompt` sends one message without the terminal interface and exits with the
   turn's outcome; `--json` writes every conversation event as one JSON line.
   Approvals are refused, Plan mode's tools are not offered, SIGINT cuts the
   turn (HITL e079aac4). A turn's round limit stays 50 in the terminal and has
   none unattended (HITL 1603bb98); `--max-tool-rounds` and
   `[agent] max_tool_rounds` set it.
+
 - An agent whose model's window is known compacts its conversation by tiers
   instead of reading its latest 50 messages (HITL a2daedfe, db06dd3d). Under 80 %
   of its ceiling, the window or, when smaller, the input past which the model's

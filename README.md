@@ -624,7 +624,12 @@ tokens one reply may write; it is sent as `max_tokens`, or as
 `max_completion_tokens` to the OpenAI models that take it, and zero is refused.
 ChatGPT sign-in connections send no limit, whatever the setting. Failures
 explain timeout, access, rate limit, server and protocol errors without echoing
-raw provider responses or keys. Failed requests are not automatically retried.
+raw provider responses or keys. A request that fails before its answer begins
+is tried 3 more times, 1, 2 then 4 seconds apart, before the turn fails, when the
+failure may pass: a lost connection, a timeout, a rate limit (429), a server
+error (5xx), 408 or 409. A timeout waits the full **Timeout** again on each try.
+A refused request (an invalid key, a malformed request) is not retried, nor an
+answer that has begun streaming. The screen does not show these retries.
 Existing completed tool actions remain in the project and conversation.
 
 ### Compaction

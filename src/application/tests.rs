@@ -1161,21 +1161,26 @@ async fn missing_last_usage_is_unknown_and_previous_round_totals_are_partial() {
 
 #[tokio::test]
 async fn provider_timeouts_and_refusals_have_actionable_private_diagnostics() {
-    for (status, delay, expected) in [
+    // A timeout and a rate limit are tried 3 more times before the turn fails
+    // (RMK-1531); a refused credential is not.
+    for (status, delay, expected, tries) in [
         (
             axum::http::StatusCode::OK,
             Duration::from_secs(3),
             "timed out",
+            4,
         ),
         (
             axum::http::StatusCode::UNAUTHORIZED,
             Duration::ZERO,
             "access denied",
+            1,
         ),
         (
             axum::http::StatusCode::TOO_MANY_REQUESTS,
             Duration::ZERO,
             "quota",
+            4,
         ),
     ] {
         let project = tempfile::tempdir().unwrap();
@@ -1252,11 +1257,64 @@ async fn provider_timeouts_and_refusals_have_actionable_private_diagnostics() {
         assert!(!log.contains("secret-key") && !log.contains("private server details"));
         assert_eq!(
             calls.load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "failures are not silently retried"
+            tries,
+            "{expected}: only a failure worth another try is tried again"
         );
         server.abort();
     }
+}
+
+/// RMK-1531: a server that fails once with a 503 answers the next try, and
+/// the turn completes with that answer.
+#[tokio::test]
+async fn a_transient_provider_failure_is_tried_again_and_the_turn_completes() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = calls.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let router = Router::new().route(
+        "/v1/chat/completions",
+        post(move || {
+            let seen = seen.clone();
+            async move {
+                if seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    let busy = json!({"error":{"message":"overloaded"}}).to_string();
+                    return (
+                        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                        [("content-type", "application/json")],
+                        busy,
+                    );
+                }
+                let delta =
+                    json!({"choices":[{"index":0,"delta":{"content":"ANSWER_AFTER_RETRY"}}]});
+                let done = json!({"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]});
+                (
+                    axum::http::StatusCode::OK,
+                    [("content-type", "text/event-stream")],
+                    format!("data: {delta}\n\ndata: {done}\n\ndata: [DONE]\n\n"),
+                )
+            }
+        }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let app = Application::open(&settings(project.path(), state.path(), &base), "key".into())
+        .await
+        .unwrap();
+    let session = turn(&app).await.snapshot().cloned().unwrap();
+    app.close().await.unwrap();
+    server.abort();
+
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert!(
+        session
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::Message(m) if m.text == "ANSWER_AFTER_RETRY")),
+        "{:?}",
+        session.items
+    );
 }
 
 #[tokio::test]

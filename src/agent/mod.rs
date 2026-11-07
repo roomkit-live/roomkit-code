@@ -1,7 +1,7 @@
 //! The tools an agent is assembled with, and their assembly; `preamble`
 //! builds its system prompt and measures what its requests carry.
 
-use roomkit::model::ChannelId;
+use roomkit::model::{ChannelId, RetryPolicy};
 use roomkit_ai::{
     AiChannel, AiChannelOptions, AiTool, ImageResolver, SkillRegistry, Tool, ToolEntry,
     ToolHandler, compose_tool_handlers,
@@ -39,6 +39,23 @@ pub(crate) use preamble::{Composition, Inventory};
 /// The agent the application runs: an AI channel answering through an
 /// OpenAI-compatible endpoint.
 pub(crate) type CodeAgent = AiChannel<OpenAiAiProvider>;
+
+/// How an agent's generation that failed before its provider handed anything
+/// is tried again: the engine's default, 3 retries 1, 2 and 4 seconds apart, on
+/// the failures its provider marks retryable (a lost connection, a timeout, 408,
+/// 409, 429 and 5xx answers). A refusal of the request (401, 400…) and a
+/// context too long for the model are not retried; an answer that began
+/// streaming is never asked again (RMK-1531).
+fn retry_policy() -> RetryPolicy {
+    let policy = RetryPolicy::default();
+    // Tests count the tries, not the waits between them.
+    #[cfg(test)]
+    let policy = RetryPolicy {
+        base_delay_seconds: 0.01,
+        ..policy
+    };
+    policy
+}
 
 /// How many of the room's latest events a turn reads, as the engine handed
 /// every turn before it sized contexts by the channels' windows. The agent's
@@ -209,6 +226,7 @@ pub(crate) async fn create(
         tool_loop_timeout: None,
         max_tool_rounds,
         max_context_events: HISTORY,
+        retry_policy: Some(retry_policy()),
         memory: memory(ceiling, &provider, resources)?,
         image_resolver: Some(images),
         // Native tools stay declared; only MCP tools wait behind find_tools.
