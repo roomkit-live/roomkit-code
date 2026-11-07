@@ -1,6 +1,9 @@
 //! Application policy for scoped project instructions; never executable hooks.
 mod discovery;
+mod kept;
 mod tools;
+
+pub(crate) use kept::still_read;
 
 use roomkit_core::rules::transcript::{fence, json_text_line};
 use roomkit_tui::protocol::{Event, PanelSpec};

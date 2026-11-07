@@ -39,35 +39,49 @@ impl AgentSlot {
     pub fn disable(&self) {
         *crate::sync::write(&self.current) = None;
     }
-    /// What a turn reads as it starts: its mode's instruction and the project's.
-    async fn mode_and_project(&self, event: &RoomEvent) -> String {
+    /// What a turn reads as it starts: its mode's instruction, then what the
+    /// application tells it (`told`), then the project's instructions unless
+    /// the agent's history still replays them as they are. A standalone
+    /// instruction reads none of that history.
+    async fn instruction(
+        &self,
+        event: &RoomEvent,
+        history: &[RoomEvent],
+        told: Option<String>,
+    ) -> String {
         self.instructions
             .begin(event.room_id.as_str(), self.id.as_str());
-        let project = self.instructions.load(vec![], true).await;
-        format!(
-            "{}\n\n{}",
-            self.policy.instruction(event.room_id.as_str()),
-            project.render()
-        )
+        let project = self.instructions.load(vec![], true).await.render();
+        let mut parts = vec![self.policy.instruction(event.room_id.as_str()).to_owned()];
+        parts.extend(told);
+        let replayed = !roomkit_core::rules::instructions::is_standalone(event)
+            && crate::instructions::still_read(&project, history, &self.id, crate::agent::HISTORY);
+        if !replayed {
+            parts.push(project);
+        }
+        parts.join("\n\n")
     }
 
     /// What the agent receives for `event`. Keep the delivered user event intact,
     /// including images and its durable identity: the delegated channel receives
     /// an application Instruction after it, in this same turn. It is never
     /// committed as a user's words or inserted into the system prompt/tool
-    /// schemas. The engine's transcript renderer distinguishes application
-    /// instructions from participant text.
+    /// schemas: the kit keeps it as the agent's own row, which its later turns
+    /// replay where it was read (roomkit-rs RMK-1407). The engine's transcript
+    /// renderer distinguishes application instructions from participant text.
     async fn turn_input(&self, event: RoomEvent, context: &mut RoomContext) -> RoomEvent {
         match event.r#type {
             EventType::Message => {
                 if !context.recent_events.iter().any(|past| past.id == event.id) {
                     context.recent_events.push(event.clone());
                 }
-                let mode_and_project = self.mode_and_project(&event).await;
+                let instruction = self
+                    .instruction(&event, &context.recent_events, None)
+                    .await;
                 let mut input = RoomEvent::new(
                     event.room_id.clone(),
                     event.source.clone(),
-                    TextContent::new(mode_and_project),
+                    TextContent::new(instruction),
                 );
                 input.r#type = EventType::Instruction;
                 input.addressed_to = event.addressed_to.clone();
@@ -75,13 +89,15 @@ impl AgentSlot {
                 input
             }
             // A turn started without a message, as to answer one handed to a
-            // turn that was cut: an instruction, which it reads as any turn reads
-            // its mode and the project's instructions, never stored.
+            // turn that was cut: an instruction, which it reads with its mode
+            // and the project's instructions, as any turn does.
             EventType::Instruction => {
-                let mode_and_project = self.mode_and_project(&event).await;
                 let told = roomkit_core::rules::transcoding::text_of(&event.content);
+                let instruction = self
+                    .instruction(&event, &context.recent_events, Some(told))
+                    .await;
                 let mut input = event;
-                input.content = TextContent::new(format!("{mode_and_project}\n\n{told}")).into();
+                input.content = TextContent::new(instruction).into();
                 input
             }
             _ => event,

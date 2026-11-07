@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A turn sends the project's `AGENTS.md` snapshot only when it changed since the
+  latest one the agent read, or when that one has left the messages the agent
+  still reads: the engine replays it otherwise, where the earlier turn read it,
+  and the request keeps the prompt cache's prefix. The mode rule is sent each turn
+  (RMK-1407).
+
 - Follows roomkit-rs 3b885524, roomkit-tui 4eed1d9 and roomkit-tools 5d05c29
   (RMK-1460). A later turn's first request now opens with the previous turn's last
   one: every earlier round of tool calls replays whole, as its turn sent it

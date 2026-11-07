@@ -119,6 +119,36 @@ async fn instructions_reach_model_in_scope_before_edit_and_refresh_on_resume() {
     app.close().await.unwrap();
 }
 
+/// A later turn reads its mode again, but the project's unchanged rules only
+/// as the earlier turn read them, so that its first request extends the
+/// earlier turn's last one and a provider's prompt cache keeps it (RMK-1407).
+#[tokio::test]
+async fn a_later_turn_replays_unchanged_project_rules_and_extends_the_previous_request() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    write(root.path(), "AGENTS.md", "ROOT_ONE");
+    write(root.path(), "src/file.rs", "contents");
+    let mock = Mock::start(vec![("read", json!({"path":"src/file.rs"}))]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    turn_operation(&app, "first-turn").await;
+    turn_operation(&app, "later-turn").await;
+    let requests = mock.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 3, "a call and an answer, then an answer");
+    let earlier = requests[1]["messages"].as_array().unwrap();
+    let later = requests[2]["messages"].as_array().unwrap();
+    assert_eq!(
+        &later[..earlier.len()],
+        earlier.as_slice(),
+        "the later turn's request opens with the earlier turn's last"
+    );
+    let (first, later) = (requests[0].to_string(), requests[2].to_string());
+    assert_eq!(later.matches("ROOT_ONE").count(), 1, "the rules are not sent again");
+    let modes = |text: &str| text.matches("Application mode: Ask.").count();
+    assert_eq!(modes(&later), modes(&first) + 1, "each turn reads its mode");
+    app.close().await.unwrap();
+}
+
 #[tokio::test]
 async fn instructions_patch_preview_loads_source_and_destination_scopes_without_changing_files() {
     let root = tempfile::tempdir().unwrap();

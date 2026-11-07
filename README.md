@@ -551,8 +551,8 @@ prediction including an unsent message or new tool definitions.
 The sidebar's **Context** section splits that measurement. A stacked bar and
 its legend show what every request of the selected agent carries before its
 messages: the **System prompt** (application and agent instructions, tool
-inventory), the **Instructions** each turn adds (the mode rule and the project's
-`AGENTS.md`), the native **Tools** schemas, the **Skills** manifest and tools,
+inventory), the **Instructions** (the mode rule each turn adds and the project's
+`AGENTS.md`, sent once and replayed), the native **Tools** schemas, the **Skills** manifest and tools,
 and one **MCP** part per server with its instructions and tool schemas; beyond
 sixteen parts, the smallest servers are summed into one. **Messages** is what
 remains of the measurement, including the instructions of skills activated in
@@ -1131,7 +1131,13 @@ remote includes are not aliases in this version.
 Global and root files are read before each agent turn, including after resume
 or switching agents. They enter an application instruction after the user's
 message, preserving the system prompt and the user's original text and images.
-The host does not rewrite earlier conversation rows. Nested rules are loaded
+The engine keeps each turn's instruction as the agent's own row and replays it in
+the agent's later turns where it was read, so that a request extends the one
+before it and a provider's prompt cache keeps it. A turn therefore carries the
+mode rule each time, but the files' snapshot only when it changed since the
+latest one the agent read, or when that one has left the messages the agent
+still reads; a newer snapshot supersedes the earlier ones. The host does not
+rewrite earlier conversation rows. Nested rules are loaded
 progressively alongside `read`, `code_outline`, `list`, `grep`, `glob` and `diff`.
 Only the supplied target paths' ancestor chains are inspected, not every search
 match or every directory under the project. A `patch` dry-run also loads scopes
