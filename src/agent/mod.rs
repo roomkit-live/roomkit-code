@@ -163,8 +163,8 @@ pub(crate) struct Extensions {
     /// Rounds of tool calls one turn may run.
     pub max_tool_rounds: u32,
     /// Nobody watches the launch: the agent gets no mode tools, which wait
-    /// for a person's approval, and its shell commands may run longer
-    /// (`timeouts::shell_max_seconds`).
+    /// for a person's approval, nor `ATTENDED_ONLY`, and its shell commands
+    /// may run longer (`timeouts::shell_max_seconds`).
     pub unattended: bool,
     /// Whether the agent is told of the delegation tools the engine serves it:
     /// not when nobody watches the launch, which ends with its turn, before a
@@ -191,7 +191,7 @@ pub(crate) async fn create(
     let shell_maximum = crate::timeouts::shell_max_seconds(unattended) * 1000;
     let policy = extensions.policy.clone();
     let tools = native_tools(root, resources, policy, shell_maximum).await?;
-    let tools = selected(profile, tools, !unattended);
+    let tools = selected(profile, tools, unattended);
     let native: Vec<AiTool> = tools
         .iter()
         .map(|(definition, _)| definition.clone())
@@ -277,19 +277,41 @@ fn memory(
     Ok(Some(memory))
 }
 
+/// The tools an unattended launch leaves out, whatever the profile selects:
+/// the plans the sidebar shows, the guide to the application and the web.
+/// Each request is smaller without their schemas, 15k of the 44k characters
+/// of a benchmark's first request (HITL cf0fc0eb).
+const ATTENDED_ONLY: [&str; 10] = [
+    "plan_create",
+    "plan_read",
+    "plan_list",
+    "plan_update",
+    "plan_delete",
+    "docs_list",
+    "docs_search",
+    "docs_read",
+    "web_search",
+    "web_fetch",
+];
+
 /// The tools of `tools` the profile selects, with their definitions, in
 /// inventory order: every tool is named once, it joins the inventory, and
 /// the agent serves it. The mode tools come with plan writing: leaving Plan
-/// approves a plan. Without `mode_tools` they never come, since nobody could
-/// approve leaving Plan and the agent would stay unable to act.
+/// approves a plan. An `unattended` launch gets none of them, since nobody
+/// could approve leaving Plan and the agent would stay unable to act, nor
+/// `ATTENDED_ONLY`.
 fn selected(
     profile: &Agent,
     tools: Vec<Arc<dyn Tool>>,
-    mode_tools: bool,
+    unattended: bool,
 ) -> Vec<(AiTool, Arc<dyn Tool>)> {
-    let plans = mode_tools && profile.tools.iter().any(|tool| tool == "plan_create");
+    let chosen = |name: &str| {
+        profile.tools.iter().any(|tool| tool == name)
+            && !(unattended && ATTENDED_ONLY.contains(&name))
+    };
+    let plans = !unattended && chosen("plan_create");
     let selected = |tool: &AiTool| {
-        profile.tools.contains(&tool.name)
+        chosen(&tool.name)
             || (plans && crate::permissions::MODE_TOOLS.contains(&tool.name.as_str()))
     };
     tools

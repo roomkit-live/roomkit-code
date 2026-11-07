@@ -104,10 +104,16 @@ def yolo_text(root, model):
     assert out == ANSWER + "\n", out
     assert (root / "project" / "note.txt").read_text() == "hello\n"
     assert "Session: " in err and "--session" in err, err
-    # Nobody could approve leaving Plan: the mode tools are not offered.
+    # Nobody could approve leaving Plan: the mode tools are not offered. Nor
+    # are the plans, the guide and the web, to keep each request small.
     tools = model.tools()
-    assert "plan_create" in tools and "shell" in tools, tools
+    assert {"shell", "process_start", "output_read", "read_stored_result"} <= tools, tools
     assert not tools & {"plan_mode_enter", "plan_mode_exit"}, tools
+    assert not [name for name in tools if name.startswith(("plan_", "docs_", "web_"))], tools
+    # Nor does the prompt carry what it says of them.
+    prompt = model.requests[0]["messages"][0]["content"]
+    for paragraph in ("plan_mode_enter asks", "manage durable plans", "own user guide", "Web search uses Exa"):
+        assert paragraph not in prompt, paragraph
     assert model.said("Write the note."), model.requests[0]["messages"]
 
 

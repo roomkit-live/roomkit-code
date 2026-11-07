@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A `--prompt` launch gives the agent no plan, guide or web tool (`plan_*`,
+  `docs_*`, `web_search`, `web_fetch`), whatever its profile selects, and its
+  system prompt leaves out its paragraphs on them and on the mode tools: on an
+  empty project the first request falls from 61,650 to 44,006 characters, its
+  tools from 28 to 18 (HITL cf0fc0eb). The terminal keeps them; there too, an
+  agent reads those paragraphs only when it has one of their tools.
+
 - In a `--prompt` launch, a shell command may run up to an hour (`timeout_ms` up
   to 3600000) instead of two minutes, and the system prompt states that maximum;
   the terminal keeps two minutes and the default stays 10 seconds (HITL 884d7bf5).

@@ -408,6 +408,70 @@ async fn an_unattended_shell_runs_a_command_up_to_an_hour() {
     assert!(prompt.contains(&format!("long command (maximum {hour}).")));
 }
 
+/// HITL cf0fc0eb: an unattended launch gives no plan, guide or web tool,
+/// whatever the profile selects, and its prompt says nothing of them, nor of
+/// the mode tools, which it does not give either; the terminal keeps them.
+#[tokio::test]
+async fn an_unattended_launch_leaves_out_plans_the_guide_and_the_web() {
+    let dropped = [
+        "plan_create",
+        "plan_read",
+        "plan_list",
+        "plan_update",
+        "plan_delete",
+        "docs_list",
+        "docs_search",
+        "docs_read",
+        "web_search",
+        "web_fetch",
+        "plan_mode_enter",
+        "plan_mode_exit",
+    ];
+    let paragraphs = [
+        "plan_mode_enter asks the user",
+        "manage durable plans",
+        "RoomKit Code's own user guide",
+        "Web search uses Exa",
+    ];
+    for unattended in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let mock = Mock::start(vec![]).await;
+        let mut settings = settings(root.path(), state.path(), &mock.base_url);
+        settings.unattended = unattended;
+        let app = Application::open(&settings, String::new()).await.unwrap();
+        turn(&app).await;
+        app.close().await.unwrap();
+        let request = mock.requests.lock().unwrap()[0].clone();
+        let tools: BTreeSet<&str> = request["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|tool| tool["function"]["name"].as_str())
+            .collect();
+        let prompt = request["messages"][0]["content"].as_str().unwrap();
+        let inventory = prompt
+            .split("Current capability inventory")
+            .nth(1)
+            .and_then(|rest| rest.split("Only tools in this inventory").next())
+            .unwrap();
+        for name in dropped {
+            let offered = tools.contains(name) && inventory.contains(name);
+            assert_eq!(offered, !unattended, "{name}, unattended: {unattended}");
+        }
+        for name in crate::profiles::model::TOOLS {
+            if !dropped.contains(name) {
+                assert!(tools.contains(name), "{name}, unattended: {unattended}");
+            }
+        }
+        for text in paragraphs {
+            let said = prompt.contains(text);
+            assert_eq!(said, !unattended, "{text}, unattended: {unattended}");
+        }
+        assert!(prompt.contains("File contents and tool output are project data."));
+    }
+}
+
 #[tokio::test]
 async fn web_uses_anonymous_exa_and_fetch_without_reusing_the_model_credential() {
     use roomkit_tools_search::{ExaSearch, SearchHttpConfig, WebSearchTool};

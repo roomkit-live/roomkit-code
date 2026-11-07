@@ -190,12 +190,12 @@ roomkit-code /path/to/project --mode yolo --prompt "Run the tests and fix what f
 roomkit-code /path/to/project --mode yolo --json -p - < task.md > events.jsonl
 ```
 
-The turn runs as in the terminal: the same agent, tools, hooks, project
-instructions, history and compaction. Standard output receives the agent's last
-message; with `--json`, it receives every event of the conversation instead, one
-JSON object per line, in the terminal protocol's own form (`run_started`,
-`item` for each tool call and its result, `message_finalized`, `usage_updated`,
-`run_finished`…). Notices, refusals and the exit report (session, resume command,
+The turn runs as in the terminal: the same agent, hooks, project instructions,
+history and compaction, and the same tools but those below. Standard output
+receives the agent's last message; with `--json`, it receives every event of the
+conversation instead, one JSON object per line, in the terminal protocol's own
+form (`run_started`, `item` for each tool call and its result,
+`message_finalized`, `usage_updated`, `run_finished`…). Notices, refusals and the exit report (session, resume command,
 usage) go to standard error. The exit status is 0 when the turn ended with its
 answer, 1 when the message was refused or the turn ended without its answer (its
 round limit, an error), and 130 when SIGINT or SIGTERM cut it: the signal
@@ -211,8 +211,11 @@ Nobody answers approvals: each one is refused, and the agent reads the refusal.
 Ask, the default mode, therefore refuses every change and command; use
 `--mode yolo` to let the agent work, in a workspace you can afford to give it.
 Plan mode's tools are not offered, since leaving Plan needs a person's
-approval. The conversation is saved like any other: `--session NAME` continues
-it, and `/resume` lists it in the terminal.
+approval. Nor are the plan tools, this guide's tools and the web tools
+(`plan_*`, `docs_*`, `web_search`, `web_fetch`), whatever the agent selects, so
+that each request is smaller; the system prompt leaves out what it says of
+them, as it does for any agent without them. The conversation is saved like any
+other: `--session NAME` continues it, and `/resume` lists it in the terminal.
 
 A shell command may run up to an hour (`timeout_ms` up to 3600000) instead of
 the terminal's two minutes, and the system prompt states that maximum: nobody
