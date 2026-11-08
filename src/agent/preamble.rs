@@ -14,7 +14,8 @@ Use this only for the field described as "Shown to the user; never passed to the
 /// What every request of an agent carries before its messages, in characters.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Composition {
-    /// The application's instructions, the agent's own and the tool inventory.
+    /// The application's instructions, the agent's own and, with hidden tools,
+    /// the names of the tools.
     pub system: usize,
     /// Native tool schemas, and the discovery tools' when MCP tools wait behind
     /// them.
@@ -181,8 +182,7 @@ pub(super) fn preamble(
 
 /// The application's instructions for an agent with `tools`, stating the
 /// longest command its shell runs, the agent's identity and instructions, and
-/// the names of every tool it has, those it finds its other tools with when
-/// they are `hidden`.
+/// what it is told of its tools beside their definitions.
 fn base_prompt(profile: &Agent, tools: &[AiTool], hidden: bool, shell_maximum: u64) -> String {
     let available = available(tools, hidden);
     let instructions = instructions(tools, hidden, shell_maximum);
@@ -460,7 +460,12 @@ mod tests {
         };
         let bare = instructions(&[], false, 120_000);
         assert!(!bare.contains("MCP tools are named"), "{bare}");
-        assert!(!bare.contains("the guide's Skills document"), "{bare}");
+        assert!(!bare.contains("document_id skills.md"), "{bare}");
+        assert!(!bare.contains("Use process_start for work"), "{bare}");
+        assert!(
+            !bare.contains("A shell or process stream cut short"),
+            "{bare}"
+        );
         // Every agent keeps where a skill goes and that /skills is no tool.
         assert!(bare.contains(".agents/skills/<name>/SKILL.md"), "{bare}");
         assert!(bare.contains("never shell programs or tools"), "{bare}");
@@ -470,7 +475,14 @@ mod tests {
             120_000,
         );
         assert!(served.contains("MCP tools are named mcp__<server>__<tool>."));
-        assert!(served.contains("read the guide's Skills document"));
+        assert!(served.contains("call docs_read with document_id skills.md"));
+        let archives = instructions(
+            &[tool("output_read"), tool("process_start")],
+            false,
+            120_000,
+        );
+        assert!(archives.contains("Use process_start for work"));
+        assert!(archives.contains("A shell or process stream cut short"));
     }
 
     #[test]
@@ -480,13 +492,21 @@ mod tests {
             "instructions": "", "tools": [],
         }))
         .unwrap();
-        let declared = base_prompt(&profile, &[], false, 120_000);
-        assert!(!declared.contains("capability inventory"), "{declared}");
-        assert!(declared.contains("Only the tools you are given are available to you."));
+        let shell = AiTool {
+            name: "shell".into(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            tags: Vec::new(),
+        };
+        let declared = base_prompt(&profile, std::slice::from_ref(&shell), false, 120_000);
         assert!(
-            base_prompt(&profile, &[], true, 120_000)
-                .contains("for this run):\nfind_tools, list_tools\nOnly tools in this inventory")
+            !declared.contains("Current capability inventory"),
+            "{declared}"
         );
+        assert!(declared.contains("Only the tools you are given are available to you."));
+        assert!(base_prompt(&profile, &[shell], true, 120_000).contains(
+            "for this run):\nshell, find_tools, list_tools\nOnly tools in this inventory"
+        ));
     }
 
     #[test]

@@ -88,3 +88,10 @@ async fn every_section_of_the_shipped_guide_is_found_first_by_its_title() {
         );
     }
 }
+
+/// The system prompt sends an agent to this document by its id.
+#[test]
+fn the_document_the_prompt_names_is_in_the_guide() {
+    assert!(names(&topics(GUIDE)).contains(&"skills.md"));
+    assert!(include_str!("../agent/coding-agent.txt").contains("document_id skills.md"));
+}

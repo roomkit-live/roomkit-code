@@ -2,11 +2,12 @@
 
 ## Unreleased
 
-- The system prompt says what holds on every turn: about 3,500 characters fewer
-  per request. How to write a skill moves to the guide's Skills document, which
-  an agent reads when asked to create one; MCP guidance comes only with MCP
-  tools; tools are listed by name only when some wait behind the discovery
-  tools, their definitions saying the rest.
+- The system prompt says what holds on every turn: about 3,300 to 4,100
+  characters fewer per request. The detail of writing a skill moves to the guide's Skills
+  document, which an agent given the `docs_*` tools reads when asked to create
+  one; MCP guidance comes only with MCP tools, process and archive guidance only
+  with those tools; tools are listed by name only when some wait behind the
+  discovery tools, their definitions saying the rest.
 
 - The view lists and stops the tasks its agents hand over (RMK-1532 follow-up).
   The sidebar's **Tasks** lists the conversation's tasks that run and the

@@ -379,8 +379,7 @@ says so first, as for processes.
 Use **/tools** to browse the capabilities actually registered by the application,
 with filtering and their tool descriptions. Selecting an entry only reports its
 availability; it never invokes the tool or contacts the model. This catalogue
-and the model's current capability inventory are derived from the same selected
-toolsets. Resuming keeps conversation history, but older assistant claims about
+and the tools the model is given are derived from the same selected toolsets. Resuming keeps conversation history, but older assistant claims about
 missing tools do not change the currently registered capabilities.
 
 New agents initially select all 27 native tools:
@@ -656,8 +655,7 @@ prediction including an unsent message or new tool definitions.
 
 The sidebar's **Context** section splits that measurement. A stacked bar and
 its legend show what every request of the selected agent carries before its
-messages: the **System prompt** (application and agent instructions, tool
-inventory), the **Instructions** each turn reads (the mode rule and the project's
+messages: the **System prompt** (application and agent instructions), the **Instructions** each turn reads (the mode rule and the project's
 `AGENTS.md`), the native **Tools** schemas, the **Skills** manifest and tools,
 and one **MCP** part per server with its instructions and tool schemas; beyond
 sixteen parts, the smallest servers are summed into one. **Messages** is what
@@ -976,7 +974,8 @@ directory.
 
 A plain `skills/` directory at the workspace root and other assistants'
 directories such as `~/.claude/skills` are not scanned; never guess another
-installation directory, or edit the application's profile store to bypass this
+installation directory, suggest moving a project skill to another assistant's
+configuration, or edit the application's profile store to bypass this
 selection. Creating a file does not prove a skill was discovered, enabled or
 activated, each is a separate step. `/skills` lists skills and loading errors,
 `/skills locations` the roots, `/skills reload` rereads them, `/skills enable
