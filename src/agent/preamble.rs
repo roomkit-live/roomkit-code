@@ -38,7 +38,7 @@ pub(crate) struct Inventory {
 /// lines: roomkit-ai's `skills::texts::PREAMBLE` and the heading and
 /// introduction of its `server_instructions` block, which are not public.
 /// `application::tests::breakdown` compares them with a request.
-const SKILLS_PREAMBLE: usize = 309 + 4;
+const SKILLS_PREAMBLE: usize = 244 + 4;
 const SERVERS_BLOCK: usize = 345 + 6;
 /// What the engine adds when a catalogue waits behind its discovery tools, and
 /// does not make public either: its preamble, and the two tools as sent.
