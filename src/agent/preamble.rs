@@ -184,27 +184,45 @@ pub(super) fn preamble(
 /// the names of every tool it has, those it finds its other tools with when
 /// they are `hidden`.
 fn base_prompt(profile: &Agent, tools: &[AiTool], hidden: bool, shell_maximum: u64) -> String {
-    let discovery = TOOL_SEARCH_INFRA_TOOL_NAMES.into_iter().filter(|_| hidden);
+    let available = available(tools, hidden);
+    let instructions = instructions(tools, hidden, shell_maximum);
+    format!(
+        "{instructions}\nCurrent agent: {} (ID: {}). Answer as this selected participant. Other participants may have different tools and providers.\nAgent instructions:\n{}\n{available}\n",
+        profile.label, profile.id, profile.instructions
+    )
+}
+
+/// What the agent is told of its tools beside their definitions. Their names
+/// are listed only when some of them wait behind the discovery tools: the
+/// definitions say the rest.
+fn available(tools: &[AiTool], hidden: bool) -> String {
+    const GUIDANCE: &str = "Apply tool-specific guidance only when that tool is present.";
+    if !hidden {
+        return format!("Only the tools you are given are available to you. {GUIDANCE}");
+    }
     let inventory = tools
         .iter()
         .map(|tool| tool.name.as_str())
-        .chain(discovery)
+        .chain(TOOL_SEARCH_INFRA_TOOL_NAMES)
         .collect::<Vec<_>>()
         .join(", ");
-    let instructions = instructions(tools, hidden, shell_maximum);
     format!(
-        "{instructions}\nCurrent agent: {} (ID: {}). Answer as this selected participant. Other participants may have different tools and providers.\nAgent instructions:\n{}\nCurrent capability inventory (provided by the application for this run):\n{inventory}\nOnly tools in this inventory are available to you. Apply tool-specific guidance only when that tool is present.\n",
-        profile.label, profile.id, profile.instructions
+        "Current capability inventory (provided by the application for this run):\n{inventory}\nOnly tools in this inventory are available to you. {GUIDANCE}"
     )
 }
 
 /// The application's instructions for an agent with `tools`, and the
 /// discovery tools when its other tools are `hidden`. A paragraph about tools
 /// an agent may lack opens with `{with name ...}`: it is kept, without that
-/// tag, only when the agent has one of the tools it names, so that a request
-/// carries no guidance for a tool it does not declare (HITL cf0fc0eb).
+/// tag, only when the agent has one of the tools it names (`prefix*` names any
+/// tool starting so), so that a request carries no guidance for a tool it does
+/// not declare (HITL cf0fc0eb).
 fn instructions(tools: &[AiTool], hidden: bool, shell_maximum: u64) -> String {
     let has = |name: &str| tools.iter().any(|tool| tool.name == name);
+    let names_a_tool = |tag: &str| match tag.strip_suffix('*') {
+        Some(prefix) => tools.iter().any(|tool| tool.name.starts_with(prefix)),
+        None => has(tag),
+    };
     // The permission summary also names the tools the engine serves beside
     // the agent's own: every agent's read_stored_result, and the discovery
     // tools of hidden ones.
@@ -216,7 +234,7 @@ fn instructions(tools: &[AiTool], hidden: bool, shell_maximum: u64) -> String {
     INSTRUCTIONS
         .split("\n\n")
         .filter_map(|paragraph| match tagged(paragraph) {
-            Some((names, text)) => names.split(' ').any(has).then_some(text),
+            Some((names, text)) => names.split(' ').any(names_a_tool).then_some(text),
             None => Some(paragraph),
         })
         .collect::<Vec<_>>()
@@ -385,9 +403,9 @@ mod tests {
         let tagged: Vec<(&str, &str)> = INSTRUCTIONS.split("\n\n").filter_map(tagged).collect();
         // Only a paragraph's opening is read as its tag.
         assert_eq!(tagged.len(), INSTRUCTIONS.matches("{with ").count());
-        assert_eq!(tagged.len(), 4);
+        assert_eq!(tagged.len(), 8);
         for name in tagged.iter().flat_map(|(names, _)| names.split(' ')) {
-            assert!(known.contains(&name), "{name}");
+            assert!(known.contains(&name) || name == "mcp__*", "{name}");
         }
     }
 
@@ -433,17 +451,41 @@ mod tests {
     }
 
     #[test]
-    fn the_inventory_names_the_discovery_tools_only_when_they_are_declared() {
+    fn mcp_guidance_goes_with_mcp_tools_and_skill_rules_with_the_guide() {
+        let tool = |name: &str| AiTool {
+            name: name.into(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            tags: Vec::new(),
+        };
+        let bare = instructions(&[], false, 120_000);
+        assert!(!bare.contains("MCP tools are named"), "{bare}");
+        assert!(!bare.contains("the guide's Skills document"), "{bare}");
+        // Every agent keeps where a skill goes and that /skills is no tool.
+        assert!(bare.contains(".agents/skills/<name>/SKILL.md"), "{bare}");
+        assert!(bare.contains("never shell programs or tools"), "{bare}");
+        let served = instructions(
+            &[tool("mcp__docs__find"), tool("docs_read")],
+            false,
+            120_000,
+        );
+        assert!(served.contains("MCP tools are named mcp__<server>__<tool>."));
+        assert!(served.contains("read the guide's Skills document"));
+    }
+
+    #[test]
+    fn the_tools_are_listed_only_when_some_wait_behind_the_discovery_tools() {
         let profile: Agent = serde_json::from_value(serde_json::json!({
             "id": "code", "label": "Code", "provider": "local", "model": "m",
             "instructions": "", "tools": [],
         }))
         .unwrap();
-        let run = "for this run):\n";
-        assert!(base_prompt(&profile, &[], false, 120_000).contains(&format!("{run}\nOnly tools")));
+        let declared = base_prompt(&profile, &[], false, 120_000);
+        assert!(!declared.contains("capability inventory"), "{declared}");
+        assert!(declared.contains("Only the tools you are given are available to you."));
         assert!(
             base_prompt(&profile, &[], true, 120_000)
-                .contains(&format!("{run}find_tools, list_tools\nOnly tools"))
+                .contains("for this run):\nfind_tools, list_tools\nOnly tools in this inventory")
         );
     }
 

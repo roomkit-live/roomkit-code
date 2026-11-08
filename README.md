@@ -956,6 +956,35 @@ Use read_skill_reference for the bundled references/checklist.md if present.
 Present findings with file paths and concise explanations.
 ```
 
+### Writing a skill
+
+A portable `SKILL.md` starts with YAML frontmatter delimited by `---` on its own
+lines. Set `name` to the directory name (lowercase letters and digits separated
+by hyphens, at most 64 characters) and `description` to what the skill does and
+when to use it (at most 1024 characters), then write Markdown instructions.
+`license` and `compatibility` are optional.
+
+Put supplementary text directly in `references/<filename>`:
+`read_skill_reference` takes the skill name and that plain filename. Not
+supported here: nested references, tool-grant fields (`allowed_tools`,
+`allowed-tools`, `requires`), other assistants' invocation fields
+(`disable-model-invocation`, `user-invocable`, `context`, `agent`) and
+`agents/openai.yaml` sidecars. Adapting an existing skill must not silently drop
+its restrictions. Bundled scripts are not run automatically: an agent runs them
+only with an available tool and the host's permission, from the skill package
+directory.
+
+A plain `skills/` directory at the workspace root and other assistants'
+directories such as `~/.claude/skills` are not scanned; never guess another
+installation directory, or edit the application's profile store to bypass this
+selection. Creating a file does not prove a skill was discovered, enabled or
+activated, each is a separate step. `/skills` lists skills and loading errors,
+`/skills locations` the roots, `/skills reload` rereads them, `/skills enable
+<name>` enables one for the selected agent and `/skills use <name> <task>` asks
+for its use in the conversation. Enabling a skill grants no extra tools and does
+not change Ask, Plan or Yolo. Without `activate_skill`, no skill is available to
+the agent yet: that says nothing of what the application can manage.
+
 Use `/skills reload` after installing or editing packages. Discovery keeps valid
 packages available when another fails, reports conflicts, and refuses directory
 links escaping their root. A broken higher-priority package does not silently

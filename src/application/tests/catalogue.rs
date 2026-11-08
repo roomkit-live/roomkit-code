@@ -447,14 +447,12 @@ async fn an_unattended_launch_leaves_out_plans_and_the_guide() {
             .filter_map(|tool| tool["function"]["name"].as_str())
             .collect();
         let prompt = request["messages"][0]["content"].as_str().unwrap();
-        let inventory = prompt
-            .split("Current capability inventory")
-            .nth(1)
-            .and_then(|rest| rest.split("Only tools in this inventory").next())
-            .unwrap();
         for name in dropped {
-            let offered = tools.contains(name) && inventory.contains(name);
-            assert_eq!(offered, !unattended, "{name}, unattended: {unattended}");
+            assert_eq!(
+                tools.contains(name),
+                !unattended,
+                "{name}, unattended: {unattended}"
+            );
         }
         for name in crate::profiles::model::TOOLS {
             if !dropped.contains(name) {

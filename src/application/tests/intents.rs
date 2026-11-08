@@ -20,7 +20,7 @@ fn assert_schemas(request: &Value, required: bool) {
     assert!(instructions.contains("respect any tool-owned parameter of the same name"));
     assert!(
         instructions.find("For every tool call, include").unwrap()
-            > instructions.find("Current capability inventory").unwrap()
+            > instructions.find("Apply tool-specific guidance").unwrap()
     );
     let tools = request["tools"].as_array().unwrap();
     assert!(!tools.is_empty());

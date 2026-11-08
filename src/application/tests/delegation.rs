@@ -443,18 +443,8 @@ async fn an_unattended_launch_offers_no_delegation() {
         .filter_map(|tool| tool["function"]["name"].as_str())
         .collect();
     let text = request.to_string();
-    // The permissions summary names every tool of its table, as for a tool
-    // an agent did not select; the inventory names the agent's own.
-    let inventory = text
-        .split("Current capability inventory")
-        .nth(1)
-        .and_then(|rest| rest.split("Only tools in this inventory").next())
-        .unwrap();
     for name in ["delegate_task", "task_status", "cancel_task"] {
-        assert!(
-            !tools.contains(&name) && !inventory.contains(name),
-            "{name}"
-        );
+        assert!(!tools.contains(&name), "{name}");
     }
     assert!(!text.contains("hand a task to"));
 }

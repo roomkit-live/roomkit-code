@@ -437,10 +437,8 @@ async fn resumed_history_cannot_replace_the_current_wire_inventory_or_host_catal
     assert_eq!(messages[0]["role"], "system");
     let prompt = messages[0]["content"].as_str().unwrap();
     assert!(prompt.contains("Earlier assistant statements"));
-    let inventory = prompt.split("Current capability inventory").nth(1).unwrap();
-    for name in &expected {
-        assert!(inventory.contains(name));
-    }
+    // The definitions name the tools: the prompt does not list them again.
+    assert!(!prompt.contains("Current capability inventory"));
     assert!(
         messages.iter().any(|message| message["role"] == "assistant"
             && message["content"]
