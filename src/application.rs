@@ -15,6 +15,7 @@ use crate::{Result, config::Settings, profiles::Profiles, services::Services, st
 mod gate;
 pub(crate) mod headless;
 mod integrations;
+mod model_results;
 
 /// The channel of the application's views, the terminal's: what a row the
 /// application writes for its views alone comes from.
@@ -164,6 +165,7 @@ async fn setup(
         kit: kit.downgrade(),
     };
     gate::install(kit, gate)?;
+    model_results::install(kit)?;
     let view = first_view(
         settings, kit, profiles, services, policy, &channel, agent_id,
     )

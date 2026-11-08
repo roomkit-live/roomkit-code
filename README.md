@@ -1173,11 +1173,15 @@ and F2 returns to the conversation view. Approvals and unsuccessful outcomes rem
 visible. Set `[ui] tool_activity = false` to keep individual tool cards instead.
 The engine requests the intention with the ordinary tool call, without another
 model request; the tools themselves receive only their business arguments.
-Agent instructions ask for this public sentence on each supported call, using it
-for routine progress and reserving assistant messages for findings and explanations.
-When the model supplies no intention, the current tool's actual name is shown.
+The sentence is asked for on a shell command, a background process, a delegated
+task and an MCP tool, whose arguments do not say what they are for, and agent
+instructions have it carry routine progress, reserving assistant messages for
+findings and explanations. Other calls read from their arguments (`Read src/main.rs`,
+in the interface's language), or as the tool's name when the interface has no
+reading for it. When the model supplies no intention on a call that asks for one,
+the tool's name is shown.
 
-RoomKit Code requires `_roomkit_intent` in the schemas sent to the model by default.
+RoomKit Code requires `_roomkit_intent` in those tools' schemas by default.
 Set `[agent] require_tool_intent = false` in the explicit TOML configuration to
 make it optional. `--require-tool-intent` and `--require-tool-intent=false` override
 the file setting. The option applies to all agents in that application
@@ -1339,7 +1343,7 @@ Only the supplied target paths' ancestor chains are inspected, not every search
 match or every directory under the project. A `patch` dry-run also loads scopes
 for every source and destination, including both sides of moves.
 
-Exploration results retain their existing fields and add `project_instructions`
+Exploration results carry a `project_instructions` field beside the tool's text
 when needed. Unchanged scope snapshots are deduplicated within a turn, separately
 for each session and agent. Changed or removed rules are reported on subsequent
 exploration; each new turn starts fresh. The agent is instructed to read existing

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A request is smaller. The model reads a tool's text, not its structured
+  result beside it (the views keep the data as the call's structured copy), and
+  only a shell command, a background process, a delegated task and an MCP tool
+  ask it for `_roomkit_intent`: the other calls read from their arguments on the
+  activity line (`Read src/main.rs`). With `--json`, a tool call's `text` is now
+  what the model read and its `data` the structured result.
+
 - The system prompt says what holds on every turn: about 3,300 to 4,100
   characters fewer per request. The detail of writing a skill moves to the guide's Skills
   document, which an agent given the `docs_*` tools reads when asked to create

@@ -13,7 +13,10 @@ fn tools(request: &Value) -> Vec<Value> {
         .unwrap()
         .iter()
         .filter(|m| m["role"] == "tool")
-        .map(|m| serde_json::from_str(m["content"].as_str().unwrap()).unwrap())
+        .map(|m| {
+            let content = m["content"].as_str().unwrap();
+            serde_json::from_str(content).unwrap_or_else(|_| Value::from(content))
+        })
         .collect()
 }
 
@@ -55,7 +58,7 @@ async fn instructions_reach_model_in_scope_before_edit_and_refresh_on_resume() {
                 .unwrap()
                 .contains("NESTED_FIXTURE")
         );
-        assert!(output[0]["data"].is_object());
+        assert!(output[0]["text"].is_string());
         assert!(
             tools(&requests[2])[1].get("project_instructions").is_none(),
             "unchanged rules are not repeated within a turn"

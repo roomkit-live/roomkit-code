@@ -165,7 +165,7 @@ async fn plan_mode_uses_native_tools_blocks_effects_and_resumes_the_same_plan_in
                 );
             }
             if call.name == "plan_create" {
-                plan_id = serde_json::from_str::<Value>(&call.text).unwrap()["data"]["plan_id"]
+                plan_id = call.data.as_ref().unwrap()["data"]["plan_id"]
                     .as_str()
                     .map(str::to_owned);
             }

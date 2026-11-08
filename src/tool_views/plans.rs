@@ -3,6 +3,10 @@ use roomkit_tools_plans::{Plan, PlanDeleteResult, PlanListResult, StepStatus};
 
 pub(super) struct Plans;
 impl ToolRenderer for Plans {
+    fn activity(&self, call: &ToolCall) -> Option<String> {
+        super::labels::activity(call)
+    }
+
     fn render(&self, call: &ToolCall) -> Vec<String> {
         self.render_styled(call, false)
             .into_iter()

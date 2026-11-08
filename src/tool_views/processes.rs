@@ -15,6 +15,10 @@ use roomkit_tui::{
 pub(super) struct Processes;
 
 impl ToolRenderer for Processes {
+    fn activity(&self, call: &ToolCall) -> Option<String> {
+        super::labels::activity(call)
+    }
+
     fn render(&self, call: &ToolCall) -> Vec<String> {
         self.render_styled(call, false)
             .into_iter()

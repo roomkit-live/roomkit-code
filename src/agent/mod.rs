@@ -165,7 +165,7 @@ pub(crate) struct Extensions {
     pub skills: SkillRegistry,
     pub skill_roots: Vec<std::path::PathBuf>,
     pub mcp: Vec<crate::profiles::McpTools>,
-    /// Whether every tool call must carry an intent.
+    /// Whether the tool calls that ask for an intent must carry one.
     pub intent_required: bool,
     /// Rounds of tool calls one turn may run.
     pub max_tool_rounds: u32,
@@ -246,6 +246,7 @@ pub(crate) async fn create(
         skills: Some(skills),
         tool_call_intents: true,
         tool_call_intents_required: intent_required,
+        tool_call_intents_only: Some(intent_tools(&mcp)),
         tool_timeout: Some(crate::timeouts::tool_call(unattended)),
         // A coding turn runs as long as its calls and approvals take, as
         // before: the engine's five-minute bound on a turn's tool loop would
@@ -340,6 +341,26 @@ fn mcp_handler(mcp: &[crate::profiles::McpTools]) -> Result<Option<ToolHandler>>
         1 => handlers.pop(),
         _ => Some(compose_tool_handlers(handlers)?),
     })
+}
+
+/// Whether a tool's calls ask the model for an intention: those whose
+/// arguments do not say what they are for. The terminal reads the others from
+/// their arguments (`tool_views::labels`).
+pub(crate) fn asks_intent(name: &str) -> bool {
+    matches!(name, "shell" | "process_start" | "delegate_task") || name.starts_with("mcp__")
+}
+
+/// The tools of an agent with `mcp` that ask the model for an intention.
+fn intent_tools(mcp: &[crate::profiles::McpTools]) -> Vec<String> {
+    ["shell", "process_start", "delegate_task"]
+        .into_iter()
+        .map(str::to_owned)
+        .chain(
+            mcp.iter()
+                .flat_map(|server| server.tools.iter().map(|tool| tool.name.clone())),
+        )
+        .filter(|name| asks_intent(name))
+        .collect()
 }
 
 /// The shell's limits. Each stream keeps its latest 16 KiB, where a command

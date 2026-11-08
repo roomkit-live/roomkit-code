@@ -157,6 +157,7 @@ pub(crate) fn definitions() -> Vec<AiTool> {
             .to_owned(),
         parameters: definition["parameters"].clone(),
         tags: Vec::new(),
+        changes_state: false,
     };
     vec![
         tool(),

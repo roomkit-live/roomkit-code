@@ -13,6 +13,10 @@ fn result(call: &ToolCall) -> Option<Value> {
         .flatten()
 }
 impl ToolRenderer for Skills {
+    fn activity(&self, call: &ToolCall) -> Option<String> {
+        super::labels::activity(call)
+    }
+
     fn has_expanded_details(&self, call: &ToolCall) -> bool {
         result(call).is_some_and(|value| {
             value

@@ -398,14 +398,14 @@ fn before(line: &str) -> usize {
 #[tokio::test]
 async fn a_compaction_s_sizes_count_the_rounds_a_turn_replays() {
     let (root, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let large: String = (0..1_500)
+    let large: String = (0..700)
         .map(|line| format!("line {line} of notes\n"))
         .collect();
     write(root.path(), "notes.md", &large);
     let mock = Mock::start(vec![("read", json!({"path":"notes.md"}))]).await;
     let (app, settings) = three_turns(root.path(), state.path(), &mock).await;
-    // Past the engine's bound, the round replays the read's preview,
-    // about 2,000 tokens, as its stored row holds it.
+    // Within the engine's bound, the round replays the read whole, about
+    // 3,900 tokens, as its stored row holds it.
     let read = mock.requests.lock().unwrap()[1].to_string();
     assert!(
         read.contains("line 1 of notes"),
@@ -465,7 +465,7 @@ async fn a_resumed_conversation_s_line_counts_the_rest_of_the_request() {
 #[tokio::test]
 async fn a_resumed_conversation_s_line_leaves_out_the_summarized_rounds() {
     let (root, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let large: String = (0..1_500)
+    let large: String = (0..700)
         .map(|line| format!("line {line} of notes\n"))
         .collect();
     write(root.path(), "notes.md", &large);
@@ -494,7 +494,7 @@ async fn a_resumed_conversation_s_line_leaves_out_the_summarized_rounds() {
     let Some(Item::Message(line)) = compactions.lines(&room) else {
         panic!("no line");
     };
-    // 20,000 measured, less the read's preview of about 2,000 tokens.
+    // 20,000 measured, less the read of about 3,900 tokens.
     let after = after(&line.text);
     assert!((15_000..=18_500).contains(&after), "{}", line.text);
     app.close().await.unwrap();

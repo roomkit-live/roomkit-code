@@ -13,6 +13,10 @@ use roomkit_tui::{
 pub(super) struct Web;
 
 impl ToolRenderer for Web {
+    fn activity(&self, call: &ToolCall) -> Option<String> {
+        super::labels::activity(call)
+    }
+
     fn render(&self, call: &ToolCall) -> Vec<String> {
         self.render_styled(call, false)
             .into_iter()

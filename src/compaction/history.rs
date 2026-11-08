@@ -103,12 +103,14 @@ async fn replayed(
 }
 
 /// `row` as a turn replays it: a failed call's text once, though its row
-/// holds it as its error and as its result.
+/// holds it as its error and as its result, and without the structured copy
+/// the views read, which the model never does.
 fn as_replayed(mut row: RoomEvent) -> RoomEvent {
-    if let EventContent::ToolCall(call) = &mut row.content
-        && !call.result.is_null()
-    {
-        call.error = None;
+    if let EventContent::ToolCall(call) = &mut row.content {
+        call.structured_content = None;
+        if !call.result.is_null() {
+            call.error = None;
+        }
     }
     row
 }

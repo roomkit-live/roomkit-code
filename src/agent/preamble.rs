@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use crate::profiles::{McpTools, model::Agent};
 
 const INSTRUCTIONS: &str = include_str!("coding-agent.txt");
-const ACTIVITY_INSTRUCTIONS: &str = r#"For every tool call, include a short description of your next action in _roomkit_intent, in the user's language. Put action announcements there, not in a separate message. Keep messages for findings, questions, explanations and the final answer.
+const ACTIVITY_INSTRUCTIONS: &str = r#"When a tool offers _roomkit_intent, write in it a short description of your next action, in the user's language. Put action announcements there, not in a separate message. Keep messages for findings, questions, explanations and the final answer.
 Use this only for the field described as "Shown to the user; never passed to the tool"; respect any tool-owned parameter of the same name. Never add an absent field."#;
 
 /// What every request of an agent carries before its messages, in characters.
@@ -43,29 +43,32 @@ const SERVERS_BLOCK: usize = 345 + 6;
 /// What the engine adds when a catalogue waits behind its discovery tools, and
 /// does not make public either: its preamble, and the two tools as sent.
 const SEARCH_PREAMBLE: usize = 1388 + 2;
-const DISCOVERY_TOOLS: usize = 1477;
+const DISCOVERY_TOOLS: usize = 1044;
 /// The engine's own `read_stored_result`, which every agent declares to page
 /// through an outcome the engine stored (roomkit-rs RMK-1228), and which it does
-/// not make public either: its definition as sent, the intent optional, then
-/// required.
-const REREAD_TOOL: [usize; 2] = [1271, 1289];
+/// not make public either: its definition as sent, which asks for no intent.
+const REREAD_TOOL: usize = 1079;
 /// That tool's name.
 const READ_STORED_RESULT: &str = "read_stored_result";
 /// The engine keeps at most this many characters of a server's instructions.
 const SERVER_INSTRUCTIONS_MAX: usize = 8192;
 
 /// Tools as an OpenAI-compatible request sends them: with the reserved intent
-/// property the engine adds, required when the application requires it, each
-/// wrapped as a function.
+/// property the engine adds for the tools that ask for one, required when the
+/// application requires it, each wrapped as a function.
 fn schema_chars(tools: &[AiTool], intent_required: bool) -> usize {
     tools
         .iter()
         .map(|tool| {
-            let parameters = roomkit::tool_intent::presented_parameters_with_requirement(
-                &tool.parameters,
-                intent_required,
-            )
-            .unwrap_or_else(|| tool.parameters.clone());
+            let shown = super::asks_intent(&tool.name)
+                .then(|| {
+                    roomkit::tool_intent::presented_parameters_with_requirement(
+                        &tool.parameters,
+                        intent_required,
+                    )
+                })
+                .flatten();
+            let parameters = shown.unwrap_or_else(|| tool.parameters.clone());
             serde_json::json!({
                 "type": "function",
                 "function": {"name": tool.name, "description": tool.description, "parameters": parameters}
@@ -274,7 +277,7 @@ fn measure(
             + only_if(servers, SERVERS_BLOCK)
             + only_if(hidden, SEARCH_PREAMBLE),
         tools: schema_chars(native, intent_required)
-            + REREAD_TOOL[usize::from(intent_required)]
+            + REREAD_TOOL
             + only_if(hidden, DISCOVERY_TOOLS),
         skills: context.len()
             + preamble
@@ -365,6 +368,7 @@ mod tests {
             description: String::new(),
             parameters: serde_json::json!({}),
             tags: Vec::new(),
+            changes_state: false,
         };
         let all: Vec<AiTool> = crate::profiles::model::TOOLS
             .iter()
@@ -457,6 +461,7 @@ mod tests {
             description: String::new(),
             parameters: serde_json::json!({}),
             tags: Vec::new(),
+            changes_state: false,
         };
         let bare = instructions(&[], false, 120_000);
         assert!(!bare.contains("MCP tools are named"), "{bare}");
@@ -497,6 +502,7 @@ mod tests {
             description: String::new(),
             parameters: serde_json::json!({}),
             tags: Vec::new(),
+            changes_state: false,
         };
         let declared = base_prompt(&profile, std::slice::from_ref(&shell), false, 120_000);
         assert!(
@@ -516,6 +522,7 @@ mod tests {
             description: "Add two numbers".into(),
             parameters: serde_json::json!({"type": "object", "properties": {"a": {"type": "number"}}}),
             tags: Vec::new(),
+            changes_state: false,
         };
         let bare = tool.name.len() + tool.description.len() + tool.parameters.to_string().len();
         let sent = schema_chars(std::slice::from_ref(&tool), false);

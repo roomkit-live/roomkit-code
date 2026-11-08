@@ -245,8 +245,7 @@ impl Hooks {
                     tracker.spawn(async move {
                         let mut context = turn.context.clone();
                         tool_payload(&mut context.payload, &event);
-                        context.payload["tool_response"] =
-                            event.result.clone().unwrap_or(Value::Null);
+                        context.payload["tool_response"] = tool_response(&event);
                         context.payload["roomkit"]["outcome"] = json!(tool_outcome(&event));
                         let name = if event.is_error {
                             HookEvent::PostToolUseFailure
@@ -482,6 +481,30 @@ fn tool_payload(payload: &mut Value, event: &ToolCallEvent) {
     payload["tool_input"] = json!(event.arguments);
 }
 
+/// What a command hook reads of a call's result: a tool's data and text as
+/// one JSON text, as it always has, or the result as the model read it.
+fn tool_response(event: &ToolCallEvent) -> Value {
+    let read = event.result.clone().unwrap_or(Value::Null);
+    let data = event
+        .structured_content
+        .as_ref()
+        .and_then(|copy| copy.get("data"));
+    let (Some(data), Some(text)) = (data, read.as_str()) else {
+        return read;
+    };
+    let mut envelope = json!({ "data": data, "text": text });
+    // Nested project instructions reach the model as JSON beside the text.
+    if let Ok(Value::Object(mut fields)) = serde_json::from_str::<Value>(text)
+        && fields.len() == 2
+        && let (Some(text), Some(rules)) =
+            (fields.remove("text"), fields.remove("project_instructions"))
+    {
+        envelope["text"] = text;
+        envelope["project_instructions"] = rules;
+    }
+    Value::String(envelope.to_string())
+}
+
 /// How a finished tool call ended, as far as the engine's tool event tells:
 /// `served`, `refused`, `cancelled`, or `failed` for any other error. The
 /// event carries no outcome of its own, as Python's, so a call a hook
@@ -691,6 +714,34 @@ mod tests {
     )]
     use super::*;
     use clap::Parser;
+
+    fn answered(result: Value, copy: Value) -> ToolCallEvent {
+        let mut event = ToolCallEvent::new(
+            roomkit::model::ChannelId::new("code").unwrap(),
+            roomkit::model::ChannelType::AI,
+            "call-1",
+            "read",
+            Default::default(),
+        );
+        event.result = Some(result);
+        event.structured_content = Some(copy);
+        event
+    }
+
+    #[test]
+    fn a_hook_reads_a_tool_s_data_and_text_as_one_json_text() {
+        let read = |response: Value| -> Value {
+            serde_json::from_str(response.as_str().unwrap()).unwrap()
+        };
+        let plain = tool_response(&answered(json!("1: a\n"), json!({"data": {"n": 1}})));
+        assert_eq!(read(plain), json!({"data": {"n": 1}, "text": "1: a\n"}));
+        let nested = json!({"project_instructions": "rules", "text": "1: a\n"}).to_string();
+        let ruled = tool_response(&answered(json!(nested), json!({"data": 1})));
+        assert_eq!(
+            read(ruled),
+            json!({"data": 1, "text": "1: a\n", "project_instructions": "rules"})
+        );
+    }
 
     fn hooks(state: &std::path::Path, workspace: &std::path::Path) -> (Arc<Hooks>, PathBuf) {
         let cli = crate::config::Cli::try_parse_from([

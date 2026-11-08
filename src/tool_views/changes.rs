@@ -24,6 +24,10 @@ struct WriteResult {
 pub(super) struct Changes;
 
 impl ToolRenderer for Changes {
+    fn activity(&self, call: &ToolCall) -> Option<String> {
+        super::labels::activity(call)
+    }
+
     fn render(&self, call: &ToolCall) -> Vec<String> {
         self.render_styled(call, false)
             .into_iter()

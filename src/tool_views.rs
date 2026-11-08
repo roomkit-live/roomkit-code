@@ -2,6 +2,7 @@
 
 mod changes;
 mod docs;
+mod labels;
 mod plans;
 mod processes;
 mod skills;
@@ -84,10 +85,10 @@ struct Envelope<T> {
     data: T,
 }
 
-// The current engine stores the tools' JSON envelope in their result text.
+// A tool's data reaches the views as its call's structured copy; a session
+// stored before that holds the tools' JSON envelope in its result text.
 // Decode only these known tool schemas, for display only. Never promote text
-// into protocol data or infer success/permissions from its contents. Prefer
-// authoritative structured data when a future adapter provides it.
+// into protocol data or infer success/permissions from its contents.
 fn output<T: DeserializeOwned>(call: &ToolCall) -> Option<T> {
     if call.state != ToolState::Succeeded {
         return None;
@@ -104,6 +105,10 @@ fn output<T: DeserializeOwned>(call: &ToolCall) -> Option<T> {
 }
 
 impl ToolRenderer for Files {
+    fn activity(&self, call: &ToolCall) -> Option<String> {
+        labels::activity(call)
+    }
+
     fn has_expanded_details(&self, call: &ToolCall) -> bool {
         match call.name.as_str() {
             "list" | "glob" => output::<PathPage>(call).is_some_and(|page| page.entries.len() > 2),

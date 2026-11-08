@@ -124,6 +124,7 @@ impl Tool for ModeTool {
                     "additionalProperties": false
                 }),
                 tags: Vec::new(),
+                changes_state: false,
             }
         } else {
             AiTool {
@@ -138,6 +139,7 @@ impl Tool for ModeTool {
                     "additionalProperties": false
                 }),
                 tags: Vec::new(),
+                changes_state: false,
             }
         }
     }

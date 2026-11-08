@@ -129,6 +129,11 @@ def yolo_json(root, model):
     assert [e["outcome"] for e in events if e["kind"] == "run_finished"] == ["completed"], events
     tools = [e["item"] for e in events if e["kind"] == "item" and e["item"].get("kind") == "tool"]
     assert any(item["call"]["name"] == "write" for item in tools), tools
+    # The model reads the text alone, the views keep the structured result.
+    written = next(item["call"] for item in tools if item["call"]["name"] == "write" and item["call"]["state"] == "succeeded")
+    assert written["data"]["data"]["path"] == "note.txt", written
+    read = model.tool_results()[0]["content"]
+    assert read.startswith('write "note.txt": created=true'), read
     answers = [e["message"]["text"] for e in events if e["kind"] == "message_finalized"]
     assert answers[-1] == ANSWER, answers
     # The answer is in the stream, never printed beside it.
@@ -252,7 +257,7 @@ def long_shell(root, model):
     assert code == 0, (code, err)
     assert "long command (maximum 3600000)." in model.requests[0]["messages"][0]["content"]
     results = [message["content"] for message in model.tool_results()]
-    assert len(results) == 1 and '"exit_code":0' in results[0].replace(" ", ""), results
+    assert len(results) == 1 and results[0].startswith("exit_code=0"), results
     assert (root / "project" / "long").read_text() == "ran"
 
 

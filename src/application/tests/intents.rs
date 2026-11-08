@@ -14,30 +14,32 @@ fn assert_schemas(request: &Value, required: bool) {
         .as_str()
         .unwrap();
     assert!(instructions.contains(
-        "For every tool call, include a short description of your next action in _roomkit_intent"
+        "When a tool offers _roomkit_intent, write in it a short description of your next action"
     ));
     assert!(instructions.contains("not in a separate message"));
     assert!(instructions.contains("respect any tool-owned parameter of the same name"));
     assert!(
-        instructions.find("For every tool call, include").unwrap()
+        instructions
+            .find("When a tool offers _roomkit_intent")
+            .unwrap()
             > instructions.find("Apply tool-specific guidance").unwrap()
     );
     let tools = request["tools"].as_array().unwrap();
     assert!(!tools.is_empty());
     for tool in tools {
-        assert_eq!(
-            tool["function"]["parameters"]["properties"]["_roomkit_intent"]["type"],
-            "string"
-        );
-        let contains_intent = tool["function"]["parameters"]["required"]
+        let name = tool["function"]["name"].as_str().unwrap();
+        let asked = crate::agent::asks_intent(name);
+        let property = &tool["function"]["parameters"]["properties"]["_roomkit_intent"];
+        assert_eq!(property.is_object(), asked, "{name}");
+        let listed = tool["function"]["parameters"]["required"]
             .as_array()
             .is_some_and(|fields| fields.iter().any(|field| field == "_roomkit_intent"));
-        assert_eq!(contains_intent, required);
+        assert_eq!(listed, asked && required, "{name}");
     }
 }
 
 #[tokio::test]
-async fn missing_public_intent_keeps_the_call_executable_and_displays_its_name() {
+async fn a_call_without_an_intent_runs_and_reads_from_its_arguments() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("listed-fixture.txt"), "fixture").unwrap();
@@ -56,7 +58,7 @@ async fn missing_public_intent_keeps_the_call_executable_and_displays_its_name()
     )
     .lines
     .join("\n");
-    assert!(text.contains("✓ list · F2 details"), "{text}");
+    assert!(text.contains("✓ List . · F2 details"), "{text}");
     assert!(!text.contains("Action completed"));
     assert!(text.contains("listed-fixture.txt"));
     assert!(!text.contains("\"data\":"));

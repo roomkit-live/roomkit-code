@@ -14,7 +14,7 @@ fn result(session: &Session, name: &str) -> Value {
         })
         .unwrap();
     assert_eq!(tool.state, ToolState::Succeeded, "{}: {}", name, tool.text);
-    serde_json::from_str::<Value>(&tool.text).unwrap()["data"].clone()
+    tool.data.as_ref().unwrap()["data"].clone()
 }
 
 #[tokio::test]
