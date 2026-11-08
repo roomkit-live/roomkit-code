@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A test rerun after each `write`, `edit` or `patch` is no longer refused as a
+  loop: those tools restart the turn's repeat counts.
+
 - A request is smaller. The model reads a tool's text, not its structured
   result beside it (the views keep the data as the call's structured copy), and
   only a shell command, a background process, a delegated task and an MCP tool
