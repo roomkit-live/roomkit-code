@@ -303,11 +303,11 @@ async fn summarize(
     let processes = &app.profiles.resources.processes;
     let config = priced.clone();
     let mut summary = crate::exit_summary::collect(&app.kit, processes, shown, priced).await;
-    if let Some(config) = config {
-        add_delegated(app, &config, &mut summary).await;
-    }
     if running {
         summary.turn_running();
+    }
+    if let Some(config) = config {
+        add_delegated(app, &config, &mut summary).await;
     }
     summary
 }
@@ -318,19 +318,19 @@ async fn add_delegated(
     config: &SessionConfig,
     summary: &mut crate::exit_summary::Summary,
 ) {
+    use crate::delegation::spending;
     let tasks = &app.profiles.resources.tasks;
-    crate::delegation::spending::read(&app.kit, &app.profiles, tasks, config).await;
+    spending::read(&app.kit, &app.profiles, tasks, config).await;
     let listed: Vec<_> = tasks
         .of(config.room.as_str())
         .into_iter()
         .map(|(_, task)| task)
         .collect();
-    let lead = config
-        .actor_names
-        .iter()
-        .find(|(id, _)| id.as_str() == config.agent.as_str())
-        .map_or_else(|| config.agent.to_string(), |(_, label)| label.clone());
-    summary.add_tasks(&lead, &listed);
+    if listed.is_empty() {
+        return;
+    }
+    let leads = spending::leads(&app.kit, &app.profiles, config).await;
+    summary.add_tasks(leads, &listed);
 }
 
 /// The conversation shown at exit with its agent, priced as the profiles

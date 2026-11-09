@@ -42,6 +42,8 @@ fn a_resumable_session_reports_its_command_usage_and_stopped_processes() {
         usage: Some(usage(2, true)),
         cost: None,
         spenders: Vec::new(),
+        tasks_running: 0,
+        turn_cut: false,
         running: vec![process("proc-1", "npm run\tdev\n", 252)],
     };
     assert_eq!(
@@ -65,6 +67,8 @@ fn partial_usage_is_marked_and_unconfirmed_cleanup_is_not_reported_as_stopped() 
         usage: Some(usage(1, false)),
         cost: None,
         spenders: Vec::new(),
+        tasks_running: 0,
+        turn_cut: false,
         running: (0..10)
             .map(|i| process(&format!("p{i}"), "sleep 9", 3700))
             .collect(),
@@ -259,6 +263,8 @@ fn an_unattended_launch_reports_the_processes_it_left_running() {
         usage: None,
         cost: None,
         spenders: Vec::new(),
+        tasks_running: 0,
+        turn_cut: false,
         running: vec![process("p2", "python3 server.py", 61)],
     };
     assert_eq!(
@@ -290,6 +296,16 @@ mod delegated {
 
     fn usd(micros: u64) -> ConversationCost {
         ConversationCost::new(micros, "USD", true)
+    }
+
+    fn lead() -> Vec<Spender> {
+        let (id, label) = ("code".to_owned(), "Code".to_owned());
+        vec![Spender::lead(
+            id,
+            label,
+            usage(1_000, 100, 2),
+            Some(usd(420_000)),
+        )]
     }
 
     fn task(agent: &str, spent: Option<Spent>, ended: bool) -> Task {
@@ -325,7 +341,7 @@ mod delegated {
     fn the_report_totals_the_conversation_then_gives_each_agent_s_part() {
         let mut summary = summary();
         summary.add_tasks(
-            "Code",
+            lead(),
             &[
                 task("Review", spent(500, 50, Some(usd(300_000))), true),
                 task("Docs", spent(200, 20, Some(usd(100_000))), true),
@@ -348,7 +364,7 @@ mod delegated {
     #[test]
     fn a_task_with_no_price_leaves_the_total_partial() {
         let mut summary = summary();
-        summary.add_tasks("Code", &[task("Review", spent(500, 50, None), true)]);
+        summary.add_tasks(lead(), &[task("Review", spent(500, 50, None), true)]);
         let lines = summary.conversation_report();
         assert_eq!(
             lines[0],
@@ -357,19 +373,54 @@ mod delegated {
         assert_eq!(lines[2], "  Review (1 task): total=550 · 1 turn");
     }
 
-    /// Without a task that consumed anything, the report stays as it was; a
-    /// task that runs is cut by closing, so the report says it is partial.
+    /// A task that runs is cut by closing and was not counted: the total
+    /// says so, and the agent that delegated keeps a whole line.
     #[test]
-    fn a_running_task_leaves_the_report_partial_and_lists_no_agent() {
-        let mut quiet = summary();
-        let before = quiet.conversation_report();
-        quiet.add_tasks("Code", &[]);
-        assert_eq!(quiet.conversation_report(), before);
-
+    fn a_running_task_is_named_and_leaves_only_the_total_partial() {
         let mut running = summary();
-        running.add_tasks("Code", &[task("Review", None, false)]);
-        let lines = running.conversation_report();
-        assert_eq!(lines.len(), 1);
-        assert!(lines[0].contains("· 2 turns (partial)"), "{lines:?}");
+        running.add_tasks(lead(), &[task("Review", None, false)]);
+        assert_eq!(
+            running.conversation_report(),
+            [
+                "Token usage: total=1100 input=1000 (+ 0 cached) output=100 · 2 turns (partial) · cost ≈ $0.42 (partial)",
+                "  Code: total=1100 · 2 turns · ≈ $0.42",
+                "  1 delegated task was still running: not counted",
+            ]
+        );
+    }
+
+    /// A task that ended but could not be read is unknown: the report says
+    /// the total lacks something rather than leaving it out in silence.
+    #[test]
+    fn an_ended_task_that_could_not_be_read_leaves_the_total_partial() {
+        let mut unread = summary();
+        unread.add_tasks(lead(), &[task("Review", None, true)]);
+        let lines = unread.conversation_report();
+        assert!(
+            lines[0].contains("· 2 turns (partial) · cost ≈ $0.42 (partial)"),
+            "{lines:?}"
+        );
+    }
+
+    /// A turn the view left running is the shown agent's: its own line says
+    /// it is cut, with the total.
+    #[test]
+    fn a_cut_turn_marks_its_agent_s_line() {
+        let mut cut = summary();
+        cut.usage.as_mut().unwrap().last_turn_recorded = false;
+        cut.turn_running();
+        cut.add_tasks(
+            lead(),
+            &[task("Review", spent(500, 50, Some(usd(1_000))), true)],
+        );
+        let lines = cut.conversation_report();
+        assert_eq!(
+            lines[1], "  Code: total=1100 · 2 turns · ≈ $0.42 (partial)",
+            "{lines:?}"
+        );
+        assert!(
+            lines[0].contains("(partial) · cost ≈ $0.42 (partial)"),
+            "{lines:?}"
+        );
     }
 }

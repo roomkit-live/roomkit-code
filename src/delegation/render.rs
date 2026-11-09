@@ -227,7 +227,7 @@ mod tests {
             room: format!("main::{id}"),
             agent: "Review".into(),
             agent_id: "review".into(),
-            input: format!("Task {id}"),
+            input: format!("Task {id}").into(),
             started: Instant::now(),
             ended: ended.then_some((Duration::from_secs(3), Outcome::Completed)),
             spent: None,
@@ -315,7 +315,7 @@ mod tests {
     #[test]
     fn long_texts_are_cut_to_the_terminal_s_limits() {
         let mut long = task("t", false);
-        long.input = "é".repeat(INPUT_BYTES);
+        long.input = "é".repeat(INPUT_BYTES).into();
         long.agent = "a".repeat(300);
         let text = details(&long);
         assert!(text.len() < INPUT_BYTES + 400, "{}", text.len());

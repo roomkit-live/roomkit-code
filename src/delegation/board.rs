@@ -5,7 +5,7 @@
 //! from its room (`history`).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
@@ -25,6 +25,8 @@ pub(crate) enum Outcome {
     Completed,
     Cancelled,
     Failed,
+    /// Its launch ended without recording how it ended: a crash.
+    Interrupted,
 }
 
 impl Outcome {
@@ -38,12 +40,13 @@ impl Outcome {
     }
 
     /// How a task its room records ended: one still marked as running ended
-    /// with the launch that ran it.
+    /// with a launch that could not say so.
     pub(crate) fn recorded(status: &str) -> Self {
         match status {
             "completed" => Self::Completed,
             "failed" => Self::Failed,
-            _ => Self::Cancelled,
+            "cancelled" => Self::Cancelled,
+            _ => Self::Interrupted,
         }
     }
 }
@@ -61,7 +64,8 @@ pub(crate) struct Task {
     pub(crate) agent: String,
     /// The worker's ID.
     pub(crate) agent_id: String,
-    pub(crate) input: String,
+    /// Shared: the views copy the tasks they show on every refresh.
+    pub(crate) input: Arc<str>,
     pub(crate) started: Instant,
     /// How long it ran and how it ended, once it did.
     pub(crate) ended: Option<(Duration, Outcome)>,
@@ -74,6 +78,12 @@ impl Task {
         self.ended.is_none()
     }
 
+    /// Whether its launch ended before it could record how it ended: what its
+    /// last turn used was never recorded.
+    pub(crate) fn interrupted(&self) -> bool {
+        matches!(self.ended, Some((_, Outcome::Interrupted)))
+    }
+
     /// Its state in a few words: "running 42 s", "completed in 58 s".
     pub(crate) fn state(&self) -> String {
         match self.ended {
@@ -81,6 +91,7 @@ impl Task {
             Some((took, Outcome::Completed)) => format!("completed in {} s", seconds(took)),
             Some((took, Outcome::Cancelled)) => format!("cancelled after {} s", seconds(took)),
             Some((took, Outcome::Failed)) => format!("failed after {} s", seconds(took)),
+            Some((_, Outcome::Interrupted)) => "interrupted".to_owned(),
         }
     }
 
@@ -168,6 +179,7 @@ impl Tasks {
             Outcome::Completed => format!("completed in {} s", seconds(took)),
             Outcome::Cancelled => "cancelled".to_owned(),
             Outcome::Failed => "failed".to_owned(),
+            Outcome::Interrupted => "interrupted".to_owned(),
         };
         let text = format!("Task for {} {outcome_text}", ended.agent);
         board
@@ -293,7 +305,7 @@ mod tests {
             room: room.into(),
             agent: "Review".into(),
             agent_id: "review".into(),
-            input: format!("Task {id}"),
+            input: format!("Task {id}").into(),
             started: Instant::now(),
             ended: None,
             spent: None,
@@ -349,13 +361,44 @@ mod tests {
         assert_eq!(a.state(), "completed in 58 s");
 
         let mut told = ended(task("quick", "main", "main::q"), Outcome::Cancelled);
-        told.input = String::new();
+        told.input = "".into();
         tasks.ended(told);
         tasks.started(task("quick", "main", "main::q"));
         assert_eq!(tasks.notices("main"), ["Task for Review cancelled"]);
         let quick = tasks.find("main", "quick").unwrap();
         assert_eq!(quick.state(), "cancelled after 58 s");
-        assert_eq!(quick.input, "Task quick");
+        assert_eq!(&*quick.input, "Task quick");
         assert_eq!(tasks.running(), 0);
+    }
+
+    /// A room says how its task ended; a status that is no end means the
+    /// launch that ran it could not say so.
+    #[test]
+    fn a_room_s_status_reads_as_how_its_task_ended() {
+        assert_eq!(Outcome::recorded("completed"), Outcome::Completed);
+        assert_eq!(Outcome::recorded("failed"), Outcome::Failed);
+        assert_eq!(Outcome::recorded("cancelled"), Outcome::Cancelled);
+        assert_eq!(Outcome::recorded("in_progress"), Outcome::Interrupted);
+        assert_eq!(Outcome::recorded("pending"), Outcome::Interrupted);
+    }
+
+    /// What the hooks told stands: a task read back from its room adds only
+    /// what they did not.
+    #[test]
+    fn a_restored_task_never_replaces_one_the_hooks_told() {
+        let tasks = Tasks::default();
+        tasks.started(task("live", "main", "main::l"));
+        tasks.restored(vec![
+            ended(task("live", "main", "main::l"), Outcome::Failed),
+            ended(task("old", "main", "main::o"), Outcome::Completed),
+        ]);
+        let listed: Vec<(String, bool)> = tasks
+            .of("main")
+            .into_iter()
+            .map(|(_, task)| (task.id.clone(), task.running()))
+            .collect();
+        assert_eq!(listed, [("live".into(), true), ("old".into(), false)]);
+        assert!(tasks.restoring("main"));
+        assert!(!tasks.restoring("main"));
     }
 }

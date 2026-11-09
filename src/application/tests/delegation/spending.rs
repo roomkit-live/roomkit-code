@@ -10,8 +10,11 @@ use super::*;
 
 /// A model server that reports what each request used: the worker answers at
 /// once, 1,000 tokens in and 100 out; each of the delegating agent's requests
-/// uses 2,000 and 200.
-async fn reporting_server() -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
+/// uses 2,000 and 200. A worker that `hangs` lists the project first, then
+/// never answers in time, so its task runs until it is stopped.
+async fn reporting_server(
+    hangs: bool,
+) -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
     let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
     let seen = requests.clone();
     let router = Router::new().route(
@@ -22,7 +25,12 @@ async fn reporting_server() -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::Joi
                 seen.lock().unwrap().push(request.clone());
                 let worker = request.to_string().contains(WORKER);
                 let last = request["messages"].as_array().unwrap().last().unwrap();
-                let delta = if worker {
+                if worker && hangs && last["role"] == "tool" {
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                }
+                let delta = if worker && hangs {
+                    call("list", &json!({"path": "."}))
+                } else if worker {
                     json!({"content": RESULT})
                 } else if last.to_string().contains(RESULT) {
                     json!({"content": RELAYED})
@@ -57,6 +65,19 @@ async fn reporting_server() -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::Joi
     (base, requests, task)
 }
 
+/// A project with a reviewer, whose models cost $2 in and $10 out a million.
+async fn priced_settings(
+    project: &std::path::Path,
+    state: &std::path::Path,
+    base: &str,
+) -> Settings {
+    let mut settings = settings(project, state, base);
+    with_a_reviewer(&settings).await;
+    let verified = roomkit_ai::Date::new(2026, 11, 6).unwrap();
+    settings.pricing = Some(roomkit_ai::ModelPricing::new(2.0, 10.0, verified).unwrap());
+    settings
+}
+
 fn sessions(app: &Application, project: &std::path::Path) -> crate::sessions::Sessions {
     crate::sessions::Sessions {
         kit: app.kit.clone(),
@@ -82,11 +103,8 @@ fn related(event: &Event) -> Option<ConversationCost> {
 async fn a_task_s_cost_shows_by_task_by_agent_and_in_the_total_and_after_a_restart() {
     let project = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
-    let (base, requests, server) = reporting_server().await;
-    let mut settings = settings(project.path(), state.path(), &base);
-    with_a_reviewer(&settings).await;
-    let verified = roomkit_ai::Date::new(2026, 11, 6).unwrap();
-    settings.pricing = Some(roomkit_ai::ModelPricing::new(2.0, 10.0, verified).unwrap());
+    let (base, requests, server) = reporting_server(false).await;
+    let settings = priced_settings(project.path(), state.path(), &base).await;
     let app = Application::open(&settings, String::new()).await.unwrap();
     let handler = sessions(&app, project.path());
     let mut updates = handler.subscribe(app.view.clone()).unwrap();
@@ -158,6 +176,125 @@ async fn a_task_s_cost_shows_by_task_by_agent_and_in_the_total_and_after_a_resta
     assert!(list.body.contains("Review · completed in"), "{}", list.body);
     assert!(list.body.contains(spent), "{}", list.body);
     assert!(app.profiles.resources.tasks.notices("main").is_empty());
+    app.close().await.unwrap();
+    server.abort();
+}
+
+/// A task stopped before its worker's usage was whole has a cost that cannot
+/// be: the total says so, as the task's own line does.
+#[tokio::test]
+async fn a_stopped_task_leaves_the_total_partial() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let (base, requests, server) = reporting_server(true).await;
+    let settings = priced_settings(project.path(), state.path(), &base).await;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let handler = sessions(&app, project.path());
+    let mut updates = handler.subscribe(app.view.clone()).unwrap();
+    turn(&app).await;
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let asked = requests
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|request| request.to_string().contains(WORKER))
+                .count();
+            if asked >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    let task = app.profiles.resources.tasks.of("main").remove(0).1;
+    let options = roomkit::CancelTaskOptions::default();
+    assert!(app.kit.cancel_task(&task.id, options).await);
+    let cost = until(&mut updates, related).await;
+    assert!(!cost.complete, "{cost:?}");
+    assert_eq!(cost.micros, 3_000, "The first request it made is counted");
+    app.close().await.unwrap();
+    server.abort();
+}
+
+/// A task a crash left running recorded nothing of its last turn: it reads
+/// interrupted, and what the total lacks is said.
+#[tokio::test]
+async fn a_task_a_crash_left_running_reads_interrupted_and_partial() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let (base, _requests, server) = reporting_server(false).await;
+    let settings = priced_settings(project.path(), state.path(), &base).await;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let metadata = roomkit::model::Metadata::from_iter([
+        ("task_id".to_owned(), json!("crashed")),
+        ("parent_room_id".to_owned(), json!("main")),
+        ("task_agent_id".to_owned(), json!("review")),
+        ("task_input".to_owned(), json!("Review the diff")),
+        ("task_status".to_owned(), json!("in_progress")),
+    ]);
+    let options = roomkit::CreateRoomOptions {
+        room_id: Some(roomkit::model::RoomId::new("main::task-crashed").unwrap()),
+        metadata,
+        ..Default::default()
+    };
+    app.kit.create_room(options).await.unwrap();
+    let handler = sessions(&app, project.path());
+    let mut updates = handler.subscribe(app.view.clone()).unwrap();
+    let cost = until(&mut updates, related).await;
+    assert!(!cost.complete, "{cost:?}");
+    let list = tasks(&handler, &app.view, "").await.unwrap();
+    assert!(
+        list.body
+            .contains("Review · interrupted · 0 tokens · ≈ $0.00 (partial)"),
+        "{}",
+        list.body
+    );
+    app.close().await.unwrap();
+    server.abort();
+}
+
+/// The agent shown at exit may not be the one that did the work: each keeps
+/// its own part, and the total counts them all.
+#[tokio::test]
+async fn the_report_credits_each_agent_of_the_room_after_a_switch() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let (base, requests, server) = reporting_server(false).await;
+    let settings = priced_settings(project.path(), state.path(), &base).await;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let handler = sessions(&app, project.path());
+    let _updates = handler.subscribe(app.view.clone()).unwrap();
+    turn(&app).await;
+    until_handed_back(&requests).await;
+    until_relayed(&app).await;
+
+    // Shown at exit: the reviewer, which only worked on the delegated task.
+    let review = ChannelId::new("review").unwrap();
+    let mut selected = SessionConfig::new(app.view.room.clone(), review, "local-user");
+    app.profiles.configure_view(&mut selected).await;
+    let processes = &app.profiles.resources.processes;
+    let shown = Some((app.view.room.to_string(), None));
+    let mut summary =
+        crate::exit_summary::collect(&app.kit, processes, shown, Some(selected.clone())).await;
+    super::super::add_delegated(&app, &selected, &mut summary).await;
+    let report = summary.conversation_report().join("\n");
+    assert!(report.contains("3 turns · cost ≈ $0.02"), "{report}");
+    assert!(
+        report.contains("code") || report.contains("Code"),
+        "{report}"
+    );
+    assert!(
+        report.contains(": total=6600 · 2 turns · ≈ $0.02"),
+        "{report}"
+    );
+    assert!(
+        report.contains("  Review (1 task): total=1100 · 1 turn"),
+        "{report}"
+    );
+    assert!(!report.contains("  Review: "), "{report}");
     app.close().await.unwrap();
     server.abort();
 }

@@ -12,7 +12,7 @@ use roomkit_tui::protocol::ConversationCost;
 use roomkit_tui_engine::SessionConfig;
 
 use super::{Task, Tasks};
-use crate::exit_summary::{Usage, amount};
+use crate::exit_summary::{Spender, Usage, amount};
 use crate::profiles::Profiles;
 
 /// What a task's worker consumed.
@@ -58,7 +58,8 @@ pub(crate) async fn read(
 }
 
 /// What the room of `task` records its worker consumed, priced as the
-/// profiles now price that agent; none when the room cannot be read.
+/// profiles now price that agent; none when the room cannot be read, which a
+/// later view tries again.
 async fn spent(
     kit: &RoomKit<SqliteStore>,
     profiles: &Profiles,
@@ -67,15 +68,65 @@ async fn spent(
 ) -> Option<Spent> {
     let room = RoomId::new(&task.room).ok()?;
     let agent = ChannelId::new(&task.agent_id).ok()?;
-    let usage = crate::exit_summary::usage(kit, &room).await.ok()?;
-    let mut config = SessionConfig::new(room, agent, "local-user");
+    let mut usage = crate::exit_summary::usage(kit, &room).await.ok()?;
+    usage.complete &= !task.interrupted();
+    let (cost, _) = priced(kit, profiles, &room, &agent, organization, usage.complete).await?;
+    Some(Spent { usage, cost })
+}
+
+/// What `agent`'s turns in `room` cost at the list price of its model, with
+/// the view that priced them: the cost is partial when its usage is not
+/// `complete`, and none when its model has no price. None when the room
+/// cannot be read.
+async fn priced(
+    kit: &RoomKit<SqliteStore>,
+    profiles: &Profiles,
+    room: &RoomId,
+    agent: &ChannelId,
+    organization: Option<String>,
+    complete: bool,
+) -> Option<(Option<ConversationCost>, SessionConfig)> {
+    let mut config = SessionConfig::new(room.clone(), agent.clone(), "local-user");
     config.organization = organization;
     profiles.configure_view(&mut config).await;
     let cost = roomkit_tui_engine::conversation_cost(kit, &config)
         .await
-        .ok()
-        .flatten();
-    Some(Spent { usage, cost })
+        .ok()?;
+    let cost = cost.map(|mut cost| {
+        cost.complete &= complete;
+        cost
+    });
+    Some((cost, config))
+}
+
+/// Each agent's part of the conversation's own room, the one `config` shows
+/// first: an agent may have been changed during the conversation.
+pub(crate) async fn leads(
+    kit: &RoomKit<SqliteStore>,
+    profiles: &Profiles,
+    config: &SessionConfig,
+) -> Vec<Spender> {
+    let Ok(agents) = crate::exit_summary::usage_by_agent(kit, &config.room).await else {
+        return Vec::new();
+    };
+    let mut leads = Vec::new();
+    for (agent, usage) in agents {
+        let organization = config.organization.clone();
+        let complete = usage.complete;
+        let room = &config.room;
+        let Some((cost, view)) = priced(kit, profiles, room, &agent, organization, complete).await
+        else {
+            continue;
+        };
+        let label = view
+            .actor_names
+            .iter()
+            .find(|(id, _)| id.as_str() == agent.as_str())
+            .map_or_else(|| agent.to_string(), |(_, label)| label.clone());
+        leads.push(Spender::lead(agent.to_string(), label, usage, cost));
+    }
+    leads.sort_by_key(|lead| !lead.is_agent(config.agent.as_str()));
+    leads
 }
 
 /// What the ended tasks of `current`'s conversation cost in its currency,

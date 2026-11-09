@@ -376,8 +376,10 @@ says so first, as for processes.
 What a task consumed is read when it ends, at the price of its agent's own
 model: the footer and the sidebar then show the conversation's own cost and
 its total with its tasks, `≈ $0.42 · total ≈ $1.30`, and the exit report totals
-the conversation before giving each agent's part. A task with no price, or
-priced in another currency, leaves the total partial.
+the conversation before giving each agent's part. The total reads partial when
+it lacks something: a task with no price or in another currency, one stopped
+before its usage was whole, one a crash left unfinished, or at exit one still
+running.
 
 ## Tools and persistence
 

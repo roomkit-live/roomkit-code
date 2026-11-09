@@ -1,8 +1,6 @@
 //! The exit report of a conversation whose agents handed tasks over: what
 //! the conversation consumed as a whole, then each agent's part.
 
-use std::iter::once;
-
 use roomkit_tui::protocol::ConversationCost;
 
 use super::{Summary, Usage, amount};
@@ -11,17 +9,38 @@ use crate::delegation::{Task, spending};
 /// One agent's part of a conversation's consumption.
 #[derive(Debug)]
 pub(crate) struct Spender {
-    pub(super) label: String,
-    /// How many delegated tasks it worked on; 0 for the conversation's own
-    /// agent.
-    pub(super) tasks: usize,
-    pub(super) usage: Usage,
-    pub(super) cost: Option<ConversationCost>,
+    agent: String,
+    label: String,
+    /// How many delegated tasks it worked on; 0 for its part of the
+    /// conversation's own room.
+    tasks: usize,
+    usage: Usage,
+    cost: Option<ConversationCost>,
 }
 
 impl Spender {
+    /// What agent `agent` consumed in the conversation's own room.
+    pub(crate) fn lead(
+        agent: String,
+        label: String,
+        usage: Usage,
+        cost: Option<ConversationCost>,
+    ) -> Self {
+        Self {
+            agent,
+            label,
+            tasks: 0,
+            usage,
+            cost,
+        }
+    }
+
+    pub(crate) fn is_agent(&self, agent: &str) -> bool {
+        self.agent == agent
+    }
+
     /// `  Review (2 tasks): total=18000 · 2 turns · ≈ $0.88`.
-    pub(super) fn line(&self) -> String {
+    fn line(&self) -> String {
         let tasks = match self.tasks {
             0 => String::new(),
             1 => " (1 task)".to_owned(),
@@ -42,38 +61,67 @@ impl Spender {
             usage.turns,
         )
     }
+
+    fn cut(&mut self) {
+        self.usage.complete = false;
+        if let Some(cost) = &mut self.cost {
+            cost.complete = false;
+        }
+    }
 }
 
 impl Summary {
     /// Adds what the conversation's `tasks` consumed to its report: its usage
-    /// and cost become the whole conversation's, and `lead`, its own agent,
-    /// and each worker get a line. A task that still runs is cut by closing:
-    /// the report is then partial.
-    pub(crate) fn add_tasks(&mut self, lead: &str, tasks: &[Task]) {
-        let cost = self.cost.clone();
+    /// and cost become the whole conversation's, `leads` give each agent's
+    /// part of its own room, and each worker gets a line. A task that still
+    /// runs, or could not be read, is unknown: the total then reads partial.
+    pub(crate) fn add_tasks(&mut self, mut leads: Vec<Spender>, tasks: &[Task]) {
         let Some(usage) = self.usage.as_mut() else {
             return;
         };
-        usage.complete &= tasks.iter().all(|task| !task.running());
-        let read: Vec<&Task> = tasks.iter().filter(|task| task.spent.is_some()).collect();
-        if read.is_empty() {
-            return;
+        if self.turn_cut
+            && let Some(lead) = leads.first_mut()
+        {
+            lead.cut();
         }
-        let mut spenders = vec![Spender {
-            label: lead.to_owned(),
-            tasks: 0,
-            usage: usage.clone(),
-            cost: cost.clone(),
-        }];
+        let running = tasks.iter().filter(|task| task.running()).count();
+        let read: Vec<&Task> = tasks.iter().filter(|task| task.spent.is_some()).collect();
+        let whole = read.len() == tasks.len();
+        usage.complete &= whole;
+        // The report's own cost is that of the shown agent alone: without its
+        // parts, it is all that is known of the room.
+        let own: Vec<_> = if leads.is_empty() {
+            vec![self.cost.as_ref()]
+        } else {
+            leads.iter().map(|lead| lead.cost.as_ref()).collect()
+        };
         let costs = read.iter().map(|task| spending::cost_of(task));
-        self.cost = spending::sum(once(cost.as_ref()).chain(costs));
+        let mut cost = spending::sum(own.into_iter().chain(costs));
+        if let Some(cost) = cost.as_mut() {
+            cost.complete &= whole;
+        }
+        self.cost = cost;
         for task in read {
             if let Some(spent) = &task.spent {
                 usage.absorb(&spent.usage);
-                add_to_worker(&mut spenders, task);
+                add_to_worker(&mut leads, task);
             }
         }
-        self.spenders = spenders;
+        self.spenders = leads;
+        self.tasks_running = running;
+    }
+
+    /// Each agent's part, then the tasks that could not be counted.
+    pub(super) fn delegated_lines(&self) -> Vec<String> {
+        let mut lines: Vec<String> = self.spenders.iter().map(Spender::line).collect();
+        match self.tasks_running {
+            0 => {}
+            1 => lines.push("  1 delegated task was still running: not counted".to_owned()),
+            count => lines.push(format!(
+                "  {count} delegated tasks were still running: not counted"
+            )),
+        }
+        lines
     }
 }
 
@@ -85,8 +133,7 @@ fn add_to_worker(spenders: &mut Vec<Spender>, task: &Task) {
     };
     let line = spenders
         .iter_mut()
-        .skip(1)
-        .find(|spender| spender.label == task.agent);
+        .find(|spender| spender.tasks > 0 && spender.agent == task.agent_id);
     match line {
         Some(line) => {
             line.tasks += 1;
@@ -94,6 +141,7 @@ fn add_to_worker(spenders: &mut Vec<Spender>, task: &Task) {
             line.cost = spending::sum([line.cost.as_ref(), spent.cost.as_ref()]);
         }
         None => spenders.push(Spender {
+            agent: task.agent_id.clone(),
             label: task.agent.clone(),
             tasks: 1,
             usage: spent.usage.clone(),

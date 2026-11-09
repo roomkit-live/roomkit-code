@@ -237,7 +237,7 @@ fn task(event: &RoomEvent, roster: &Roster) -> Task {
         room: text(event, "child_room_id").to_owned(),
         agent: roster.label(text(event, "agent_id")),
         agent_id: text(event, "agent_id").to_owned(),
-        input: text(event, "task_input").to_owned(),
+        input: text(event, "task_input").into(),
         started: Instant::now(),
         ended: None,
         spent: None,

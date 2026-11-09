@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use roomkit::model::{EventType, Metadata, RoomEvent, RoomId};
+use roomkit::model::{ChannelId, EventType, Metadata, RoomEvent, RoomId};
 use roomkit::{GetTimelineOptions, RoomKit};
 use roomkit_sqlite::SqliteStore;
 use roomkit_tools_process::{ProcessSession, ProcessState};
@@ -13,6 +13,8 @@ use roomkit_tui_engine::SessionConfig;
 use serde_json::{Value, json};
 
 mod delegated;
+
+pub(crate) use delegated::Spender;
 
 /// Processes listed by name; the rest are counted.
 const LISTED: usize = 8;
@@ -50,7 +52,11 @@ pub(crate) struct Summary {
     /// The conversation's cost at its model's list price, when it has one.
     pub cost: Option<ConversationCost>,
     /// Each agent's part, when some worked on delegated tasks.
-    pub spenders: Vec<delegated::Spender>,
+    pub spenders: Vec<Spender>,
+    /// How many delegated tasks still ran as the report was gathered.
+    pub tasks_running: usize,
+    /// The view left a turn running, which closing cuts.
+    pub turn_cut: bool,
     pub running: Vec<Process>,
 }
 
@@ -64,6 +70,8 @@ impl Summary {
             usage: None,
             cost: None,
             spenders: Vec::new(),
+            tasks_running: 0,
+            turn_cut: false,
             running: running(processes).await,
         }
     }
@@ -124,14 +132,38 @@ async fn running(processes: &ProcessSession) -> Vec<Process> {
 /// Sum every turn's reported totals over the whole conversation. The engine
 /// stores one `ai_usage` record per turn, so no model call is counted twice.
 pub(crate) async fn usage(kit: &RoomKit<SqliteStore>, room: &RoomId) -> crate::Result<Usage> {
-    let mut usage = Usage {
-        input: 0,
-        cached: 0,
-        output: 0,
-        turns: 0,
-        complete: true,
-        last_turn_recorded: false,
-    };
+    let mut usage = Usage::none();
+    each_row(kit, room, |event| usage.add(event)).await?;
+    Ok(usage)
+}
+
+/// The same totals, for each agent that answered in `room`.
+pub(crate) async fn usage_by_agent(
+    kit: &RoomKit<SqliteStore>,
+    room: &RoomId,
+) -> crate::Result<Vec<(ChannelId, Usage)>> {
+    let mut agents: Vec<(ChannelId, Usage)> = Vec::new();
+    each_row(kit, room, |event| {
+        let source = &event.source.channel_id;
+        let index = agents.iter().position(|(agent, _)| agent == source);
+        let index = index.unwrap_or_else(|| {
+            agents.push((source.clone(), Usage::none()));
+            agents.len() - 1
+        });
+        agents[index].1.add(event);
+    })
+    .await?;
+    // A person's messages hold no turn.
+    agents.retain(|(_, usage)| usage.turns > 0 || !usage.complete);
+    Ok(agents)
+}
+
+/// Hands `read` every row of `room`, the oldest first.
+async fn each_row(
+    kit: &RoomKit<SqliteStore>,
+    room: &RoomId,
+    mut read: impl FnMut(&RoomEvent),
+) -> crate::Result<()> {
     let mut after = None;
     loop {
         let options = GetTimelineOptions {
@@ -141,14 +173,26 @@ pub(crate) async fn usage(kit: &RoomKit<SqliteStore>, room: &RoomId) -> crate::R
         };
         let page = kit.get_timeline(room, options).await?;
         let Some(last) = page.last() else {
-            return Ok(usage);
+            return Ok(());
         };
         after = Some(last.index);
-        page.iter().for_each(|event| usage.add(event));
+        page.iter().for_each(&mut read);
     }
 }
 
 impl Usage {
+    /// Nothing counted yet.
+    fn none() -> Self {
+        Self {
+            input: 0,
+            cached: 0,
+            output: 0,
+            turns: 0,
+            complete: true,
+            last_turn_recorded: false,
+        }
+    }
+
     /// Counts `other` in these totals.
     fn absorb(&mut self, other: &Self) {
         self.input = self.input.saturating_add(other.input);
@@ -240,6 +284,7 @@ impl Summary {
             .filter(|usage| usage.turns > 0 && !usage.last_turn_recorded)
         {
             usage.complete = false;
+            self.turn_cut = true;
         }
     }
 
@@ -293,7 +338,7 @@ impl Summary {
             .filter(|usage| usage.turns > 0 || !usage.complete)
         {
             lines.push(usage.line(self.cost.as_ref()));
-            lines.extend(self.spenders.iter().map(delegated::Spender::line));
+            lines.extend(self.delegated_lines());
         }
         lines
     }
