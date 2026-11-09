@@ -433,26 +433,26 @@ impl Settings {
         let state_dir = std::path::absolute(state_dir)?;
         let appearance = file.ui;
         let custom_logo = appearance.logo.is_some();
-        let mut branding = Branding::new(appearance.name)
-            .with_subtitle("Explore, edit and test your project")
-            .with_logo(appearance.logo.unwrap_or_else(crate::branding::header_logo));
+        let mut branding =
+            Branding::new(appearance.name).with_subtitle("Explore, edit and test your project");
+        branding = match appearance.logo {
+            Some(logo) => branding.with_logo(logo),
+            None => branding.with_logo_tiles(crate::logo::header_tiles()),
+        };
         if cli.no_logo {
             branding.logo.clear();
+            branding.logo_tiles.clear();
         }
         let welcome = appearance.welcome.then(|| {
             let mut welcome = WelcomeScreen::default();
             welcome.width = appearance.welcome_width;
-            welcome.logo = if cli.no_logo {
-                Vec::new()
-            } else {
-                appearance.welcome_logo.unwrap_or_else(|| {
-                    if custom_logo {
-                        branding.logo.clone()
-                    } else {
-                        crate::branding::welcome_logo()
-                    }
-                })
-            };
+            if !cli.no_logo {
+                match appearance.welcome_logo {
+                    Some(logo) => welcome.logo = logo,
+                    None if custom_logo => welcome.logo = branding.logo.clone(),
+                    None => welcome = welcome.with_logo_tiles(crate::logo::welcome_tiles()),
+                }
+            }
             welcome.wordmark = if cli.no_logo {
                 Vec::new()
             } else {

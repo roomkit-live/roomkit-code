@@ -19,6 +19,7 @@ mod hooks;
 mod http_client;
 mod images;
 mod instructions;
+mod logo;
 mod permissions;
 mod plans;
 mod processes;

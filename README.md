@@ -1168,15 +1168,13 @@ explicit TOML configuration with `[ui] welcome = false`, `welcome_width = 88`,
 application names fall back to plain lettering unless a wordmark is supplied.
 Small windows use the regular conversation layout without discarding input.
 
-The default terminal artwork is generated from `assets/roomkit-mark.svg` and
-the website's Space Grotesk 600 font. The same SVG produces the compact seven-column,
-four-row header symbol and the larger welcome symbol; neither is drawn separately
-by hand. The compact version thickens the SVG outline before downsampling to keep
-it visible at this size.
-It uses Unicode quadrant blocks, inherits the terminal theme and requires no
-image protocol or runtime font dependency.
-To regenerate it during development, install CairoSVG and Pillow in a local
-Python environment, then run:
+The default mark is RoomKit's four blocks in three violets, the one the RoomKit
+console draws: two columns of two rows in the header, larger on the welcome
+screen. A custom `logo` is drawn as plain text in the theme's colors.
+The welcome wordmark is generated from the website's Space Grotesk 600 font, in
+Unicode quadrant blocks, with no image protocol or runtime font dependency. To
+regenerate it during development, install Pillow in a local Python environment,
+then run:
 
 ```sh
 python scripts/generate-branding.py --font /path/to/space-grotesk-600-latin.woff2

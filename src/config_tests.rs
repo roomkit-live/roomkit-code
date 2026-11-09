@@ -139,6 +139,34 @@ fn explicit_configuration_and_cli_overrides_control_appearance_without_creating_
 }
 
 #[test]
+fn the_default_logo_is_the_colored_mark_and_a_custom_one_stays_plain() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("config.toml");
+    std::fs::write(&path, "").unwrap();
+    let mut cli = cli(root.path());
+    cli.config = Some(path.clone());
+    let loaded = Settings::load(&cli).unwrap();
+    assert_eq!(loaded.ui.branding.logo_tiles, crate::logo::header_tiles());
+    let welcome = loaded.ui.welcome.as_ref().unwrap();
+    assert_eq!(welcome.logo_tiles, crate::logo::welcome_tiles());
+
+    std::fs::write(&path, "[ui]\nlogo = ['AB']\n").unwrap();
+    let loaded = Settings::load(&cli).unwrap();
+    assert_eq!(loaded.ui.branding.logo, ["AB"]);
+    assert!(loaded.ui.branding.logo_tiles.is_empty());
+    let welcome = loaded.ui.welcome.as_ref().unwrap();
+    assert_eq!(welcome.logo, ["AB"]);
+    assert!(welcome.logo_tiles.is_empty());
+
+    std::fs::write(&path, "").unwrap();
+    cli.no_logo = true;
+    let loaded = Settings::load(&cli).unwrap();
+    assert!(loaded.ui.branding.logo.is_empty() && loaded.ui.branding.logo_tiles.is_empty());
+    let welcome = loaded.ui.welcome.as_ref().unwrap();
+    assert!(welcome.logo.is_empty() && welcome.logo_tiles.is_empty());
+}
+
+#[test]
 fn invalid_or_credential_bearing_settings_are_refused_without_echoing_contents() {
     let root = tempfile::tempdir().unwrap();
     let mut cli = cli(root.path());

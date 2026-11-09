@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The logo is RoomKit's four blocks in three violets, as in the RoomKit
+  console, in the header and on the welcome screen.
+
 - `/back` leaves a task's room for its conversation; the sidebar and `/tasks`
   offer the same, and the view says how on arriving in the room.
 
