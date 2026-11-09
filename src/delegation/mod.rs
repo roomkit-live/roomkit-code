@@ -24,6 +24,7 @@ mod transcript;
 
 pub(crate) use board::{Outcome, Task, Tasks};
 
+use std::num::NonZeroUsize;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
@@ -145,6 +146,10 @@ impl Roster {
     }
 }
 
+/// How much of a worker's output comes back to the agent that delegated: the
+/// kit's default, 4,000 characters, cut a review short (RMK-1617).
+const MAX_RESULT_CHARS: NonZeroUsize = NonZeroUsize::new(20_000).unwrap();
+
 /// The handler of every agent's `delegate_task`: the delegating agent is told
 /// the result, and no message of the conversation is handed over
 /// (`max_conversation` 0, HITL a7392f28). The terminal is shared into each
@@ -154,6 +159,7 @@ pub(crate) fn handler(kit: &RoomKit<SqliteStore>) -> DelegateHandler<SqliteStore
     let terminal = ChannelId::new(crate::application::TERMINAL).ok();
     let options = DelegateHandlerOptions {
         default_share_channels: terminal.map(|terminal| vec![terminal]),
+        max_result_chars: MAX_RESULT_CHARS,
         ..DelegateHandlerOptions::default()
     };
     DelegateHandler::new(kit, options)

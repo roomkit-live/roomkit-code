@@ -106,6 +106,37 @@ async fn a_finished_task_leaves_a_line_in_its_conversation() {
     server.abort();
 }
 
+/// A result past the kit's default bound comes back to the agent whole: a
+/// review of 4,492 characters came back cut at 4,000 (RMK-1617).
+#[tokio::test]
+async fn a_long_result_comes_back_whole() {
+    use super::spending::{priced_settings, reporting_server_answering};
+
+    const TAIL: &str = "THE_END_OF_THE_REVIEW";
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let answer = format!("{RESULT}{}{TAIL}", "x".repeat(12_000));
+    let (base, requests, server) = reporting_server_answering(false, answer).await;
+    let settings = priced_settings(project.path(), state.path(), &base).await;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+
+    turn(&app).await;
+    until_handed_back(&requests).await;
+    until_relayed(&app).await;
+
+    let told = requests
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|r| hands_back(r))
+        .unwrap()
+        .to_string();
+    assert!(told.contains(TAIL), "The result came back cut");
+    assert!(!told.contains("[...truncated]"));
+    app.close().await.unwrap();
+    server.abort();
+}
+
 /// What `/tasks` with `arguments` opened in the view of `current`.
 pub(super) async fn tasks(
     handler: &crate::sessions::Sessions,

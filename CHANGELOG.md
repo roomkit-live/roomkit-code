@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A delegated task's result comes back to the agent up to 20,000 characters,
+  4,000 before: a long review no longer stops short (RMK-1617).
+
 - A delegated task that ends while the application runs leaves a line in the
   conversation that asked for it: "Task for Review completed in 58 s". It is
   there again after `/resume`, and no agent reads it.

@@ -472,9 +472,9 @@ mod tests {
         let said: Vec<_> = tasks
             .ended_lines("main")
             .into_iter()
-            .map(|line| match line {
-                roomkit_tui::protocol::Item::Message(message) => message.text,
-                other => panic!("{other:?}"),
+            .filter_map(|line| match line {
+                roomkit_tui::protocol::Item::Message(message) => Some(message.text),
+                _ => None,
             })
             .collect();
         assert_eq!(

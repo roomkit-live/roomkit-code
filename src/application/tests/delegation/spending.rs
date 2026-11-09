@@ -15,12 +15,21 @@ use super::*;
 pub(super) async fn reporting_server(
     hangs: bool,
 ) -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
+    reporting_server_answering(hangs, RESULT.to_owned()).await
+}
+
+/// The same server, whose worker's result is `answer`, which starts with
+/// [`RESULT`].
+pub(super) async fn reporting_server_answering(
+    hangs: bool,
+    answer: String,
+) -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
     let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
     let seen = requests.clone();
     let router = Router::new().route(
         "/v1/chat/completions",
         post(move |Json(request): Json<Value>| {
-            let seen = seen.clone();
+            let (seen, answer) = (seen.clone(), answer.clone());
             async move {
                 seen.lock().unwrap().push(request.clone());
                 let worker = super::rooms::is_worker(&request.to_string());
@@ -31,7 +40,7 @@ pub(super) async fn reporting_server(
                 let delta = if worker && hangs {
                     call("list", &json!({"path": "."}))
                 } else if worker {
-                    json!({"content": RESULT})
+                    json!({"content": answer})
                 } else if last.to_string().contains(RESULT) {
                     json!({"content": RELAYED})
                 } else if last["role"] == "tool" {
