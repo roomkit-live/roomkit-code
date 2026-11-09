@@ -52,7 +52,7 @@ fn back_to_conversation(tasks: &Tasks, room: &str) -> Option<Choice> {
     let root = tasks.root_of(room);
     (root != room).then(|| {
         Choice::new(format!("open {root}"), "Back to the conversation")
-            .with_description("Leave this task's room; its agent keeps working")
+            .with_description("Leave this task's room; a task still running carries on")
     })
 }
 
@@ -220,7 +220,7 @@ pub(super) fn sidebar(tasks: &Tasks, room: &str) -> SidebarSection {
     if root != room {
         let action = crate::profiles::sidebar::action(COMMAND, format!("open {root}"));
         let back = SidebarEntry::new("← Back to the conversation")
-            .with_detail("/back or Alt+Left")
+            .with_detail("/back")
             .with_tone(SidebarTone::Accent)
             .with_action(action);
         entries.insert(0, back);

@@ -26,7 +26,7 @@ pub(crate) async fn open_task(
     let mut next = current.clone();
     next.room = room.clone();
     next.agent = agent;
-    next.title = format!("Task for {} · /back or Alt+Left returns", task.agent);
+    next.title = format!("Task for {} · /back returns", task.agent);
     next.mode = Some(sessions.policy.state(room.as_str()));
     next.group = Some(root);
     // Stopping the run stops the task: a message never cuts it to be sent.
@@ -35,7 +35,7 @@ pub(crate) async fn open_task(
     sessions.profiles.resources.tasks.tell(
         room.as_str(),
         format!(
-            "You are in {}'s room: /back or Alt+Left returns to the conversation",
+            "You are in {}'s room: /back returns to the conversation",
             task.agent
         ),
     );

@@ -1155,6 +1155,8 @@ async fn a_task_s_room_says_how_to_go_back() {
     client.try_send(invoke(2, "main", "tasks", "next")).unwrap();
     let opened = snapshot_of(&client, &task.room).await;
     assert!(opened.title.contains("/back"), "{}", opened.title);
+    // Alt+Left moves to the previous stop, which may be another task's room.
+    assert!(!opened.title.contains("Alt+Left"), "{}", opened.title);
 
     let (mut told, mut offered) = (false, false);
     tokio::time::timeout(Duration::from_secs(10), async {
