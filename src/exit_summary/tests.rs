@@ -41,6 +41,7 @@ fn a_resumable_session_reports_its_command_usage_and_stopped_processes() {
         ),
         usage: Some(usage(2, true)),
         cost: None,
+        spenders: Vec::new(),
         running: vec![process("proc-1", "npm run\tdev\n", 252)],
     };
     assert_eq!(
@@ -63,6 +64,7 @@ fn partial_usage_is_marked_and_unconfirmed_cleanup_is_not_reported_as_stopped() 
         resume: None,
         usage: Some(usage(1, false)),
         cost: None,
+        spenders: Vec::new(),
         running: (0..10)
             .map(|i| process(&format!("p{i}"), "sleep 9", 3700))
             .collect(),
@@ -256,6 +258,7 @@ fn an_unattended_launch_reports_the_processes_it_left_running() {
         resume: None,
         usage: None,
         cost: None,
+        spenders: Vec::new(),
         running: vec![process("p2", "python3 server.py", 61)],
     };
     assert_eq!(
@@ -265,4 +268,108 @@ fn an_unattended_launch_reports_the_processes_it_left_running() {
             "  p2 · python3 server.py · 1m 01s"
         ]
     );
+}
+
+mod delegated {
+    use std::time::{Duration, Instant};
+
+    use super::*;
+    use crate::delegation::spending::Spent;
+    use crate::delegation::{Outcome, Task};
+
+    fn usage(input: u64, output: u64, turns: u64) -> Usage {
+        Usage {
+            input,
+            cached: 0,
+            output,
+            turns,
+            complete: true,
+            last_turn_recorded: true,
+        }
+    }
+
+    fn usd(micros: u64) -> ConversationCost {
+        ConversationCost::new(micros, "USD", true)
+    }
+
+    fn task(agent: &str, spent: Option<Spent>, ended: bool) -> Task {
+        Task {
+            id: format!("{agent}-{}", spent.is_some()),
+            parent: "main".into(),
+            room: "main::task".into(),
+            agent: agent.into(),
+            agent_id: agent.to_lowercase(),
+            input: "Review".into(),
+            started: Instant::now(),
+            ended: ended.then_some((Duration::from_secs(3), Outcome::Completed)),
+            spent,
+        }
+    }
+
+    fn spent(input: u64, output: u64, cost: Option<ConversationCost>) -> Option<Spent> {
+        Some(Spent {
+            usage: usage(input, output, 1),
+            cost,
+        })
+    }
+
+    fn summary() -> Summary {
+        Summary {
+            usage: Some(usage(1_000, 100, 2)),
+            cost: Some(usd(420_000)),
+            ..Summary::default()
+        }
+    }
+
+    #[test]
+    fn the_report_totals_the_conversation_then_gives_each_agent_s_part() {
+        let mut summary = summary();
+        summary.add_tasks(
+            "Code",
+            &[
+                task("Review", spent(500, 50, Some(usd(300_000))), true),
+                task("Docs", spent(200, 20, Some(usd(100_000))), true),
+                task("Review", spent(300, 30, Some(usd(180_000))), true),
+            ],
+        );
+        assert_eq!(
+            summary.conversation_report(),
+            [
+                "Token usage: total=2200 input=2000 (+ 0 cached) output=200 · 5 turns · cost ≈ $1.00",
+                "  Code: total=1100 · 2 turns · ≈ $0.42",
+                "  Review (2 tasks): total=880 · 2 turns · ≈ $0.48",
+                "  Docs (1 task): total=220 · 1 turn · ≈ $0.10",
+            ]
+        );
+    }
+
+    /// A worker with no price is counted in the tokens, and leaves the cost
+    /// partial rather than silently lower.
+    #[test]
+    fn a_task_with_no_price_leaves_the_total_partial() {
+        let mut summary = summary();
+        summary.add_tasks("Code", &[task("Review", spent(500, 50, None), true)]);
+        let lines = summary.conversation_report();
+        assert_eq!(
+            lines[0],
+            "Token usage: total=1650 input=1500 (+ 0 cached) output=150 · 3 turns · cost ≈ $0.42 (partial)"
+        );
+        assert_eq!(lines[2], "  Review (1 task): total=550 · 1 turn");
+    }
+
+    /// Without a task that consumed anything, the report stays as it was; a
+    /// task that runs is cut by closing, so the report says it is partial.
+    #[test]
+    fn a_running_task_leaves_the_report_partial_and_lists_no_agent() {
+        let mut quiet = summary();
+        let before = quiet.conversation_report();
+        quiet.add_tasks("Code", &[]);
+        assert_eq!(quiet.conversation_report(), before);
+
+        let mut running = summary();
+        running.add_tasks("Code", &[task("Review", None, false)]);
+        let lines = running.conversation_report();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("· 2 turns (partial)"), "{lines:?}");
+    }
 }

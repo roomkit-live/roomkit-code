@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- What a delegated task consumed is counted (RMK-1536): tokens and cost per
+  task in the sidebar and `/tasks`, the conversation's total beside its own
+  cost in the footer and sidebar, and each agent's part in the exit report,
+  which now totals the conversation with its tasks. `/tasks` also lists the
+  tasks of earlier launches, read from their rooms.
+
 - A GLM model gets its reasoning back between the rounds of a turn, in
   `reasoning_content`, on Z.ai's endpoints or under a `glm-*` model name, as
   Z.ai's documentation asks: it reasons more often and takes about half the

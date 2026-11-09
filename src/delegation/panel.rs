@@ -172,22 +172,30 @@ pub(crate) struct Live {
     /// The open panel as it stands now.
     pub(crate) panel: Option<Event>,
     pub(crate) section: SidebarSection,
+    /// What the conversation's tasks cost, which the view adds to its own.
+    pub(crate) cost: Event,
     /// How soon the view needs them again, if it does.
     pub(crate) poll: Option<Duration>,
 }
 
 pub(crate) async fn live(
     kit: &RoomKit<SqliteStore>,
+    profiles: &crate::profiles::Profiles,
     tasks: &Tasks,
     current: &SessionConfig,
 ) -> Live {
     let room = current.room.as_str();
+    super::spending::read(kit, profiles, tasks, current).await;
     let update = update(kit, tasks, current).await;
     let follows = update.as_ref().is_some_and(|(_, follows)| *follows);
     let counting = tasks.of(room).iter().any(|(_, task)| task.running());
     Live {
         panel: update.map(|(event, _)| event),
         section: render::sidebar(tasks, room),
+        cost: Event::RelatedCostUpdated {
+            conversation: room.into(),
+            cost: super::spending::related(tasks, current),
+        },
         poll: poll(follows, counting),
     }
 }

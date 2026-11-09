@@ -127,7 +127,7 @@ fn text(told: &Told<'_>) -> String {
 }
 
 /// `850`, `4.2k`, `180k`.
-fn tokens(count: usize) -> String {
+pub(crate) fn tokens(count: usize) -> String {
     match count {
         0..1_000 => count.to_string(),
         1_000..9_950 => {

@@ -301,11 +301,36 @@ async fn summarize(
         (view.conversation.into_inner(), command)
     });
     let processes = &app.profiles.resources.processes;
+    let config = priced.clone();
     let mut summary = crate::exit_summary::collect(&app.kit, processes, shown, priced).await;
+    if let Some(config) = config {
+        add_delegated(app, &config, &mut summary).await;
+    }
     if running {
         summary.turn_running();
     }
     summary
+}
+
+/// Adds to the report what the tasks of `config`'s conversation consumed.
+async fn add_delegated(
+    app: &Application,
+    config: &SessionConfig,
+    summary: &mut crate::exit_summary::Summary,
+) {
+    let tasks = &app.profiles.resources.tasks;
+    crate::delegation::spending::read(&app.kit, &app.profiles, tasks, config).await;
+    let listed: Vec<_> = tasks
+        .of(config.room.as_str())
+        .into_iter()
+        .map(|(_, task)| task)
+        .collect();
+    let lead = config
+        .actor_names
+        .iter()
+        .find(|(id, _)| id.as_str() == config.agent.as_str())
+        .map_or_else(|| config.agent.to_string(), |(_, label)| label.clone());
+    summary.add_tasks(&lead, &listed);
 }
 
 /// The conversation shown at exit with its agent, priced as the profiles

@@ -61,7 +61,7 @@ fn list(mut spec: PanelSpec, tasks: &Tasks, open: &Open) -> PanelSpec {
     for (depth, task) in listed.iter().filter(|(_, task)| shown.contains(&task.id)) {
         let indent = "  ".repeat(*depth);
         let agent = clip(&task.agent, AGENT_CHARS);
-        let label = format!("{indent}{agent} · {}", task.state());
+        let label = format!("{indent}{agent} · {}", task.summary());
         spec.body
             .push_str(&format!("{label}\n{indent}  {}\n", task.preview()));
         let value = format!("open:{}", task.id);
@@ -163,7 +163,7 @@ fn details(task: &Task) -> String {
     format!(
         "Agent: {}\nState: {}\nConversation: {}\n\nTask:\n{input}\n",
         clip(&task.agent, AGENT_CHARS),
-        task.state(),
+        task.summary(),
         task.room,
     )
 }
@@ -184,7 +184,7 @@ pub(super) fn sidebar(tasks: &Tasks, room: &str) -> SidebarSection {
             };
             let mark = if task.running() { "●" } else { "○" };
             SidebarEntry::new(format!("{mark} {}", clip(&task.agent, AGENT_CHARS)))
-                .with_detail(task.state())
+                .with_detail(task.summary())
                 .with_tone(tone)
                 .with_action(crate::profiles::sidebar::action(COMMAND, task.id.clone()))
         })
@@ -226,9 +226,11 @@ mod tests {
             parent: "main".into(),
             room: format!("main::{id}"),
             agent: "Review".into(),
+            agent_id: "review".into(),
             input: format!("Task {id}"),
             started: Instant::now(),
             ended: ended.then_some((Duration::from_secs(3), Outcome::Completed)),
+            spent: None,
         }
     }
 

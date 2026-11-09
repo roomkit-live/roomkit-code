@@ -12,12 +12,14 @@ use roomkit_tui::protocol::ConversationCost;
 use roomkit_tui_engine::SessionConfig;
 use serde_json::{Value, json};
 
+mod delegated;
+
 /// Processes listed by name; the rest are counted.
 const LISTED: usize = 8;
 const TIMELINE_PAGE: u64 = 500;
 
 /// Reported consumption summed over every turn of a conversation.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Usage {
     /// Input tokens the provider did not serve from its cache.
     pub input: u64,
@@ -47,6 +49,8 @@ pub(crate) struct Summary {
     pub usage: Option<Usage>,
     /// The conversation's cost at its model's list price, when it has one.
     pub cost: Option<ConversationCost>,
+    /// Each agent's part, when some worked on delegated tasks.
+    pub spenders: Vec<delegated::Spender>,
     pub running: Vec<Process>,
 }
 
@@ -59,6 +63,7 @@ impl Summary {
             resume: None,
             usage: None,
             cost: None,
+            spenders: Vec::new(),
             running: running(processes).await,
         }
     }
@@ -144,6 +149,15 @@ pub(crate) async fn usage(kit: &RoomKit<SqliteStore>, room: &RoomId) -> crate::R
 }
 
 impl Usage {
+    /// Counts `other` in these totals.
+    fn absorb(&mut self, other: &Self) {
+        self.input = self.input.saturating_add(other.input);
+        self.cached = self.cached.saturating_add(other.cached);
+        self.output = self.output.saturating_add(other.output);
+        self.turns = self.turns.saturating_add(other.turns);
+        self.complete &= other.complete;
+    }
+
     fn add(&mut self, event: &RoomEvent) {
         self.read(matches!(event.r#type, EventType::Message), &event.metadata);
     }
@@ -199,7 +213,7 @@ impl Usage {
 
 /// `≈ $0.42`, a list price's estimate; below a cent, four decimals, as the
 /// view writes it.
-fn amount(cost: &ConversationCost) -> String {
+pub(crate) fn amount(cost: &ConversationCost) -> String {
     let value = cost.micros as f64 / 1_000_000.0;
     let digits = if cost.micros == 0 || cost.micros >= 10_000 {
         2
@@ -279,6 +293,7 @@ impl Summary {
             .filter(|usage| usage.turns > 0 || !usage.complete)
         {
             lines.push(usage.line(self.cost.as_ref()));
+            lines.extend(self.spenders.iter().map(delegated::Spender::line));
         }
         lines
     }

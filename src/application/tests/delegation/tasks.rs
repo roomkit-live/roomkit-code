@@ -51,7 +51,7 @@ async fn slow_worker() -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHand
 }
 
 /// Waits until the view's live events hold one `found` returns something for.
-async fn until<T>(
+pub(super) async fn until<T>(
     updates: &mut tokio::sync::watch::Receiver<Vec<Event>>,
     found: impl Fn(&Event) -> Option<T>,
 ) -> T {
@@ -68,7 +68,7 @@ async fn until<T>(
 }
 
 /// What `/tasks` with `arguments` opened in the view of `current`.
-async fn tasks(
+pub(super) async fn tasks(
     handler: &crate::sessions::Sessions,
     current: &SessionConfig,
     arguments: &str,

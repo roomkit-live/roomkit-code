@@ -5,6 +5,7 @@
 
 use super::*;
 
+mod spending;
 mod tasks;
 
 /// What tells the worker's requests apart: the line its turns read.

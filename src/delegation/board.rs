@@ -1,13 +1,16 @@
 //! The tasks each conversation's agents handed over while this application
 //! runs, as the engine's task hooks report them: what the view's status line,
 //! its sidebar and `/tasks` show. A task does not outlive the application:
-//! closing it ends every task the engine runs.
+//! closing it ends every task the engine runs, and a later launch lists it
+//! from its room (`history`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
+
+use super::spending::Spent;
 
 /// How long a view shows a task's latest notice again whenever it is sent its
 /// live events, as a compaction's.
@@ -15,10 +18,6 @@ const NOTICE_FOR: Duration = Duration::from_secs(10);
 
 /// How many characters of a task its notice quotes.
 const TASK_PREVIEW: usize = 60;
-
-/// How many ended tasks the application keeps listed, the latest; a running
-/// task is never dropped.
-const KEPT: usize = 50;
 
 /// How a task ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +36,16 @@ impl Outcome {
             _ => Self::Failed,
         }
     }
+
+    /// How a task its room records ended: one still marked as running ended
+    /// with the launch that ran it.
+    pub(crate) fn recorded(status: &str) -> Self {
+        match status {
+            "completed" => Self::Completed,
+            "failed" => Self::Failed,
+            _ => Self::Cancelled,
+        }
+    }
 }
 
 /// A task an agent handed over, as this application saw it start and end.
@@ -50,10 +59,14 @@ pub(crate) struct Task {
     pub(crate) room: String,
     /// The worker's label, else its ID.
     pub(crate) agent: String,
+    /// The worker's ID.
+    pub(crate) agent_id: String,
     pub(crate) input: String,
     pub(crate) started: Instant,
     /// How long it ran and how it ended, once it did.
     pub(crate) ended: Option<(Duration, Outcome)>,
+    /// What its worker consumed, read once it ended (`spending`).
+    pub(crate) spent: Option<Spent>,
 }
 
 impl Task {
@@ -71,6 +84,15 @@ impl Task {
         }
     }
 
+    /// Its state and what it consumed, once that is known: "completed in
+    /// 58 s · 58k tokens · ≈ $0.61".
+    pub(crate) fn summary(&self) -> String {
+        match &self.spent {
+            Some(spent) => format!("{} · {}", self.state(), spent.text()),
+            None => self.state(),
+        }
+    }
+
     /// The task on one line, cut at [`TASK_PREVIEW`] characters.
     pub(crate) fn preview(&self) -> String {
         preview(&self.input)
@@ -83,6 +105,8 @@ struct Board {
     notices: HashMap<String, (Instant, String)>,
     /// In the order they started.
     tasks: Vec<Task>,
+    /// The conversations whose earlier tasks were read from the store.
+    restored: HashSet<String>,
 }
 
 /// The tasks agents handed over, the notices they left, and the `/tasks`
@@ -153,9 +177,36 @@ impl Tasks {
             Some(index) => board.tasks[index].ended = Some((took, outcome)),
             None => board.tasks.push(ended),
         }
-        trim(&mut board.tasks);
         drop(board);
         self.changes.send_replace(());
+    }
+
+    /// Whether the earlier tasks of `room` are yet to be read: true for its
+    /// first view alone.
+    pub(crate) fn restoring(&self, room: &str) -> bool {
+        crate::sync::lock(&self.board)
+            .restored
+            .insert(room.to_owned())
+    }
+
+    /// Lists `tasks`, which earlier launches ran, telling no one: a task the
+    /// hooks already reported stays as they told it.
+    pub(crate) fn restored(&self, tasks: Vec<Task>) {
+        let mut board = crate::sync::lock(&self.board);
+        for task in tasks {
+            if !board.tasks.iter().any(|known| known.id == task.id) {
+                board.tasks.push(task);
+            }
+        }
+    }
+
+    /// Keeps what task `id`'s worker consumed. Nothing changes on screen but
+    /// what the view that read it is about to show.
+    pub(crate) fn keep_spent(&self, id: &str, spent: Spent) {
+        let mut board = crate::sync::lock(&self.board);
+        if let Some(task) = board.tasks.iter_mut().find(|task| task.id == id) {
+            task.spent = Some(spent);
+        }
     }
 
     /// The latest notice of `room` while it is recent.
@@ -215,37 +266,6 @@ fn descend(tasks: &[Task], room: &str, depth: usize, listed: &mut Vec<(usize, Ta
     }
 }
 
-/// Drops the oldest ended tasks past [`KEPT`], never one that runs nor one a
-/// running task was handed on from, which lists it.
-fn trim(tasks: &mut Vec<Task>) {
-    let needed = handing_on(tasks);
-    let mut ended = tasks.iter().filter(|task| !task.running()).count();
-    tasks.retain(|task| {
-        if ended <= KEPT || task.running() || needed.contains(&task.id) {
-            return true;
-        }
-        ended -= 1;
-        false
-    });
-}
-
-/// The IDs of the tasks a running task was handed on from, at any depth.
-fn handing_on(tasks: &[Task]) -> std::collections::HashSet<String> {
-    let mut needed = std::collections::HashSet::new();
-    for task in tasks.iter().filter(|task| task.running()) {
-        let mut room = task.parent.as_str();
-        // The depth bound only guards against a cycle.
-        for _ in 0..=crate::delegation::MAX_DEPTH {
-            let Some(parent) = tasks.iter().find(|known| known.room == room) else {
-                break;
-            };
-            needed.insert(parent.id.clone());
-            room = parent.parent.as_str();
-        }
-    }
-    needed
-}
-
 /// `task` on one line, cut at [`TASK_PREVIEW`] characters.
 fn preview(task: &str) -> String {
     let line = task.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -272,9 +292,11 @@ mod tests {
             parent: parent.into(),
             room: room.into(),
             agent: "Review".into(),
+            agent_id: "review".into(),
             input: format!("Task {id}"),
             started: Instant::now(),
             ended: None,
+            spent: None,
         }
     }
 
@@ -335,34 +357,5 @@ mod tests {
         assert_eq!(quick.state(), "cancelled after 58 s");
         assert_eq!(quick.input, "Task quick");
         assert_eq!(tasks.running(), 0);
-    }
-
-    /// The oldest ended tasks are dropped past the bound, never a running one.
-    #[test]
-    fn the_oldest_ended_tasks_are_dropped_first() {
-        let tasks = Tasks::default();
-        tasks.started(task("running", "main", "main::r"));
-        for n in 0..KEPT + 3 {
-            tasks.ended(ended(task(&n.to_string(), "main", "x"), Outcome::Failed));
-        }
-        let listed = tasks.of("main");
-        assert_eq!(listed.len(), KEPT + 1);
-        assert_eq!(listed[0].1.id, "running");
-        assert_eq!(listed[1].1.id, "3");
-    }
-
-    /// A task that ended stays while a task handed on from it runs: the list
-    /// reaches the running one through it.
-    #[test]
-    fn an_ended_task_stays_while_one_handed_on_from_it_runs() {
-        let tasks = Tasks::default();
-        tasks.started(task("parent", "main", "main::p"));
-        tasks.started(task("child", "main::p", "main::p::c"));
-        tasks.ended(ended(task("parent", "main", "main::p"), Outcome::Completed));
-        for n in 0..KEPT + 3 {
-            tasks.ended(ended(task(&n.to_string(), "main", "x"), Outcome::Failed));
-        }
-        let listed: Vec<String> = tasks.of("main").into_iter().map(|(_, t)| t.id).collect();
-        assert_eq!(&listed[..2], ["parent", "child"]);
     }
 }

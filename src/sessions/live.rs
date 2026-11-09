@@ -68,6 +68,7 @@ pub(super) fn subscribe(
     let (policy, kit) = (sessions.policy.clone(), sessions.kit.clone());
     let (tx, rx) = watch::channel(Vec::new());
     tokio::spawn(async move {
+        crate::delegation::history::restore(&kit, &profiles, &current).await;
         loop {
             let view = (&kit, &profiles, &*services, &current);
             let (mut events, poll) = events(view, &mut sources).await;
@@ -111,8 +112,9 @@ async fn events(
     let tasks = &profiles.resources.tasks;
     let mut notices = compactions.notices(room);
     notices.extend(tasks.notices(room));
-    let delegated = crate::delegation::panel::live(kit, tasks, current).await;
+    let delegated = crate::delegation::panel::live(kit, profiles, tasks, current).await;
     events.extend(delegated.panel);
+    events.push(delegated.cost);
     events.extend(notices.into_iter().map(|text| Event::Notice {
         conversation: room.into(),
         text,

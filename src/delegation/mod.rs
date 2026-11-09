@@ -10,11 +10,14 @@
 //! the person's approval is refused, since no view shows a child room
 //! (`permissions::Policy::adopt`). The view's status line says when a task
 //! starts and how it ended; its sidebar lists the conversation's tasks, and
-//! `/tasks` shows and stops them (`board`, `panel`).
+//! `/tasks` shows and stops them (`board`, `panel`), with what each consumed
+//! (`spending`).
 
 mod board;
+pub(crate) mod history;
 pub(crate) mod panel;
 mod render;
+pub(crate) mod spending;
 mod transcript;
 
 pub(crate) use board::{Outcome, Task, Tasks};
@@ -233,9 +236,11 @@ fn task(event: &RoomEvent, roster: &Roster) -> Task {
         parent: event.room_id.as_str().to_owned(),
         room: text(event, "child_room_id").to_owned(),
         agent: roster.label(text(event, "agent_id")),
+        agent_id: text(event, "agent_id").to_owned(),
         input: text(event, "task_input").to_owned(),
         started: Instant::now(),
         ended: None,
+        spent: None,
     }
 }
 

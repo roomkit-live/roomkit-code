@@ -6,6 +6,7 @@
 //! compaction leaves a line in its conversation (HITL a2dfba34).
 mod history;
 mod line;
+pub(crate) use line::tokens;
 mod memory;
 mod runs;
 mod summary;
