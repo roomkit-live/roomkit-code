@@ -91,6 +91,8 @@ async fn an_agent_asks_to_plan_and_implements_only_an_approved_plan() {
     decide(&client, 2, &enter, Decision::Allow);
     // Leaving shows the stored plan, not a text the agent supplied.
     let exit = approval_noting(&client, &mut modes).await;
+    // A view in one of the conversation's other rooms can answer it too.
+    assert_eq!(exit.origin.as_ref().map(|room| room.as_str()), Some("main"));
     assert_eq!(app.policy.mode("main"), Mode::Plan);
     assert!(exit.title.contains("Approve this plan"), "{}", exit.title);
     assert!(

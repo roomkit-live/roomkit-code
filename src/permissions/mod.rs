@@ -9,7 +9,7 @@ use roomkit::ToolCallEvent;
 use roomkit::model::HookResult;
 use roomkit::model::hook::{AllowOptions, BlockOptions};
 use roomkit_tui::protocol::{Choice, Decision, ModeState};
-use roomkit_tui_engine::ConversationChannel;
+use roomkit_tui_engine::{ConversationChannel, PermissionRequest};
 use serde::Deserialize;
 
 mod card;
@@ -207,6 +207,35 @@ impl Policy {
         self.mode(room_of(event)) == Mode::Plan && !plan_allowed(event)
     }
 
+    /// The card for `event`, named after the agent that asks when it is a
+    /// delegated one's, which any view of its conversation answers.
+    fn card(
+        &self,
+        event: &ToolCallEvent,
+        label: &str,
+        review: Option<String>,
+        asker: Option<String>,
+    ) -> Result<PermissionRequest, &'static str> {
+        let mut request = card::request(event, label, review)?;
+        if let Some(asker) = asker {
+            request.title = format!("{asker} asks: {}", request.title);
+        }
+        Ok(self.answered_in_conversation(room_of(event), request))
+    }
+
+    /// `request`, which any view of `room`'s conversation answers, whichever
+    /// of its rooms it shows.
+    pub(super) fn answered_in_conversation(
+        &self,
+        room: &str,
+        request: PermissionRequest,
+    ) -> PermissionRequest {
+        match self.conversation(room) {
+            Some((conversation, _)) => request.with_group(conversation),
+            None => request,
+        }
+    }
+
     pub(crate) async fn gate_with_review(
         &self,
         channel: &ConversationChannel,
@@ -230,18 +259,10 @@ impl Policy {
         if review.is_none() && self.mode(room_of(&event)) == Mode::Yolo {
             return allow();
         }
-        let mut request = match card::request(&event, rule.label, review) {
+        let request = match self.card(&event, rule.label, review, asker) {
             Ok(request) => request,
             Err(refusal) => return block(refusal),
         };
-        if let Some(asker) = asker {
-            request.title = format!("{asker} asks: {}", request.title);
-        }
-        // Any view of the conversation answers, whichever of its rooms it
-        // shows: a delegated task's agent asks the person where they are.
-        if let Some((conversation, _)) = self.conversation(room_of(&event)) {
-            request = request.with_group(conversation);
-        }
         match channel.ask_tool_permission(&event, request).await {
             Decision::Allow
                 if self.mode(room_of(&event)) == Mode::Plan && !plan_allowed(&event) =>

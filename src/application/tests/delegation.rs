@@ -199,11 +199,7 @@ async fn an_agent_hands_a_task_to_another_and_says_its_result() {
     assert!(worker[0].contains("Review the diff") && worker[0].contains("BRANCH_MARK"));
     assert!(worker[0].contains("Application mode: Ask"));
     assert!(!worker[0].contains("Inspect the project."));
-    assert!(
-        worker[1].contains("not approved"),
-        "{}",
-        worker[1]
-    );
+    assert!(worker[1].contains("not approved"), "{}", worker[1]);
     assert!(!project.path().join("worker.txt").exists());
 
     // The status line said how the task ended.

@@ -203,6 +203,7 @@ pub(crate) async fn approve_exit(
         crate::timeouts::APPROVAL,
     )
     .with_summary(format!("{EXIT} · {}", plan.title));
+    let request = policy.answered_in_conversation(room, request);
     match channel.ask_tool_permission(&event, request).await {
         Decision::Allow if policy.mode(room) == Mode::Plan => pinned(event, &plan),
         Decision::Allow => {

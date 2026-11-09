@@ -1008,6 +1008,26 @@ async fn a_worker_s_approval_comes_to_the_view_and_runs_once_allowed() {
     asking.decide(Decision::Allow);
     until_handed_back(&asking.requests).await;
     assert!(asking.project.path().join("worker.txt").exists());
+    // The decision is kept with the room it was asked in, opened or not.
+    let room = roomkit::model::RoomId::new(&task.room).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let options = roomkit::GetTimelineOptions {
+                limit: 200,
+                ..Default::default()
+            };
+            let rows = asking.app.kit.get_timeline(&room, options).await.unwrap();
+            if rows
+                .iter()
+                .any(|row| row.metadata.contains_key("roomkit_tui_approval"))
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
     asking.close().await;
 }
 
@@ -1080,5 +1100,26 @@ async fn a_worker_s_approval_is_shown_again_in_its_own_room() {
         .unwrap();
     until_handed_back(&asking.requests).await;
     assert!(asking.project.path().join("worker.txt").exists());
+    // Decided in the worker's own room, it is kept there too: the worker's
+    // turn is no turn of the view's to store it as it ends.
+    let room = roomkit::model::RoomId::new(&task.room).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let options = roomkit::GetTimelineOptions {
+                limit: 200,
+                ..Default::default()
+            };
+            let rows = asking.app.kit.get_timeline(&room, options).await.unwrap();
+            if rows
+                .iter()
+                .any(|row| row.metadata.contains_key("roomkit_tui_approval"))
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
     asking.close().await;
 }

@@ -66,9 +66,9 @@ fn shown_in(open: &Open, current: &SessionConfig) -> bool {
     open.room == current.room.as_str() && open.agent == current.agent.as_str()
 }
 
-/// `/tasks [task-id]`, `/tasks next` and `/tasks previous`, which move between
-/// the conversation and its tasks' rooms, and the panel's own actions
-/// `<panel>:<action>`.
+/// `/tasks [task-id]`, `/tasks next`, `/tasks previous` and `/tasks open
+/// <room>`, which move between the conversation and its tasks' rooms, and
+/// the panel's own actions `<panel>:<action>`.
 pub(crate) async fn handle(
     sessions: &Sessions,
     current: &SessionConfig,
