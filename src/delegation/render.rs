@@ -36,10 +36,24 @@ pub(super) async fn panel(
 ) -> PanelSpec {
     let spec = PanelSpec::new(open.id.clone(), COMMAND, "Tasks · this conversation", "")
         .with_dismiss(format!("{}:dismiss", open.id));
-    match &open.selected {
+    let mut spec = match &open.selected {
         None => list(spec, tasks, open),
         Some(id) => detail(spec, kit, tasks, open, id, organization).await,
+    };
+    if let Some(back) = back_to_conversation(tasks, &open.room) {
+        spec.actions.insert(0, back);
     }
+    spec
+}
+
+/// The action that leaves a task's room for its conversation; none in the
+/// conversation itself.
+fn back_to_conversation(tasks: &Tasks, room: &str) -> Option<Choice> {
+    let root = tasks.root_of(room);
+    (root != room).then(|| {
+        Choice::new(format!("open {root}"), "Back to the conversation")
+            .with_description("Leave this task's room; its agent keeps working")
+    })
 }
 
 fn action(open: &Open, value: &str, label: &str, description: &str) -> Choice {
@@ -201,6 +215,15 @@ pub(super) fn sidebar(tasks: &Tasks, room: &str) -> SidebarSection {
         .collect();
     if entries.is_empty() {
         entries.push(SidebarEntry::new("No tasks").with_tone(SidebarTone::Muted));
+    }
+    let root = tasks.root_of(room);
+    if root != room {
+        let action = crate::profiles::sidebar::action(COMMAND, format!("open {root}"));
+        let back = SidebarEntry::new("← Back to the conversation")
+            .with_detail("/back or Alt+Left")
+            .with_tone(SidebarTone::Accent)
+            .with_action(action);
+        entries.insert(0, back);
     }
     SidebarSection::new("Tasks", SidebarContent::Entries { entries })
         .with_action(crate::profiles::sidebar::action(COMMAND, ""))

@@ -378,7 +378,8 @@ was cancelled. Closing the application stops the tasks that run, and Ctrl+D
 says so first, as for processes.
 
 **Open its conversation** in `/tasks`, or Alt+Right and Alt+Left with an empty
-composer, move the view into a task's room and back. Alt+arrows go around the
+composer, move the view into a task's room and back. From a task's room, `/back`
+or **Back to the conversation** in the sidebar or `/tasks` returns directly. Alt+arrows go around the
 conversation and the tasks that run; the conversation's agent keeps working
 meanwhile. There you follow the agent as it works, and Esc stops its task. What
 you write while it works reaches it at its next step, and its result still

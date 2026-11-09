@@ -231,6 +231,13 @@ impl Tasks {
         }
     }
 
+    /// Shows `text` in `room`'s status line for a few seconds.
+    pub(crate) fn tell(&self, room: &str, text: String) {
+        crate::sync::lock(&self.board)
+            .notices
+            .insert(room.to_owned(), (Instant::now(), text));
+    }
+
     /// The latest notice of `room` while it is recent.
     pub(crate) fn notices(&self, room: &str) -> Vec<String> {
         crate::sync::lock(&self.board)

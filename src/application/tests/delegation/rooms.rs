@@ -1123,3 +1123,82 @@ async fn a_worker_s_approval_is_shown_again_in_its_own_room() {
     .unwrap();
     asking.close().await;
 }
+
+/// From a task's room the way back is offered: a command that says so, an
+/// entry in the sidebar and in `/tasks`, and a word on arriving.
+#[tokio::test]
+async fn a_task_s_room_says_how_to_go_back() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let (base, requests, server) = attentive_worker().await;
+    let settings = settings(project.path(), state.path(), &base);
+    with_a_reviewer(&settings).await;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let (client, host) = connection(NonZeroUsize::new(1_024).unwrap());
+    let router = app.router(&settings.workspace);
+    let view = tokio::spawn(app.session().run_with_commands(host, router));
+    snapshot_of(&client, "main").await;
+    client.try_send(invoke(9, "main", "back", "")).unwrap();
+    until(&client, |event| match event {
+        Event::Reply { request, error } if *request == RequestId::new(9) => {
+            assert!(error.is_some(), "Already in the conversation");
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
+    client
+        .try_send(submit(1, "main", "code", "Review the diff"))
+        .unwrap();
+    until_requested(&requests, |request| request.to_string().contains(WORKER)).await;
+    let task = app.profiles.resources.tasks.of("main").remove(0).1;
+    client.try_send(invoke(2, "main", "tasks", "next")).unwrap();
+    let opened = snapshot_of(&client, &task.room).await;
+    assert!(opened.title.contains("/back"), "{}", opened.title);
+
+    let (mut told, mut offered) = (false, false);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !(told && offered) {
+            match client.try_recv() {
+                Ok(Event::Notice { text, .. }) => told |= text.contains("/back"),
+                Ok(Event::SidebarChanged {
+                    sidebar: Some(sidebar),
+                    ..
+                }) => offered |= format!("{sidebar:?}").contains("Back to the conversation"),
+                Ok(_) => {}
+                Err(_) => tokio::time::sleep(Duration::from_millis(5)).await,
+            }
+        }
+    })
+    .await
+    .unwrap();
+
+    client.try_send(invoke(3, &task.room, "tasks", "")).unwrap();
+    let panel = until(&client, |event| match event {
+        Event::Panel { panel, .. } => Some(panel.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(panel.actions[0].value, "open main");
+    assert_eq!(panel.actions[0].label, "Back to the conversation");
+
+    client.try_send(invoke(4, &task.room, "back", "")).unwrap();
+    snapshot_of(&client, "main").await;
+
+    let task_rooms: Vec<String> = crate::sessions::commands()
+        .into_iter()
+        .map(|spec| spec.name)
+        .collect();
+    assert!(task_rooms.contains(&"back".to_owned()));
+    let tasks = app.profiles.resources.tasks.clone();
+    let stop = roomkit::CancelTaskOptions::default();
+    assert!(
+        app.kit
+            .cancel_task(&tasks.of("main").remove(0).1.id, stop)
+            .await
+    );
+    drop(client);
+    view.await.unwrap().unwrap();
+    app.close().await.unwrap();
+    server.abort();
+}

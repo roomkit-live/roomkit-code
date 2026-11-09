@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `/back` leaves a task's room for its conversation; the sidebar and `/tasks`
+  offer the same, and the view says how on arriving in the room.
+
 - A delegated agent can ask for an approval (RMK-1535, HITL 04faa598): the card
   comes to the view you are in, named after the agent. Esc refuses that one
   action and `o` opens its room. In Ask, it could only read before.

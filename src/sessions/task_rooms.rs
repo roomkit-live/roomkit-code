@@ -26,12 +26,19 @@ pub(crate) async fn open_task(
     let mut next = current.clone();
     next.room = room.clone();
     next.agent = agent;
-    next.title = format!("Task for {} · Alt+arrows to move", task.agent);
+    next.title = format!("Task for {} · /back or Alt+Left returns", task.agent);
     next.mode = Some(sessions.policy.state(room.as_str()));
     next.group = Some(root);
     // Stopping the run stops the task: a message never cuts it to be sent.
     next.can_cut_to_send = !task.running();
     ready(sessions, &mut next).await;
+    sessions.profiles.resources.tasks.tell(
+        room.as_str(),
+        format!(
+            "You are in {}'s room: /back or Alt+Left returns to the conversation",
+            task.agent
+        ),
+    );
     Ok(CommandResult::Switch(Box::new(next)))
 }
 
@@ -149,6 +156,22 @@ async fn open_conversation(
     let mut next = current.clone();
     home(sessions, &mut next, root).await;
     Ok(sessions.switched(next, room).await)
+}
+
+/// `/back`: from a task's room, to its conversation.
+pub(crate) async fn back(
+    sessions: &Sessions,
+    current: &SessionConfig,
+) -> Result<CommandResult, String> {
+    let root = sessions
+        .profiles
+        .resources
+        .tasks
+        .root_of(current.room.as_str());
+    if root == current.room.as_str() {
+        return Err("You are already in the conversation".into());
+    }
+    open_conversation(sessions, current, &root).await
 }
 
 /// Moves to room `target` of the conversation shown: its own, or a task's.

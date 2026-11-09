@@ -73,6 +73,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "See the tasks agents handed to other agents, and stop them",
             "[task-id]",
         ),
+        ("back", "Return from a task's room to its conversation", ""),
         (
             "files",
             "List the files this conversation's agents changed or read",
@@ -221,6 +222,7 @@ impl CommandHandler for Sessions {
                 | "tools"
                 | "processes"
                 | "tasks"
+                | "back"
                 | "files"
                 | "diagnostics"
                 | "plans"
@@ -300,6 +302,7 @@ impl Sessions {
                     .await
             }
             "tasks" => crate::delegation::panel::handle(self, &current, arguments).await,
+            "back" => task_rooms::back(self, &current).await,
             "tools" => self.tools(&current, arguments).await,
             "mode" => self.mode(&current, arguments).await,
             "compact" => self.compact_here(&current),
