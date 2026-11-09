@@ -42,8 +42,8 @@ fn a_resumable_session_reports_its_command_usage_and_stopped_processes() {
         usage: Some(usage(2, true)),
         cost: None,
         spenders: Vec::new(),
-        tasks_running: 0,
-        turn_cut: false,
+        tasks_uncounted: 0,
+        turn_left_running: false,
         running: vec![process("proc-1", "npm run\tdev\n", 252)],
     };
     assert_eq!(
@@ -67,8 +67,8 @@ fn partial_usage_is_marked_and_unconfirmed_cleanup_is_not_reported_as_stopped() 
         usage: Some(usage(1, false)),
         cost: None,
         spenders: Vec::new(),
-        tasks_running: 0,
-        turn_cut: false,
+        tasks_uncounted: 0,
+        turn_left_running: false,
         running: (0..10)
             .map(|i| process(&format!("p{i}"), "sleep 9", 3700))
             .collect(),
@@ -263,8 +263,8 @@ fn an_unattended_launch_reports_the_processes_it_left_running() {
         usage: None,
         cost: None,
         spenders: Vec::new(),
-        tasks_running: 0,
-        turn_cut: false,
+        tasks_uncounted: 0,
+        turn_left_running: false,
         running: vec![process("p2", "python3 server.py", 61)],
     };
     assert_eq!(
@@ -347,6 +347,7 @@ mod delegated {
                 task("Docs", spent(200, 20, Some(usd(100_000))), true),
                 task("Review", spent(300, 30, Some(usd(180_000))), true),
             ],
+            "code",
         );
         assert_eq!(
             summary.conversation_report(),
@@ -364,7 +365,11 @@ mod delegated {
     #[test]
     fn a_task_with_no_price_leaves_the_total_partial() {
         let mut summary = summary();
-        summary.add_tasks(lead(), &[task("Review", spent(500, 50, None), true)]);
+        summary.add_tasks(
+            lead(),
+            &[task("Review", spent(500, 50, None), true)],
+            "code",
+        );
         let lines = summary.conversation_report();
         assert_eq!(
             lines[0],
@@ -376,15 +381,15 @@ mod delegated {
     /// A task that runs is cut by closing and was not counted: the total
     /// says so, and the agent that delegated keeps a whole line.
     #[test]
-    fn a_running_task_is_named_and_leaves_only_the_total_partial() {
+    fn a_running_task_is_counted_aside_and_leaves_only_the_total_partial() {
         let mut running = summary();
-        running.add_tasks(lead(), &[task("Review", None, false)]);
+        running.add_tasks(lead(), &[task("Review", None, false)], "code");
         assert_eq!(
             running.conversation_report(),
             [
                 "Token usage: total=1100 input=1000 (+ 0 cached) output=100 · 2 turns (partial) · cost ≈ $0.42 (partial)",
                 "  Code: total=1100 · 2 turns · ≈ $0.42",
-                "  1 delegated task was still running: not counted",
+                "  1 delegated task not counted: still running or unreadable",
             ]
         );
     }
@@ -394,7 +399,7 @@ mod delegated {
     #[test]
     fn an_ended_task_that_could_not_be_read_leaves_the_total_partial() {
         let mut unread = summary();
-        unread.add_tasks(lead(), &[task("Review", None, true)]);
+        unread.add_tasks(lead(), &[task("Review", None, true)], "code");
         let lines = unread.conversation_report();
         assert!(
             lines[0].contains("· 2 turns (partial) · cost ≈ $0.42 (partial)"),
@@ -409,10 +414,8 @@ mod delegated {
         let mut cut = summary();
         cut.usage.as_mut().unwrap().last_turn_recorded = false;
         cut.turn_running();
-        cut.add_tasks(
-            lead(),
-            &[task("Review", spent(500, 50, Some(usd(1_000))), true)],
-        );
+        let done = task("Review", spent(500, 50, Some(usd(1_000))), true);
+        cut.add_tasks(lead(), &[done], "code");
         let lines = cut.conversation_report();
         assert_eq!(
             lines[1], "  Code: total=1100 · 2 turns · ≈ $0.42 (partial)",
@@ -422,5 +425,52 @@ mod delegated {
             lines[0].contains("(partial) · cost ≈ $0.42 (partial)"),
             "{lines:?}"
         );
+    }
+
+    /// The agent shown at exit may have answered nothing yet: the turn cut is
+    /// its own, and leaves another agent's line whole.
+    #[test]
+    fn a_cut_turn_leaves_another_agent_s_line_whole() {
+        let mut cut = summary();
+        cut.usage.as_mut().unwrap().last_turn_recorded = false;
+        cut.turn_running();
+        let done = task("Review", spent(500, 50, Some(usd(1_000))), true);
+        cut.add_tasks(lead(), &[done], "other");
+        let lines = cut.conversation_report();
+        assert_eq!(
+            lines[1], "  Code: total=1100 · 2 turns · ≈ $0.42",
+            "{lines:?}"
+        );
+        assert!(lines[0].contains("· cost ≈ $0.42 (partial)"), "{lines:?}");
+    }
+
+    /// The conversation's first turn, cut after its task ended: the room holds
+    /// no turn of its own yet, and the report still cannot be whole.
+    #[test]
+    fn a_first_turn_cut_after_its_task_ended_leaves_the_report_partial() {
+        let mut first = Summary {
+            usage: Some(Usage {
+                last_turn_recorded: false,
+                ..usage(0, 0, 0)
+            }),
+            cost: Some(usd(0)),
+            ..Summary::default()
+        };
+        first.turn_running();
+        let done = task("Review", spent(1_000, 100, Some(usd(3_000))), true);
+        first.add_tasks(lead(), &[done], "code");
+        let lines = first.conversation_report();
+        assert!(lines[0].contains("· 1 turn (partial)"), "{lines:?}");
+    }
+
+    /// A room that could not be read gives no agent's part: what is left of
+    /// the cost cannot be the whole.
+    #[test]
+    fn a_room_that_could_not_be_read_leaves_the_total_partial() {
+        let mut unread = summary();
+        let done = task("Review", spent(500, 50, Some(usd(1_000))), true);
+        unread.add_tasks(Vec::new(), &[done], "code");
+        let lines = unread.conversation_report();
+        assert!(lines[0].ends_with("(partial)"), "{lines:?}");
     }
 }

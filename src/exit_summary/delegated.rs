@@ -19,7 +19,7 @@ pub(crate) struct Spender {
 }
 
 impl Spender {
-    /// What agent `agent` consumed in the conversation's own room.
+    /// What `agent` consumed in the conversation's own room.
     pub(crate) fn lead(
         agent: String,
         label: String,
@@ -73,20 +73,21 @@ impl Spender {
 impl Summary {
     /// Adds what the conversation's `tasks` consumed to its report: its usage
     /// and cost become the whole conversation's, `leads` give each agent's
-    /// part of its own room, and each worker gets a line. A task that still
-    /// runs, or could not be read, is unknown: the total then reads partial.
-    pub(crate) fn add_tasks(&mut self, mut leads: Vec<Spender>, tasks: &[Task]) {
+    /// part of its own room, and each worker gets a line. What is unknown
+    /// leaves the total partial: a task that still runs or could not be read,
+    /// a turn of `shown` closing cuts, or a room that could not be read.
+    pub(crate) fn add_tasks(&mut self, mut leads: Vec<Spender>, tasks: &[Task], shown: &str) {
         let Some(usage) = self.usage.as_mut() else {
             return;
         };
-        if self.turn_cut
-            && let Some(lead) = leads.first_mut()
-        {
+        // With tasks to add, a cut turn misstates the report even when it is
+        // the room's first.
+        let cut = self.turn_left_running && !usage.last_turn_recorded;
+        if cut && let Some(lead) = leads.iter_mut().find(|lead| lead.is_agent(shown)) {
             lead.cut();
         }
-        let running = tasks.iter().filter(|task| task.running()).count();
         let read: Vec<&Task> = tasks.iter().filter(|task| task.spent.is_some()).collect();
-        let whole = read.len() == tasks.len();
+        let whole = read.len() == tasks.len() && !cut && !leads.is_empty();
         usage.complete &= whole;
         // The report's own cost is that of the shown agent alone: without its
         // parts, it is all that is known of the room.
@@ -101,24 +102,25 @@ impl Summary {
             cost.complete &= whole;
         }
         self.cost = cost;
+        let read_count = read.len();
         for task in read {
             if let Some(spent) = &task.spent {
                 usage.absorb(&spent.usage);
                 add_to_worker(&mut leads, task);
             }
         }
+        self.tasks_uncounted = tasks.len() - read_count;
         self.spenders = leads;
-        self.tasks_running = running;
     }
 
-    /// Each agent's part, then the tasks that could not be counted.
+    /// Each agent's part, then how many tasks could not be counted.
     pub(super) fn delegated_lines(&self) -> Vec<String> {
         let mut lines: Vec<String> = self.spenders.iter().map(Spender::line).collect();
-        match self.tasks_running {
+        match self.tasks_uncounted {
             0 => {}
-            1 => lines.push("  1 delegated task was still running: not counted".to_owned()),
+            1 => lines.push("  1 delegated task not counted: still running or unreadable".into()),
             count => lines.push(format!(
-                "  {count} delegated tasks were still running: not counted"
+                "  {count} delegated tasks not counted: still running or unreadable"
             )),
         }
         lines

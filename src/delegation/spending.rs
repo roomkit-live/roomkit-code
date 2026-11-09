@@ -99,8 +99,10 @@ async fn priced(
     Some((cost, config))
 }
 
-/// Each agent's part of the conversation's own room, the one `config` shows
-/// first: an agent may have been changed during the conversation.
+/// Each agent's part of the conversation's own room, in the order they first
+/// answered: an agent may have been changed during the conversation. One whose
+/// cost could not be read keeps its line, with no cost, which leaves the total
+/// partial.
 pub(crate) async fn leads(
     kit: &RoomKit<SqliteStore>,
     profiles: &Profiles,
@@ -114,18 +116,24 @@ pub(crate) async fn leads(
         let organization = config.organization.clone();
         let complete = usage.complete;
         let room = &config.room;
-        let Some((cost, view)) = priced(kit, profiles, room, &agent, organization, complete).await
-        else {
-            continue;
-        };
+        let read = priced(kit, profiles, room, &agent, organization, complete).await;
+        let (cost, view) = read.unzip();
         let label = view
-            .actor_names
-            .iter()
-            .find(|(id, _)| id.as_str() == agent.as_str())
+            .as_ref()
+            .and_then(|view| {
+                let names = view.actor_names.iter();
+                names
+                    .into_iter()
+                    .find(|(id, _)| id.as_str() == agent.as_str())
+            })
             .map_or_else(|| agent.to_string(), |(_, label)| label.clone());
-        leads.push(Spender::lead(agent.to_string(), label, usage, cost));
+        leads.push(Spender::lead(
+            agent.to_string(),
+            label,
+            usage,
+            cost.flatten(),
+        ));
     }
-    leads.sort_by_key(|lead| !lead.is_agent(config.agent.as_str()));
     leads
 }
 

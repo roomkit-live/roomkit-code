@@ -53,10 +53,11 @@ pub(crate) struct Summary {
     pub cost: Option<ConversationCost>,
     /// Each agent's part, when some worked on delegated tasks.
     pub spenders: Vec<Spender>,
-    /// How many delegated tasks still ran as the report was gathered.
-    pub tasks_running: usize,
+    /// How many delegated tasks the report could not count: still running,
+    /// or unreadable.
+    pub tasks_uncounted: usize,
     /// The view left a turn running, which closing cuts.
-    pub turn_cut: bool,
+    pub turn_left_running: bool,
     pub running: Vec<Process>,
 }
 
@@ -70,8 +71,8 @@ impl Summary {
             usage: None,
             cost: None,
             spenders: Vec::new(),
-            tasks_running: 0,
-            turn_cut: false,
+            tasks_uncounted: 0,
+            turn_left_running: false,
             running: running(processes).await,
         }
     }
@@ -276,6 +277,7 @@ impl Summary {
     /// read, so the usage read here is not all of it, unless its record is
     /// written already, its answer done but for the view's last word.
     pub(crate) fn turn_running(&mut self) {
+        self.turn_left_running = true;
         // With no turn counted there is nothing the report would misstate: the
         // view's run may also be a `!` command's, or a tool server's.
         if let Some(usage) = self
@@ -284,7 +286,6 @@ impl Summary {
             .filter(|usage| usage.turns > 0 && !usage.last_turn_recorded)
         {
             usage.complete = false;
-            self.turn_cut = true;
         }
     }
 

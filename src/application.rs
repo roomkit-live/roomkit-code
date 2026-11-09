@@ -330,7 +330,7 @@ async fn add_delegated(
         return;
     }
     let leads = spending::leads(&app.kit, &app.profiles, config).await;
-    summary.add_tasks(leads, &listed);
+    summary.add_tasks(leads, &listed, config.agent.as_str());
 }
 
 /// The conversation shown at exit with its agent, priced as the profiles
