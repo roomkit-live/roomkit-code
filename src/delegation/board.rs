@@ -458,6 +458,35 @@ mod tests {
         task
     }
 
+    #[tokio::test]
+    async fn tasks_ending_together_each_leave_their_line() {
+        let tasks = Tasks::default();
+        for id in ["a", "b"] {
+            tasks.started(task(id, "main", &format!("main::{id}")));
+        }
+        let first = ended(task("a", "main", "main::a"), Outcome::Completed);
+        tasks.finished(first).await;
+        let second = ended(task("b", "main", "main::b"), Outcome::Failed);
+        tasks.finished(second).await;
+
+        let said: Vec<_> = tasks
+            .ended_lines("main")
+            .into_iter()
+            .map(|line| match line {
+                roomkit_tui::protocol::Item::Message(message) => message.text,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            said,
+            [
+                "Task for Review completed in 58 s",
+                "Task for Review failed"
+            ]
+        );
+        assert!(tasks.ended_lines("elsewhere").is_empty());
+    }
+
     #[test]
     fn a_notice_quotes_a_task_on_one_short_line() {
         let long = "Review\n the diff ".repeat(20);

@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-- A delegated task's end leaves a line in the conversation that asked for it:
-  "Task for Review completed in 58 s". It is there again after `/resume`, and
-  no agent reads it.
+- A delegated task that ends while the application runs leaves a line in the
+  conversation that asked for it: "Task for Review completed in 58 s". It is
+  there again after `/resume`, and no agent reads it.
 
 - The logo is RoomKit's four blocks in three violets, as in the RoomKit
   console, in the header and on the welcome screen.
