@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A GLM model gets its reasoning back between the rounds of a turn, in
+  `reasoning_content`, on Z.ai's endpoints or under a `glm-*` model name, as
+  Z.ai's documentation asks: it reasons more often and takes about half the
+  rounds. No other endpoint is sent the field.
+
 - A test rerun after each `write`, `edit` or `patch` is no longer refused as a
   loop: those tools restart the turn's repeat counts.
 

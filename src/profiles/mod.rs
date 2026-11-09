@@ -3,6 +3,7 @@ mod catalog;
 mod deletion;
 mod mcp;
 pub(crate) mod model;
+mod reasoning;
 pub(crate) mod sidebar;
 mod skills;
 mod slot;
@@ -327,6 +328,7 @@ impl Profiles {
             // base URL. On OpenAI's own endpoint its catalogue still decides for
             // the models it tags.
             supports_reasoning_effort_with_tools: Some(true),
+            thinking_field: reasoning::thinking_field(&provider.base_url, &profile.model),
             // No cap unless the agent sets one: the endpoint decides how long
             // a reply may be, as each model has its own limit.
             max_tokens: profile.max_output_tokens,

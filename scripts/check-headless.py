@@ -38,6 +38,9 @@ class Model:
                 deltas = []
                 if isinstance(reply, tuple):
                     name, args, *text = reply
+                    if thought := args.get("_thought"):
+                        deltas.append({"reasoning_content": thought})
+                        args = {key: value for key, value in args.items() if key != "_thought"}
                     deltas += [{"content": line} for line in text]
                     deltas.append({"tool_calls": [{"index": 0, "id": f"call-{index}", "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}]})
                     reason = "tool_calls"
@@ -70,17 +73,17 @@ class Model:
         return [message for request in self.requests for message in request["messages"] if message.get("role") == "tool"]
 
 
-def launch(root, model, *options, stdin=None):
+def launch(root, model, *options, stdin=None, name="fixture-model"):
     """Start the binary on pipes, the way a benchmark harness does."""
     storage = root / "storage"
     env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
     env.update({"HOME": str(storage / "home"), "XDG_DATA_HOME": str(storage / "data")})
-    argv = [str(binary), str(root / "project"), "--state-dir", str(storage / "state"), "--base-url", model.url, "--model", "fixture-model", "--no-update-check", *options]
+    argv = [str(binary), str(root / "project"), "--state-dir", str(storage / "state"), "--base-url", model.url, "--model", name, "--no-update-check", *options]
     return subprocess.Popen(argv, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
 
 
-def run(root, model, *options, stdin=None):
-    process = launch(root, model, *options, stdin=stdin)
+def run(root, model, *options, stdin=None, name="fixture-model"):
+    process = launch(root, model, *options, stdin=stdin, name=name)
     out, err = process.communicate(stdin, timeout=60)
     return process.returncode, out, err
 
@@ -176,6 +179,23 @@ def from_stdin(root, model):
     assert model.requests[0].get("reasoning_effort") == "low", model.requests[0].get("reasoning_effort")
     assert out == ANSWER + "\n", out
     assert model.said("A message read from standard input."), model.requests[0]["messages"]
+
+
+def reasoning_sent_back(model):
+    """The reasoning the second request gives back on the first round."""
+    return [m["reasoning_content"] for m in model.requests[1]["messages"] if m.get("role") == "assistant" and "reasoning_content" in m]
+
+
+def reasoning_goes_back_to_glm(root, model):
+    code, out, err = run(root, model, "--mode", "yolo", "--prompt", "Look.", name="glm-5.3-flash")
+    assert code == 0, (code, err)
+    assert reasoning_sent_back(model) == ["I look first."], model.requests[1]["messages"]
+
+
+def reasoning_stays_home_elsewhere(root, model):
+    code, out, err = run(root, model, "--mode", "yolo", "--prompt", "Look.")
+    assert code == 0, (code, err)
+    assert reasoning_sent_back(model) == [], model.requests[1]["messages"]
 
 
 def same_session(root, model):
@@ -338,6 +358,8 @@ scenario("round limit fails the launch", [call("list", path="."), call("list", "
 # Each call differs: the engine stops a turn that repeats one exact call.
 scenario("no round limit unattended", [call("glob", pattern=f"*{i}*") for i in range(55)] + [ANSWER], past_fifty_rounds)
 scenario("message from standard input", [ANSWER], from_stdin)
+scenario("a GLM model gets its reasoning back", [call("list", path=".", _thought="I look first."), ANSWER], reasoning_goes_back_to_glm)
+scenario("another model does not", [call("list", path=".", _thought="I look first."), ANSWER], reasoning_stays_home_elsewhere)
 scenario("a second launch on one session", ["Answer one.", "Answer two."], same_session)
 scenario("standard output closed early", ["\n".join(["line"] * 20_000)], closed_output)
 scenario("events to a reader that left", [call("process_start", command="echo $$ > server.pid; exec sleep 60"), "\n".join(["line"] * 20_000)], closed_events)
