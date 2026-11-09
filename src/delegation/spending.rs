@@ -39,8 +39,7 @@ impl Spent {
 }
 
 /// Reads what the ended tasks of `current`'s conversation consumed, those
-/// not read yet: a room whose task ended changes only by a view writing in it
-/// (`Tasks::viewing`).
+/// not read yet or since a turn was recorded there (`Tasks::consumed`).
 pub(crate) async fn read(
     kit: &RoomKit<SqliteStore>,
     profiles: &Profiles,
@@ -180,8 +179,8 @@ pub(crate) async fn around_task(
     sum(once(own.as_ref()).chain(costs))
 }
 
-/// What the agent of conversation `root` cost, read once for each change of
-/// its tasks: a view polling a task's room would read the whole conversation.
+/// What the agent of conversation `root` cost, read once for each change to
+/// the figures: a view polling a task's room would read the whole conversation.
 async fn own_cost(
     kit: &RoomKit<SqliteStore>,
     profiles: &Profiles,

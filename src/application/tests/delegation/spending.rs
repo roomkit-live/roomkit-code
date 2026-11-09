@@ -12,7 +12,7 @@ use super::*;
 /// once, 1,000 tokens in and 100 out; each of the delegating agent's requests
 /// uses 2,000 and 200. A worker that `hangs` lists the project first, then
 /// never answers in time, so its task runs until it is stopped.
-async fn reporting_server(
+pub(super) async fn reporting_server(
     hangs: bool,
 ) -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
     let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
@@ -23,7 +23,7 @@ async fn reporting_server(
             let seen = seen.clone();
             async move {
                 seen.lock().unwrap().push(request.clone());
-                let worker = request.to_string().contains(WORKER);
+                let worker = super::rooms::is_worker(&request.to_string());
                 let last = request["messages"].as_array().unwrap().last().unwrap();
                 if worker && hangs && last["role"] == "tool" {
                     tokio::time::sleep(Duration::from_secs(60)).await;
@@ -66,7 +66,7 @@ async fn reporting_server(
 }
 
 /// A project with a reviewer, whose models cost $2 in and $10 out a million.
-async fn priced_settings(
+pub(super) async fn priced_settings(
     project: &std::path::Path,
     state: &std::path::Path,
     base: &str,

@@ -5,7 +5,6 @@
 //! from its room (`history`).
 
 use std::collections::{HashMap, HashSet};
-use std::ops::Not;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -122,9 +121,8 @@ struct Board {
     restored: HashSet<String>,
     /// The agent shown in each conversation, for a view that returns to it.
     leads: HashMap<String, String>,
-    /// The tasks' rooms a view has shown: what they consumed can have changed.
-    viewed: HashSet<String>,
-    /// Counts the tasks that started or ended.
+    /// Counts what changes a conversation's figures: a task started or ended,
+    /// a turn recorded.
     version: u64,
     /// What each conversation's own agent cost, as of a `version`.
     own_costs: HashMap<String, (u64, Option<ConversationCost>)>,
@@ -291,24 +289,40 @@ impl Tasks {
             .cloned()
     }
 
-    /// Notes the view that shows `room` with `agent`: the agent a view
-    /// returning to a conversation shows again, and the task rooms whose
-    /// figures its turns may change.
+    /// The agent working on a task right now, if `agent` is: assembling it
+    /// again would replace the loop its turn runs in.
+    pub(crate) fn agent_running(&self, agent: &str) -> bool {
+        crate::sync::lock(&self.board)
+            .tasks
+            .iter()
+            .any(|task| task.agent_id == agent && task.running())
+    }
+
+    /// Notes the agent a view shows in `room`, for a view returning to it.
     pub(crate) fn viewing(&self, room: &str, agent: &str) {
         let root = self.root_of(room);
-        let mut board = crate::sync::lock(&self.board);
         if root == room {
-            board.leads.insert(root, agent.to_owned());
-        } else {
-            board.viewed.insert(room.to_owned());
+            crate::sync::lock(&self.board)
+                .leads
+                .insert(root, agent.to_owned());
         }
-        let viewed = std::mem::take(&mut board.viewed);
-        for task in board.tasks.iter_mut().filter(|task| task.running().not()) {
-            if viewed.contains(&task.room) {
-                task.spent = None;
-            }
+    }
+
+    /// A turn recorded in `room`: an ended task of that room, which its agent
+    /// can still answer in, is read again, and the conversation's figures
+    /// change.
+    pub(crate) fn consumed(&self, room: &str) {
+        let mut board = crate::sync::lock(&self.board);
+        board.version += 1;
+        for task in board
+            .tasks
+            .iter_mut()
+            .filter(|t| t.room == room && !t.running())
+        {
+            task.spent = None;
         }
-        board.viewed = viewed.into_iter().filter(|shown| shown == room).collect();
+        drop(board);
+        self.changes.send_replace(());
     }
 
     /// The conversation a view of `room` with `agent` belongs to, with the
@@ -324,8 +338,8 @@ impl Tasks {
         crate::sync::lock(&self.board).leads.get(root).cloned()
     }
 
-    /// Counts the tasks that started or ended, which changes what a
-    /// conversation's figures add up to.
+    /// Counts what changes a conversation's figures: a task started or
+    /// ended, a turn recorded.
     pub(crate) fn version(&self) -> u64 {
         crate::sync::lock(&self.board).version
     }
@@ -525,10 +539,9 @@ mod tests {
         );
     }
 
-    /// What a worker consumed changes only by a view writing in its room:
-    /// read again once a view has shown that room.
+    /// A turn recorded in a task's room, whoever started it, is read again.
     #[test]
-    fn a_task_s_figures_are_read_again_once_its_room_was_shown() {
+    fn a_task_s_figures_are_read_again_once_a_turn_is_recorded_there() {
         let spent = || super::Spent {
             usage: crate::exit_summary::Usage::for_tests(10, 1),
             cost: None,
@@ -539,16 +552,22 @@ mod tests {
         tasks.keep_spent("a", spent());
         tasks.keep_spent("b", spent());
         let read = |id: &str| tasks.find("main", id).unwrap().spent.is_some();
-
-        tasks.viewing("main", "code");
-        assert!(read("a") && read("b"), "Nothing was shown yet");
-        tasks.viewing("main::a", "review");
+        let before = tasks.version();
+        tasks.consumed("main::a");
         assert!(!read("a") && read("b"));
-        tasks.keep_spent("a", spent());
-        tasks.viewing("main", "code");
-        assert!(!read("a") && read("b"), "It may have changed while shown");
-        tasks.keep_spent("a", spent());
-        tasks.viewing("main", "code");
-        assert!(read("a"), "Left alone since, it stays read");
+        assert!(
+            tasks.version() > before,
+            "The conversation's figures changed"
+        );
+    }
+
+    /// An agent at work keeps the assembled agent its turn runs in.
+    #[test]
+    fn an_agent_on_a_task_is_known_until_the_task_ends() {
+        let tasks = Tasks::default();
+        tasks.started(task("a", "main", "main::a"));
+        assert!(tasks.agent_running("review") && !tasks.agent_running("code"));
+        tasks.ended(ended(task("a", "main", "main::a"), Outcome::Completed));
+        assert!(!tasks.agent_running("review"));
     }
 }

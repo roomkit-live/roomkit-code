@@ -52,6 +52,22 @@ const CONTEXT_DESCRIPTION: &str = "Optional. A JSON object, never a string, of w
 /// What a delegated task's worker reads with its mode at each turn.
 pub(crate) const WORKER: &str = "You are working on a task another agent handed you, in a conversation of your own, which the person can open and write in. You cannot ask for approval: an action that needs one is refused. Do what the mode allows, then answer with your result, complete and self-contained: it goes back to the agent that asked, as the task's result.";
 
+/// What the agent of a task's room reads once its task ended: the person is
+/// talking to it.
+pub(crate) const AFTER_TASK: &str = "The task another agent handed you has ended and its result went back to that agent. The person is now talking to you directly in this conversation of your own; what you answer stays here. You cannot ask for approval: an action that needs one is refused.";
+
+/// What the agent of `room` reads about its task, if `room` is a task's.
+pub(crate) fn worker_note(room: &roomkit::model::Room) -> Option<&'static str> {
+    if !room.metadata.contains_key("parent_room_id") {
+        return None;
+    }
+    let status = room.metadata.get("task_status").and_then(Value::as_str);
+    Some(match status {
+        Some("pending" | "in_progress") | None => WORKER,
+        Some(_) => AFTER_TASK,
+    })
+}
+
 /// How many delegated tasks' rooms deep a task can still be handed on from:
 /// the conversation's agent, its worker and that worker's worker. Two agents
 /// would otherwise hand a task back and forth without end.
@@ -207,6 +223,7 @@ pub(crate) fn install(
     roster: std::sync::Arc<Roster>,
 ) -> crate::Result<()> {
     let (started, ended) = (tasks.clone(), roster.clone());
+    let finishing = tasks.clone();
     kit.hook(
         HookTrigger::OnTaskDelegated,
         move |event: RoomEvent, _| {
@@ -218,7 +235,7 @@ pub(crate) fn install(
     kit.hook(
         HookTrigger::OnTaskCompleted,
         move |event: RoomEvent, _| {
-            let (tasks, roster) = (tasks.clone(), ended.clone());
+            let (tasks, roster) = (finishing.clone(), ended.clone());
             async move {
                 let mut task = task(&event, &roster);
                 let ms = event.metadata.get("duration_ms").and_then(Value::as_f64);
@@ -232,6 +249,32 @@ pub(crate) fn install(
         },
         observer("code-delegation-ended"),
     )?;
+    // A turn's record rides its last row: one that ended on no text is written
+    // by updating a row already sent.
+    let triggers = [
+        (HookTrigger::AfterBroadcast, "code-delegation-consumed"),
+        (
+            HookTrigger::OnEventUpdated,
+            "code-delegation-consumed-update",
+        ),
+    ];
+    for (trigger, name) in triggers {
+        let consumed = tasks.clone();
+        kit.hook(
+            trigger,
+            move |event: RoomEvent, _| {
+                let tasks = consumed.clone();
+                async move {
+                    if event.metadata.contains_key("ai_usage")
+                        || event.metadata.contains_key("loop_end_reason")
+                    {
+                        tasks.consumed(event.room_id.as_str());
+                    }
+                }
+            },
+            observer(name),
+        )?;
+    }
     Ok(())
 }
 

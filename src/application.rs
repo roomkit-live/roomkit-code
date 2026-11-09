@@ -245,8 +245,12 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
     // The final observation outlives the view: it names the conversation to resume.
     let observer = roomkit_tui::SessionObserver::default();
     let resume = integrations::Resume::new(&settings);
-    let integrations =
-        integrations::Integration::start(&settings, app.profiles.diagnostics.clone(), &observer);
+    let integrations = integrations::Integration::start(
+        &settings,
+        app.profiles.diagnostics.clone(),
+        &observer,
+        app.profiles.resources.tasks.clone(),
+    );
     let view = observer.clone();
     let terminal = tokio::task::spawn_blocking(move || {
         roomkit_tui::run_with_observer(client, renderers, settings.ui, view)
@@ -285,6 +289,7 @@ async fn summarize(
         .is_some_and(|run| run.outcome.is_none());
     // A view can be in a task's room: the report is its conversation's.
     let tasks = &app.profiles.resources.tasks;
+    let running = running || conversation_turn_runs(app, view.as_ref());
     let shown_room = view.as_ref().map(|view| {
         tasks.conversation_of(view.conversation.as_str(), view.selected_agent.as_str())
     });
@@ -311,6 +316,19 @@ async fn summarize(
     summary
 }
 
+/// Whether the view is in a task's room while a turn runs in its conversation.
+fn conversation_turn_runs(
+    app: &Application,
+    view: Option<&roomkit_tui::SessionObservation>,
+) -> bool {
+    let tasks = &app.profiles.resources.tasks;
+    view.is_some_and(|view| {
+        let root = tasks.root_of(view.conversation.as_str());
+        root != view.conversation.as_str()
+            && roomkit::model::RoomId::new(&root).is_ok_and(|room| app.channel.is_busy(&room))
+    })
+}
+
 /// Adds to the report what the tasks of `config`'s conversation consumed.
 async fn add_delegated(
     app: &Application,
@@ -319,7 +337,6 @@ async fn add_delegated(
 ) {
     use crate::delegation::spending;
     let tasks = &app.profiles.resources.tasks;
-    tasks.viewing(config.room.as_str(), config.agent.as_str());
     spending::read(&app.kit, &app.profiles, tasks, config).await;
     let listed: Vec<_> = tasks
         .of(config.room.as_str())

@@ -16,6 +16,7 @@ impl Integration {
         settings: &Settings,
         diagnostics: std::sync::Arc<crate::diagnostics::Diagnostics>,
         observer: &SessionObserver,
+        tasks: std::sync::Arc<crate::delegation::Tasks>,
     ) -> Self {
         let endpoint = settings
             .herdr
@@ -28,7 +29,14 @@ impl Integration {
         let resume = Resume::new(settings);
         let reporter = herdr::Reporter::start(
             endpoint,
-            move || source.latest().map(|state| resume.report(state)),
+            move || {
+                source.latest().map(|mut state| {
+                    // A view can be in a task's room: the session is its
+                    // conversation, the one a resume command reopens.
+                    state.conversation = tasks.root_of(state.conversation.as_str()).into();
+                    resume.report(state)
+                })
+            },
             move |code| {
                 diagnostics.record("herdr_integration", serde_json::json!({"code":code}), None)
             },

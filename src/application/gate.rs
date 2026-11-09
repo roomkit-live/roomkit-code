@@ -106,6 +106,11 @@ async fn delegation_refusal(gate: &Gate, event: &ToolCallEvent) -> Option<String
     if let Some(refusal) = gate.profiles.resources.roster.refusal(caller, target) {
         return Some(refusal);
     }
+    // Assembled again, an agent already working on a task would lose the loop
+    // a message to it is handed to: an edit applies to its next task.
+    if gate.profiles.resources.tasks.agent_running(target) {
+        return None;
+    }
     let kit = gate.kit.upgrade()?;
     let prepared = gate.profiles.prepare_target(&kit, target).await;
     prepared

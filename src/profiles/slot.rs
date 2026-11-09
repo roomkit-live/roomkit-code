@@ -70,15 +70,14 @@ impl AgentSlot {
         event: &RoomEvent,
         history: &[RoomEvent],
         told: Option<String>,
+        worker: Option<&'static str>,
     ) -> String {
         let (room, agent) = (event.room_id.as_str(), self.id.as_str());
         self.instructions.begin(room, agent);
         let project = self.instructions.load(vec![], true).await.render();
         self.compactions.tell_snapshot(room, agent, &project);
         let mut parts = vec![self.policy.instruction(room).to_owned()];
-        if self.policy.delegated(room) {
-            parts.push(crate::delegation::WORKER.to_owned());
-        }
+        parts.extend(worker.map(str::to_owned));
         parts.extend(self.roster.instruction(agent));
         parts.extend(told);
         if !self.still_read(&project, event, history) {
@@ -123,7 +122,10 @@ impl AgentSlot {
                 if !context.recent_events.iter().any(|past| past.id == event.id) {
                     context.recent_events.push(event.clone());
                 }
-                let instruction = self.instruction(&event, &context.recent_events, None).await;
+                let worker = crate::delegation::worker_note(&context.room);
+                let instruction = self
+                    .instruction(&event, &context.recent_events, None, worker)
+                    .await;
                 let mut input = RoomEvent::new(
                     event.room_id.clone(),
                     event.source.clone(),
@@ -139,8 +141,9 @@ impl AgentSlot {
             // and the project's instructions, as any turn does.
             EventType::Instruction => {
                 let told = roomkit_core::rules::transcoding::text_of(&event.content);
+                let worker = crate::delegation::worker_note(&context.room);
                 let instruction = self
-                    .instruction(&event, &context.recent_events, Some(told))
+                    .instruction(&event, &context.recent_events, Some(told), worker)
                     .await;
                 let mut input = event;
                 input.content = TextContent::new(instruction).into();

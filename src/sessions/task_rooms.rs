@@ -4,7 +4,7 @@
 //! worker whose task ended stays in its room.
 
 use roomkit::model::{Access, ChannelId, RoomId};
-use roomkit::{AttachChannelOptions, ListBindingsOptions};
+use roomkit::{AttachChannelOptions, GetRoomOptions, ListBindingsOptions};
 use roomkit_tui_engine::{CommandResult, SessionConfig};
 
 use super::Sessions;
@@ -19,14 +19,99 @@ pub(crate) async fn open_task(
 ) -> Result<CommandResult, String> {
     let room = RoomId::new(&task.room).map_err(|_| "This task's room cannot be opened")?;
     let agent = ChannelId::new(&task.agent_id).map_err(|_| "This task's agent is unknown")?;
-    bind_terminal(sessions, &room, current.organization.clone()).await?;
+    let organization = current.organization.clone();
+    bind_terminal(sessions, &room, organization.clone()).await?;
+    adopt(sessions, &room, organization).await?;
+    let root = sessions.profiles.resources.tasks.root_of(room.as_str());
     let mut next = current.clone();
     next.room = room.clone();
     next.agent = agent;
-    next.title = format!("Task for {} · Alt+Left to go back", task.agent);
+    next.title = format!("Task for {} · Alt+arrows to move", task.agent);
     next.mode = Some(sessions.policy.state(room.as_str()));
-    sessions.profiles.configure_view(&mut next).await;
+    next.group = Some(root);
+    // Stopping the run stops the task: a message never cuts it to be sent.
+    next.can_cut_to_send = !task.running();
+    ready(sessions, &mut next).await;
     Ok(CommandResult::Switch(Box::new(next)))
+}
+
+/// Configures `view`, assembling its agent when it is not ready: a worker of
+/// an earlier launch was never served, and only a task's start assembles one.
+async fn ready(sessions: &Sessions, view: &mut SessionConfig) {
+    sessions.profiles.configure_view(view).await;
+    if view.submission_error.is_none() {
+        return;
+    }
+    // One that cannot be assembled leaves the room readable: the view says
+    // why it cannot be written to.
+    let agent = view.agent.to_string();
+    let prepared = sessions.profiles.prepare_target(&sessions.kit, &agent);
+    if prepared.await.is_ok() {
+        sessions.profiles.configure_view(view).await;
+    }
+}
+
+/// Tells the policy `room` and the rooms it was handed on from are tasks',
+/// so the mode shown from it is its conversation's before an agent's next
+/// turn says so. The depth bound only guards against a cycle.
+async fn adopt(
+    sessions: &Sessions,
+    room: &RoomId,
+    organization_id: Option<String>,
+) -> Result<(), String> {
+    let mut current = room.clone();
+    for _ in 0..=crate::delegation::MAX_DEPTH {
+        let options = GetRoomOptions {
+            organization_id: organization_id.clone(),
+        };
+        let found = sessions
+            .kit
+            .get_room(&current, options)
+            .await
+            .map_err(|_| "This task's room cannot be read")?;
+        sessions.policy.adopt(&found);
+        let parent = found
+            .metadata
+            .get("parent_room_id")
+            .and_then(|p| p.as_str());
+        let Some(parent) = parent.and_then(|parent| RoomId::new(parent).ok()) else {
+            break;
+        };
+        current = parent;
+    }
+    Ok(())
+}
+
+/// `current` as a view of its conversation: what a command that changes the
+/// conversation acts from when the view is in a task's room.
+pub(crate) async fn in_conversation(
+    sessions: &Sessions,
+    current: SessionConfig,
+) -> Result<SessionConfig, String> {
+    let tasks = &sessions.profiles.resources.tasks;
+    let root = tasks.root_of(current.room.as_str());
+    if root == current.room.as_str() {
+        return Ok(current);
+    }
+    let room = RoomId::new(&root).map_err(|_| "This conversation cannot be opened")?;
+    let mut next = current;
+    next.room = room;
+    home(sessions, &mut next, &root).await;
+    Ok(next)
+}
+
+/// Sets `view`'s agent and settings to those of conversation `root`.
+async fn home(sessions: &Sessions, view: &mut SessionConfig, root: &str) {
+    let tasks = &sessions.profiles.resources.tasks;
+    if let Some(agent) = tasks
+        .lead_of(root)
+        .and_then(|agent| ChannelId::new(agent).ok())
+    {
+        view.agent = agent;
+    }
+    view.group = None;
+    view.can_cut_to_send = true;
+    sessions.profiles.configure_view(view).await;
 }
 
 async fn bind_terminal(
@@ -61,15 +146,8 @@ async fn open_conversation(
     root: &str,
 ) -> Result<CommandResult, String> {
     let room = RoomId::new(root).map_err(|_| "This conversation cannot be opened")?;
-    let tasks = &sessions.profiles.resources.tasks;
     let mut next = current.clone();
-    if let Some(agent) = tasks
-        .lead_of(root)
-        .and_then(|agent| ChannelId::new(agent).ok())
-    {
-        next.agent = agent;
-    }
-    sessions.profiles.configure_view(&mut next).await;
+    home(sessions, &mut next, root).await;
     Ok(sessions.switched(next, room).await)
 }
 

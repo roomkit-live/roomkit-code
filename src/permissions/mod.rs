@@ -65,8 +65,7 @@ impl Mode {
     }
 }
 
-/// What a call that needs an approval reads in a delegated task's room, which
-/// no view shows.
+/// What a call that needs an approval reads in a delegated task's room.
 const DELEGATED: &str = "This action needs the person's approval, which a delegated task cannot ask for: it was not executed. Do not retry it or use another tool to get around it; finish what the mode allows and say in your answer what you could not do.";
 
 /// How many rooms up a delegated task's room is followed to its conversation:
@@ -183,19 +182,19 @@ impl Policy {
             "yolo" => Mode::Yolo,
             _ => return Err("Use /mode ask, /mode plan or /mode yolo".into()),
         };
-        self.apply(room, mode);
+        // Set by the person from a task's room, it is the conversation's; a
+        // worker's own mode tools stay on its room, which nothing reads.
+        let conversation = self
+            .conversation(room)
+            .map_or_else(|| room.to_owned(), |(room, _)| room);
+        self.apply(&conversation, mode);
         Ok(self.state(room))
     }
 
     /// Set `room`'s mode, and signal it: the view's live updates carry the
     /// mode, and must not keep one a later change replaced.
     pub(crate) fn apply(&self, room: &str, mode: Mode) {
-        // A task's room takes its conversation's mode: set from there, it is
-        // the conversation's.
-        let conversation = self
-            .conversation(room)
-            .map_or_else(|| room.to_owned(), |(room, _)| room);
-        crate::sync::lock(&self.modes).insert(conversation, mode);
+        crate::sync::lock(&self.modes).insert(room.into(), mode);
         self.changes.send_replace(());
     }
 
@@ -283,6 +282,21 @@ mod tests {
         assert_eq!((policy.depth("main"), policy.depth("main::a::b")), (0, 2));
         assert!(policy.delegated("main::a") && !policy.delegated("main"));
         assert!(!policy.delegated("other"));
+    }
+
+    /// A person who sets the mode from a task's room sets the conversation's.
+    /// A worker's own mode tool cannot: nothing reads its room's mode.
+    #[test]
+    fn only_the_person_sets_a_conversation_s_mode_from_a_task_s_room() {
+        let policy = Policy::new(Mode::Yolo);
+        policy.apply("main", Mode::Yolo);
+        policy.adopt(&child("main::a", "main"));
+        policy.apply("main::a", Mode::Plan);
+        assert_eq!(policy.mode("main"), Mode::Yolo);
+        assert_eq!(policy.mode("main::a"), Mode::Yolo);
+        policy.set("main::a", "ask").unwrap();
+        assert_eq!(policy.mode("main"), Mode::Ask);
+        assert_eq!(policy.mode("main::a"), Mode::Ask);
     }
 
     /// A chain deeper than the walk, or a loop, never falls back to the launch

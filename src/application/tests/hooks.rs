@@ -661,6 +661,34 @@ async fn changing_views_does_not_close_sessions_or_replay_their_start() {
     );
 }
 
+/// Moving into a delegated task's room starts no session: it belongs to its
+/// conversation's.
+#[tokio::test]
+async fn a_task_s_room_is_no_session_of_its_own() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    configure(root.path(), &["SessionStart", "SessionEnd"], "", false);
+    let mock = Mock::start(vec![]).await;
+    let app = Application::open(
+        &settings(root.path(), state.path(), &mock.base_url),
+        String::new(),
+    )
+    .await
+    .unwrap();
+    enable_all(&app);
+    let mut view = app.view.clone();
+    view.room = roomkit::model::RoomId::new("main::task-1").unwrap();
+    view.group = Some("main".into());
+    app.services.hooks.lifecycle().attached(&view);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    app.close().await.unwrap();
+    assert!(
+        records(root.path()).is_empty(),
+        "{:?}",
+        records(root.path())
+    );
+}
+
 #[tokio::test]
 async fn shutdown_interrupts_detached_preparation_and_runs_session_end() {
     let root = tempfile::tempdir().unwrap();

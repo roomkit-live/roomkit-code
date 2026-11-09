@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use roomkit::model::{Access, EventContent, RoomId};
+use roomkit::model::{Access, ChannelId, EventContent, RoomId};
 use roomkit::{ListBindingsOptions, RoomKit};
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::{Choice, Command, CommandSpec, Event, Rejection, Request};
@@ -302,12 +302,21 @@ impl Sessions {
             "tasks" => crate::delegation::panel::handle(self, &current, arguments).await,
             "tools" => self.tools(&current, arguments).await,
             "mode" => self.mode(&current, arguments).await,
-            "compact" => Ok(self.compact(&current)),
+            "compact" => self.compact_here(&current),
             "new" => {
+                let current = task_rooms::in_conversation(self, current).await?;
                 self.new_session(current, arguments, request.operation.as_str())
                     .await
             }
-            "resume" => self.resume(current, arguments).await,
+            "resume" => {
+                // The list shows in this view; a choice leaves its room.
+                let current = if arguments.is_empty() {
+                    current
+                } else {
+                    task_rooms::in_conversation(self, current).await?
+                };
+                self.resume(current, arguments).await
+            }
             "rename" => self.rename(current, arguments).await,
             _ => Err("Unknown application command".into()),
         }
@@ -425,7 +434,24 @@ impl Sessions {
     /// instruction holds wherever it reads, and leaves the last word to a
     /// mode tool the model calls afterwards.
     async fn tell_the_running_turn(&self, current: &SessionConfig) {
-        let room = current.room.clone();
+        self.steer_mode(current, current.room.clone(), &current.agent)
+            .await;
+        // From a task's room, the mode is the whole conversation's.
+        let tasks = &self.profiles.resources.tasks;
+        let root = tasks.root_of(current.room.as_str());
+        if root == current.room.as_str() {
+            return;
+        }
+        let lead = tasks
+            .lead_of(&root)
+            .and_then(|agent| ChannelId::new(agent).ok());
+        if let (Ok(room), Some(lead)) = (RoomId::new(&root), lead) {
+            self.steer_mode(current, room, &lead).await;
+        }
+    }
+
+    /// Tells the turn `agent` runs in `room` the new mode.
+    async fn steer_mode(&self, current: &SessionConfig, room: RoomId, agent: &ChannelId) {
         let update = roomkit::model::UpdateSystemPrompt::new(format!(
             "\n\nThe user changed the application mode during this turn. The instruction below replaces the mode instruction elsewhere in this conversation, wherever it appears, unless a plan mode tool you call after reading this reports another mode.\n{}",
             self.policy.instruction(room.as_str())
@@ -435,12 +461,28 @@ impl Sessions {
             organization_id: current.organization.clone(),
             ..Default::default()
         };
-        if let Err(error) = self.kit.steer(update, &current.agent, options).await {
+        if let Err(error) = self.kit.steer(update, agent, options).await {
             let detail = serde_json::json!({ "error": error.to_string() });
             self.profiles
                 .diagnostics
                 .record("mode_change_not_steered", detail, None);
         }
+    }
+
+    /// `/compact`, refused in the room of a task its agent is working on: the
+    /// queue that holds a compaction until a turn ends counts a person's
+    /// turns, not a delegated one.
+    fn compact_here(&self, current: &SessionConfig) -> std::result::Result<CommandResult, String> {
+        if self
+            .profiles
+            .resources
+            .tasks
+            .running_in(current.room.as_str())
+            .is_some()
+        {
+            return Err("This task's agent is working: compact once its task ended".into());
+        }
+        Ok(self.compact(current))
     }
 }
 

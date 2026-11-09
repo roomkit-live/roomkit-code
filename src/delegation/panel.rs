@@ -86,35 +86,9 @@ pub(crate) async fn handle(
         tasks.panel.close();
         return sessions::task_rooms::open_task(sessions, current, &task).await;
     }
-    let mut open = match arguments.split_once(':') {
-        None => {
-            let selected = (!arguments.is_empty()).then(|| arguments.to_owned());
-            if let Some(id) = &selected
-                && tasks.find(room, id).is_none()
-            {
-                return Err("This conversation has no such task".into());
-            }
-            Open {
-                id: String::new(),
-                room: room.to_owned(),
-                agent: current.agent.to_string(),
-                selected,
-            }
-        }
-        Some((id, action)) => {
-            let open = tasks
-                .panel
-                .get()
-                .filter(|open| open.id == id && shown_in(open, current))
-                .ok_or("This task action belongs to an older view")?;
-            match act(kit, tasks, current, open, action).await? {
-                Some(open) => open,
-                None => {
-                    tasks.panel.close();
-                    return Ok(CommandResult::Events(Vec::new()));
-                }
-            }
-        }
+    let Some(mut open) = requested(kit, tasks, current, arguments).await? else {
+        tasks.panel.close();
+        return Ok(CommandResult::Events(Vec::new()));
     };
     open.id = uuid::Uuid::new_v4().to_string();
     let spec = render::panel(kit, tasks, &open, current.organization.clone()).await;
@@ -123,6 +97,37 @@ pub(crate) async fn handle(
         conversation: room.into(),
         panel: spec,
     }]))
+}
+
+/// The panel `/tasks` asks for with `arguments`: what it opens, or what the
+/// panel's own action leaves; none once it is dismissed.
+async fn requested(
+    kit: &RoomKit<SqliteStore>,
+    tasks: &Tasks,
+    current: &SessionConfig,
+    arguments: &str,
+) -> Result<Option<Open>, String> {
+    let room = current.room.as_str();
+    let Some((id, action)) = arguments.split_once(':') else {
+        let selected = (!arguments.is_empty()).then(|| arguments.to_owned());
+        if let Some(id) = &selected
+            && tasks.find(room, id).is_none()
+        {
+            return Err("This conversation has no such task".into());
+        }
+        return Ok(Some(Open {
+            id: String::new(),
+            room: room.to_owned(),
+            agent: current.agent.to_string(),
+            selected,
+        }));
+    };
+    let open = tasks
+        .panel
+        .get()
+        .filter(|open| open.id == id && shown_in(open, current))
+        .ok_or("This task action belongs to an older view")?;
+    act(kit, tasks, current, open, action).await
 }
 
 fn cycle_direction(arguments: &str) -> Option<bool> {

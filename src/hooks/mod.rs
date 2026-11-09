@@ -32,6 +32,8 @@ struct Session {
     room: String,
     agent: Mutex<String>,
     source: String,
+    /// A delegated task's room: part of its conversation's session.
+    task: bool,
     ready: tokio::sync::OnceCell<()>,
 }
 
@@ -177,6 +179,7 @@ impl Hooks {
             execution: uuid::Uuid::new_v4().to_string(),
             source,
             agent: Mutex::new(view.agent.to_string()),
+            task: view.group.is_some(),
             ready: tokio::sync::OnceCell::new(),
         });
         state.sessions.insert(session.room.clone(), session.clone());
@@ -199,6 +202,9 @@ impl Hooks {
     }
 
     async fn open_session(&self, session: &Session, agent: &str) {
+        if session.task {
+            return;
+        }
         session
             .ready
             .get_or_init(|| async {
@@ -428,7 +434,7 @@ impl Hooks {
                 .record("hooks_close_timeout", json!({ "turns": left }), None);
         }
         let sessions: Vec<_> = self.state().sessions.values().cloned().collect();
-        for session in sessions {
+        for session in sessions.into_iter().filter(|session| !session.task) {
             let agent = crate::sync::lock(&session.agent).clone();
             let mut context = self.context(&session, &agent, None);
             context.payload["reason"] = json!("shutdown");
