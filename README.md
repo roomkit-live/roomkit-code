@@ -355,10 +355,14 @@ in turn, three levels deep at most. A `--prompt` launch offers no delegation:
 it ends with its turn, before a task could end.
 
 The other agent reads the task and the `context` it was handed, a JSON
-object, not the conversation. It works under the conversation's mode, and an
-action that needs an approval is refused: in Ask it reads and answers, in Yolo
-it can change files and run commands, in Plan it plans. Its conversation
-belongs to the one it was handed the task in: `/resume` does not list it.
+object, not the conversation. It works under the conversation's mode: in Ask
+what needs an approval asks you, in Yolo it can change files and run commands,
+in Plan it plans. Its conversation belongs to the one it was handed the task
+in: `/resume` does not list it.
+
+An approval it needs comes to the view you are in, named after the agent. Esc
+refuses that one action and the agent goes on; `o` opens its room. It waits
+five minutes, like any card, and stopping the task withdraws it.
 
 The status line says when a task starts and how it ended. The sidebar's
 **Tasks** lists the conversation's tasks that run, then the latest ended,

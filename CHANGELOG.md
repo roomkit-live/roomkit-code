@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A delegated agent can ask for an approval (RMK-1535, HITL 04faa598): the card
+  comes to the view you are in, named after the agent. Esc refuses that one
+  action and `o` opens its room. In Ask, it could only read before.
+
 - A delegated task's room can be opened and written in (RMK-1535): **Open its
   conversation** in `/tasks`, or Alt+Right and Alt+Left to go around the
   conversation and the tasks that run. The agent that delegated keeps working

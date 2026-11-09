@@ -4,6 +4,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use roomkit_tui::Client;
+use roomkit_tui::protocol::Decision;
 
 use super::*;
 
@@ -918,4 +919,166 @@ async fn a_nested_task_of_an_earlier_launch_shows_its_conversation_s_mode() {
     view.await.unwrap().unwrap();
     app.close().await.unwrap();
     server.abort();
+}
+
+/// What a worker that writes a file needs: an approval, in a view left on
+/// the conversation, for a task handed to `review`.
+struct Asking {
+    app: Application,
+    client: Client,
+    view: tokio::task::JoinHandle<std::result::Result<(), roomkit_tui_engine::AdapterError>>,
+    server: tokio::task::JoinHandle<()>,
+    requests: Arc<Mutex<Vec<Value>>>,
+    permission: roomkit_tui::protocol::Permission,
+    project: tempfile::TempDir,
+    _state: tempfile::TempDir,
+}
+
+async fn a_worker_asking() -> Asking {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let (base, requests, server) = super::server(task_for("review")).await;
+    let settings = settings(project.path(), state.path(), &base);
+    with_a_reviewer(&settings).await;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let (client, host) = connection(NonZeroUsize::new(1_024).unwrap());
+    let router = app.router(&settings.workspace);
+    let view = tokio::spawn(app.session().run_with_commands(host, router));
+    snapshot_of(&client, "main").await;
+    client
+        .try_send(submit(1, "main", "code", "Review the diff"))
+        .unwrap();
+    let permission = until(&client, |event| match event {
+        Event::PermissionRequested {
+            conversation,
+            permission,
+        } => {
+            assert_eq!(conversation.as_str(), "main");
+            Some(permission.clone())
+        }
+        _ => None,
+    })
+    .await;
+    Asking {
+        app,
+        client,
+        view,
+        server,
+        requests,
+        permission,
+        project,
+        _state: state,
+    }
+}
+
+impl Asking {
+    async fn close(self) {
+        drop(self.client);
+        self.view.await.unwrap().unwrap();
+        self.app.close().await.unwrap();
+        self.server.abort();
+    }
+
+    fn decide(&self, decision: Decision) {
+        let command = Command::Decide {
+            permission: self.permission.id.clone(),
+            decision,
+        };
+        self.client
+            .try_send(Request::new(RequestId::new(5), "decide", "main", command))
+            .unwrap();
+    }
+}
+
+/// The worker's approval comes to the conversation the person is looking at,
+/// named after the agent and its room; allowed, the action runs.
+#[tokio::test]
+async fn a_worker_s_approval_comes_to_the_view_and_runs_once_allowed() {
+    let asking = a_worker_asking().await;
+    let task = asking.app.profiles.resources.tasks.of("main").remove(0).1;
+    assert!(
+        asking.permission.title.starts_with("Review asks: "),
+        "{}",
+        asking.permission.title
+    );
+    assert_eq!(
+        asking.permission.origin.as_ref().map(|room| room.as_str()),
+        Some(task.room.as_str())
+    );
+    asking.decide(Decision::Allow);
+    until_handed_back(&asking.requests).await;
+    assert!(asking.project.path().join("worker.txt").exists());
+    asking.close().await;
+}
+
+/// Refused, the action does not run, and the worker goes on to its result.
+#[tokio::test]
+async fn a_worker_s_approval_refused_stops_only_that_action() {
+    let asking = a_worker_asking().await;
+    asking.decide(Decision::Deny);
+    until_handed_back(&asking.requests).await;
+    assert!(!asking.project.path().join("worker.txt").exists());
+    let task = asking.app.profiles.resources.tasks.of("main").remove(0).1;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while asking.app.profiles.resources.tasks.running() > 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let ended = asking.app.profiles.resources.tasks.find("main", &task.id);
+    assert!(ended.unwrap().state().starts_with("completed"));
+    asking.close().await;
+}
+
+/// Stopping the task withdraws its card.
+#[tokio::test]
+async fn stopping_a_task_withdraws_its_approval() {
+    let asking = a_worker_asking().await;
+    let task = asking.app.profiles.resources.tasks.of("main").remove(0).1;
+    let options = roomkit::CancelTaskOptions::default();
+    assert!(asking.app.kit.cancel_task(&task.id, options).await);
+    let id = asking.permission.id.clone();
+    until(&asking.client, |event| match event {
+        Event::PermissionResolved { permission, .. } if *permission == id => Some(()),
+        _ => None,
+    })
+    .await;
+    assert!(!asking.project.path().join("worker.txt").exists());
+    asking.close().await;
+}
+
+/// The card's key opens the room it was asked in, where it is shown again.
+#[tokio::test]
+async fn a_worker_s_approval_is_shown_again_in_its_own_room() {
+    let asking = a_worker_asking().await;
+    let task = asking.app.profiles.resources.tasks.of("main").remove(0).1;
+    let target = format!("open {}", task.room);
+    asking
+        .client
+        .try_send(invoke(6, "main", "tasks", &target))
+        .unwrap();
+    snapshot_of(&asking.client, &task.room).await;
+    let id = asking.permission.id.clone();
+    until(&asking.client, |event| match event {
+        Event::PermissionRequested { permission, .. } if permission.id == id => Some(()),
+        _ => None,
+    })
+    .await;
+    let command = Command::Decide {
+        permission: id,
+        decision: Decision::Allow,
+    };
+    asking
+        .client
+        .try_send(Request::new(
+            RequestId::new(7),
+            "decide",
+            task.room.as_str(),
+            command,
+        ))
+        .unwrap();
+    until_handed_back(&asking.requests).await;
+    assert!(asking.project.path().join("worker.txt").exists());
+    asking.close().await;
 }

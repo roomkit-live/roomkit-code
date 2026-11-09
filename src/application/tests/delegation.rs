@@ -193,14 +193,14 @@ async fn an_agent_hands_a_task_to_another_and_says_its_result() {
     assert!(first.to_string().contains("review (Review)"));
 
     // The worker read the task and its context, under Ask, and none of the
-    // conversation; its write needed an approval and was refused.
+    // conversation; its write needed an approval, and no view stayed to give it.
     let worker = delegated.worker();
     assert_eq!(worker.len(), 2, "{worker:?}");
     assert!(worker[0].contains("Review the diff") && worker[0].contains("BRANCH_MARK"));
     assert!(worker[0].contains("Application mode: Ask"));
     assert!(!worker[0].contains("Inspect the project."));
     assert!(
-        worker[1].contains("needs the person's approval"),
+        worker[1].contains("not approved"),
         "{}",
         worker[1]
     );
@@ -226,7 +226,7 @@ async fn a_worker_takes_its_conversation_s_mode() {
     let worker = delegated.worker();
     assert_eq!(worker.len(), 2, "{worker:?}");
     assert!(worker[0].contains("Application mode: Yolo"));
-    assert!(!worker[1].contains("needs the person's approval"));
+    assert!(!worker[1].contains("not approved"));
     let written = std::fs::read_to_string(project.path().join("worker.txt")).unwrap();
     assert_eq!(written, "from the worker");
 }

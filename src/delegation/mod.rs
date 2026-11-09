@@ -7,8 +7,8 @@
 //! the worker needs goes in the task and its `context`.
 //!
 //! A child room takes its conversation's mode, and an action there that needs
-//! the person's approval is refused (`permissions::Policy::adopt`). The
-//! terminal is shared into each child room, so a view can move into it, follow
+//! the person's approval asks them in the view they are in (HITL 04faa598).
+//! The terminal is shared into each child room, so a view can move into it, follow
 //! the worker and write to it (RMK-1535). The view's status line says when a task
 //! starts and how it ended; its sidebar lists the conversation's tasks, and
 //! `/tasks` shows and stops them (`board`, `panel`), with what each consumed
@@ -50,11 +50,11 @@ const CONTEXT: &str = "context";
 const CONTEXT_DESCRIPTION: &str = "Optional. A JSON object, never a string, of what the agent needs besides the task, as named values, for example {\"files\": [\"src/main.rs\"], \"branch\": \"main\"}. It reads it with the task, as data.";
 
 /// What a delegated task's worker reads with its mode at each turn.
-pub(crate) const WORKER: &str = "You are working on a task another agent handed you, in a conversation of your own, which the person can open and write in. You cannot ask for approval: an action that needs one is refused. Do what the mode allows, then answer with your result, complete and self-contained: it goes back to the agent that asked, as the task's result.";
+pub(crate) const WORKER: &str = "You are working on a task another agent handed you, in a conversation of your own, which the person can open and write in. An action that needs their approval asks them and waits: if it is refused, do not retry it or use another tool to get around it, and say in your answer what you could not do. Do what the mode allows, then answer with your result, complete and self-contained: it goes back to the agent that asked, as the task's result.";
 
 /// What the agent of a task's room reads once its task ended: the person is
 /// talking to it.
-pub(crate) const AFTER_TASK: &str = "The task another agent handed you has ended and its result went back to that agent. The person is now talking to you directly in this conversation of your own; what you answer stays here. You cannot ask for approval: an action that needs one is refused.";
+pub(crate) const AFTER_TASK: &str = "The task another agent handed you has ended and its result went back to that agent. The person is now talking to you directly in this conversation of your own; what you answer stays here.";
 
 /// What the agent of `room` reads about its task, if `room` is a task's.
 pub(crate) fn worker_note(room: &roomkit::model::Room) -> Option<&'static str> {
@@ -101,7 +101,7 @@ impl Roster {
     }
 
     /// The label of agent `id`, else its ID.
-    fn label(&self, id: &str) -> String {
+    pub(crate) fn label(&self, id: &str) -> String {
         crate::sync::read(&self.0)
             .iter()
             .find(|(known, _)| known == id)

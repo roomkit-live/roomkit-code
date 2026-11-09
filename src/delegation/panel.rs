@@ -76,6 +76,9 @@ pub(crate) async fn handle(
 ) -> Result<CommandResult, String> {
     let (kit, tasks) = (&sessions.kit, &*sessions.profiles.resources.tasks);
     let room = current.room.as_str();
+    if let Some(target) = arguments.strip_prefix("open ") {
+        return sessions::task_rooms::open(sessions, current, target).await;
+    }
     if let Some(forward) = cycle_direction(arguments) {
         return sessions::task_rooms::cycle(sessions, current, forward).await;
     }

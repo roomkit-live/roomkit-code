@@ -151,6 +151,28 @@ async fn open_conversation(
     Ok(sessions.switched(next, room).await)
 }
 
+/// Moves to room `target` of the conversation shown: its own, or a task's.
+pub(crate) async fn open(
+    sessions: &Sessions,
+    current: &SessionConfig,
+    target: &str,
+) -> Result<CommandResult, String> {
+    let tasks = &sessions.profiles.resources.tasks;
+    let root = tasks.root_of(current.room.as_str());
+    if target == root {
+        return open_conversation(sessions, current, &root).await;
+    }
+    let listed = tasks.of(&root);
+    let task = listed
+        .iter()
+        .map(|(_, task)| task)
+        .find(|task| task.room == target);
+    match task {
+        Some(task) => open_task(sessions, current, task).await,
+        None => Err("This conversation has no such room".into()),
+    }
+}
+
 /// Moves to the next room around the conversation, or the previous one: the
 /// conversation and the tasks that run, with the room shown wherever it is.
 pub(crate) async fn cycle(

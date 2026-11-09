@@ -65,8 +65,9 @@ impl Mode {
     }
 }
 
-/// What a call that needs an approval reads in a delegated task's room.
-const DELEGATED: &str = "This action needs the person's approval, which a delegated task cannot ask for: it was not executed. Do not retry it or use another tool to get around it; finish what the mode allows and say in your answer what you could not do.";
+/// What leaving Plan mode reads in a delegated task's room: its review is the
+/// conversation's own agent's to ask.
+const DELEGATED: &str = "Leaving Plan mode needs the person's review of a plan, which a delegated task cannot ask for: it was not done. Finish what the mode allows and say in your answer what you could not do.";
 
 /// How many rooms up a delegated task's room is followed to its conversation:
 /// past it, the chain is taken for a loop and the room for one whose
@@ -199,7 +200,7 @@ impl Policy {
     }
 
     pub async fn gate(&self, channel: &ConversationChannel, event: ToolCallEvent) -> Verdict {
-        self.gate_with_review(channel, event, None).await
+        self.gate_with_review(channel, event, None, None).await
     }
 
     pub(crate) fn plan_blocks(&self, event: &ToolCallEvent) -> bool {
@@ -211,6 +212,7 @@ impl Policy {
         channel: &ConversationChannel,
         event: ToolCallEvent,
         review: Option<String>,
+        asker: Option<String>,
     ) -> Verdict {
         if self.plan_blocks(&event) {
             return block(
@@ -228,13 +230,18 @@ impl Policy {
         if review.is_none() && self.mode(room_of(&event)) == Mode::Yolo {
             return allow();
         }
-        if self.delegated(room_of(&event)) {
-            return block(DELEGATED);
-        }
-        let request = match card::request(&event, rule.label, review) {
+        let mut request = match card::request(&event, rule.label, review) {
             Ok(request) => request,
             Err(refusal) => return block(refusal),
         };
+        if let Some(asker) = asker {
+            request.title = format!("{asker} asks: {}", request.title);
+        }
+        // Any view of the conversation answers, whichever of its rooms it
+        // shows: a delegated task's agent asks the person where they are.
+        if let Some((conversation, _)) = self.conversation(room_of(&event)) {
+            request = request.with_group(conversation);
+        }
         match channel.ask_tool_permission(&event, request).await {
             Decision::Allow
                 if self.mode(room_of(&event)) == Mode::Plan && !plan_allowed(&event) =>

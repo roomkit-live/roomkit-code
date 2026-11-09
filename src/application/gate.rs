@@ -76,7 +76,15 @@ async fn decide(gate: &Gate, event: ToolCallEvent, context: &RoomContext) -> Ver
     {
         return block(refusal);
     }
-    policy.gate_with_review(channel, event, review).await
+    let asker = policy
+        .delegated(crate::permissions::room_of(&event))
+        .then(|| {
+            gate.profiles
+                .resources
+                .roster
+                .label(event.channel_id.as_str())
+        });
+    policy.gate_with_review(channel, event, review, asker).await
 }
 
 /// Why a `delegate_task` call cannot hand its task over, if it cannot: a
