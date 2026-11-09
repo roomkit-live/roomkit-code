@@ -29,6 +29,7 @@ mod sessions;
 mod shell;
 mod storage;
 mod sync;
+mod system_row;
 #[cfg(test)]
 mod testing;
 mod timeouts;

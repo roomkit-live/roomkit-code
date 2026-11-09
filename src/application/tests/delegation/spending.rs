@@ -78,7 +78,7 @@ pub(super) async fn priced_settings(
     settings
 }
 
-fn sessions(app: &Application, project: &std::path::Path) -> crate::sessions::Sessions {
+pub(super) fn sessions(app: &Application, project: &std::path::Path) -> crate::sessions::Sessions {
     crate::sessions::Sessions {
         kit: app.kit.clone(),
         workspace: project.into(),

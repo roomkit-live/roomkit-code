@@ -67,6 +67,45 @@ pub(super) async fn until<T>(
     .unwrap()
 }
 
+/// A task's end leaves a line in the conversation that asked for it: shown
+/// to the view that watches, there for one that attaches later, read by no
+/// agent.
+#[tokio::test]
+async fn a_finished_task_leaves_a_line_in_its_conversation() {
+    use super::spending::{priced_settings, reporting_server, sessions};
+
+    const SAID: &str = "Task for Review completed in";
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let (base, requests, server) = reporting_server(false).await;
+    let settings = priced_settings(project.path(), state.path(), &base).await;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let handler = sessions(&app, project.path());
+    let mut updates = handler.subscribe(app.view.clone()).unwrap();
+    let is_the_line = |item: &Item| matches!(item, Item::Message(m) if m.text.starts_with(SAID));
+
+    turn(&app).await;
+    until_handed_back(&requests).await;
+    until_relayed(&app).await;
+
+    until(&mut updates, |event| match event {
+        Event::Item { item, .. } if is_the_line(item) => Some(()),
+        _ => None,
+    })
+    .await;
+    let snapshot = app.session().snapshot().await.unwrap();
+    let lines = snapshot.items.iter().filter(|i| is_the_line(i)).count();
+    assert_eq!(lines, 1, "{:?}", snapshot.items);
+    let read = requests
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|r| r.to_string().contains(SAID));
+    assert!(!read, "An agent read the line");
+    app.close().await.unwrap();
+    server.abort();
+}
+
 /// What `/tasks` with `arguments` opened in the view of `current`.
 pub(super) async fn tasks(
     handler: &crate::sessions::Sessions,

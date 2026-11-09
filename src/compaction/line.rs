@@ -7,16 +7,14 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use roomkit::model::{
-    ChannelId, ChannelSet, ChannelType, EventId, EventSource, EventType, RoomEvent, RoomId,
-    TextContent, Visibility,
-};
-use roomkit::{CommitEventOptions, RoomKit};
+use roomkit::RoomKit;
+use roomkit::model::ChannelId;
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::{ActorId, Item, Message};
 use serde_json::json;
 
 use super::NOTICE_FOR;
+use crate::system_row::{self, SystemRow};
 
 /// Where a compaction's line goes: the engine and the terminal's channel,
 /// once the application installed them; the lines the views show at once.
@@ -79,9 +77,7 @@ impl Journal {
     }
 }
 
-/// Stores `text` as the system row `id` in `told`'s room, from the terminal
-/// and for it alone: the agents' histories never hold it. A row that cannot
-/// be stored is only shown.
+/// Stores `text` as the system row `id` in `told`'s room.
 async fn commit(
     kit: &RoomKit<SqliteStore>,
     terminal: &ChannelId,
@@ -89,25 +85,14 @@ async fn commit(
     id: &str,
     text: &str,
 ) {
-    let (Ok(room), Ok(id), Ok(visibility)) = (
-        RoomId::new(told.room),
-        EventId::new(id),
-        ChannelSet::new([terminal.clone()]).map(Visibility::Channels),
-    ) else {
-        return;
+    let about = json!({"agent": told.agent, "from": told.from, "summarized": told.summarized});
+    let row = SystemRow {
+        room: told.room,
+        id,
+        text,
+        about: ("compaction", about),
     };
-    let source = EventSource::new(terminal.clone(), ChannelType::WEBSOCKET);
-    let mut row = RoomEvent::new(room.clone(), source, TextContent::new(text));
-    row.id = id;
-    row.r#type = EventType::System;
-    row.visibility = visibility;
-    row.metadata.insert(
-        "compaction".into(),
-        json!({"agent": told.agent, "from": told.from, "summarized": told.summarized}),
-    );
-    let _ = kit
-        .commit_event(&room, row, CommitEventOptions::default())
-        .await;
+    system_row::commit(kit, terminal, row).await;
 }
 
 /// "Conversation compacted · 42 messages summarized · ≈180k → ≈40k tokens · 12 s".

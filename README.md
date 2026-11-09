@@ -364,7 +364,8 @@ An approval it needs comes to the view you are in, named after the agent. Esc
 refuses that one action and the agent goes on; `o` opens its room. It waits
 five minutes, like any card, and stopping the task withdraws it.
 
-The status line says when a task starts and how it ended. The sidebar's
+The status line says when a task starts and how it ended, and its end leaves a
+line in the conversation that asked for it. The sidebar's
 **Tasks** lists the conversation's tasks that run, then the latest ended,
 with how long they ran and what they consumed. **/tasks**, a click on a task,
 or the footer's **Tasks** status, which F6 opens while no process runs, show

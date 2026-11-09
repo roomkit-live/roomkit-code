@@ -15,7 +15,7 @@ use super::spending::Spent;
 
 /// How long a view shows a task's latest notice again whenever it is sent its
 /// live events, as a compaction's.
-const NOTICE_FOR: Duration = Duration::from_secs(10);
+pub(super) const NOTICE_FOR: Duration = Duration::from_secs(10);
 
 /// How many characters of a task its notice quotes.
 const TASK_PREVIEW: usize = 60;
@@ -134,6 +134,7 @@ pub(crate) struct Tasks {
     board: Mutex<Board>,
     changes: watch::Sender<()>,
     pub(crate) panel: super::panel::Panel,
+    lines: super::ended_line::EndedLines,
 }
 
 impl Default for Tasks {
@@ -141,6 +142,7 @@ impl Default for Tasks {
         Self {
             board: Mutex::default(),
             changes: watch::channel(()).0,
+            lines: super::ended_line::EndedLines::default(),
             panel: super::panel::Panel::default(),
         }
     }
@@ -170,12 +172,36 @@ impl Tasks {
         self.changes.send_replace(());
     }
 
-    /// Records the task `ended` as it ended: the one recorded under its ID,
-    /// else `ended` itself, whose start was not told yet.
-    pub(crate) fn ended(&self, ended: Task) {
-        let Some((took, outcome)) = ended.ended else {
+    /// Gives the lines of tasks' ends where to be stored.
+    pub(crate) fn install_lines(
+        &self,
+        kit: &roomkit::RoomKit<roomkit_sqlite::SqliteStore>,
+        terminal: &roomkit::model::ChannelId,
+    ) {
+        self.lines.install(kit, terminal);
+    }
+
+    /// Records the task `ended`, then leaves its line in the conversation
+    /// that asked for it.
+    pub(crate) async fn finished(&self, ended: Task) {
+        let (room, id) = (ended.parent.clone(), ended.id.clone());
+        let Some(text) = self.ended(ended) else {
             return;
         };
+        self.lines.write(&room, &id, &text).await;
+        self.changes.send_replace(());
+    }
+
+    /// The lines of the tasks that ended lately in `room`.
+    pub(crate) fn ended_lines(&self, room: &str) -> Vec<roomkit_tui::protocol::Item> {
+        self.lines.recent(room)
+    }
+
+    /// Records the task `ended` as it ended: the one recorded under its ID,
+    /// else `ended` itself, whose start was not told yet. Returns what its
+    /// end is told as.
+    pub(crate) fn ended(&self, ended: Task) -> Option<String> {
+        let (took, outcome) = ended.ended?;
         let mut board = crate::sync::lock(&self.board);
         let known = board.tasks.iter().position(|known| known.id == ended.id);
         // An end that says nothing of how long the task ran is measured
@@ -193,7 +219,7 @@ impl Tasks {
         let text = format!("Task for {} {outcome_text}", ended.agent);
         board
             .notices
-            .insert(ended.parent.clone(), (Instant::now(), text));
+            .insert(ended.parent.clone(), (Instant::now(), text.clone()));
         match known {
             Some(index) => board.tasks[index].ended = Some((took, outcome)),
             None => board.tasks.push(ended),
@@ -201,6 +227,7 @@ impl Tasks {
         board.version += 1;
         drop(board);
         self.changes.send_replace(());
+        Some(text)
     }
 
     /// Whether the earlier tasks of `room` are yet to be read: true for its

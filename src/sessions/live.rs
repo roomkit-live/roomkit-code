@@ -121,7 +121,11 @@ async fn events(
         conversation: room.into(),
         text,
     }));
-    events.extend(compactions.lines(room).map(|item| Event::Item {
+    let lines = compactions
+        .lines(room)
+        .into_iter()
+        .chain(tasks.ended_lines(room));
+    events.extend(lines.map(|item| Event::Item {
         conversation: room.into(),
         item,
     }));

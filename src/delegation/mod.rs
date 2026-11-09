@@ -15,6 +15,7 @@
 //! (`spending`).
 
 mod board;
+mod ended_line;
 pub(crate) mod history;
 pub(crate) mod panel;
 mod render;
@@ -222,6 +223,9 @@ pub(crate) fn install(
     tasks: std::sync::Arc<Tasks>,
     roster: std::sync::Arc<Roster>,
 ) -> crate::Result<()> {
+    if let Ok(terminal) = ChannelId::new(crate::application::TERMINAL) {
+        tasks.install_lines(kit, &terminal);
+    }
     let (started, ended) = (tasks.clone(), roster.clone());
     let finishing = tasks.clone();
     kit.hook(
@@ -244,7 +248,7 @@ pub(crate) fn install(
                     .and_then(|ms| Duration::try_from_secs_f64(ms / 1000.0).ok())
                     .unwrap_or_default();
                 task.ended = Some((took, Outcome::of(text(&event, "task_status"))));
-                tasks.ended(task);
+                tasks.finished(task).await;
             }
         },
         observer("code-delegation-ended"),
