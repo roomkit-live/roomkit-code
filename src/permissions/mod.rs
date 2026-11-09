@@ -190,7 +190,12 @@ impl Policy {
     /// Set `room`'s mode, and signal it: the view's live updates carry the
     /// mode, and must not keep one a later change replaced.
     pub(crate) fn apply(&self, room: &str, mode: Mode) {
-        crate::sync::lock(&self.modes).insert(room.into(), mode);
+        // A task's room takes its conversation's mode: set from there, it is
+        // the conversation's.
+        let conversation = self
+            .conversation(room)
+            .map_or_else(|| room.to_owned(), |(room, _)| room);
+        crate::sync::lock(&self.modes).insert(conversation, mode);
         self.changes.send_replace(());
     }
 

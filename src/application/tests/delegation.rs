@@ -5,11 +5,12 @@
 
 use super::*;
 
+mod rooms;
 mod spending;
 mod tasks;
 
 /// What tells the worker's requests apart: the line its turns read.
-const WORKER: &str = "nobody watches";
+const WORKER: &str = "which the person can open and write in";
 /// The worker's answer, which the hand-back carries to the delegating agent.
 const RESULT: &str = "WORKER_RESULT_THE_DIFF_IS_FINE";
 /// What the delegating agent says once it is handed the result.

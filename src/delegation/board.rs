@@ -5,9 +5,11 @@
 //! from its room (`history`).
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Not;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use roomkit_tui::protocol::ConversationCost;
 use tokio::sync::watch;
 
 use super::spending::Spent;
@@ -118,6 +120,14 @@ struct Board {
     tasks: Vec<Task>,
     /// The conversations whose earlier tasks were read from the store.
     restored: HashSet<String>,
+    /// The agent shown in each conversation, for a view that returns to it.
+    leads: HashMap<String, String>,
+    /// The tasks' rooms a view has shown: what they consumed can have changed.
+    viewed: HashSet<String>,
+    /// Counts the tasks that started or ended.
+    version: u64,
+    /// What each conversation's own agent cost, as of a `version`.
+    own_costs: HashMap<String, (u64, Option<ConversationCost>)>,
 }
 
 /// The tasks agents handed over, the notices they left, and the `/tasks`
@@ -157,6 +167,7 @@ impl Tasks {
             .notices
             .insert(task.parent.clone(), (Instant::now(), text));
         board.tasks.push(task);
+        board.version += 1;
         drop(board);
         self.changes.send_replace(());
     }
@@ -189,6 +200,7 @@ impl Tasks {
             Some(index) => board.tasks[index].ended = Some((took, outcome)),
             None => board.tasks.push(ended),
         }
+        board.version += 1;
         drop(board);
         self.changes.send_replace(());
     }
@@ -242,12 +254,93 @@ impl Tasks {
         listed
     }
 
-    /// The task `id` if `room`'s conversation lists it.
+    /// The conversation `room` belongs to: `room` itself, unless it is a
+    /// task's. The depth bound only guards against a cycle.
+    pub(crate) fn root_of(&self, room: &str) -> String {
+        let board = crate::sync::lock(&self.board);
+        let mut current = room;
+        for _ in 0..=crate::delegation::MAX_DEPTH {
+            match board.tasks.iter().find(|task| task.room == current) {
+                Some(task) => current = &task.parent,
+                None => break,
+            }
+        }
+        current.to_owned()
+    }
+
+    /// The tasks of the conversation `room` belongs to, whichever of its
+    /// rooms a view shows.
+    pub(crate) fn family(&self, room: &str) -> Vec<(usize, Task)> {
+        self.of(&self.root_of(room))
+    }
+
+    /// The task `id` if the conversation of `room` lists it.
     pub(crate) fn find(&self, room: &str, id: &str) -> Option<Task> {
-        self.of(room)
+        self.family(room)
             .into_iter()
             .map(|(_, task)| task)
             .find(|task| task.id == id)
+    }
+
+    /// The task that runs in `room`, if one does.
+    pub(crate) fn running_in(&self, room: &str) -> Option<Task> {
+        crate::sync::lock(&self.board)
+            .tasks
+            .iter()
+            .find(|task| task.room == room && task.running())
+            .cloned()
+    }
+
+    /// Notes the view that shows `room` with `agent`: the agent a view
+    /// returning to a conversation shows again, and the task rooms whose
+    /// figures its turns may change.
+    pub(crate) fn viewing(&self, room: &str, agent: &str) {
+        let root = self.root_of(room);
+        let mut board = crate::sync::lock(&self.board);
+        if root == room {
+            board.leads.insert(root, agent.to_owned());
+        } else {
+            board.viewed.insert(room.to_owned());
+        }
+        let viewed = std::mem::take(&mut board.viewed);
+        for task in board.tasks.iter_mut().filter(|task| task.running().not()) {
+            if viewed.contains(&task.room) {
+                task.spent = None;
+            }
+        }
+        board.viewed = viewed.into_iter().filter(|shown| shown == room).collect();
+    }
+
+    /// The conversation a view of `room` with `agent` belongs to, with the
+    /// agent to show there: a view can be in a task's room.
+    pub(crate) fn conversation_of(&self, room: &str, agent: &str) -> (String, String) {
+        let root = self.root_of(room);
+        let lead = self.lead_of(&root).filter(|_| root != room);
+        (root, lead.unwrap_or_else(|| agent.to_owned()))
+    }
+
+    /// The agent the view of conversation `root` last showed.
+    pub(crate) fn lead_of(&self, root: &str) -> Option<String> {
+        crate::sync::lock(&self.board).leads.get(root).cloned()
+    }
+
+    /// Counts the tasks that started or ended, which changes what a
+    /// conversation's figures add up to.
+    pub(crate) fn version(&self) -> u64 {
+        crate::sync::lock(&self.board).version
+    }
+
+    /// What conversation `root`'s own agent cost, as read at `version`.
+    pub(crate) fn own_cost(&self, root: &str, version: u64) -> Option<Option<ConversationCost>> {
+        let board = crate::sync::lock(&self.board);
+        let (kept, cost) = board.own_costs.get(root)?;
+        (*kept == version).then(|| cost.clone())
+    }
+
+    pub(crate) fn keep_own_cost(&self, root: &str, version: u64, cost: Option<ConversationCost>) {
+        crate::sync::lock(&self.board)
+            .own_costs
+            .insert(root.to_owned(), (version, cost));
     }
 
     /// How many tasks run, in every conversation: closing the application
@@ -400,5 +493,62 @@ mod tests {
         assert_eq!(listed, [("live".into(), true), ("old".into(), false)]);
         assert!(tasks.restoring("main"));
         assert!(!tasks.restoring("main"));
+    }
+
+    /// Whichever of its rooms a view shows, a conversation lists the same
+    /// tasks, and knows the agent to show when returning to it.
+    #[test]
+    fn a_task_s_room_belongs_to_its_conversation() {
+        let tasks = Tasks::default();
+        tasks.started(task("a", "main", "main::a"));
+        tasks.started(task("a1", "main::a", "main::a::a1"));
+        tasks.started(task("other", "second", "second::x"));
+        assert_eq!(tasks.root_of("main::a::a1"), "main");
+        assert_eq!(tasks.root_of("main"), "main");
+        assert_eq!(tasks.root_of("unknown"), "unknown");
+        let ids = |room: &str| -> Vec<String> {
+            tasks.family(room).into_iter().map(|(_, t)| t.id).collect()
+        };
+        assert_eq!(ids("main::a"), ["a", "a1"]);
+        assert_eq!(ids("main"), ["a", "a1"]);
+        assert!(tasks.find("main::a", "a1").is_some());
+        assert!(tasks.find("main::a", "other").is_none());
+
+        tasks.viewing("main", "code");
+        assert_eq!(
+            tasks.conversation_of("main::a", "review"),
+            ("main".to_owned(), "code".to_owned())
+        );
+        assert_eq!(
+            tasks.conversation_of("second", "review"),
+            ("second".to_owned(), "review".to_owned())
+        );
+    }
+
+    /// What a worker consumed changes only by a view writing in its room:
+    /// read again once a view has shown that room.
+    #[test]
+    fn a_task_s_figures_are_read_again_once_its_room_was_shown() {
+        let spent = || super::Spent {
+            usage: crate::exit_summary::Usage::for_tests(10, 1),
+            cost: None,
+        };
+        let tasks = Tasks::default();
+        tasks.ended(ended(task("a", "main", "main::a"), Outcome::Completed));
+        tasks.ended(ended(task("b", "main", "main::b"), Outcome::Completed));
+        tasks.keep_spent("a", spent());
+        tasks.keep_spent("b", spent());
+        let read = |id: &str| tasks.find("main", id).unwrap().spent.is_some();
+
+        tasks.viewing("main", "code");
+        assert!(read("a") && read("b"), "Nothing was shown yet");
+        tasks.viewing("main::a", "review");
+        assert!(!read("a") && read("b"));
+        tasks.keep_spent("a", spent());
+        tasks.viewing("main", "code");
+        assert!(!read("a") && read("b"), "It may have changed while shown");
+        tasks.keep_spent("a", spent());
+        tasks.viewing("main", "code");
+        assert!(read("a"), "Left alone since, it stays read");
     }
 }

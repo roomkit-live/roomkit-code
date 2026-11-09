@@ -11,6 +11,7 @@ use roomkit_tui_engine::{CommandHandler, CommandResult, SessionConfig};
 mod live;
 mod names;
 mod rooms;
+pub(crate) mod task_rooms;
 
 pub(crate) use names::name;
 pub(crate) use rooms::{create, empty};
@@ -199,6 +200,19 @@ impl CommandHandler for Sessions {
         Some(live::subscribe(self, current))
     }
 
+    fn stop_run(
+        &self,
+        current: &SessionConfig,
+        _run: &roomkit_tui::protocol::RunId,
+    ) -> Option<roomkit_tui_engine::StopRun> {
+        let tasks = self.profiles.resources.tasks.clone();
+        let task = tasks.running_in(current.room.as_str())?;
+        let (kit, current) = (self.kit.clone(), current.clone());
+        Some(Box::pin(async move {
+            crate::delegation::panel::stop(&kit, &tasks, &current, task).await
+        }))
+    }
+
     fn allow_while_busy(&self, name: &str) -> bool {
         matches!(
             name,
@@ -285,10 +299,7 @@ impl Sessions {
                     .handle(&self.kit, &self.channel, &current, arguments)
                     .await
             }
-            "tasks" => {
-                let tasks = &self.profiles.resources.tasks;
-                crate::delegation::panel::handle(&self.kit, tasks, &current, arguments).await
-            }
+            "tasks" => crate::delegation::panel::handle(self, &current, arguments).await,
             "tools" => self.tools(&current, arguments).await,
             "mode" => self.mode(&current, arguments).await,
             "compact" => Ok(self.compact(&current)),

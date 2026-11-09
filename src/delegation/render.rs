@@ -53,7 +53,7 @@ fn list(mut spec: PanelSpec, tasks: &Tasks, open: &Open) -> PanelSpec {
         handed on, the latest ended among them. Closing the application stops the tasks \
         that run.\n\n"
         .into();
-    let listed = tasks.of(&open.room);
+    let listed = tasks.family(&open.room);
     if listed.is_empty() {
         spec.body.push_str("No tasks.\n");
     }
@@ -139,6 +139,12 @@ async fn detail(
     let agent = clip(&task.agent, AGENT_CHARS);
     let conversation = super::transcript::read(kit, &task.room, &agent, organization);
     spec.body.push_str(&conversation.await);
+    if task.room != open.room {
+        let description = "Move to its room, where you can follow it and write to its agent";
+        let value = format!("room:{}", task.id);
+        spec.actions
+            .push(action(open, &value, "Open its conversation", description));
+    }
     if task.running() {
         let description = "Cancel this task; its agent stops working on it";
         spec.actions
@@ -171,7 +177,11 @@ fn details(task: &Task) -> String {
 /// The sidebar's list of `room`'s tasks: those that run, then the latest
 /// ended.
 pub(super) fn sidebar(tasks: &Tasks, room: &str) -> SidebarSection {
-    let listed: Vec<Task> = tasks.of(room).into_iter().map(|(_, task)| task).collect();
+    let listed: Vec<Task> = tasks
+        .family(room)
+        .into_iter()
+        .map(|(_, task)| task)
+        .collect();
     let running = listed.iter().filter(|task| task.running());
     let ended = listed.iter().rev().filter(|task| !task.running());
     let mut entries: Vec<SidebarEntry> = running

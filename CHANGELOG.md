@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- A delegated task's room can be opened and written in (RMK-1535): **Open its
+  conversation** in `/tasks`, or Alt+Right and Alt+Left to go around the
+  conversation and the tasks that run. The agent that delegated keeps working
+  meanwhile. A message written while the task runs reaches its agent at its
+  next step, Esc stops the task, and once it ended the person can keep talking
+  to its agent, the replies staying in its room. A task handed on now gets its
+  result back: its worker's room has a transport to receive it.
+
 - What a delegated task consumed is counted (RMK-1536): tokens and cost per
   task in the sidebar and `/tasks`, the conversation's total beside its own
   cost in the footer and sidebar, and each agent's part in the exit report,

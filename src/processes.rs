@@ -62,7 +62,11 @@ impl Processes {
         tasks: &crate::delegation::Tasks,
     ) -> [Event; 2] {
         let room = current.room.as_str();
-        let delegated = tasks.of(room).iter().filter(|(_, t)| t.running()).count();
+        let delegated = tasks
+            .family(room)
+            .iter()
+            .filter(|(_, t)| t.running())
+            .count();
         [
             self.exit_warning(room, tasks.running()).await,
             Event::BackgroundChanged {

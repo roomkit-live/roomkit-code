@@ -14,6 +14,7 @@ use roomkit_tui::protocol::{Event, SidebarSection};
 use roomkit_tui_engine::{CommandResult, SessionConfig};
 
 use super::{Outcome, Task, Tasks, render};
+use crate::sessions::{self, Sessions};
 
 /// The command that opens the panel.
 pub(crate) const COMMAND: &str = "tasks";
@@ -65,14 +66,26 @@ fn shown_in(open: &Open, current: &SessionConfig) -> bool {
     open.room == current.room.as_str() && open.agent == current.agent.as_str()
 }
 
-/// `/tasks [task-id]`, and the panel's own actions `<panel>:<action>`.
+/// `/tasks [task-id]`, `/tasks next` and `/tasks previous`, which move between
+/// the conversation and its tasks' rooms, and the panel's own actions
+/// `<panel>:<action>`.
 pub(crate) async fn handle(
-    kit: &RoomKit<SqliteStore>,
-    tasks: &Tasks,
+    sessions: &Sessions,
     current: &SessionConfig,
     arguments: &str,
 ) -> Result<CommandResult, String> {
+    let (kit, tasks) = (&sessions.kit, &*sessions.profiles.resources.tasks);
     let room = current.room.as_str();
+    if let Some(forward) = cycle_direction(arguments) {
+        return sessions::task_rooms::cycle(sessions, current, forward).await;
+    }
+    if let Some(id) = room_action(tasks, current, arguments) {
+        let task = tasks
+            .find(room, &id)
+            .ok_or("This conversation has no such task")?;
+        tasks.panel.close();
+        return sessions::task_rooms::open_task(sessions, current, &task).await;
+    }
     let mut open = match arguments.split_once(':') {
         None => {
             let selected = (!arguments.is_empty()).then(|| arguments.to_owned());
@@ -112,6 +125,22 @@ pub(crate) async fn handle(
     }]))
 }
 
+fn cycle_direction(arguments: &str) -> Option<bool> {
+    match arguments {
+        "next" => Some(true),
+        "previous" => Some(false),
+        _ => None,
+    }
+}
+
+/// The task whose room the panel's action `<panel>:room:<id>` opens.
+fn room_action(tasks: &Tasks, current: &SessionConfig, arguments: &str) -> Option<String> {
+    let (id, action) = arguments.split_once(':')?;
+    let task = action.strip_prefix("room:")?;
+    let open = tasks.panel.get().filter(|open| open.id == id)?;
+    shown_in(&open, current).then(|| task.to_owned())
+}
+
 /// What `action` leaves the panel showing, or none once it is dismissed.
 async fn act(
     kit: &RoomKit<SqliteStore>,
@@ -145,7 +174,7 @@ async fn act(
 
 /// Cancels `task`, which the engine ends cancelled: its worker stops, and
 /// the agent that handed it over is told.
-async fn stop(
+pub(crate) async fn stop(
     kit: &RoomKit<SqliteStore>,
     tasks: &Tasks,
     current: &SessionConfig,
@@ -186,18 +215,34 @@ pub(crate) async fn live(
 ) -> Live {
     let room = current.room.as_str();
     super::spending::read(kit, profiles, tasks, current).await;
+    let related = related_cost(kit, profiles, tasks, current).await;
     let update = update(kit, tasks, current).await;
     let follows = update.as_ref().is_some_and(|(_, follows)| *follows);
-    let counting = tasks.of(room).iter().any(|(_, task)| task.running());
+    let counting = tasks.family(room).iter().any(|(_, task)| task.running());
     Live {
         panel: update.map(|(event, _)| event),
         section: render::sidebar(tasks, room),
         cost: Event::RelatedCostUpdated {
             conversation: room.into(),
-            cost: super::spending::related(tasks, current),
+            cost: related,
         },
         poll: poll(follows, counting),
     }
+}
+
+/// What the view adds to the cost of the room it shows to get the
+/// conversation's total.
+async fn related_cost(
+    kit: &RoomKit<SqliteStore>,
+    profiles: &crate::profiles::Profiles,
+    tasks: &Tasks,
+    current: &SessionConfig,
+) -> Option<roomkit_tui::protocol::ConversationCost> {
+    let root = tasks.root_of(current.room.as_str());
+    if root == current.room.as_str() {
+        return super::spending::related(tasks, current);
+    }
+    super::spending::around_task(kit, profiles, tasks, current, &root).await
 }
 
 /// Each second while the panel follows a task that runs, every two while the

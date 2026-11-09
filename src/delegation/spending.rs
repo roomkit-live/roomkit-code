@@ -39,14 +39,15 @@ impl Spent {
 }
 
 /// Reads what the ended tasks of `current`'s conversation consumed, those
-/// not read yet: a room whose task ended no longer changes.
+/// not read yet: a room whose task ended changes only by a view writing in it
+/// (`Tasks::viewing`).
 pub(crate) async fn read(
     kit: &RoomKit<SqliteStore>,
     profiles: &Profiles,
     tasks: &Tasks,
     current: &SessionConfig,
 ) {
-    for (_, task) in tasks.of(current.room.as_str()) {
+    for (_, task) in tasks.family(current.room.as_str()) {
         if task.running() || task.spent.is_some() {
             continue;
         }
@@ -141,7 +142,7 @@ pub(crate) async fn leads(
 /// which the view adds to the conversation's own cost; none before one ended
 /// or when nothing has a price.
 pub(crate) fn related(tasks: &Tasks, current: &SessionConfig) -> Option<ConversationCost> {
-    let listed = tasks.of(current.room.as_str());
+    let listed = tasks.family(current.room.as_str());
     let ended: Vec<&Task> = listed
         .iter()
         .map(|(_, task)| task)
@@ -158,6 +159,46 @@ pub(crate) fn related(tasks: &Tasks, current: &SessionConfig) -> Option<Conversa
     sum(once(own.as_ref())
         .filter(|cost| cost.is_some())
         .chain(costs))
+}
+
+/// What the rest of the conversation cost, beside a task's room `current`
+/// shows: the conversation's own agent, and its other tasks.
+pub(crate) async fn around_task(
+    kit: &RoomKit<SqliteStore>,
+    profiles: &Profiles,
+    tasks: &Tasks,
+    current: &SessionConfig,
+    root: &str,
+) -> Option<ConversationCost> {
+    let own = own_cost(kit, profiles, tasks, current, root).await;
+    let listed = tasks.family(current.room.as_str());
+    let others = listed
+        .iter()
+        .map(|(_, task)| task)
+        .filter(|task| !task.running() && task.room != current.room.as_str());
+    let costs = others.map(cost_of);
+    sum(once(own.as_ref()).chain(costs))
+}
+
+/// What the agent of conversation `root` cost, read once for each change of
+/// its tasks: a view polling a task's room would read the whole conversation.
+async fn own_cost(
+    kit: &RoomKit<SqliteStore>,
+    profiles: &Profiles,
+    tasks: &Tasks,
+    current: &SessionConfig,
+    root: &str,
+) -> Option<ConversationCost> {
+    let version = tasks.version();
+    if let Some(cost) = tasks.own_cost(root, version) {
+        return cost;
+    }
+    let room = RoomId::new(root).ok()?;
+    let agent = ChannelId::new(tasks.lead_of(root)?).ok()?;
+    let organization = current.organization.clone();
+    let (cost, _) = priced(kit, profiles, &room, &agent, organization, true).await?;
+    tasks.keep_own_cost(root, version, cost.clone());
+    cost
 }
 
 /// What a task cost, if that is known.

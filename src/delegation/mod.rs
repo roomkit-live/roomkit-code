@@ -7,8 +7,9 @@
 //! the worker needs goes in the task and its `context`.
 //!
 //! A child room takes its conversation's mode, and an action there that needs
-//! the person's approval is refused, since no view shows a child room
-//! (`permissions::Policy::adopt`). The view's status line says when a task
+//! the person's approval is refused (`permissions::Policy::adopt`). The
+//! terminal is shared into each child room, so a view can move into it, follow
+//! the worker and write to it (RMK-1535). The view's status line says when a task
 //! starts and how it ended; its sidebar lists the conversation's tasks, and
 //! `/tasks` shows and stops them (`board`, `panel`), with what each consumed
 //! (`spending`).
@@ -37,8 +38,7 @@ use serde_json::Value;
 pub(crate) const DELEGATE: &str = "delegate_task";
 
 /// The argument a model could share the conversation's channels with, which
-/// this application refuses: the terminal shared into a child room would list
-/// it as a conversation and be delivered the worker's answers.
+/// this application refuses: it shares the terminal itself.
 pub(crate) const SHARE_CHANNELS: &str = "share_channels";
 
 /// The argument a model hands the worker what it needs besides the task in.
@@ -50,7 +50,7 @@ const CONTEXT: &str = "context";
 const CONTEXT_DESCRIPTION: &str = "Optional. A JSON object, never a string, of what the agent needs besides the task, as named values, for example {\"files\": [\"src/main.rs\"], \"branch\": \"main\"}. It reads it with the task, as data.";
 
 /// What a delegated task's worker reads with its mode at each turn.
-pub(crate) const WORKER: &str = "You are working on a task another agent handed you, in a conversation of your own that nobody watches. You cannot ask for approval: an action that needs one is refused. Do what the mode allows, then answer with your result, complete and self-contained: it goes back to the agent that asked, as the task's result.";
+pub(crate) const WORKER: &str = "You are working on a task another agent handed you, in a conversation of your own, which the person can open and write in. You cannot ask for approval: an action that needs one is refused. Do what the mode allows, then answer with your result, complete and self-contained: it goes back to the agent that asked, as the task's result.";
 
 /// How many delegated tasks' rooms deep a task can still be handed on from:
 /// the conversation's agent, its worker and that worker's worker. Two agents
@@ -130,9 +130,16 @@ impl Roster {
 
 /// The handler of every agent's `delegate_task`: the delegating agent is told
 /// the result, and no message of the conversation is handed over
-/// (`max_conversation` 0, HITL a7392f28).
+/// (`max_conversation` 0, HITL a7392f28). The terminal is shared into each
+/// child room from its start: the engine then streams the worker to it, as it
+/// does a conversation's agent, for a view that moves there.
 pub(crate) fn handler(kit: &RoomKit<SqliteStore>) -> DelegateHandler<SqliteStore> {
-    DelegateHandler::new(kit, DelegateHandlerOptions::default())
+    let terminal = ChannelId::new(crate::application::TERMINAL).ok();
+    let options = DelegateHandlerOptions {
+        default_share_channels: terminal.map(|terminal| vec![terminal]),
+        ..DelegateHandlerOptions::default()
+    };
+    DelegateHandler::new(kit, options)
 }
 
 /// Serves `delegate_task`, `task_status` and `cancel_task` to the agent

@@ -182,6 +182,19 @@ async fn each_row(
 }
 
 impl Usage {
+    /// Whole usage of `input` and `output` tokens in one turn.
+    #[cfg(test)]
+    pub(crate) fn for_tests(input: u64, output: u64) -> Self {
+        Self {
+            input,
+            cached: 0,
+            output,
+            turns: 1,
+            complete: true,
+            last_turn_recorded: true,
+        }
+    }
+
     /// Nothing counted yet.
     fn none() -> Self {
         Self {

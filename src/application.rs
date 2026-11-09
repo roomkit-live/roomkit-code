@@ -201,6 +201,7 @@ async fn first_view(
         "shell",
         "Run a shell command in this project",
     )];
+    view.cycle_command = Some(crate::delegation::panel::COMMAND.to_owned());
     view.mode = Some(policy.state(view.room.as_str()));
     profiles.attach(kit, &view, channel.id()).await?;
     profiles.configure_view(&mut view).await;
@@ -282,23 +283,21 @@ async fn summarize(
         .as_ref()
         .and_then(|view| view.run.as_ref())
         .is_some_and(|run| run.outcome.is_none());
-    let priced = match &view {
-        Some(view) => {
-            priced(
-                app,
-                view.conversation.as_str(),
-                view.selected_agent.as_str(),
-            )
-            .await
-        }
+    // A view can be in a task's room: the report is its conversation's.
+    let tasks = &app.profiles.resources.tasks;
+    let shown_room = view.as_ref().map(|view| {
+        tasks.conversation_of(view.conversation.as_str(), view.selected_agent.as_str())
+    });
+    let priced = match &shown_room {
+        Some((room, agent)) => priced(app, room, agent).await,
         None => None,
     };
-    let shown = view.map(|view| {
+    let shown = view.zip(shown_room).map(|(view, (room, _))| {
         let command = view
             .mode
             .as_ref()
-            .and_then(|mode| resume.command(view.conversation.as_str(), mode.selected.as_str()));
-        (view.conversation.into_inner(), command)
+            .and_then(|mode| resume.command(&room, mode.selected.as_str()));
+        (room, command)
     });
     let processes = &app.profiles.resources.processes;
     let config = priced.clone();
@@ -320,6 +319,7 @@ async fn add_delegated(
 ) {
     use crate::delegation::spending;
     let tasks = &app.profiles.resources.tasks;
+    tasks.viewing(config.room.as_str(), config.agent.as_str());
     spending::read(&app.kit, &app.profiles, tasks, config).await;
     let listed: Vec<_> = tasks
         .of(config.room.as_str())

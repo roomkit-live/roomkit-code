@@ -56,7 +56,10 @@ async fn active_rooms(kit: &RoomKit<SqliteStore>, channel: &ChannelId) -> Result
     };
     let mut rooms = Vec::new();
     for id in store.find_room_ids_by_channel(channel, options).await? {
-        rooms.extend(store.get_room(&id).await?);
+        // A delegated task's room belongs to its conversation: the terminal
+        // is bound to it, but it is no session of its own.
+        let room = store.get_room(&id).await?;
+        rooms.extend(room.filter(|room| !room.metadata.contains_key("parent_room_id")));
     }
     Ok(rooms)
 }
@@ -159,7 +162,7 @@ async fn unused_draft(
 }
 
 impl Sessions {
-    async fn switched(&self, mut config: SessionConfig, room: RoomId) -> CommandResult {
+    pub(super) async fn switched(&self, mut config: SessionConfig, room: RoomId) -> CommandResult {
         let name = names::name(&self.kit, &room).await;
         config.title = title(&self.workspace, &room, name.as_deref());
         config.mode = Some(self.policy.state(room.as_str()));

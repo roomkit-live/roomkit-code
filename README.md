@@ -355,10 +355,10 @@ in turn, three levels deep at most. A `--prompt` launch offers no delegation:
 it ends with its turn, before a task could end.
 
 The other agent reads the task and the `context` it was handed, a JSON
-object, not the conversation. It works under the conversation's mode, and
-nobody watches its conversation, so an action that needs an approval is
-refused: in Ask it reads and answers, in Yolo it can change files and run
-commands, in Plan it plans. Its conversation is not listed by `/resume`.
+object, not the conversation. It works under the conversation's mode, and an
+action that needs an approval is refused: in Ask it reads and answers, in Yolo
+it can change files and run commands, in Plan it plans. Its conversation
+belongs to the one it was handed the task in: `/resume` does not list it.
 
 The status line says when a task starts and how it ended. The sidebar's
 **Tasks** lists the conversation's tasks that run, then the latest ended,
@@ -372,6 +372,15 @@ it called with how the call ended or that it still runs. **Stop task** cancels
 one that runs: its agent stops, and the agent that handed it over is told it
 was cancelled. Closing the application stops the tasks that run, and Ctrl+D
 says so first, as for processes.
+
+**Open its conversation** in `/tasks`, or Alt+Right and Alt+Left with an empty
+composer, move the view into a task's room and back. Alt+arrows go around the
+conversation and the tasks that run; the conversation's agent keeps working
+meanwhile. There you follow the agent as it works, and Esc stops its task. What
+you write while it works reaches it at its next step, and its result still
+goes to the agent that handed the task over. Once its task ended you can keep
+talking to it: what you say stays in its room, and the agent that handed the
+task over is not told.
 
 What a task consumed is read when it ends, at the price of its agent's own
 model: the footer and the sidebar then show the conversation's own cost and

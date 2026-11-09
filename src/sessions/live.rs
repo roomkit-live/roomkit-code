@@ -69,6 +69,8 @@ pub(super) fn subscribe(
     let (tx, rx) = watch::channel(Vec::new());
     tokio::spawn(async move {
         crate::delegation::history::restore(&kit, &profiles, &current).await;
+        let tasks = &profiles.resources.tasks;
+        tasks.viewing(current.room.as_str(), current.agent.as_str());
         loop {
             let view = (&kit, &profiles, &*services, &current);
             let (mut events, poll) = events(view, &mut sources).await;
