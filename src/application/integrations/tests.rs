@@ -190,3 +190,34 @@ fn a_person_reads_the_command_without_the_default_storage() {
     let full = Resume::new(&settings).command("room", "ask").unwrap();
     assert!(full.iter().any(|arg| arg == "--state-dir"), "{full:?}");
 }
+
+#[test]
+fn a_question_waiting_for_the_person_blocks_like_an_approval() {
+    let (_root, resume, mut session) = setup();
+    session.apply(Event::RunStarted {
+        conversation: "first".into(),
+        run: "run".into(),
+        answers: None,
+    });
+    let items = vec![QuestionItem::new(
+        "Database",
+        "Which database?",
+        vec![QuestionOption::new("SQLite", "")],
+    )];
+    session.apply(Event::QuestionAsked {
+        conversation: "first".into(),
+        question: Question::new("question", "coder", "run", items),
+    });
+    assert_eq!(
+        resume.report(session.observation().unwrap()).state,
+        State::Blocked
+    );
+    session.apply(Event::QuestionResolved {
+        conversation: "first".into(),
+        question: "question".into(),
+    });
+    assert_eq!(
+        resume.report(session.observation().unwrap()).state,
+        State::Working
+    );
+}

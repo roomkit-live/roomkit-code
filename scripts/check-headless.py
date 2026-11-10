@@ -132,6 +132,8 @@ def yolo_text(root, model):
     tools = model.tools()
     assert {"shell", "process_start", "output_read", "read_stored_result", "web_search", "web_fetch"} <= tools, tools
     assert not tools & {"plan_mode_enter", "plan_mode_exit"}, tools
+    # Nobody can answer a question either.
+    assert "ask_user" not in tools, tools
     assert not [name for name in tools if name.startswith(("plan_", "docs_"))], tools
     # Nor does the prompt carry what it says of them.
     prompt = model.requests[0]["messages"][0]["content"]

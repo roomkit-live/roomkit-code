@@ -19,6 +19,9 @@ pub(super) struct AgentSlot {
     roster: Arc<crate::delegation::Roster>,
     id: ChannelId,
     current: Arc<RwLock<Option<Arc<CodeAgent>>>>,
+    /// The requests its agents' `ask_user` opens, which the engine
+    /// announces once the slot declares them as it registers.
+    human_input: Option<roomkit::human_input::HumanInputHandler>,
 }
 impl AgentSlot {
     pub fn new(
@@ -38,7 +41,17 @@ impl AgentSlot {
             roster,
             id,
             current: Arc::new(RwLock::new(agent.map(Arc::new))),
+            human_input: None,
         }
+    }
+
+    /// The slot whose agents' questions open requests on `handler`.
+    pub fn with_human_input(
+        mut self,
+        handler: Option<roomkit::human_input::HumanInputHandler>,
+    ) -> Self {
+        self.human_input = handler;
+        self
     }
     /// Whether the agent answers `event`: one addressed to it, as the view
     /// addresses a person's message to the selected agent, or in the room of
@@ -159,6 +172,9 @@ impl AgentSlot {
 impl Channel for AgentSlot {
     fn channel_id(&self) -> ChannelId {
         self.id.clone()
+    }
+    fn human_input_handler(&self) -> Option<roomkit::human_input::HumanInputHandler> {
+        self.human_input.clone()
     }
     fn channel_type(&self) -> ChannelType {
         ChannelType::AI

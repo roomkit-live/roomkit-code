@@ -566,6 +566,19 @@ and action. It is saved when the turn settles and returns with `/resume`.
 Timeouts, disconnections and automatic Yolo actions never claim that a person
 approved or denied something. Approval remains distinct from tool success.
 
+An agent may ask you questions with `ask_user` when a decision is yours: up
+to four at once, each with up to four options, and always a last row for your
+own words. The card shows after any approval. **↑/↓** or a digit picks,
+**Space** toggles on a question taking several answers, **Enter** confirms and
+goes to the next question, then sends; **Tab** and **Shift+Tab** move between
+questions, **Esc** closes them unanswered and **Ctrl+C** interrupts the run. As
+on an approval, keys count once the card has been on screen for half a second.
+The agent reads one line per question (`Database: Postgres`); closed
+unanswered, it is told to go on with its best judgement. Asking needs no
+approval, in Plan too. A launch nobody watches (`--prompt`) offers no such
+tool, and a delegated agent puts its question in its task's result instead.
+Herdr shows the session as blocked while a question waits.
+
 Press **Shift+Tab** in the composer to cycle **Ask → Plan → Yolo → Ask**,
 including while an agent is working. While an approval card is open, Shift+Tab
 does not change the mode: decide first. The status line shows the host-confirmed

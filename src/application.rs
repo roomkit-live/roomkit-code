@@ -165,6 +165,7 @@ async fn setup(
         kit: kit.downgrade(),
     };
     gate::install(kit, gate)?;
+    crate::ask_user::install(kit, channel.clone(), policy.clone())?;
     model_results::install(kit)?;
     let view = first_view(
         settings, kit, profiles, services, policy, &channel, agent_id,

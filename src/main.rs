@@ -3,6 +3,7 @@
 mod accounts;
 mod agent;
 mod application;
+mod ask_user;
 mod background;
 mod branding;
 mod command_env;

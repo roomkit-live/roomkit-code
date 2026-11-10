@@ -61,6 +61,8 @@ const MCP: Rule = Rule {
 /// Every tool an agent can select, MCP tools and patch previews aside (see
 /// `rule_for`).
 const RULES: &[(&str, Rule)] = &[
+    // Asking the person changes nothing: it needs no approval, in Plan too.
+    (crate::ask_user::ASK_USER, READ),
     ("activate_skill", READ),
     ("read_skill_reference", READ),
     ("find_tools", READ),

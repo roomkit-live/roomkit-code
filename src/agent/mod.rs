@@ -187,6 +187,10 @@ pub(crate) struct Extensions {
     /// The tokens the agent's history compacts under; none keeps its window
     /// of `HISTORY` messages.
     pub ceiling: Option<u64>,
+    /// What serves `ask_user`, shared by every agent so that the engine
+    /// announces its requests (`crate::ask_user`); none when nobody watches
+    /// the launch, which then offers no such tool.
+    pub human_input: Option<roomkit_ai::HumanInputToolHandler>,
 }
 
 pub(crate) async fn create(
@@ -216,6 +220,7 @@ pub(crate) async fn create(
         delegation,
         images,
         ceiling,
+        human_input,
         ..
     } = extensions;
     let preamble = preamble(
@@ -224,7 +229,10 @@ pub(crate) async fn create(
         &skills,
         &skill_roots,
         &mcp,
-        (intent_required, delegation),
+        (
+            intent_required,
+            engine_tools(delegation, human_input.as_ref()),
+        ),
         shell_maximum,
     );
     let mut entries: Vec<ToolEntry> = tools
@@ -258,6 +266,7 @@ pub(crate) async fn create(
         reasoning_effort: profile.reasoning_effort.clone(),
         memory: memory((ceiling, &profile.id), &provider, resources),
         image_resolver: Some(images),
+        human_input_handler: human_input,
         // Native tools stay declared; only MCP tools wait behind find_tools.
         tool_search: Some(preamble.hides_mcp),
         tool_search_pinned: preamble.pinned,
@@ -339,6 +348,25 @@ fn mcp_handler(mcp: &[crate::profiles::McpTools]) -> Result<Option<ToolHandler>>
         1 => handlers.pop(),
         _ => Some(compose_tool_handlers(handlers)?),
     })
+}
+
+/// The tools the engine serves the agent beside those it selects: the
+/// delegation tools, and `ask_user` in an attended launch.
+fn engine_tools(
+    delegation: bool,
+    asking: Option<&roomkit_ai::HumanInputToolHandler>,
+) -> Vec<AiTool> {
+    let mut tools = if delegation {
+        crate::delegation::definitions()
+    } else {
+        Vec::new()
+    };
+    tools.extend(
+        asking
+            .map(roomkit_ai::HumanInputToolHandler::tools)
+            .unwrap_or_default(),
+    );
+    tools
 }
 
 /// Whether a tool's calls ask the model for an intention: those whose

@@ -138,16 +138,16 @@ pub(super) struct Preamble {
 }
 
 /// The preamble of `profile` with its selected `native` tools, its skills
-/// and its MCP servers, whether every call carries an intent, whether the
-/// engine serves it the delegation tools, and the longest command its shell
-/// runs, in milliseconds.
+/// and its MCP servers, whether every call carries an intent, the tools the
+/// engine serves it (delegation, `ask_user`), and the longest command its
+/// shell runs, in milliseconds.
 pub(super) fn preamble(
     profile: &Agent,
     native: Vec<AiTool>,
     skills: &SkillRegistry,
     skill_roots: &[PathBuf],
     mcp: &[McpTools],
-    (intent_required, delegates): (bool, bool),
+    (intent_required, engine): (bool, Vec<AiTool>),
     shell_maximum: u64,
 ) -> Preamble {
     let hidden = hides_mcp(mcp, intent_required, profile.context_window);
@@ -156,15 +156,11 @@ pub(super) fn preamble(
     for server in mcp {
         tools.extend(server.tools.iter().cloned());
     }
-    // The engine serves the delegation tools (RMK-1532): listed and declared
-    // outright with the native ones, though no agent selects them.
-    let delegation = if delegates {
-        crate::delegation::definitions()
-    } else {
-        Vec::new()
-    };
-    let served = [native.as_slice(), &delegation].concat();
-    let listed = [tools.as_slice(), &delegation].concat();
+    // The engine serves the delegation tools (RMK-1532) and `ask_user`:
+    // listed and declared outright with the native ones, though no agent
+    // selects them.
+    let served = [native.as_slice(), &engine].concat();
+    let listed = [tools.as_slice(), &engine].concat();
     let base = base_prompt(profile, &listed, hidden, shell_maximum);
     let context = skill_context(skills, skill_roots);
     let composition = measure(

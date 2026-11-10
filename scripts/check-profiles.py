@@ -238,7 +238,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         assert "Answer from fixture-a." in json.dumps(requests[1]["messages"])
         # Each agent declares its one tool, beside the engine's own
         # read_stored_result (roomkit-rs RMK-1228) and delegation (RMK-1532).
-        engine = {"read_stored_result", "delegate_task", "task_status", "cancel_task"}
+        engine = {"read_stored_result", "delegate_task", "task_status", "cancel_task", "ask_user"}
         assert all(len([t for t in r["tools"] if t["function"]["name"] not in engine]) == 1
                    for r in requests)
         # Reopening a secret never reveals it; Escape does not change storage.

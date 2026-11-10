@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- An agent can ask you questions (`ask_user`, HITL 946ebf73): up to four at
+  once, with options and your own words, on a card after any approval; it
+  reads your answers, or that you closed the card. It needs no approval, Plan
+  included; `--prompt` does not offer it, a delegated agent is told to put its
+  question in its result, and Herdr shows the session blocked meanwhile
+  (roomkit-tui a1a34d6).
+
 - Anthropic output budgets now default to Auto (32K, bounded by model and
   context capacity), with one larger retry per turn for an exhausted response
   before any text or tool call. Fixed limits remain unchanged. Signed tool

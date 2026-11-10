@@ -26,23 +26,31 @@ fn task_for(target: &str) -> Value {
 /// `delegate_task` with `arguments`, then says it did, then relays the result
 /// it is handed.
 async fn server(arguments: Value) -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
+    let write = json!({"path": "worker.txt", "content": "from the worker"});
+    serving(arguments, ("write", write)).await
+}
+
+/// [`server`], its worker calling `worker` instead of writing a file.
+async fn serving(
+    arguments: Value,
+    worker: (&'static str, Value),
+) -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
     let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
     let seen = requests.clone();
     let router = Router::new().route(
         "/v1/chat/completions",
         post(move |Json(request): Json<Value>| {
-            let (seen, arguments) = (seen.clone(), arguments.clone());
+            let (seen, arguments, worker) = (seen.clone(), arguments.clone(), worker.clone());
             async move {
                 seen.lock().unwrap().push(request.clone());
-                let worker = request.to_string().contains(WORKER);
+                let asks = request.to_string().contains(WORKER);
                 let last = request["messages"].as_array().unwrap().last().unwrap();
                 let answered = last["role"] == "tool";
-                let delta = if !worker && last.to_string().contains(RESULT) {
+                let delta = if !asks && last.to_string().contains(RESULT) {
                     json!({"content": RELAYED})
-                } else if worker && !answered {
-                    let args = json!({"path": "worker.txt", "content": "from the worker"});
-                    call("write", &args)
-                } else if worker {
+                } else if asks && !answered {
+                    call(worker.0, &worker.1)
+                } else if asks {
                     json!({"content": RESULT})
                 } else if !answered {
                     call("delegate_task", &arguments)
@@ -316,6 +324,42 @@ async fn a_target_works_with_its_connection_as_it_stands() {
             .count()
     };
     assert_eq!((worker(&before), worker(&after)), (2, 2));
+}
+
+/// A task's agent cannot ask the person: it is told to put its question in
+/// its result, which reaches the agent that delegated.
+#[tokio::test]
+async fn a_task_s_agent_is_told_to_put_its_question_in_its_result() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let ask = json!({"questions": [{"question": "Which branch?", "options": [{"label": "main"}, {"label": "dev"}]}]});
+    let worker = (crate::ask_user::ASK_USER, ask);
+    let (base, requests, server) = serving(task_for("review"), worker).await;
+    let settings = settings(project.path(), state.path(), &base);
+    with_a_reviewer(&settings).await;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    turn(&app).await;
+    until_handed_back(&requests).await;
+    let read: String = requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|request| request.to_string().contains(WORKER))
+        .map(|request| {
+            request["messages"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert!(
+        read.contains("Only the conversation's agent can ask the user"),
+        "{read}"
+    );
+    app.close().await.unwrap();
+    server.abort();
 }
 
 /// A model server whose workers each try to hand the task on to the other

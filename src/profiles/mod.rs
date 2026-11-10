@@ -47,6 +47,8 @@ pub(crate) struct Profiles {
     unattended: bool,
     /// An unattended launch in Plan mode, which keeps the plan tools.
     planning: bool,
+    /// What serves every agent's `ask_user`, in an attended launch.
+    asking: Option<roomkit_ai::HumanInputToolHandler>,
     workspace: PathBuf,
     state_dir: PathBuf,
     pub(crate) diagnostics: Arc<crate::diagnostics::Diagnostics>,
@@ -72,6 +74,9 @@ struct State {
     /// Agents shared by every project, beside the shared connections.
     global: Document<Project>,
     slots: BTreeMap<String, AgentSlot>,
+    /// The requests of every agent's `ask_user`, which each slot declares to
+    /// the engine as it registers.
+    asking: Option<roomkit::human_input::HumanInputHandler>,
     tools: BTreeMap<String, Vec<AiTool>>,
     /// What each configured agent's requests carry before their messages.
     compositions: BTreeMap<String, crate::agent::Composition>,
@@ -194,6 +199,12 @@ impl Profiles {
         let compactions = resources.compactions.clone();
         let files = resources.files.clone();
         let roster = resources.roster.clone();
+        // Nobody can answer a question in a launch nobody watches.
+        let asking = (!settings.unattended)
+            .then(crate::ask_user::handler)
+            .transpose()
+            .map_err(|error| error.to_string())?;
+        let requests = asking.as_ref().map(|asking| asking.handler().clone());
         Ok(Arc::new(Self {
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),
@@ -201,6 +212,7 @@ impl Profiles {
             max_tool_rounds: settings.max_tool_rounds,
             unattended: settings.unattended,
             planning: settings.unattended && settings.mode == crate::permissions::Mode::Plan,
+            asking,
             skill_catalogue: tokio::sync::RwLock::new(skill_catalogue),
             images: crate::images::Images::new(storage.database.with_file_name("attachments")),
             diagnostics,
@@ -221,6 +233,7 @@ impl Profiles {
                 project,
                 global,
                 slots: BTreeMap::new(),
+                asking: requests,
                 tools: BTreeMap::new(),
                 compositions: BTreeMap::new(),
                 roster,
@@ -305,6 +318,7 @@ impl Profiles {
             policy: self.policy.clone(),
             images: self.images.clone(),
             ceiling: ceiling(profile, provider.kind),
+            human_input: self.asking.clone(),
         };
         let created = crate::agent::create(
             &self.workspace,
@@ -450,7 +464,8 @@ impl State {
             self.files.clone(),
             self.compactions.clone(),
             self.roster.clone(),
-        );
+        )
+        .with_human_input(self.asking.clone());
         kit.register_channel(slot.clone())
             .map_err(|_| "Could not register the agent")?;
         // Kept as soon as the engine holds it, which never registers it twice.

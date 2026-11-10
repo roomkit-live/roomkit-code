@@ -202,7 +202,8 @@ const SUMMARY: &str = "SUMMARY_OF_THE_EARLIER_TURNS";
 /// `read_stored_result` pages through an outcome the engine stored (roomkit-rs
 /// RMK-1228); the delegation tools hand a task to another agent and follow it
 /// (RMK-1532).
-const ENGINE_TOOLS: [&str; 4] = [
+const ENGINE_TOOLS: [&str; 5] = [
+    "ask_user",
     "read_stored_result",
     "delegate_task",
     "task_status",
@@ -1864,6 +1865,7 @@ async fn stale_or_conflicting_forms_cannot_replace_a_working_agent() {
     app.close().await.unwrap();
 }
 
+mod ask_user;
 mod breakdown;
 mod catalogue;
 mod compaction;
