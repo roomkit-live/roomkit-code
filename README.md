@@ -547,7 +547,11 @@ per stream and 64 MiB overall, with 4 KiB read pages. `output_read` pages an own
 cursors; `output_forget` releases it. Check completeness and omitted bytes: these
 are bounded copies, not a guarantee of lossless capture. Process and archive IDs
 are scoped to the originating session and agent, survive reconfiguration, and
-**do not survive restarting the app**, even when present in saved history.
+**do not survive restarting the app**, even when present in saved history. A
+later run gives the same IDs again, so an agent's first turn in a resumed
+conversation is told that the application restarted and that the processes and
+archives of before cannot be reached; an agent without those tools is told
+nothing.
 
 **Ask is the default.** Each `write`, `edit`, applied `patch`, `shell`,
 `process_start`, `process_write`, `web_search` and `web_fetch` call waits for an
@@ -798,6 +802,10 @@ error (5xx), 408 or 409. A timeout waits the full **Timeout** again on each try.
 A refused request (an invalid key, a malformed request) is not retried, nor an
 answer that has begun streaming. The screen does not show these retries.
 Existing completed tool actions remain in the project and conversation.
+The agent's next turn is told that its previous one ended without a final
+answer and how: on an error, interrupted, at the limit of tool rounds, cut at
+the output limit. After an error, within the same run of the application, it
+also reads the explanation you were shown, never the provider's own text.
 
 A request the model refuses as past its window, when compaction cannot make
 room, says so: the notice names the context limit and what frees room

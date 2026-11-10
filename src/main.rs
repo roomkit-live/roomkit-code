@@ -36,6 +36,7 @@ mod system_row;
 mod testing;
 mod timeouts;
 mod tool_views;
+mod turn_ends;
 mod updates;
 
 use clap::Parser;

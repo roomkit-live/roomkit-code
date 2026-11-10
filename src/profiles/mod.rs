@@ -80,6 +80,8 @@ struct State {
     compositions: BTreeMap<String, crate::agent::Composition>,
     /// The agents a task can be handed to, kept as the agent files change.
     roster: Arc<crate::delegation::Roster>,
+    /// What every agent's turns are told of what came before them.
+    turn_ends: Arc<crate::turn_ends::TurnEnds>,
     /// What serves every agent's `delegate_task`, once the engine is up.
     delegation: Option<roomkit::tasks::DelegateHandler<SqliteStore>>,
     pending: Option<ui::Pending>,
@@ -182,6 +184,7 @@ impl Profiles {
         let compactions = resources.compactions.clone();
         let files = resources.files.clone();
         let roster = resources.roster.clone();
+        let turn_ends = resources.turn_ends.clone();
         // Nobody can answer a question in a launch nobody watches.
         let asking = (!settings.unattended)
             .then(crate::ask_user::handler)
@@ -220,6 +223,7 @@ impl Profiles {
                 tools: BTreeMap::new(),
                 compositions: BTreeMap::new(),
                 roster,
+                turn_ends,
                 delegation: None,
                 pending: None,
                 pending_delete: None,
@@ -448,6 +452,7 @@ impl State {
             self.compactions.clone(),
             self.roster.clone(),
         )
+        .with_turn_ends(self.turn_ends.clone())
         .with_human_input(self.asking.clone());
         kit.register_channel(slot.clone())
             .map_err(|_| "Could not register the agent")?;

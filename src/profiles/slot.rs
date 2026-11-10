@@ -17,6 +17,9 @@ pub(super) struct AgentSlot {
     policy: crate::permissions::Policy,
     /// The agents a turn can hand a task to.
     roster: Arc<crate::delegation::Roster>,
+    /// What a turn is told of how the agent's previous turn ended, and of a
+    /// restart since.
+    turn_ends: Arc<crate::turn_ends::TurnEnds>,
     id: ChannelId,
     current: Arc<RwLock<Option<Arc<CodeAgent>>>>,
     /// The requests its agents' `ask_user` opens, which the engine
@@ -39,10 +42,18 @@ impl AgentSlot {
             compactions,
             policy,
             roster,
+            turn_ends: Arc::default(),
             id,
             current: Arc::new(RwLock::new(agent.map(Arc::new))),
             human_input: None,
         }
+    }
+
+    /// The slot whose turns read in `turn_ends` what came before them, as
+    /// the application's other agents do.
+    pub fn with_turn_ends(mut self, turn_ends: Arc<crate::turn_ends::TurnEnds>) -> Self {
+        self.turn_ends = turn_ends;
+        self
     }
 
     /// The slot whose agents' questions open requests on `handler`.
@@ -76,8 +87,10 @@ impl AgentSlot {
     }
     /// What a turn reads as it starts: its mode's instruction, what a
     /// delegated task's worker must know, the agents it can hand a task to,
-    /// then what the application tells it (`told`), then the project's
-    /// instructions unless the agent's history still holds them as they are.
+    /// how the agent's previous turn ended when not with an answer and
+    /// whether the application restarted since, then what the application
+    /// tells it (`told`), then the project's instructions unless the agent's
+    /// history still holds them as they are.
     async fn instruction(
         &self,
         event: &RoomEvent,
@@ -100,6 +113,7 @@ impl AgentSlot {
         if worker.is_none() {
             parts.extend(self.roster.instruction(agent));
         }
+        parts.extend(self.turn_ends.begin(&self.id, event, history));
         parts.extend(told);
         if !self.still_read(&project, event, history) {
             parts.push(project);

@@ -154,6 +154,7 @@ async fn setup(
     resources
         .instructions
         .install(kit, profiles.diagnostics.clone());
+    resources.turn_ends.install(kit)?;
     crate::delegation::install(kit, resources.tasks.clone(), resources.roster.clone())?;
     let agent_id = profiles.initialize(kit).await?;
     let channel = ConversationChannel::new(ChannelId::new(TERMINAL)?);

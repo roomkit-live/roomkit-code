@@ -85,6 +85,9 @@ pub(crate) struct Resources {
     pub roster: Arc<crate::delegation::Roster>,
     /// What the status line says of each conversation's latest task.
     pub tasks: Arc<crate::delegation::Tasks>,
+    /// What each turn is told of how its agent's previous turn ended, and
+    /// of a restart since.
+    pub turn_ends: Arc<crate::turn_ends::TurnEnds>,
 }
 
 impl Resources {
@@ -133,6 +136,7 @@ impl Resources {
             fetch: WebFetchTool::new().with_limits(fetch_limits)?,
             roster: Arc::default(),
             tasks: Arc::default(),
+            turn_ends: Arc::default(),
         })
     }
 
@@ -211,6 +215,8 @@ pub(crate) async fn create(
         .iter()
         .map(|(definition, _)| definition.clone())
         .collect();
+    let named = native.iter().map(|tool| tool.name.as_str());
+    resources.turn_ends.agent_reaches(&profile.id, named);
     let Extensions {
         skills,
         skill_roots,

@@ -134,11 +134,20 @@ impl Drop for Mock {
     }
 }
 
+/// The call's name that makes the mock server refuse a request, as it would
+/// a credential: a failure the provider does not try again.
+const REFUSED: &str = "!refused";
+
 async fn answer(
     State(fixture): State<Fixture>,
     headers: axum::http::HeaderMap,
     Json(request): Json<Value>,
-) -> ([(&'static str, &'static str); 1], String) {
+) -> (
+    axum::http::StatusCode,
+    [(&'static str, &'static str); 1],
+    String,
+) {
+    use axum::http::StatusCode;
     fixture.headers.lock().unwrap().push(
         headers
             .get("authorization")
@@ -159,9 +168,15 @@ async fn answer(
         let summary = json!({
             "choices": [{"index": 0, "message": {"role": "assistant", "content": *fixture.summary.lock().unwrap()}, "finish_reason": "stop"}],
         });
-        return ([("content-type", "application/json")], summary.to_string());
+        let json = [("content-type", "application/json")];
+        return (StatusCode::OK, json, summary.to_string());
     }
     let _held = fixture.turns_held.lock().await;
+    if matches!(fixture.calls.get(index), Some((name, _)) if *name == REFUSED) {
+        let refusal = json!({"error":{"message":"private server details"}}).to_string();
+        let json = [("content-type", "application/json")];
+        return (StatusCode::UNAUTHORIZED, json, refusal);
+    }
     // A call named "" answers: a later request may call a tool.
     let (delta, reason) = match fixture.calls.get(index) {
         Some((name, args)) if !name.is_empty() => (
@@ -192,7 +207,11 @@ async fn answer(
         json!({"choices":[{"index":0,"delta":delta}]}),
         json!({"choices":[{"index":0,"delta":{},"finish_reason":reason}]})
     );
-    ([("content-type", "text/event-stream")], body)
+    (
+        StatusCode::OK,
+        [("content-type", "text/event-stream")],
+        body,
+    )
 }
 
 /// What the mock server answers a request asked whole: a compaction's summary.
@@ -1951,6 +1970,7 @@ mod images;
 mod shell;
 mod skills;
 mod steering;
+mod turn_ends;
 
 mod mcp;
 

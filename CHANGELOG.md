@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- A turn is told what its history does not say. After a turn that ended
+  without a final answer (an error, an interruption, the limit of tool rounds),
+  the agent's next turn reads how it ended and that you read no conclusion,
+  with the explanation you were shown for an error of the same run. After a
+  restart, an agent's first turn in a resumed conversation reads that the
+  processes and output archives of before cannot be reached, and that their
+  IDs may be given again.
+
 - `/providers` offers **Connect OpenCode Go**: paste the subscription's API key,
   then choose among the paid models Go serves over Chat Completions. Requests
   carry the session header Go requires and name RoomKit Code as the client.
