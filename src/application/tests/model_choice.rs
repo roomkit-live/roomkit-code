@@ -442,3 +442,50 @@ async fn an_agent_changes_its_model_from_its_connections_list_in_its_form() {
     assert_eq!(offered(&listed).1[0].description, "Current model");
     app.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn forged_or_stale_model_choices_are_refused_before_any_form() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let file: Value = serde_json::from_slice(
+        &std::fs::read(settings.state_dir.join("connections.json")).unwrap(),
+    )
+    .unwrap();
+    let local = file["profiles"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .next()
+        .unwrap()
+        .clone();
+    let long = "m".repeat(257);
+    let refused = [
+        ("agents", "use-model:missing:discovered-model".to_owned()),
+        ("agents", "use-model:code:".to_owned()),
+        ("agents", "use-model:code: ".to_owned()),
+        ("agents", format!("use-model:code:{long}")),
+        ("agents", "use-model:code:bad\x1b[2Jmodel".to_owned()),
+        ("agents", "models:missing".to_owned()),
+        ("agents", "new:missing".to_owned()),
+        ("providers", format!("typed:{local}:discovered-model")),
+        ("providers", "typed:missing".to_owned()),
+        ("providers", format!("model:{local}:")),
+        ("providers", format!("model:{local}:bad\nmodel")),
+        ("providers", format!("model:{local}:{long}")),
+    ];
+    for (command, arguments) in refused {
+        let answer = profile_command(
+            &app,
+            Command::Invoke {
+                name: command.into(),
+                arguments: arguments.clone(),
+            },
+        )
+        .await;
+        assert!(answer.is_err(), "{command} {arguments:?}");
+    }
+    app.close().await.unwrap();
+}

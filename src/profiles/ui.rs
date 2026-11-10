@@ -345,7 +345,7 @@ impl Profiles {
                     ("providers", "model" | "typed") => {
                         if !state.providers.value.profiles.contains_key(id)
                             || model.is_empty() != (action == "typed")
-                            || model.len() > 256
+                            || !(model.is_empty() || listable(model))
                         {
                             return Err("Invalid provider/model selection".into());
                         }
@@ -362,7 +362,7 @@ impl Profiles {
                     ("agents", "models") => self.agent_models(state, current, id).await,
                     ("agents", "use-model") => {
                         let mut agent = state.agent(id).ok_or("Unknown agent")?;
-                        if model.is_empty() || model.len() > 256 {
+                        if !listable(model) {
                             return Err("Invalid agent/model selection".into());
                         }
                         agent.model = model.into();
@@ -621,6 +621,12 @@ fn agent_choices(state: &State, current: &SessionConfig) -> CommandResult {
         "Agents · global and this project's · shared conversation",
         entries,
     )
+}
+
+/// Whether a choice's `model` may preset a form: an ID a saved agent may
+/// carry, whatever sent it.
+fn listable(model: &str) -> bool {
+    !model.trim().is_empty() && model.len() <= 256 && !model.chars().any(char::is_control)
 }
 
 pub(super) fn next_id(prefix: &str, occupied: impl Fn(&str) -> bool) -> String {

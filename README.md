@@ -342,8 +342,8 @@ Choosing another authentication mode removes the stored key from that profile.
 Saving a new connection lists the models it serves, and choosing one opens the
 form of an agent using it; **Test connection and list models** lists them again.
 The listing is a bounded `GET /models` request (`/v1/models` for Anthropic) with
-no redirects; it sends no conversation. Every list ends with **Type a model ID**,
-for a model it does not show. Some compatible servers do not implement
+no redirects; it sends no conversation. Each list of models for a new agent ends
+with **Type a model ID**, for a model it does not show. Some compatible servers do not implement
 discovery: the connection is saved all the same, and the model's ID is typed in
 the agent's form. Subscriptions have their own entries:
 [OpenCode Go](#opencode-go) and [Sign in with ChatGPT](#sign-in-with-chatgpt).
