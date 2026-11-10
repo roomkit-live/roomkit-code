@@ -406,11 +406,11 @@ async fn an_unrecognized_reasoning_error_has_actionable_private_diagnostics() {
     let start = records
         .iter()
         .find(|r| r["event"] == "provider_request_started")
-        .expect("request start");
+        .unwrap();
     let failure = records
         .iter()
         .find(|r| r["event"] == "provider_request_finished")
-        .expect("request failure");
+        .unwrap();
     assert_eq!(start["max_tokens"], 8192);
     assert_eq!(start["budget"], "fixed");
     assert_eq!(start["request"], failure["request"]);
