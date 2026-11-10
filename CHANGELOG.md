@@ -6,6 +6,10 @@
   then choose among the paid models Go serves over Chat Completions. Requests
   carry the session header Go requires and name RoomKit Code as the client.
 
+- A streamed agent that reaches its tool round limit now shows the reason and
+  an execution failure, even when it produced only tool calls. Completed actions
+  remain available and a new message can continue the conversation.
+
 - The agent's instructions now state what it had to find out by failing: a
   shell command is stopped after 10 seconds unless `timeout_ms` asks for more
   and is POSIX `sh`, not bash; a `grep` `include` glob is relative to its
