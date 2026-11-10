@@ -1473,7 +1473,11 @@ for each agent, the directories whose rules it was given, so a conversation
 resumed after a restart takes back the rules removed meanwhile and adds nothing
 elsewhere. A conversation from before that record may hold rules removed since:
 each directory's first exploration reports once, even when it finds none, over
-all its later launches. The agent is instructed to read existing
+all its later launches. So does a conversation whose record cannot be read, which
+`/diagnostics` notes as `instruction_record_not_read`; a record that cannot be
+saved is noted as `instruction_record_not_kept` and saved again with the next
+change or turn. Both name the room, the agent and whether the store or the
+record's form failed, never the error's text. The agent is instructed to read existing
 files, inspect the nearest existing parent before creating files, and preview
 patches before applying them. These are model instructions, not an enforced
 proof of compliance: an arbitrary shell command, running process or remote MCP

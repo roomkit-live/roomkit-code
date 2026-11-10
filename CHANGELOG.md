@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A conversation's record of the nested rules an agent was given failed
+  silently when it could not be read or saved. `/diagnostics` now notes it as
+  `instruction_record_not_read` or `instruction_record_not_kept`, with the
+  room, the agent and whether the store or the record's form failed.
+
 - A tool result is handed to the model whole up to a tenth of the agent's
   context capacity, between 5,000 and 16,000 estimated tokens, where the
   engine's 5,000 applied to every agent: a file of 450 lines took four calls to

@@ -5,6 +5,7 @@ mod tools;
 
 pub(crate) use kept::{View, still_read};
 
+use crate::diagnostics::Diagnostics;
 use roomkit::{ConversationStore, RoomKit, WeakRoomKit, model::RoomId};
 use roomkit_core::rules::transcript::{fence, json_text_line};
 use roomkit_sqlite::SqliteStore;
@@ -22,12 +23,56 @@ pub(crate) struct Instructions {
     workspace: PathBuf,
     global: PathBuf,
     emitted: Arc<Mutex<VecDeque<Emission>>>,
-    /// The engine whose store keeps each agent's record with its
-    /// conversation, held without keeping it alive: its agents hold these
-    /// instructions. Before it, a record lives in memory only.
-    kit: Arc<OnceLock<WeakRoomKit<SqliteStore>>>,
+    /// Where each agent's record is kept with its conversation. Before it,
+    /// a record lives in memory only.
+    keeper: Arc<OnceLock<Keeper>>,
     /// One record is written at a time, as it stands when its turn comes.
     keeping: Arc<tokio::sync::Mutex<()>>,
+}
+
+/// Where the records are kept, and where one that cannot be read or kept is
+/// noted.
+struct Keeper {
+    /// The engine whose store keeps the records, held without keeping it
+    /// alive: its agents hold these instructions.
+    kit: WeakRoomKit<SqliteStore>,
+    diagnostics: Arc<Diagnostics>,
+}
+
+/// What a record that cannot be read or kept is noted with: whether its form
+/// or the store failed, and the error, which the diagnostics classify.
+type Failure = (&'static str, String);
+
+/// Notes in `diagnostics`, as `event`, that the record `room` keeps of
+/// `agent` could not be read or kept: which of its form or the store failed,
+/// and the error's classification, never its text.
+fn note(
+    diagnostics: &Diagnostics,
+    event: &'static str,
+    (room, agent): (&str, &str),
+    (cause, error): &Failure,
+) {
+    let fields = serde_json::json!({"room": room, "agent": agent, "cause": cause});
+    diagnostics.record(event, fields, Some(error));
+}
+
+/// Writes `held` as the record `room` keeps of `agent`.
+async fn write_record(
+    kit: &RoomKit<SqliteStore>,
+    (room, agent): (&str, &str),
+    held: &Held,
+) -> Result<(), Failure> {
+    let state = match (RoomId::new(room), serde_json::to_value(held)) {
+        (Ok(id), Ok(serde_json::Value::Object(state))) => Ok((id, state)),
+        (Err(_), _) => Err("the room's ID is not valid".to_owned()),
+        (_, Ok(_)) => Err("the record is not an object".to_owned()),
+        (_, Err(error)) => Err(error.to_string()),
+    };
+    let (id, state) = state.map_err(|error| ("format", error))?;
+    kit.store()
+        .set_private_state(&id, &state_key(agent), Some(state))
+        .await
+        .map_err(|error| ("store", error.to_string()))
 }
 
 /// The directories an agent's record keeps before it is forgotten.
@@ -198,15 +243,26 @@ impl Instructions {
             workspace: workspace.into(),
             global: global.into(),
             emitted: Arc::default(),
-            kit: Arc::default(),
+            keeper: Arc::default(),
             keeping: Arc::default(),
         })
     }
 
     /// Keep each agent's record with its conversation, in this engine's
-    /// store. Before it, records live in memory only.
-    pub fn install(&self, kit: &RoomKit<SqliteStore>) {
-        let _ = self.kit.set(kit.downgrade());
+    /// store, and note in `diagnostics` one that cannot be read or kept.
+    /// Before it, records live in memory only.
+    pub fn install(&self, kit: &RoomKit<SqliteStore>, diagnostics: Arc<Diagnostics>) {
+        let _ = self.keeper.set(Keeper {
+            kit: kit.downgrade(),
+            diagnostics,
+        });
+    }
+
+    /// The engine whose store keeps the records, and the diagnostics; none
+    /// before `install`, or once the engine is gone.
+    fn keeper(&self) -> Option<(RoomKit<SqliteStore>, &Diagnostics)> {
+        let keeper = self.keeper.get()?;
+        Some((keeper.kit.upgrade()?, &keeper.diagnostics))
     }
 
     /// A turn of `agent` begins in `room`: its explorations carry each
@@ -268,40 +324,58 @@ impl Instructions {
         });
     }
 
-    /// The record `room` keeps of `agent`; none without a store, without a
-    /// record, or for one that cannot be read, which the next one replaces.
+    /// The record `room` keeps of `agent`; none without a store or without a
+    /// record. One the store cannot read, or that does not decode, is none
+    /// either, which the next one replaces, and the diagnostics say so: the
+    /// agent then reads each directory's state again, as for a conversation
+    /// older than its record.
     async fn kept(&self, room: &str, agent: &str) -> Option<Held> {
-        let kit = self.kit.get()?.upgrade()?;
+        let (kit, diagnostics) = self.keeper()?;
         let id = RoomId::new(room).ok()?;
-        let state = kit.store().get_private_state(&id, &state_key(agent)).await;
-        serde_json::from_value(serde_json::Value::Object(state.ok()??)).ok()
+        let read = kit.store().get_private_state(&id, &state_key(agent)).await;
+        let failure: Failure = match read {
+            Ok(None) => return None,
+            Ok(Some(state)) => match serde_json::from_value(serde_json::Value::Object(state)) {
+                Ok(held) => return Some(held),
+                Err(error) => ("format", error.to_string()),
+            },
+            Err(error) => ("store", error.to_string()),
+        };
+        note(
+            diagnostics,
+            "instruction_record_not_read",
+            (room, agent),
+            &failure,
+        );
+        None
     }
 
     /// Keeps `agent`'s record with `room`, as it stands, if it changed since
-    /// it was last kept. One the store refuses is kept with the next change,
-    /// or as the agent's next turn begins.
+    /// it was last kept. One that cannot be kept is, with the next change or
+    /// as the agent's next turn begins, and the diagnostics say so: until
+    /// then a later launch would read the record as it was.
     async fn keep(&self, room: &str, agent: &str) {
-        let Some(kit) = self.kit.get().and_then(WeakRoomKit::upgrade) else {
+        let Some((kit, diagnostics)) = self.keeper() else {
             return;
         };
-        let _keeping = self.keeping.lock().await;
-        let Some(held) = self.take_unsaved(room, agent) else {
-            return;
+        let failure = {
+            let _keeping = self.keeping.lock().await;
+            let Some(held) = self.take_unsaved(room, agent) else {
+                return;
+            };
+            let failure = write_record(&kit, (room, agent), &held).await.err();
+            if failure.is_some() {
+                self.mark_unsaved(room, agent);
+            }
+            failure
         };
-        let state = match (RoomId::new(room), serde_json::to_value(&held)) {
-            (Ok(id), Ok(serde_json::Value::Object(state))) => Some((id, state)),
-            _ => None,
-        };
-        let stored = match state {
-            Some((id, state)) => kit
-                .store()
-                .set_private_state(&id, &state_key(agent), Some(state))
-                .await
-                .is_ok(),
-            None => false,
-        };
-        if !stored {
-            self.mark_unsaved(room, agent);
+        if let Some(failure) = failure {
+            note(
+                diagnostics,
+                "instruction_record_not_kept",
+                (room, agent),
+                &failure,
+            );
         }
     }
 

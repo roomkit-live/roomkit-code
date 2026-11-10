@@ -299,16 +299,95 @@ async fn engine(state: &Path) -> RoomKit<SqliteStore> {
     kit
 }
 
+/// The diagnostics a launch notes its failures in, kept in `state`.
+fn journal(state: &Path) -> Arc<Diagnostics> {
+    Diagnostics::open(state.join("diagnostics.jsonl"), false).unwrap()
+}
+
+/// What the diagnostics kept in `state` recorded as `event`.
+fn noted(state: &Path, event: &str) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(state.join("diagnostics.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|record| record["event"] == event)
+        .collect()
+}
+
 /// A launch of the application on `root`: nothing in memory, the records the
-/// conversations of `kit` keep, and a `read` that carries the nested rules.
+/// conversations of `kit` keep, a failure to read or keep one noted in `log`,
+/// and a `read` that carries the nested rules.
 async fn launch(
     root: &Path,
     kit: &RoomKit<SqliteStore>,
+    log: &Arc<Diagnostics>,
 ) -> (Arc<Instructions>, Arc<dyn roomkit_ai::Tool>) {
     let loader = Instructions::new(root, root);
-    loader.install(kit);
+    loader.install(kit, log.clone());
     let tool = reader(root, &loader).await;
     (loader, tool)
+}
+
+/// Review finding: a record the store could not read or keep, or that did
+/// not decode, failed without a word, and the conversation read each
+/// directory's empty snapshot again with nothing to say why. The diagnostics
+/// name each failure and what failed, never the error's text; a conversation
+/// without a record is no failure.
+#[tokio::test]
+async fn a_record_that_cannot_be_read_or_kept_is_noted_in_the_diagnostics() {
+    const NOT_READ: &str = "instruction_record_not_read";
+    const NOT_KEPT: &str = "instruction_record_not_kept";
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    write(root.path(), "src/file", "contents");
+    let kit = engine(state.path()).await;
+    let log = journal(state.path());
+    let room = RoomId::new("room").unwrap();
+
+    let (loader, _tool) = launch(root.path(), &kit, &log).await;
+    loader.begin("room", "other", true).await;
+    assert!(noted(state.path(), NOT_READ).is_empty(), "no record yet");
+
+    let undecodable: serde_json::Map<String, serde_json::Value> =
+        [("given".into(), serde_json::json!(42))]
+            .into_iter()
+            .collect();
+    kit.store()
+        .set_private_state(&room, &state_key("agent"), Some(undecodable))
+        .await
+        .unwrap();
+    let (loader, _tool) = launch(root.path(), &kit, &log).await;
+    loader.begin("room", "agent", true).await;
+    let not_read = noted(state.path(), NOT_READ);
+    assert_eq!(not_read.len(), 1, "{not_read:?}");
+    assert_eq!(
+        (&not_read[0]["room"], &not_read[0]["agent"]),
+        (&serde_json::json!("room"), &serde_json::json!("agent"))
+    );
+    assert_eq!(not_read[0]["cause"], "format");
+    assert!(not_read[0]["code"].is_string(), "classified: {not_read:?}");
+    assert!(noted(state.path(), NOT_KEPT).is_empty(), "it was replaced");
+
+    // A closed store refuses the read, then the record the turn starts from.
+    kit.close().await.unwrap();
+    let (loader, tool) = launch(root.path(), &kit, &log).await;
+    loader.begin("room", "agent", true).await;
+    let not_read = noted(state.path(), NOT_READ);
+    assert_eq!(not_read.len(), 2, "{not_read:?}");
+    assert_eq!(not_read[1]["cause"], "store");
+    let not_kept = noted(state.path(), NOT_KEPT);
+    assert_eq!(not_kept.len(), 1, "{not_kept:?}");
+    assert_eq!(
+        (&not_kept[0]["agent"], &not_kept[0]["cause"]),
+        (&serde_json::json!("agent"), &serde_json::json!("store"))
+    );
+    // The turn goes on, as for a conversation older than its record.
+    assert!(given(&tool, "src/file").await.is_some());
+    let text = std::fs::read_to_string(state.path().join("diagnostics.jsonl")).unwrap();
+    assert!(
+        !text.contains("SQLiteStore") && !text.contains("invalid type"),
+        "an error's text is never recorded: {text}"
+    );
 }
 
 /// A resumed conversation read every directory's empty snapshot again at each
@@ -323,20 +402,21 @@ async fn a_later_launch_takes_back_what_the_conversation_kept_and_supposes_nothi
     write(root.path(), "docs/file", "contents");
     write(root.path(), "docs/AGENTS.md", "RULES");
     let kit = engine(state.path()).await;
-    let (loader, tool) = launch(root.path(), &kit).await;
+    let log = journal(state.path());
+    let (loader, tool) = launch(root.path(), &kit, &log).await;
     loader.begin("room", "agent", false).await;
     assert_eq!(given(&tool, "src/file").await, None);
     assert!(given(&tool, "docs/file").await.unwrap().contains("RULES"));
     assert_eq!(loader.kept("room", "other").await, None, "each agent's own");
 
     std::fs::remove_file(root.path().join("docs/AGENTS.md")).unwrap();
-    let (loader, tool) = launch(root.path(), &kit).await;
+    let (loader, tool) = launch(root.path(), &kit, &log).await;
     loader.begin("room", "agent", true).await;
     assert_eq!(given(&tool, "src/file").await, None, "none was given there");
     let taken_back = given(&tool, "docs/file").await.unwrap();
     assert!(taken_back.contains("No nonempty"), "{taken_back}");
 
-    let (loader, tool) = launch(root.path(), &kit).await;
+    let (loader, tool) = launch(root.path(), &kit, &log).await;
     loader.begin("room", "agent", true).await;
     assert_eq!(given(&tool, "docs/file").await, None, "taken back already");
     kit.close().await.unwrap();
@@ -352,6 +432,7 @@ async fn a_conversation_older_than_its_record_reads_each_directory_once_over_its
     write(root.path(), "src/file", "contents");
     write(root.path(), "src/deep/file", "contents");
     let kit = engine(state.path()).await;
+    let log = journal(state.path());
     let room = RoomId::new("room").unwrap();
     let unreadable: serde_json::Map<String, serde_json::Value> =
         [("given".into(), serde_json::json!(42))]
@@ -361,11 +442,11 @@ async fn a_conversation_older_than_its_record_reads_each_directory_once_over_its
         .set_private_state(&room, &state_key("agent"), Some(unreadable))
         .await
         .unwrap();
-    let (loader, tool) = launch(root.path(), &kit).await;
+    let (loader, tool) = launch(root.path(), &kit, &log).await;
     loader.begin("room", "agent", true).await;
     assert!(given(&tool, "src/file").await.is_some());
 
-    let (loader, tool) = launch(root.path(), &kit).await;
+    let (loader, tool) = launch(root.path(), &kit, &log).await;
     assert!(loader.kept("room", "agent").await.unwrap().inherited);
     loader.begin("room", "agent", true).await;
     assert_eq!(
