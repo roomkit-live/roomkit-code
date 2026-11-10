@@ -16,6 +16,36 @@ async fn model(app: &Application, arguments: &str) -> CommandResult {
     .unwrap()
 }
 
+fn values(choices: &[Choice]) -> Vec<&str> {
+    choices.iter().map(|c| c.value.as_str()).collect()
+}
+
+async fn invoke(app: &Application, command: &str, arguments: &str) -> CommandResult {
+    profile_command(
+        app,
+        Command::Invoke {
+            name: command.into(),
+            arguments: arguments.into(),
+        },
+    )
+    .await
+    .unwrap()
+}
+
+/// The form a command's answer opens, by its fields' values.
+fn opened(result: &CommandResult) -> std::collections::BTreeMap<String, String> {
+    let CommandResult::Events(events) = result else {
+        panic!("Expected a form")
+    };
+    let Some(Event::Form { form, .. }) = events.last() else {
+        panic!("Expected a form, not {events:?}")
+    };
+    form.fields
+        .iter()
+        .map(|f| (f.name.clone(), f.value.clone()))
+        .collect()
+}
+
 /// The choices of a command's answer, with the command they invoke.
 fn offered(result: &CommandResult) -> (&str, &[Choice]) {
     let CommandResult::Events(events) = result else {
@@ -48,8 +78,10 @@ async fn a_new_connection_offers_its_models_and_one_listing_none_stays_saved() {
     .unwrap();
     let (command, choices) = offered(&connected);
     assert_eq!(command, "providers");
-    assert_eq!(choices.len(), 1);
-    assert_eq!(choices[0].value, "model:second:discovered-model");
+    assert_eq!(
+        values(choices),
+        ["model:second:discovered-model", "typed:second"]
+    );
     assert_eq!(
         choices[0].description,
         "Reported capacity: 32768 tokens · create agent"
@@ -67,13 +99,14 @@ async fn a_new_connection_offers_its_models_and_one_listing_none_stays_saved() {
     .unwrap() else {
         panic!("Expected a notice")
     };
-    let [Event::Notice { text, .. }] = events.as_slice() else {
-        panic!("Expected a notice, not {events:?}")
+    let [Event::Notice { text, .. }, Event::Choices { choices, .. }] = events.as_slice() else {
+        panic!("Expected a notice and a way to type the model, not {events:?}")
     };
     assert!(
         text.starts_with("Connection saved. Model discovery returned HTTP 404"),
         "{text}"
     );
+    assert_eq!(values(choices), ["typed:third"]);
     let file: Value = serde_json::from_slice(
         &std::fs::read(settings.state_dir.join("connections.json")).unwrap(),
     )
@@ -258,5 +291,154 @@ async fn a_listing_waiting_on_its_server_holds_up_no_other_profile_command() {
     };
     let tested = answered_while_held(&app, &server, testing, "default").await;
     assert_eq!(offered(&tested).1[0].value, "model:second:held-model");
+
+    // A new agent's models, then an existing agent's, in /agents.
+    let creating = invoke(&app, "agents", "new:second");
+    let creation = answered_while_held(&app, &server, creating, "high").await;
+    assert_eq!(offered(&creation).1[0].value, "model:second:held-model");
+    let changing = invoke(&app, "agents", "models:code");
+    let change = answered_while_held(&app, &server, changing, "low").await;
+    assert_eq!(offered(&change).1[0].value, "use-model:code:held-model");
+    app.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn adding_an_agent_lists_its_connections_models_before_its_form() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let mut app = Application::open(&settings, String::new()).await.unwrap();
+
+    // One connection, the one the launch imported: + Add agent lists its
+    // models at once.
+    let file: Value = serde_json::from_slice(
+        &std::fs::read(settings.state_dir.join("connections.json")).unwrap(),
+    )
+    .unwrap();
+    let local = file["profiles"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .next()
+        .unwrap()
+        .clone();
+    let menu = invoke(&app, "agents", "").await;
+    assert_eq!(offered(&menu).1[0].value, "new");
+    let listed = invoke(&app, "agents", "new").await;
+    let (command, choices) = offered(&listed);
+    assert_eq!(command, "providers");
+    assert_eq!(
+        values(choices),
+        [
+            format!("model:{local}:discovered-model"),
+            format!("typed:{local}")
+        ]
+    );
+    let form = opened(
+        &invoke(
+            &app,
+            "providers",
+            &format!("model:{local}:discovered-model"),
+        )
+        .await,
+    );
+    assert_eq!(
+        (&form["provider"][..], &form["model"][..]),
+        (local.as_str(), "discovered-model")
+    );
+    let form = opened(&invoke(&app, "providers", &format!("typed:{local}")).await);
+    assert_eq!(
+        (&form["provider"][..], &form["model"][..]),
+        (local.as_str(), "")
+    );
+
+    // Several: it asks for the connection first; one without a list leaves
+    // the model to be typed.
+    let unlisted = format!("{}/unlisted", mock.base_url);
+    add_connection(&app, &[("id", "second"), ("url", &mock.base_url)]).await;
+    submit_profile(
+        &app,
+        "providers",
+        "add",
+        &[("id", "third"), ("url", &unlisted)],
+    )
+    .await
+    .unwrap();
+    let connections = invoke(&app, "agents", "new").await;
+    let (command, choices) = offered(&connections);
+    assert_eq!(command, "agents");
+    assert_eq!(
+        values(choices),
+        [
+            format!("new:{local}"),
+            "new:second".into(),
+            "new:third".into()
+        ]
+    );
+    let listed = invoke(&app, "agents", "new:second").await;
+    assert_eq!(
+        values(offered(&listed).1),
+        ["model:second:discovered-model", "typed:second"]
+    );
+    let CommandResult::Events(events) = invoke(&app, "agents", "new:third").await else {
+        panic!("Expected a notice")
+    };
+    let [Event::Notice { text, .. }, Event::Choices { choices, .. }] = events.as_slice() else {
+        panic!("Expected a notice and a way to type the model, not {events:?}")
+    };
+    assert!(
+        text.starts_with("Model discovery returned HTTP 404"),
+        "{text}"
+    );
+    assert_eq!(values(choices), ["typed:third"]);
+
+    // Saving the form preset from the list creates and selects the agent.
+    edit_profile(
+        &mut app,
+        "providers",
+        "model:second:discovered-model",
+        &[("id", "listed"), ("tools", "")],
+    )
+    .await;
+    assert_eq!(app.view.agent.as_str(), "listed");
+    assert_eq!(app.view.model.as_ref().unwrap().model, "discovered-model");
+    app.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn an_agent_changes_its_model_from_its_connections_list_in_its_form() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let mut app = Application::open(&settings, String::new()).await.unwrap();
+
+    let menu = invoke(&app, "agents", "open:code").await;
+    assert!(values(offered(&menu).1).contains(&"models:code"));
+    let listed = invoke(&app, "agents", "models:code").await;
+    let (command, choices) = offered(&listed);
+    assert_eq!(command, "agents");
+    assert_eq!(values(choices), ["use-model:code:discovered-model"]);
+
+    // The agent's own form opens with that model, its other settings kept.
+    let mut form = opened(&invoke(&app, "agents", "use-model:code:discovered-model").await);
+    let mut edited = opened(&invoke(&app, "agents", "edit:code").await);
+    assert_eq!(
+        (&form["id"][..], &form["model"][..]),
+        ("code", "discovered-model")
+    );
+    form.remove("model");
+    edited.remove("model");
+    assert_eq!(form, edited);
+    edit_profile(&mut app, "agents", "use-model:code:discovered-model", &[]).await;
+    assert_eq!(app.view.model.as_ref().unwrap().model, "discovered-model");
+    turn_operation(&app, "after-change").await;
+    assert_eq!(
+        mock.requests.lock().unwrap().last().unwrap()["model"],
+        "discovered-model"
+    );
+    let listed = invoke(&app, "agents", "models:code").await;
+    assert_eq!(offered(&listed).1[0].description, "Current model");
     app.close().await.unwrap();
 }

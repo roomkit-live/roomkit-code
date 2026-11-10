@@ -2,10 +2,12 @@
 
 ## Unreleased
 
-- A new connection lists the models it serves as soon as it is saved, as a
-  ChatGPT sign-in does: choose one to create an agent, instead of typing its
-  ID. `/model` lists the current agent's models and switches it to another;
-  `/model <model-id>` sets one by its ID.
+- Models are chosen from the list their connection serves, instead of typing
+  their ID: a new connection lists them once saved, as a ChatGPT sign-in does;
+  in `/agents`, **+ Add agent** lists the chosen connection's models before
+  the form, and an agent's **Change model** lists its own. `/model` lists the
+  current agent's models and switches it to another; `/model <model-id>` sets
+  one by its ID. **Type a model ID** remains for a model no list shows.
 
 - The agent's tools no longer mislead it. A missing file reads `no such file
   or directory: src/absent.rs` instead of `Tool 'read' failed (ToolIOError)`;

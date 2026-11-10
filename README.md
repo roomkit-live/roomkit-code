@@ -342,15 +342,21 @@ Choosing another authentication mode removes the stored key from that profile.
 Saving a new connection lists the models it serves, and choosing one opens the
 form of an agent using it; **Test connection and list models** lists them again.
 The listing is a bounded `GET /models` request (`/v1/models` for Anthropic) with
-no redirects; it sends no conversation. Some compatible servers do not implement
-discovery: the connection is saved all the same, and model identifiers can
-always be entered manually. Subscriptions have their own entries:
+no redirects; it sends no conversation. Every list ends with **Type a model ID**,
+for a model it does not show. Some compatible servers do not implement
+discovery: the connection is saved all the same, and the model's ID is typed in
+the agent's form. Subscriptions have their own entries:
 [OpenCode Go](#opencode-go) and [Sign in with ChatGPT](#sign-in-with-chatgpt).
 
 **/model** lists the models of the current agent's connection and switches the
 agent to the one you choose; `/model <model-id>` sets one by its ID, listed or
 not. The agent keeps its other settings, the context capacity included, and the
 conversation.
+
+In **/agents**, **+ Add agent** asks for the connection when there are several,
+lists that connection's models, then opens the form of an agent using the one
+you choose. An agent's **Change model** lists its connection's models and opens
+its form with the one you choose, its other settings unchanged.
 
 **/agents** manages the interlocutors. Each has a stable ID, display name,
 provider, model, optional context capacity and output limit, additional instructions, selected
@@ -953,7 +959,8 @@ Open `/providers`, choose **Connect OpenCode Go**, and paste the API key from
 your [OpenCode console](https://opencode.ai/console). The connection calls
 `https://opencode.ai/inference/go/openai/v1` and nowhere else. Once saved, it
 lists the paid models Go serves over Chat Completions; choose one to create an
-agent, and `/model` to switch an agent to another. Free models answer only OpenCode's own client, and the
+agent. **+ Add agent** and **Change model** in `/agents`, and `/model`, list them
+too. Free models answer only OpenCode's own client, and the
 models Go serves over the Responses, Anthropic or Gemini APIs are not offered yet.
 
 Every request carries the agent's cache key, the same for that agent in this

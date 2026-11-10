@@ -164,7 +164,10 @@ async fn connect_and_edit(catalogue: &Catalogue) {
     assert_eq!(fields, ["label", "key", "timeout"]);
     // Saved, it offers the models it can call, listed with its key.
     let connected = submit(&app, form(&connect), &[("key", " go-test-key\n")]).await;
-    assert_eq!(offered(&connected), ["model:opencode-go-1:kimi-k3"]);
+    assert_eq!(
+        offered(&connected),
+        ["model:opencode-go-1:kimi-k3", "typed:opencode-go-1"]
+    );
     assert_eq!(
         *catalogue.authorizations.lock().unwrap(),
         ["Bearer go-test-key"]
@@ -193,7 +196,10 @@ async fn connect_and_edit(catalogue: &Catalogue) {
     // A second subscription takes the next ID.
     let second = providers(&app, "subscription:opencode-go").await;
     let connected_again = submit(&app, form(&second), &[("key", "other-key")]).await;
-    assert_eq!(offered(&connected_again), ["model:opencode-go-2:kimi-k3"]);
+    assert_eq!(
+        offered(&connected_again),
+        ["model:opencode-go-2:kimi-k3", "typed:opencode-go-2"]
+    );
     assert_eq!(
         saved(&settings, "opencode-go-2")["authentication"]["key"],
         "other-key"

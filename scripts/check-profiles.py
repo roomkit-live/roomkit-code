@@ -176,6 +176,11 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
     def add_agent(identifier, label, model):
         after_turn("/agents", "Agents · global".encode())
         offset = send(b"\r")
+        # + Add agent lists the one connection's models; these are typed.
+        wait_for(b"New agent", offset)
+        wait_for(b"fixture-discovered", offset)
+        send("Type a model ID")
+        offset = send(b"\r")
         wait_for(b"Agent profile", offset)
         fields([identifier, label, None, model, "32768", None, None, "Fixture instructions", "read"])
         save()
@@ -273,6 +278,19 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         offset = send(b"\x1b")
         # The form is closed only once the composer shows again.
         wait_for(b"Enter send", offset)
+        # An agent's model is chosen from its connection's list, in its form.
+        command("/agents list", "Agents · global".encode())
+        send("First agent")
+        offset = send(b"\r")
+        wait_for(b"Change model", offset)
+        send("Change model")
+        offset = send(b"\r")
+        wait_for("First agent · choose a model".encode(), offset)
+        offset = send(b"\r")
+        wait_for(b"Agent profile", offset)
+        wait_for(b"fixture-discovered", offset)
+        offset = send(b"\x1b")
+        wait_for(b"Enter send", offset)
         assert secret.encode() not in captured
         # Agents are global by default: shared by every project, selected here.
         agents = json.loads((state / "agents.json").read_text())
@@ -322,4 +340,4 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         server.shutdown()
         server.server_close()
 
-print("Profile PTY checks passed: account menus, bootstrap, masked credentials, persistent forms, two agents, shared history, discovery, listing, confirmed deletion and cancellation.")
+print("Profile PTY checks passed: account menus, bootstrap, masked credentials, persistent forms, two agents from a model list, shared history, discovery, changing a model from the list, listing, confirmed deletion and cancellation.")

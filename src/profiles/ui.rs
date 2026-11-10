@@ -341,9 +341,10 @@ impl Profiles {
                         let title = "Connection successful · choose a model to create an agent";
                         self.creation_choices(&current, &provider, title).await
                     }
-                    ("providers", "model") => {
+                    // A listed model, or none to type one (`typed`).
+                    ("providers", "model" | "typed") => {
                         if !state.providers.value.profiles.contains_key(id)
-                            || model.is_empty()
+                            || model.is_empty() != (action == "typed")
                             || model.len() > 256
                         {
                             return Err("Invalid provider/model selection".into());
@@ -357,6 +358,19 @@ impl Profiles {
                         Ok(open_form(&mut state, &current, form, Target::Agent(None)))
                     }
                     ("agents", "") => Ok(agent_choices(&state, &current)),
+                    ("agents", "new") => self.new_agent(state, current, id).await,
+                    ("agents", "models") => self.agent_models(state, current, id).await,
+                    ("agents", "use-model") => {
+                        let mut agent = state.agent(id).ok_or("Unknown agent")?;
+                        if model.is_empty() || model.len() > 256 {
+                            return Err("Invalid agent/model selection".into());
+                        }
+                        agent.model = model.into();
+                        let target = Target::Agent(Some(agent.id.clone()));
+                        let id = uuid::Uuid::new_v4().to_string();
+                        let form = agent_form(Some(&agent), &state, id, None)?;
+                        Ok(open_form(&mut state, &current, form, target))
+                    }
                     ("agents", "open") => {
                         let agent = state.agent(id).ok_or("Unknown agent")?;
                         Ok(choices(
@@ -368,6 +382,11 @@ impl Profiles {
                                     format!("select:{id}"),
                                     "Select agent",
                                     format!("{} · {}", agent.provider, agent.model),
+                                ),
+                                choice(
+                                    format!("models:{id}"),
+                                    "Change model",
+                                    "Choose among the models its connection serves",
                                 ),
                                 choice(
                                     format!("edit:{id}"),
@@ -571,9 +590,9 @@ pub(super) fn provider_choices(state: &State, current: &SessionConfig) -> Comman
 }
 fn agent_choices(state: &State, current: &SessionConfig) -> CommandResult {
     let mut entries = vec![choice(
-        "add",
+        "new",
         "+ Add agent",
-        "Choose its provider, model, instructions and tools",
+        "Choose its connection and model, then its instructions and tools",
     )];
     for (agent, scope) in state.agents() {
         entries.push(choice(
