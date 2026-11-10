@@ -1,8 +1,10 @@
 //! User connections and project agent composition, independent of terminal widgets.
 mod catalog;
 mod deletion;
+mod discovery;
 mod mcp;
 pub(crate) mod model;
+mod provider;
 mod reasoning;
 pub(crate) mod sidebar;
 mod skills;
@@ -34,10 +36,6 @@ pub(crate) use mcp::McpTools;
 use model::{Agent, Authentication, PROJECT_SCHEMA, Project, Provider, Providers, TOOLS};
 use slot::AgentSlot;
 use store::Document;
-
-/// The name the OpenAI provider reports for the usage it measures, which a
-/// view's model must carry for its measurements: Python's class name.
-const PROVIDER_NAME: &str = "OpenAIAIProvider";
 
 pub(crate) struct Profiles {
     pub(crate) policy: crate::permissions::Policy,
@@ -107,8 +105,9 @@ fn cache_routing(
 /// the kit's catalogue's window for its model, or the input past which the
 /// catalogue's price for it rises when that is smaller (HITL a2daedfe,
 /// db06dd3d). None without a window: the agent keeps its window of messages.
-fn ceiling(profile: &Agent) -> Option<u64> {
-    let listed = <roomkit_openai::OpenAiAiProvider as roomkit_ai::AiProvider>::available_models()
+fn ceiling(profile: &Agent, kind: crate::providers::ProviderKind) -> Option<u64> {
+    let listed = kind
+        .models()
         .into_iter()
         .find(|entry| entry.id == profile.model);
     let window = profile
@@ -122,6 +121,7 @@ fn ceiling(profile: &Agent) -> Option<u64> {
 
 /// `[provider.pricing]`: the list price of `model` on `base_url`.
 struct ConfiguredPrice {
+    kind: crate::providers::ProviderKind,
     base_url: String,
     model: String,
     pricing: roomkit_ai::ModelPricing,
@@ -136,13 +136,19 @@ fn list_price(
     model: &str,
     configured: Option<&ConfiguredPrice>,
 ) -> Option<roomkit_ai::ModelPricing> {
-    <roomkit_openai::OpenAiAiProvider as roomkit_ai::AiProvider>::available_models()
+    connection
+        .kind
+        .models()
         .into_iter()
         .find(|entry| entry.id == model)
         .and_then(|entry| entry.pricing)
         .or_else(|| {
             configured
-                .filter(|price| price.base_url == connection.base_url && price.model == model)
+                .filter(|price| {
+                    price.kind == connection.kind
+                        && price.base_url == connection.base_url
+                        && price.model == model
+                })
                 .map(|price| price.pricing.clone())
         })
 }
@@ -223,6 +229,7 @@ impl Profiles {
                 pending_delete: None,
                 setup_error: None,
                 configured_price: settings.pricing.clone().map(|pricing| ConfiguredPrice {
+                    kind: settings.provider,
                     base_url: settings.base_url.clone(),
                     model: settings.model.clone(),
                     pricing,
@@ -278,65 +285,7 @@ impl Profiles {
     ) -> Result<(CodeAgent, Inventory), String> {
         profile.validate()?;
         provider.validate()?;
-        let config = match &provider.authentication {
-            Authentication::ChatGpt { account } => {
-                let connected = self
-                    .accounts
-                    .auth
-                    .accounts()
-                    .map_err(|e| e.to_string())?
-                    .into_iter()
-                    .find(|a| &a.id == account)
-                    .ok_or("ChatGPT account not found; open /providers")?;
-                if !connected.connected {
-                    return Err("Sign in to this ChatGPT account with /providers".into());
-                }
-                if !connected.plan_usage {
-                    return Err("Authorize ChatGPT plan usage with /providers".into());
-                }
-                // An agent's requests share their prompt's start: one key
-                // routes them to one prompt cache. Without it, a turn's later
-                // steps mostly missed it too (RMK-1481).
-                let (extra_body, headers) = cache_routing(&self.workspace, &profile.id);
-                roomkit_openai::OpenAiConfig {
-                    base_url: Some(roomkit_auth::CHATGPT_API_ROOT.into()),
-                    api: roomkit_openai::OpenAiApi::Responses,
-                    tool_namespace: Some((
-                        "functions".into(),
-                        "Tools available to this assistant".into(),
-                    )),
-                    token_source: Some(Arc::new(crate::accounts::Credential {
-                        auth: self.accounts.auth.clone(),
-                        account: account.clone(),
-                    })),
-                    extra_body: Some(extra_body),
-                    default_headers: Some(headers),
-                    ..roomkit_openai::OpenAiConfig::new("", &profile.model)
-                }
-            }
-            _ => roomkit_openai::OpenAiConfig {
-                base_url: Some(provider.base_url.clone()),
-                ..roomkit_openai::OpenAiConfig::new(provider.authentication.key()?, &profile.model)
-            },
-        };
-        let config = roomkit_openai::OpenAiConfig {
-            timeout: std::time::Duration::from_secs(provider.timeout_seconds),
-            vision: profile.vision,
-            reasoning_effort: profile.reasoning_effort.clone(),
-            // An effort is the person's choice, and every turn here has tools:
-            // left unstated, the kit would drop it from each of them behind a
-            // base URL. On OpenAI's own endpoint its catalogue still decides for
-            // the models it tags.
-            supports_reasoning_effort_with_tools: Some(true),
-            thinking_field: reasoning::thinking_field(&provider.base_url, &profile.model),
-            // No cap unless the agent sets one: the endpoint decides how long
-            // a reply may be, as each model has its own limit.
-            max_tokens: profile.max_output_tokens,
-            // The application sends no temperature, as before: the endpoint's
-            // default applies, and a model that refuses one is never sent it.
-            supports_custom_temperature: Some(false),
-            ..config
-        };
+        let provider_instance = self.generation_provider(profile, provider)?;
         let (skills, skill_roots) = {
             let catalogue = self.skill_catalogue.read().await;
             (
@@ -355,13 +304,13 @@ impl Profiles {
             delegation: !self.unattended,
             policy: self.policy.clone(),
             images: self.images.clone(),
-            ceiling: ceiling(profile),
+            ceiling: ceiling(profile, provider.kind),
         };
         let created = crate::agent::create(
             &self.workspace,
             &self.resources,
             profile,
-            config,
+            provider_instance,
             extensions,
         )
         .await
@@ -369,7 +318,7 @@ impl Profiles {
             |_| "Could not configure this agent; verify its provider, credential and workspace",
         )?;
         let compactions = &self.resources.compactions;
-        compactions.set_bounded(&profile.id, ceiling(profile).is_some());
+        compactions.set_bounded(&profile.id, ceiling(profile, provider.kind).is_some());
         Ok(created)
     }
 
@@ -450,9 +399,16 @@ impl State {
             env!("CARGO_PKG_NAME").into(),
         );
         if let Some(profile) = agent {
+            let kind = self
+                .providers
+                .value
+                .profiles
+                .get(&profile.provider)
+                .map(|p| p.kind)
+                .unwrap_or_default();
             // Match the engine's usage identity, including Responses over OAuth.
             view.model = Some(
-                ModelInfo::new(PROVIDER_NAME, profile.model.clone()).with_effort(
+                ModelInfo::new(kind.name(), profile.model.clone()).with_effort(
                     profile
                         .reasoning_effort
                         .clone()
@@ -553,6 +509,7 @@ mod tests {
 
     fn connection(authentication: Authentication) -> Provider {
         Provider {
+            kind: crate::providers::ProviderKind::OpenAi,
             id: "local".into(),
             label: "Local".into(),
             base_url: "http://localhost:8000/v1".into(),
@@ -564,6 +521,7 @@ mod tests {
     fn configured(model: &str) -> ConfiguredPrice {
         let verified = roomkit_ai::Date::new(2026, 11, 6).unwrap();
         ConfiguredPrice {
+            kind: crate::providers::ProviderKind::OpenAi,
             base_url: "http://localhost:8000/v1".into(),
             model: model.into(),
             pricing: roomkit_ai::ModelPricing::new(0.5, 1.5, verified).unwrap(),

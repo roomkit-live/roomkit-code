@@ -77,7 +77,7 @@ pub(crate) async fn run(settings: Settings, prompt: Prompt) -> Result<ExitCode> 
     // Listen first: a signal while the application opens keeps the message
     // from being sent, and the launch still closes what it opened.
     let signals = listen()?;
-    let api_key = std::env::var("ROOMKIT_API_KEY").unwrap_or_default();
+    let api_key = settings.initial_api_key();
     let (app, first) = open(&settings, api_key).await?;
     let progress = watcher(&app, &settings, &first, prompt.json).await;
     let (client, host) = connection(QUEUE);

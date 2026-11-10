@@ -64,6 +64,8 @@ impl Authentication {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Provider {
+    #[serde(default)]
+    pub kind: crate::providers::ProviderKind,
     pub id: String,
     pub label: String,
     pub base_url: String,
@@ -195,7 +197,8 @@ impl Provider {
             return Err("Timeout must be between 1 and 86400 seconds".into());
         }
         if let Authentication::ChatGpt { account } = &self.authentication
-            && (self.base_url != roomkit_auth::CHATGPT_API_ROOT
+            && (self.kind != crate::providers::ProviderKind::OpenAi
+                || self.base_url != roomkit_auth::CHATGPT_API_ROOT
                 || uuid::Uuid::parse_str(account).is_err())
         {
             return Err(
@@ -302,3 +305,15 @@ impl Agent {
 }
 
 pub(crate) const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn existing_connections_without_a_kind_keep_the_openai_protocol() {
+        let value = serde_json::json!({"id":"local", "label":"Local", "base_url":"http://localhost:8000/v1", "authentication":{"kind":"none"}, "timeout_seconds":600});
+        assert!(
+            serde_json::from_value::<super::Provider>(value)
+                .is_ok_and(|p| p.kind == crate::providers::ProviderKind::OpenAi)
+        );
+    }
+}

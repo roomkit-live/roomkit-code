@@ -196,6 +196,7 @@ impl Tool for Hanging {
             parameters: json!({"type": "object"}),
             tags: Vec::new(),
             changes_state: false,
+            defer_loading: false,
         }
     }
 

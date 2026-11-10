@@ -19,7 +19,7 @@ async fn next(client: &Client) -> Event {
     .await
     .unwrap()
 }
-async fn attach(
+pub(super) async fn attach(
     app: &Application,
     workspace: &std::path::Path,
 ) -> (
@@ -39,7 +39,7 @@ async fn attach(
     assert!(matches!(next(&client).await, Event::Snapshot(_)));
     (client, task)
 }
-fn request(app: &Application, command: Command) -> Request {
+pub(super) fn request(app: &Application, command: Command) -> Request {
     Request::new(
         RequestId::new(91),
         OperationId::new(uuid::Uuid::new_v4().to_string()),
@@ -47,7 +47,7 @@ fn request(app: &Application, command: Command) -> Request {
         command,
     )
 }
-async fn completed(client: &Client) -> Vec<Event> {
+pub(super) async fn completed(client: &Client) -> Vec<Event> {
     let mut events = vec![];
     loop {
         let event = next(client).await;

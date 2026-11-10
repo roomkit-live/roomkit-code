@@ -58,6 +58,7 @@ async fn opening_account_menus_does_not_start_login_or_change_existing_connectio
 #[test]
 fn oauth_accounts_cannot_forward_credentials_to_a_custom_endpoint_or_static_key_path() {
     let mut provider = Provider {
+        kind: crate::providers::ProviderKind::OpenAi,
         id: "account-provider".into(),
         label: "ChatGPT".into(),
         base_url: roomkit_auth::CHATGPT_API_ROOT.into(),
@@ -67,6 +68,9 @@ fn oauth_accounts_cannot_forward_credentials_to_a_custom_endpoint_or_static_key_
         timeout_seconds: 600,
     };
     assert!(provider.validate().is_ok());
+    provider.kind = crate::providers::ProviderKind::Anthropic;
+    assert!(provider.validate().is_err());
+    provider.kind = crate::providers::ProviderKind::OpenAi;
     assert!(provider.authentication.key().is_err());
     let saved = serde_json::to_value(&provider).unwrap();
     assert_eq!(saved["authentication"].as_object().unwrap().len(), 2);

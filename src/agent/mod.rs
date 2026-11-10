@@ -1,12 +1,12 @@
 //! The tools an agent is assembled with, and their assembly; `preamble`
 //! builds its system prompt and measures what its requests carry.
 
+use crate::providers::CodeProvider;
 use roomkit::model::{ChannelId, RetryPolicy};
 use roomkit_ai::{
     AiChannel, AiChannelOptions, AiTool, ImageResolver, SkillRegistry, Tool, ToolEntry,
     ToolHandler, compose_tool_handlers,
 };
-use roomkit_openai::{OpenAiAiProvider, OpenAiConfig};
 use roomkit_tools_code::CodeOutlineTool;
 use roomkit_tools_docs::{DocsBackend, DocsListTool, DocsReadTool, DocsSearchTool};
 use roomkit_tools_fs::{
@@ -37,8 +37,8 @@ use preamble::preamble;
 pub(crate) use preamble::{Composition, Inventory};
 
 /// The agent the application runs: an AI channel answering through an
-/// OpenAI-compatible endpoint.
-pub(crate) type CodeAgent = AiChannel<OpenAiAiProvider>;
+/// configured native provider.
+pub(crate) type CodeAgent = AiChannel<CodeProvider>;
 
 /// How an agent's generation that failed before its provider handed anything
 /// is tried again: the engine's default, 3 retries 1, 2 and 4 seconds apart, on
@@ -193,7 +193,7 @@ pub(crate) async fn create(
     root: &std::path::Path,
     resources: &Resources,
     profile: &Agent,
-    provider: OpenAiConfig,
+    provider: CodeProvider,
     extensions: Extensions,
 ) -> Result<(CodeAgent, Inventory)> {
     profile.validate()?;
@@ -255,14 +255,14 @@ pub(crate) async fn create(
         max_tool_rounds,
         max_context_events: HISTORY,
         retry_policy: Some(retry_policy()),
-        memory: memory((ceiling, &profile.id), &provider, resources)?,
+        reasoning_effort: profile.reasoning_effort.clone(),
+        memory: memory((ceiling, &profile.id), &provider, resources),
         image_resolver: Some(images),
         // Native tools stay declared; only MCP tools wait behind find_tools.
         tool_search: Some(preamble.hides_mcp),
         tool_search_pinned: preamble.pinned,
         ..AiChannelOptions::default()
     };
-    let provider = OpenAiAiProvider::new(provider)?;
     let agent = AiChannel::new(ChannelId::new(&profile.id)?, provider, options)?;
     Ok((agent, preamble.inventory))
 }
@@ -272,13 +272,11 @@ pub(crate) async fn create(
 /// outside its turns; none keeps its window of `HISTORY` messages.
 fn memory(
     (ceiling, agent): (Option<u64>, &str),
-    provider: &OpenAiConfig,
+    provider: &CodeProvider,
     resources: &Resources,
-) -> Result<Option<Arc<dyn roomkit_ai::memory::MemoryProvider>>> {
-    let Some(ceiling) = ceiling else {
-        return Ok(None);
-    };
-    let summarizer = OpenAiAiProvider::new(provider.clone())?;
+) -> Option<Arc<dyn roomkit_ai::memory::MemoryProvider>> {
+    let ceiling = ceiling?;
+    let summarizer = provider.clone();
     let compactions = resources.compactions.clone();
     let memory = Arc::new(crate::compaction::TieredMemory::new(
         summarizer,
@@ -286,7 +284,7 @@ fn memory(
         compactions.clone(),
     ));
     compactions.register(agent, memory.clone());
-    Ok(Some(memory))
+    Some(memory)
 }
 
 /// The tools an unattended launch leaves out, whatever the profile selects:

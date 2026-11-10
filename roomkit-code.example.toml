@@ -1,16 +1,18 @@
 # Explicitly select with: roomkit-code --config roomkit-code.local.toml
 # Keep personal configuration in an ignored *.local.toml file.
 [provider]
+kind = "openai" # openai or anthropic; omitted preserves OpenAI-compatible behavior
 base_url = "http://localhost:8000/v1"
 model = "your-model"
 timeout_seconds = 600 # longest wait between two reads of a model answer
 # context_window = 32768 # actual server capacity; omitted means unknown
-# max_output_tokens = 4096 # most tokens one reply may write; omitted sends no limit
+# max_output_tokens = 4096 # omitted: Anthropic uses 1024; OpenAI decides at the server
 # reasoning_effort = "low" # low, medium, high, xhigh, max; omitted: the provider's default
-# API keys are read only from ROOMKIT_API_KEY, never from this file.
+# Anthropic: kind = "anthropic", base_url = "https://api.anthropic.com", model = "claude-sonnet-5-5".
+# API keys come from ROOMKIT_API_KEY (or ANTHROPIC_API_KEY for Anthropic), never this file.
 
 # The model's list price, which shows the conversation's cost. The kit already
-# prices OpenAI's models; this prices this server's model, per million tokens.
+# prices OpenAI and Anthropic models; this prices this server's model, per million tokens.
 # [provider.pricing]
 # input_per_million = 0.50
 # output_per_million = 1.50

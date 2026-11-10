@@ -6,7 +6,7 @@ terminal interface, conversation engine, authentication and tool implementations
 own repositories.
 
 This version can **explore, plan, edit and test projects**, with Ask/Plan/Yolo permissions.
-It supports OpenAI-compatible Chat Completions endpoints and Sign in with
+It supports native Anthropic Messages, OpenAI-compatible Chat Completions endpoints and Sign in with
 ChatGPT through Responses, with streamed answers, tool details,
 activity timing, mouse selection, configurable appearance and SQLite history.
 Linux and macOS are the supported platforms. The repositories are currently
@@ -26,6 +26,22 @@ cargo run --locked -- /path/to/project
 
 You can also launch without a URL/model and configure everything using
 **/providers**, then **/agents**. Messages are disabled until an agent is ready.
+
+For Anthropic, choose **Anthropic** as the provider type in **/providers**,
+then select a model in **/agents**. An empty API base uses
+`https://api.anthropic.com`; a custom Messages gateway uses its API root without
+`/v1`. Existing connections keep the OpenAI-compatible protocol.
+
+```sh
+export ANTHROPIC_API_KEY=your-key
+cargo run --locked -- /path/to/project --provider anthropic \
+  --model claude-sonnet-5-5 --max-output-tokens 8192
+```
+
+`--provider` (or `ROOMKIT_PROVIDER`) selects the protocol for the first agent.
+The explicit TOML equivalent is `[provider] kind = "anthropic"`.
+`ROOMKIT_API_KEY` takes precedence over `ANTHROPIC_API_KEY` when bootstrapping
+an Anthropic connection. Saved connections retain their selected authentication.
 
 The selected model must support function calling and the provider's streaming protocol.
 API requests go to the selected endpoint. File contents returned by tools can
@@ -317,13 +333,13 @@ These files contain counters, not conversation content or resume arguments.
 
 ## Providers and agents
 
-**/providers** manages connections shared across your projects. Add a name, API
+**/providers** manages connections shared across your projects. Add a name, provider type, API
 base URL, timeout and authentication: no key, a stored key, or a named environment
 variable. Stored keys live in a private local file (0600), not an OS keychain;
 secret fields are masked, never prefilled, never echoed in diagnostics and never
 stored in chat history. Leaving a stored-key field blank preserves that key.
 Choosing another authentication mode removes the stored key from that profile.
-Testing a connection makes a bounded `GET /models` request with no redirects;
+Testing a connection makes a bounded `GET /models` request (`/v1/models` for Anthropic) with no redirects;
 it sends no conversation. Some compatible servers do not implement discovery,
 so model identifiers can always be entered manually.
 
@@ -721,15 +737,18 @@ new execution clears its turn totals. Changing the model or conversation clears
 the previous-context fallback too.
 
 The connection's **Timeout** in `/providers` bounds how long a model request
-waits for the endpoint between two reads of its answer, and for each write: an
+waits for the endpoint between two reads of its answer: an
 answer that keeps streaming is never cut. Connecting is bounded at 5 seconds.
 The initial TOML/CLI timeout, context and output-limit flags
 remain available when bootstrapping a new project. The application defaults to 600 seconds;
 the library's own default is unchanged. Chat Completions requests send no
-temperature, so the endpoint's default applies, and no output limit: each model
-has its own. Set the agent's **Max output tokens** in `/agents` to cap how many
+temperature, so the endpoint's default applies. OpenAI-compatible connections
+send no output limit by default; each model has its own. Set the agent's **Max output tokens** in `/agents` to cap how many
 tokens one reply may write; it is sent as `max_tokens`, or as
 `max_completion_tokens` to the OpenAI models that take it, and zero is refused.
+Anthropic requires `max_tokens`: an empty output limit uses the native provider’s
+1024-token default; set a larger limit for longer edits. Its prompt caching,
+usage, model prices and context compaction use the Anthropic provider.
 ChatGPT sign-in connections send no limit, whatever the setting. Failures
 explain timeout, access, rate limit, server and protocol errors without echoing
 raw provider responses or keys. A request that fails before its answer begins
@@ -854,6 +873,12 @@ Tests use temporary projects, local HTTP fixtures and a stdio MCP fixture, with
 no model service or credentials. They exercise real file tools, streaming, persistence and terminal
 cleanup. See [CONTRIBUTING.md](CONTRIBUTING.md) for dependency and CI setup.
 
+To opt into a paid Anthropic check, build with `cargo build --locked`, set
+`ANTHROPIC_API_KEY`, and run `python3 scripts/check-anthropic-live.py`. It checks
+native launch, file tools and session resume in a disposable project, then
+removes its stored credential. `ANTHROPIC_TEST_MODEL` overrides its default
+`claude-sonnet-5-5` model. This check is excluded from the normal gates and CI.
+
 MIT licensed. This is an initial development version, not a published release.
 
 ## Sign in with ChatGPT
@@ -946,7 +971,7 @@ RoomKit Code validates the image before sending it, and stores it outside the
 workspace in the private project state directory. `/resume` can reuse those
 attachments; the model receives the newest four images within its conversation
 history. Older images retain text mentions. Missing image files produce an
-unavailable-image marker. This applies to OpenAI-compatible Chat Completions
+unavailable-image marker. This applies to native Anthropic Messages and OpenAI-compatible Chat Completions
 and ChatGPT Responses connections; no image tool is needed for native vision.
 
 Image paste requires the native clipboard of the machine running the terminal

@@ -570,3 +570,49 @@ fn the_first_agent_s_reasoning_effort_is_explicit_and_checked() {
     );
     assert!(Cli::try_parse_from(["roomkit-code", workspace, "--reasoning-effort", "max"]).is_ok());
 }
+
+#[test]
+fn anthropic_launch_uses_the_native_endpoint_and_cli_overrides_the_file() {
+    use crate::providers::ProviderKind;
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("settings.toml");
+    std::fs::write(
+        &config,
+        "[provider]\nkind = 'anthropic'\nmodel = 'claude-sonnet-5-5'\n",
+    )
+    .unwrap();
+    let parsed = Cli::try_parse_from([
+        "roomkit-code",
+        root.path().to_str().unwrap(),
+        "--config",
+        config.to_str().unwrap(),
+    ])
+    .unwrap();
+    let settings = Settings::load(&parsed).unwrap();
+    assert_eq!(settings.provider, ProviderKind::Anthropic);
+    assert_eq!(settings.base_url, "https://api.anthropic.com");
+    assert_eq!(settings.model, "claude-sonnet-5-5");
+    let parsed = Cli::try_parse_from([
+        "roomkit-code",
+        root.path().to_str().unwrap(),
+        "--config",
+        config.to_str().unwrap(),
+        "--provider",
+        "openai",
+        "--base-url",
+        "http://localhost:8000/v1",
+    ])
+    .unwrap();
+    assert_eq!(
+        Settings::load(&parsed).unwrap().provider,
+        ProviderKind::OpenAi
+    );
+    assert!(Cli::try_parse_from(["roomkit-code", "--provider", "unknown"]).is_err());
+}
+
+#[test]
+fn an_unconfigured_anthropic_launch_can_open_the_provider_menu() {
+    let parsed = Cli::try_parse_from(["roomkit-code", "--provider", "anthropic"]).unwrap();
+    let settings = Settings::load(&parsed).unwrap();
+    assert!(settings.base_url.is_empty() && settings.model.is_empty());
+}

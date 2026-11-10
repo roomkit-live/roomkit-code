@@ -1876,6 +1876,7 @@ mod global_agents;
 mod processes;
 
 mod accounts;
+mod anthropic;
 mod profile_deletion;
 
 #[tokio::test]

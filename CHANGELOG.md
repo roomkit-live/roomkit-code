@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Native Anthropic connections are available in `/providers`, `--provider` and
+  TOML settings, including streaming, tools, model discovery, usage pricing and
+  conversation compaction. Existing connections keep the OpenAI protocol.
+
 - A tool call whose model writes the intent without its leading underscore,
   `roomkit_intent`, runs with that intent shown, instead of being refused as an
   unknown argument and written again (roomkit-rs f5a56a9).

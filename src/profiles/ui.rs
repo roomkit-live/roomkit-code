@@ -3,7 +3,9 @@ use roomkit_tui::protocol::{
 };
 use roomkit_tui_engine::CommandResult;
 
+use super::discovery::discover;
 use super::*;
+use crate::providers::ProviderKind;
 use catalog::Scope;
 
 pub(super) struct Pending {
@@ -181,6 +183,7 @@ impl Profiles {
                         state.providers.reload()?;
                         let provider_id = format!("chatgpt-{id}");
                         let provider = Provider {
+                            kind: ProviderKind::OpenAi,
                             id: provider_id.clone(),
                             label: format!(
                                 "ChatGPT · {}",
@@ -556,6 +559,7 @@ fn next_id(prefix: &str, occupied: impl Fn(&str) -> bool) -> String {
 
 fn provider_form(existing: Option<&Provider>, state: &State, id: String) -> FormSpec {
     let default = Provider {
+        kind: ProviderKind::OpenAi,
         id: next_id("provider", |id| {
             state.providers.value.profiles.contains_key(id)
         }),
@@ -574,7 +578,7 @@ fn provider_form(existing: Option<&Provider>, state: &State, id: String) -> Form
     FormSpec::new(
         id,
         "providers",
-        "Provider connection · OpenAI-compatible",
+        "Provider connection",
         vec![
             field(
                 "id",
@@ -593,11 +597,24 @@ fn provider_form(existing: Option<&Provider>, state: &State, id: String) -> Form
                 FieldKind::Text,
             ),
             field(
+                "kind",
+                "Provider type",
+                p.kind.value(),
+                "The API protocol this connection uses",
+                true,
+                FieldKind::Choice {
+                    choices: vec![
+                        choice("openai", "OpenAI-compatible", "Chat Completions"),
+                        choice("anthropic", "Anthropic", "Native Messages API"),
+                    ],
+                },
+            ),
+            field(
                 "url",
                 "API base URL",
                 &p.base_url,
-                "API root including /v1 when required; no credentials in the URL",
-                true,
+                "OpenAI: include /v1 when required. Anthropic: empty uses https://api.anthropic.com",
+                false,
                 FieldKind::Text,
             ),
             field(
@@ -732,7 +749,7 @@ fn agent_form(
                 "Max output tokens",
                 a.max_output_tokens
                     .map_or_else(String::new, |n| n.to_string()),
-                "Most tokens one reply may write; empty sends no limit. Chat Completions connections only",
+                "Most tokens one reply may write; empty uses Anthropic’s 1024-token default or the OpenAI server default",
                 false,
                 FieldKind::Text,
             ),
@@ -846,10 +863,25 @@ fn parse_provider(
         }
         _ => return Err("Unknown authentication mode".into()),
     };
+    let kind = match value(values, "kind") {
+        "" => original
+            .and_then(|id| state.providers.value.profiles.get(id))
+            .map_or(ProviderKind::OpenAi, |p| p.kind),
+        "openai" => ProviderKind::OpenAi,
+        "anthropic" => ProviderKind::Anthropic,
+        _ => return Err("Choose OpenAI-compatible or Anthropic".into()),
+    };
+    let url = value(values, "url").trim().trim_end_matches('/');
     let provider = Provider {
+        kind,
         id: id.into(),
         label: value(values, "label").trim().into(),
-        base_url: value(values, "url").trim().trim_end_matches('/').into(),
+        base_url: if url.is_empty() {
+            kind.default_url()
+        } else {
+            url
+        }
+        .into(),
         authentication,
         timeout_seconds: value(values, "timeout")
             .trim()
@@ -925,70 +957,4 @@ fn parse_agent(
         };
     profile.validate()?;
     Ok((profile, scope))
-}
-
-async fn discover(provider: &Provider) -> Result<Vec<(String, Option<u64>)>, String> {
-    provider.validate()?;
-    let client = crate::http_client::builder()
-        .map_err(|_| "Cannot initialize connection check")?
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|_| "Cannot initialize connection check")?;
-    let mut request = client.get(format!(
-        "{}/models",
-        provider.base_url.trim_end_matches('/')
-    ));
-    let key = provider.authentication.key()?;
-    if !key.is_empty() {
-        request = request.bearer_auth(key);
-    }
-    let mut response = request
-        .send()
-        .await
-        .map_err(|_| "Connection failed; verify the URL, network and credential")?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "Model discovery returned HTTP {}; verify the URL and authentication (some servers do not support /models)",
-            response.status().as_u16()
-        ));
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|_| "Could not read model catalogue")?
-    {
-        if body.len() + chunk.len() > 1_048_576 {
-            return Err("Model catalogue exceeds 1 MiB".into());
-        }
-        body.extend_from_slice(&chunk);
-    }
-    let json: serde_json::Value = serde_json::from_slice(&body)
-        .map_err(|_| "Server did not return a JSON model catalogue")?;
-    let mut models = json
-        .get("data")
-        .and_then(serde_json::Value::as_array)
-        .ok_or("Server did not return a model list")?
-        .iter()
-        .filter_map(|model| {
-            Some((
-                model.get("id")?.as_str()?.to_owned(),
-                model
-                    .get("max_model_len")
-                    .and_then(serde_json::Value::as_u64),
-            ))
-        })
-        .filter(|(id, _)| !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control))
-        .take(500)
-        .collect::<Vec<_>>();
-    models.sort();
-    models.dedup_by(|a, b| a.0 == b.0);
-    if models.is_empty() {
-        return Err(
-            "Connection succeeded but no models were returned; enter a model manually in /agents"
-                .into(),
-        );
-    }
-    Ok(models)
 }

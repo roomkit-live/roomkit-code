@@ -200,7 +200,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         command("/providers", b"Providers")
         offset = send(b"\r")
         wait_for(b"Provider connection", offset)
-        fields(["fixture", "Fixture provider", f"http://127.0.0.1:{server.server_port}/v1", "<right>", secret, "", "30"])
+        fields(["fixture", "Fixture provider", None, f"http://127.0.0.1:{server.server_port}/v1", "<right>", secret, "", "30"])
         wait_for(b"Timeout (seconds) *: 30")
         assert secret.encode() not in captured, "Secret appeared in terminal output"
         # Saving an invisible form is disabled until the terminal is large enough.

@@ -226,7 +226,7 @@ async fn abandon(kit: &RoomKit<SqliteStore>, profiles: &Profiles) {
 const QUEUE: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 
 pub(crate) async fn run(settings: Settings) -> Result<()> {
-    let api_key = std::env::var("ROOMKIT_API_KEY").unwrap_or_default();
+    let api_key = settings.initial_api_key();
     let app = Application::open(&settings, api_key).await?;
     // Refuse an invalid attachment before entering alternate-screen mode.
     if let Err(error) = app.session().snapshot().await {

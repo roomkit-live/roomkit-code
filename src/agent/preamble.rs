@@ -369,6 +369,7 @@ mod tests {
             parameters: serde_json::json!({}),
             tags: Vec::new(),
             changes_state: false,
+            defer_loading: false,
         };
         let all: Vec<AiTool> = crate::profiles::model::TOOLS
             .iter()
@@ -462,6 +463,7 @@ mod tests {
             parameters: serde_json::json!({}),
             tags: Vec::new(),
             changes_state: false,
+            defer_loading: false,
         };
         let bare = instructions(&[], false, 120_000);
         assert!(!bare.contains("MCP tools are named"), "{bare}");
@@ -503,6 +505,7 @@ mod tests {
             parameters: serde_json::json!({}),
             tags: Vec::new(),
             changes_state: false,
+            defer_loading: false,
         };
         let declared = base_prompt(&profile, std::slice::from_ref(&shell), false, 120_000);
         assert!(
@@ -523,6 +526,7 @@ mod tests {
             parameters: serde_json::json!({"type": "object", "properties": {"a": {"type": "number"}}}),
             tags: Vec::new(),
             changes_state: false,
+            defer_loading: false,
         };
         let bare = tool.name.len() + tool.description.len() + tool.parameters.to_string().len();
         let sent = schema_chars(std::slice::from_ref(&tool), false);

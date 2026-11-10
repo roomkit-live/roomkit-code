@@ -89,6 +89,7 @@ fn add_first_agent(
     let id = format!("imported-{}", &digest[..12]);
     if !documents.providers.value.profiles.contains_key(&id) {
         let provider = Provider {
+            kind: settings.provider,
             id: id.clone(),
             label: "Imported connection".into(),
             base_url: settings.base_url.clone(),

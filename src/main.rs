@@ -24,6 +24,7 @@ mod permissions;
 mod plans;
 mod processes;
 mod profiles;
+mod providers;
 mod services;
 mod sessions;
 mod shell;

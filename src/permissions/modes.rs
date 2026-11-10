@@ -125,6 +125,7 @@ impl Tool for ModeTool {
                 }),
                 tags: Vec::new(),
                 changes_state: false,
+                defer_loading: false,
             }
         } else {
             AiTool {
@@ -140,6 +141,7 @@ impl Tool for ModeTool {
                 }),
                 tags: Vec::new(),
                 changes_state: false,
+                defer_loading: false,
             }
         }
     }

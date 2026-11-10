@@ -37,6 +37,9 @@ pub(crate) struct Cli {
     /// Explicit TOML configuration file (never loaded from the project implicitly).
     #[arg(long)]
     pub config: Option<PathBuf>,
+    /// Initial provider protocol; existing saved connections take precedence.
+    #[arg(long, env = "ROOMKIT_PROVIDER", value_enum)]
+    pub provider: Option<crate::providers::ProviderKind>,
     /// Initial API root for a project without agent profiles.
     #[arg(long, env = "ROOMKIT_BASE_URL", hide_env_values = true)]
     pub base_url: Option<String>,
@@ -49,7 +52,7 @@ pub(crate) struct Cli {
     /// Initial effective model context capacity in tokens.
     #[arg(long)]
     pub context_window: Option<u64>,
-    /// Initial limit on the tokens one model reply may write; none by default.
+    /// Initial reply token limit; Anthropic defaults to 1024, OpenAI has no cap.
     #[arg(long)]
     pub max_output_tokens: Option<u32>,
     /// Initial reasoning effort; the provider's default when omitted.
@@ -206,6 +209,7 @@ struct Permissions {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Provider {
+    kind: Option<crate::providers::ProviderKind>,
     base_url: Option<String>,
     model: Option<String>,
     timeout_seconds: Option<u64>,
@@ -314,6 +318,7 @@ pub(crate) struct Settings {
     /// Neither the flag nor its variable named the storage.
     pub default_storage: bool,
     pub session: Option<String>,
+    pub provider: crate::providers::ProviderKind,
     pub base_url: String,
     pub model: String,
     pub provider_timeout_seconds: u64,
@@ -336,6 +341,19 @@ pub(crate) struct Settings {
 }
 
 impl Settings {
+    /// Bootstrap credentials; saved profiles remain authoritative thereafter.
+    pub fn initial_api_key(&self) -> String {
+        std::env::var("ROOMKIT_API_KEY")
+            .or_else(|error| {
+                if self.provider == crate::providers::ProviderKind::Anthropic {
+                    std::env::var("ANTHROPIC_API_KEY")
+                } else {
+                    Err(error)
+                }
+            })
+            .unwrap_or_default()
+    }
+
     pub fn load(cli: &Cli) -> Result<Self> {
         let file = match &cli.config {
             Some(path) => {
@@ -347,7 +365,8 @@ impl Settings {
             }
             None => FileConfig::default(),
         };
-        let base_url = cli
+        let provider = cli.provider.or(file.provider.kind).unwrap_or_default();
+        let mut base_url = cli
             .base_url
             .clone()
             .or(file.provider.base_url)
@@ -371,6 +390,9 @@ impl Settings {
             .or(file.provider.model)
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_default();
+        if base_url.is_empty() && !model.is_empty() {
+            base_url = provider.default_url().into();
+        }
         if base_url.is_empty() != model.is_empty() {
             return Err(
                 "Supply both a base URL and model, or configure them with /providers and /agents"
@@ -517,6 +539,7 @@ impl Settings {
             default_storage: cli.state_dir.is_none(),
             session: cli.session.clone(),
             mode: cli.mode.unwrap_or(file.permissions.mode),
+            provider,
             base_url,
             model,
             provider_timeout_seconds,

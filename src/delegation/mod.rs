@@ -197,6 +197,7 @@ pub(crate) fn definitions() -> Vec<AiTool> {
         parameters: definition["parameters"].clone(),
         tags: Vec::new(),
         changes_state: false,
+        defer_loading: false,
     };
     vec![
         tool(),
