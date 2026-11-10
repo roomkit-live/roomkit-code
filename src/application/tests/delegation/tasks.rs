@@ -106,16 +106,13 @@ async fn a_finished_task_leaves_a_line_in_its_conversation() {
     server.abort();
 }
 
-/// A result past the kit's default bound comes back to the agent whole: a
-/// review of 4,492 characters came back cut at 4,000 (RMK-1617).
-#[tokio::test]
-async fn a_long_result_comes_back_whole() {
+/// What the agent that delegated is told when its worker's result is
+/// `answer`, which starts with [`RESULT`].
+async fn handed_back(answer: String) -> String {
     use super::spending::{priced_settings, reporting_server_answering};
 
-    const TAIL: &str = "THE_END_OF_THE_REVIEW";
     let project = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
-    let answer = format!("{RESULT}{}{TAIL}", "x".repeat(12_000));
     let (base, requests, server) = reporting_server_answering(false, answer).await;
     let settings = priced_settings(project.path(), state.path(), &base).await;
     let app = Application::open(&settings, String::new()).await.unwrap();
@@ -131,10 +128,31 @@ async fn a_long_result_comes_back_whole() {
         .find(|r| hands_back(r))
         .unwrap()
         .to_string();
-    assert!(told.contains(TAIL), "The result came back cut");
-    assert!(!told.contains("[...truncated]"));
     app.close().await.unwrap();
     server.abort();
+    told
+}
+
+/// A result comes back whole up to 20,000 characters, counted as characters
+/// and not bytes, and cut past them: a review of 4,492 characters came back
+/// cut at 4,000 (RMK-1617).
+#[tokio::test]
+async fn a_result_comes_back_whole_up_to_its_limit_and_is_cut_past_it() {
+    const LIMIT: usize = 20_000;
+    let answer = |chars: usize| format!("{RESULT}{}", "é".repeat(chars - RESULT.chars().count()));
+
+    let whole = answer(LIMIT);
+    let told = handed_back(whole.clone()).await;
+    assert!(told.contains(&whole), "The result came back cut");
+    assert!(!told.contains("[...truncated]"));
+
+    let past = answer(LIMIT + 1);
+    let told = handed_back(past.clone()).await;
+    assert!(
+        told.contains(&format!("{whole}\\n[...truncated]")),
+        "Not cut at the limit"
+    );
+    assert!(!told.contains(&past));
 }
 
 /// What `/tasks` with `arguments` opened in the view of `current`.

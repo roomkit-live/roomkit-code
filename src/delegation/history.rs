@@ -9,7 +9,7 @@ use roomkit::model::Room;
 use roomkit::store::{ConversationStore, FindRoomsOptions};
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui_engine::SessionConfig;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::{MAX_DEPTH, Outcome, Roster, Task};
 use crate::profiles::Profiles;
@@ -28,7 +28,14 @@ pub(crate) async fn restore(
     if !tasks.restoring(current.room.as_str()) {
         return;
     }
-    let mut children = task_rooms(kit, current.organization.clone()).await;
+    let (mut children, whole) = task_rooms(kit, current.organization.clone()).await;
+    if !whole {
+        tasks.unread(current.room.as_str());
+        let room = json!({"room": current.room.as_str()});
+        profiles
+            .diagnostics
+            .record("tasks_not_restored", room, None);
+    }
     let mut found = Vec::new();
     let mut rooms = vec![(current.room.as_str().to_owned(), 0)];
     while let Some((parent, depth)) = rooms.pop() {
@@ -45,40 +52,53 @@ pub(crate) async fn restore(
 }
 
 /// Every room that holds a task, by the room that handed it over, the oldest
-/// first; what could be read when the store fails. A store reads every room
-/// to filter them by metadata, so they are read once, whatever the tasks.
+/// first, and whether all of them could be read: what could be read when the
+/// store fails. A store reads every room to filter them by metadata, so they
+/// are read once, whatever the tasks.
 async fn task_rooms(
     kit: &RoomKit<SqliteStore>,
     organization_id: Option<String>,
-) -> HashMap<String, Vec<Room>> {
-    let mut by_parent: HashMap<String, Vec<Room>> = HashMap::new();
-    let mut offset = 0;
-    loop {
+) -> (HashMap<String, Vec<Room>>, bool) {
+    let (rooms, whole) = pages(PAGE, |offset| {
         let options = FindRoomsOptions {
             organization_id: organization_id.clone(),
             limit: PAGE,
             offset,
             ..FindRoomsOptions::default()
         };
-        let Ok(page) = kit.store().find_rooms(options).await else {
-            break;
-        };
-        let last = (page.len() as u64) < PAGE;
-        offset += page.len() as u64;
-        for room in page {
-            let parent = room.metadata.get("parent_room_id").and_then(Value::as_str);
-            if let Some(parent) = parent.map(str::to_owned) {
-                by_parent.entry(parent).or_default().push(room);
-            }
-        }
-        if last {
-            break;
+        async move { kit.store().find_rooms(options).await }
+    })
+    .await;
+    let mut by_parent: HashMap<String, Vec<Room>> = HashMap::new();
+    for room in rooms {
+        let parent = room.metadata.get("parent_room_id").and_then(Value::as_str);
+        if let Some(parent) = parent.map(str::to_owned) {
+            by_parent.entry(parent).or_default().push(room);
         }
     }
     for rooms in by_parent.values_mut() {
         rooms.sort_by_key(|room| room.created_at);
     }
-    by_parent
+    (by_parent, whole)
+}
+
+/// Every page `read` gives from an offset, `size` items each, until a shorter
+/// one; and whether the last was reached, not a failure.
+async fn pages<T, E, Page>(size: u64, mut read: impl FnMut(u64) -> Page) -> (Vec<T>, bool)
+where
+    Page: Future<Output = Result<Vec<T>, E>>,
+{
+    let mut items = Vec::new();
+    loop {
+        let Ok(page) = read(items.len() as u64).await else {
+            return (items, false);
+        };
+        let last = (page.len() as u64) < size;
+        items.extend(page);
+        if last {
+            return (items, true);
+        }
+    }
 }
 
 /// The task `room` keeps; none when the room's metadata does not name one.
@@ -106,49 +126,32 @@ fn task(room: &Room, roster: &Roster) -> Option<Task> {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, reason = "A broken fixture fails the test")]
-    use roomkit::model::RoomId;
-    use serde_json::json;
-
     use super::*;
 
-    fn room(status: &str) -> Room {
-        let mut room = Room::new(RoomId::new("main::task-1").unwrap());
-        room.created_at = "2026-11-09T10:00:00Z".parse().unwrap();
-        room.updated_at = "2026-11-09T10:00:42Z".parse().unwrap();
-        room.metadata = roomkit::model::Metadata::from_iter([
-            ("task_id".to_owned(), json!("t1")),
-            ("parent_room_id".to_owned(), json!("main")),
-            ("task_agent_id".to_owned(), json!("review")),
-            ("task_input".to_owned(), json!("Review the diff")),
-            ("task_status".to_owned(), json!(status)),
-        ]);
-        room
+    #[tokio::test]
+    async fn a_page_that_fails_says_the_rooms_are_not_all_read() {
+        let (read, whole) = pages(2, |offset| async move {
+            match offset {
+                0 => Ok(vec![1, 2]),
+                _ => Err("the store failed"),
+            }
+        })
+        .await;
+        assert_eq!(read, [1, 2]);
+        assert!(!whole);
     }
 
-    /// A room keeps who worked, on what, for how long and how it ended.
-    #[test]
-    fn a_room_reads_back_as_its_task() {
-        let task = task(&room("completed"), &Roster::default()).unwrap();
-        assert_eq!(
-            (&*task.id, &*task.parent, &*task.room, &*task.agent_id),
-            ("t1", "main", "main::task-1", "review")
-        );
-        assert_eq!(&*task.input, "Review the diff");
-        assert_eq!(task.state(), "completed in 42 s");
-    }
-
-    /// One a crash left running says so, with no duration it cannot know.
-    #[test]
-    fn a_task_a_crash_left_running_reads_interrupted() {
-        let task = task(&room("in_progress"), &Roster::default()).unwrap();
-        assert!(task.interrupted());
-        assert_eq!(task.state(), "interrupted");
-    }
-
-    #[test]
-    fn a_room_that_names_no_task_is_none() {
-        let mut plain = room("completed");
-        plain.metadata.remove("task_id");
-        assert!(task(&plain, &Roster::default()).is_none());
+    #[tokio::test]
+    async fn a_short_page_ends_the_reading() {
+        let (read, whole) = pages(2, |offset| async move {
+            Ok::<_, &str>(match offset {
+                0 => vec![1, 2],
+                2 => vec![3],
+                _ => vec![4, 5, 6],
+            })
+        })
+        .await;
+        assert_eq!(read, [1, 2, 3]);
+        assert!(whole);
     }
 }

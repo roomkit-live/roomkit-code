@@ -249,10 +249,20 @@ impl Tasks {
         }
     }
 
-    /// Keeps what task `id`'s worker consumed. Nothing changes on screen but
-    /// what the view that read it is about to show.
-    pub(crate) fn keep_spent(&self, id: &str, spent: Spent) {
+    /// The tasks of `room` could not all be read: its next view tries again.
+    pub(crate) fn unread(&self, room: &str) {
+        crate::sync::lock(&self.board).restored.remove(room);
+    }
+
+    /// Keeps what task `id`'s worker consumed, read from the board's
+    /// `version`: a reading a later turn or task overtook is dropped, and the
+    /// next view reads the room again. Nothing changes on screen but what the
+    /// view that read it is about to show.
+    pub(crate) fn keep_spent(&self, id: &str, spent: Spent, version: u64) {
         let mut board = crate::sync::lock(&self.board);
+        if board.version != version {
+            return;
+        }
         if let Some(task) = board.tasks.iter_mut().find(|task| task.id == id) {
             task.spent = Some(spent);
         }
@@ -459,7 +469,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tasks_ending_together_each_leave_their_line() {
+    async fn each_task_ended_lately_keeps_its_line() {
         let tasks = Tasks::default();
         for id in ["a", "b"] {
             tasks.started(task(id, "main", &format!("main::{id}")));
@@ -612,8 +622,8 @@ mod tests {
         let tasks = Tasks::default();
         tasks.ended(ended(task("a", "main", "main::a"), Outcome::Completed));
         tasks.ended(ended(task("b", "main", "main::b"), Outcome::Completed));
-        tasks.keep_spent("a", spent());
-        tasks.keep_spent("b", spent());
+        tasks.keep_spent("a", spent(), tasks.version());
+        tasks.keep_spent("b", spent(), tasks.version());
         let read = |id: &str| tasks.find("main", id).unwrap().spent.is_some();
         let before = tasks.version();
         tasks.consumed("main::a");
@@ -622,6 +632,32 @@ mod tests {
             tasks.version() > before,
             "The conversation's figures changed"
         );
+    }
+
+    /// A reading begun before a turn was recorded misses that turn: it is
+    /// not kept, and the next view reads the room again.
+    #[test]
+    fn a_task_s_figures_read_before_a_new_turn_are_not_kept() {
+        let tasks = Tasks::default();
+        tasks.ended(ended(task("a", "main", "main::a"), Outcome::Completed));
+        let reading_from = tasks.version();
+        tasks.consumed("main::a");
+        let spent = super::Spent {
+            usage: crate::exit_summary::Usage::for_tests(10, 1),
+            cost: None,
+        };
+        tasks.keep_spent("a", spent, reading_from);
+        assert!(tasks.find("main", "a").unwrap().spent.is_none());
+    }
+
+    /// A read that failed is tried again by the conversation's next view.
+    #[test]
+    fn a_conversation_whose_tasks_could_not_be_read_is_read_again() {
+        let tasks = Tasks::default();
+        assert!(tasks.restoring("main"));
+        tasks.unread("main");
+        assert!(tasks.restoring("main"));
+        assert!(!tasks.restoring("main"));
     }
 
     /// An agent at work keeps the assembled agent its turn runs in.
