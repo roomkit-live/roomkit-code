@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Native provider failures now explain their cause and recovery steps, retain
+  available HTTP status codes in diagnostics, and allow retrying the session.
+  Responses with reasoning but no answer report the missing answer and
+  suggest adjusting output or reasoning settings instead of ending silently.
+
 - Native Anthropic connections are available in `/providers`, `--provider` and
   TOML settings, including streaming, tools, model discovery, usage pricing and
   conversation compaction. Existing connections keep the OpenAI protocol.

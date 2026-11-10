@@ -1878,6 +1878,7 @@ mod processes;
 mod accounts;
 mod anthropic;
 mod profile_deletion;
+mod provider_errors;
 
 #[tokio::test]
 async fn effort_selection_persists_reconfigures_requests_and_can_restore_provider_default() {

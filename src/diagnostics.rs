@@ -120,6 +120,9 @@ impl Diagnostics {
             let diagnostic = Diagnostic::classify(error);
             fields["code"] = json!(diagnostic.code);
             fields["summary"] = json!(diagnostic.summary);
+            if let Some(status) = diagnostic.http_status {
+                fields["http_status"] = json!(status);
+            }
         }
         format!("{fields}\n")
     }

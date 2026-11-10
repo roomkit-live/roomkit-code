@@ -751,7 +751,12 @@ Anthropic requires `max_tokens`: an empty output limit uses the native providerâ
 usage, model prices and context compaction use the Anthropic provider.
 ChatGPT sign-in connections send no limit, whatever the setting. Failures
 explain timeout, access, rate limit, server and protocol errors without echoing
-raw provider responses or keys. A request that fails before its answer begins
+raw provider responses or keys. Native Anthropic failures distinguish credit, quota,
+overload, model access, context capacity and rejected output or reasoning settings.
+A response containing only reasoning, with no answer or tool call, reports that
+no visible answer was returned. Retry, or adjust the agentâ€™s output limit and
+reasoning effort as the message suggests.
+A request that fails before its answer begins
 is tried 3 more times, 1, 2 then 4 seconds apart, before the turn fails, when the
 failure may pass: a lost connection, a timeout, a rate limit (429), a server
 error (5xx), 408 or 409. A timeout waits the full **Timeout** again on each try.
@@ -927,8 +932,9 @@ instance's recent activity. Errors and tool outcomes are
 recorded automatically using RoomKit's `ON_ERROR`, `ON_TOOL_CALL` and framework
 events. Run `roomkit-code --debug` for additional lifecycle and delivery records.
 Records include timestamps, room/event/channel identifiers, known tool names,
-outcomes and safe error classifications. They never include prompts, tool
-arguments/results, credentials, encrypted reasoning or raw provider error bodies.
+outcomes, safe error classifications and HTTP status codes when present. They
+never include prompts, tool arguments/results, credentials, encrypted reasoning
+or raw provider error bodies.
 The panel shows recent records for the current launch; files also cover previous
 launches. File write failures are shown in the panel and do not stop the agent.
 An internal error (a panic) is recorded with where it happened and its kind of
