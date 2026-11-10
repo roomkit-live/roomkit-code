@@ -1,8 +1,8 @@
 //! A tool call that fails is the tool's outcome, not the engine's.
 use super::*;
 
-/// A failed `read` was recorded as `engine_failed`, "Engine execution
-/// failed", the engine classifier reading the tool's error (RMK-1639).
+/// A failed `read` is recorded with the tool's outcome: the engine's
+/// classifier, which knows provider and engine failures, does not read it.
 #[tokio::test]
 async fn a_failed_tool_call_is_recorded_as_the_tools_not_as_an_engine_failure() {
     let root = tempfile::tempdir().unwrap();
