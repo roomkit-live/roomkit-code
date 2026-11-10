@@ -1877,6 +1877,7 @@ mod processes;
 
 mod accounts;
 mod anthropic;
+mod anthropic_recovery;
 mod profile_deletion;
 mod provider_errors;
 

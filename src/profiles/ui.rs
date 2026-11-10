@@ -750,10 +750,10 @@ fn agent_form(
             ),
             field(
                 "output",
-                "Max output tokens",
+                "Output budget (advanced)",
                 a.max_output_tokens
                     .map_or_else(String::new, |n| n.to_string()),
-                "Most tokens one reply may write; empty uses Anthropic’s 1024-token default or the OpenAI server default",
+                "Empty = Auto (includes reasoning); enter a token count only to set a fixed limit",
                 false,
                 FieldKind::Text,
             ),

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Anthropic output budgets now default to Auto (32K, bounded by model and
+  context capacity), with one larger retry per turn for an exhausted response
+  before any text or tool call. Fixed limits remain unchanged. Signed tool
+  rounds preserve original arguments, and one rejected reasoning block and its
+  successors can be removed automatically without repeating executed tools.
+
 - Native provider failures now explain their cause and recovery steps, retain
   available HTTP status codes in diagnostics, and allow retrying the session.
   Responses with reasoning but no answer report the missing answer and

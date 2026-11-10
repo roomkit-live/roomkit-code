@@ -6,7 +6,7 @@ base_url = "http://localhost:8000/v1"
 model = "your-model"
 timeout_seconds = 600 # longest wait between two reads of a model answer
 # context_window = 32768 # actual server capacity; omitted means unknown
-# max_output_tokens = 4096 # omitted: Anthropic uses 1024; OpenAI decides at the server
+# max_output_tokens = 8192 # advanced fixed limit; omitted selects Auto
 # reasoning_effort = "low" # low, medium, high, xhigh, max; omitted: the provider's default
 # Anthropic: kind = "anthropic", base_url = "https://api.anthropic.com", model = "claude-sonnet-5-5".
 # API keys come from ROOMKIT_API_KEY (or ANTHROPIC_API_KEY for Anthropic), never this file.

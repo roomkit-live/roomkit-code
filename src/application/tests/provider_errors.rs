@@ -72,7 +72,7 @@ fn response(status: u16, message: &str, streamed: bool, healthy: bool) -> axum::
     ([("content-type", "text/event-stream")], wire).into_response()
 }
 
-async fn submit(app: &Application, operation: &str) -> Vec<Event> {
+pub(super) async fn submit(app: &Application, operation: &str) -> Vec<Event> {
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run(host));
     assert!(matches!(event(&client).await, Event::Snapshot(_)));

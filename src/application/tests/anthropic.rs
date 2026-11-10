@@ -62,7 +62,7 @@ async fn native_answer(
         json!({"type":"text", "text":""})
     };
     let delta = if first {
-        json!({"type":"input_json_delta", "partial_json":json!({"path":"fixture.txt", "_roomkit_intent":"Read the fixture"}).to_string()})
+        json!({"type":"input_json_delta", "partial_json":json!({"path":"fixture.txt", "_roomkit_intent":"  Read\n the fixture  "}).to_string()})
     } else {
         json!({"type":"text_delta", "text":if summary { "Native summary." } else { "Native project inspection complete." }})
     };
@@ -154,6 +154,18 @@ async fn anthropic_profiles_discover_call_tools_compact_and_resume() {
             .contains("native file content")
     );
     assert!(requests[1]["messages"].to_string().contains("tool_result"));
+    let replayed = requests[1]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["content"].as_array())
+        .flatten()
+        .find(|p| p["type"] == "tool_use")
+        .unwrap();
+    assert_eq!(
+        replayed["input"]["_roomkit_intent"],
+        "  Read\n the fixture  "
+    );
 
     turn_operation(&app, "second").await;
     turn_operation(&app, "third").await;
@@ -215,6 +227,30 @@ async fn anthropic_profiles_discover_call_tools_compact_and_resume() {
         native.requests.lock().unwrap().last().unwrap()["messages"]
             .to_string()
             .contains("Native summary.")
+    );
+    app.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn anthropic_automatically_leaves_room_for_reasoning_and_an_answer() {
+    let native = Native::start().await;
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("fixture.txt"), "fixture").unwrap();
+    let mut settings = settings(root.path(), state.path(), &native.url);
+    settings.provider = ProviderKind::Anthropic;
+    settings.model = "claude-fable-5-2".into();
+    let app = Application::open(&settings, "native-fixture-key".into())
+        .await
+        .unwrap();
+    turn(&app).await;
+    assert!(
+        native
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|r| r["max_tokens"] == 32000)
     );
     app.close().await.unwrap();
 }

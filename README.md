@@ -35,7 +35,7 @@ then select a model in **/agents**. An empty API base uses
 ```sh
 export ANTHROPIC_API_KEY=your-key
 cargo run --locked -- /path/to/project --provider anthropic \
-  --model claude-sonnet-5-5 --max-output-tokens 8192
+  --model claude-sonnet-5-5
 ```
 
 `--provider` (or `ROOMKIT_PROVIDER`) selects the protocol for the first agent.
@@ -743,12 +743,24 @@ The initial TOML/CLI timeout, context and output-limit flags
 remain available when bootstrapping a new project. The application defaults to 600 seconds;
 the library's own default is unchanged. Chat Completions requests send no
 temperature, so the endpoint's default applies. OpenAI-compatible connections
-send no output limit by default; each model has its own. Set the agent's **Max output tokens** in `/agents` to cap how many
+send no output limit by default; each model has its own. Set the agent's **Output budget (advanced)** in `/agents` to cap how many
 tokens one reply may write; it is sent as `max_tokens`, or as
 `max_completion_tokens` to the OpenAI models that take it, and zero is refused.
-Anthropic requires `max_tokens`: an empty output limit uses the native provider’s
-1024-token default; set a larger limit for longer edits. Its prompt caching,
+Leave that field empty for **Auto**. Anthropic starts with 32,000 tokens for
+reasoning and the answer together, bounded by known model limits and estimated
+remaining context. If it exhausts that budget before producing text or a tool
+call, Auto can double it once per turn, up to 64,000 tokens. Later rounds retain
+the larger budget. A numeric limit, including an existing 8192 setting, stays
+fixed; explicit compaction budgets also remain fixed. Its prompt caching,
 usage, model prices and context compaction use the Anthropic provider.
+Anthropic tool rounds preserve their signed thinking and original tool inputs.
+If the API rejects a specific reasoning signature, one recovery per turn removes
+that block and subsequent reasoning, preserving text and tool results. Removed
+blocks stay out of subsequent requests. Other providers keep their existing
+model-specific reasoning replay policy.
+Recoveries appear in `/diagnostics` without raw reasoning or signatures. The usage
+of an exhausted attempt is retained there even if the retry fails before any
+tool ran; in that failure case the engine does not publish the usage to the UI.
 ChatGPT sign-in connections send no limit, whatever the setting. Failures
 explain timeout, access, rate limit, server and protocol errors without echoing
 raw provider responses or keys. Native Anthropic failures distinguish credit, quota,

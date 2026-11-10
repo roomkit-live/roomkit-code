@@ -2,6 +2,8 @@
 use roomkit_ai::{
     AiContext, AiProvider, AiResponse, ModelInfo, ProviderError, ProviderStream, TextStream,
 };
+mod anthropic;
+pub(crate) use anthropic::Anthropic;
 use roomkit_anthropic::AnthropicAiProvider;
 use roomkit_openai::OpenAiAiProvider;
 use serde::{Deserialize, Serialize};
@@ -50,31 +52,28 @@ impl ProviderKind {
 #[derive(Clone)]
 pub(crate) enum CodeProvider {
     OpenAi(OpenAiAiProvider),
-    Anthropic {
-        provider: AnthropicAiProvider,
-        vision: bool,
-    },
+    Anthropic { provider: Anthropic, vision: bool },
 }
 
 impl AiProvider for CodeProvider {
     fn name(&self) -> &str {
         match self {
             Self::OpenAi(p) => p.name(),
-            Self::Anthropic { provider: p, .. } => p.name(),
+            Self::Anthropic { provider: p, .. } => p.inner.name(),
         }
     }
 
     fn model_name(&self) -> &str {
         match self {
             Self::OpenAi(p) => p.model_name(),
-            Self::Anthropic { provider: p, .. } => p.model_name(),
+            Self::Anthropic { provider: p, .. } => p.inner.model_name(),
         }
     }
 
     fn catalog_entry(&self) -> Option<ModelInfo> {
         match self {
             Self::OpenAi(p) => p.catalog_entry(),
-            Self::Anthropic { provider: p, .. } => p.catalog_entry(),
+            Self::Anthropic { provider: p, .. } => p.inner.catalog_entry(),
         }
     }
 
@@ -89,7 +88,7 @@ impl AiProvider for CodeProvider {
     fn supports_deferred_tools(&self) -> bool {
         match self {
             Self::OpenAi(p) => p.supports_deferred_tools(),
-            Self::Anthropic { provider: p, .. } => p.supports_deferred_tools(),
+            Self::Anthropic { provider: p, .. } => p.inner.supports_deferred_tools(),
         }
     }
 
@@ -104,21 +103,21 @@ impl AiProvider for CodeProvider {
     fn supports_response_schema(&self) -> bool {
         match self {
             Self::OpenAi(p) => p.supports_response_schema(),
-            Self::Anthropic { provider: p, .. } => p.supports_response_schema(),
+            Self::Anthropic { provider: p, .. } => p.inner.supports_response_schema(),
         }
     }
 
     fn supports_response_schema_with_tools(&self) -> bool {
         match self {
             Self::OpenAi(p) => p.supports_response_schema_with_tools(),
-            Self::Anthropic { provider: p, .. } => p.supports_response_schema_with_tools(),
+            Self::Anthropic { provider: p, .. } => p.inner.supports_response_schema_with_tools(),
         }
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
         match self {
             Self::OpenAi(p) => p.list_models().await,
-            Self::Anthropic { provider: p, .. } => p.list_models().await,
+            Self::Anthropic { provider: p, .. } => p.inner.list_models().await,
         }
     }
 

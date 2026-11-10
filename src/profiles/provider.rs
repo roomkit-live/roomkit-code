@@ -25,7 +25,12 @@ impl Profiles {
                 }
                 AnthropicAiProvider::new(config)
                     .map(|provider| CodeProvider::Anthropic {
-                        provider,
+                        provider: crate::providers::Anthropic::new(
+                            provider,
+                            profile.max_output_tokens,
+                            profile.context_window,
+                            self.diagnostics.clone(),
+                        ),
                         vision: profile.vision,
                     })
                     .map_err(|_| "Cannot initialize the Anthropic connection".into())

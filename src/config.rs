@@ -52,7 +52,7 @@ pub(crate) struct Cli {
     /// Initial effective model context capacity in tokens.
     #[arg(long)]
     pub context_window: Option<u64>,
-    /// Initial reply token limit; Anthropic defaults to 1024, OpenAI has no cap.
+    /// Fixed reply token limit, including reasoning; omitted selects Auto.
     #[arg(long)]
     pub max_output_tokens: Option<u32>,
     /// Initial reasoning effort; the provider's default when omitted.

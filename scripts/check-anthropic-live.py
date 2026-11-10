@@ -38,7 +38,9 @@ def main():
                 "--session", "anthropic-check", "--mode", "yolo", "--no-herdr",
                 "--no-update-check", "--json"]
         bootstrap = ["--provider", "anthropic", "--model", model,
-                     "--max-output-tokens", "4096", "--provider-timeout-seconds", "60"]
+                     "--provider-timeout-seconds", "120"]
+        if effort := os.environ.get("ANTHROPIC_TEST_EFFORT"):
+            bootstrap += ["--reasoning-effort", effort]
         launch(base + bootstrap, env,
                "Read fixture.txt using the read tool, then use the write tool to "
                "copy its exact contents into result.txt. Finish with a short confirmation.")
