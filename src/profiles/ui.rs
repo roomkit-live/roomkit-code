@@ -494,7 +494,11 @@ fn open_form(
 
 pub(super) fn provider_choices(state: &State, current: &SessionConfig) -> CommandResult {
     let mut entries = vec![
-        choice("add", "+ Add provider", "OpenAI-compatible connection"),
+        choice(
+            "add",
+            "+ Add provider",
+            "OpenAI-compatible or Anthropic connection",
+        ),
         choice(
             "chatgpt:menu",
             "Sign in with ChatGPT",
