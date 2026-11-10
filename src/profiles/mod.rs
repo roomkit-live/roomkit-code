@@ -241,7 +241,15 @@ impl Profiles {
         }))
     }
 
-    pub async fn initialize(&self, kit: &RoomKit<SqliteStore>) -> Result<ChannelId, String> {
+    /// Registers the agent the application opens with: the one `conversation`
+    /// names, which the conversation it resumes designates, else the
+    /// project's selection. A conversation's agent that no longer exists is
+    /// not replaced: the view says why nothing can be sent.
+    pub async fn initialize(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        conversation: Option<ChannelId>,
+    ) -> Result<ChannelId, String> {
         let mut state = self.state.lock().await;
         // A launch nobody watches ends with its turn, before a task it handed
         // over could end: no agent is served the delegation tools then.
@@ -249,7 +257,13 @@ impl Profiles {
             state.delegation = Some(crate::delegation::handler(kit));
             state.refresh_roster();
         }
-        let id = state.selected().unwrap_or_else(|| "code".into());
+        let id = match &conversation {
+            Some(agent) => agent.to_string(),
+            None => state.selected().unwrap_or_else(|| "code".into()),
+        };
+        if conversation.is_some() && state.agent(&id).is_none() {
+            state.setup_error = Some(gone(&id));
+        }
         let channel = ChannelId::new(&id).map_err(|_| "Invalid agent ID")?;
         let assembled = if let Some(profile) = state.agent(&id) {
             let provider = state
@@ -375,6 +389,60 @@ impl Profiles {
         }
         Ok(())
     }
+
+    /// Makes `view` show `agent`, the one its conversation designates,
+    /// attached there and ready to answer. An agent that no longer exists
+    /// or cannot be assembled is still the one shown: the view says why
+    /// nothing can be sent, rather than send the conversation to another.
+    pub async fn show(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        view: &mut SessionConfig,
+        terminal: &ChannelId,
+        agent: ChannelId,
+    ) -> Result<(), String> {
+        let mut state = self.state.lock().await;
+        let id = agent.to_string();
+        view.agent = agent;
+        state.ensure_slot(kit, &id)?;
+        self.attach(kit, view, terminal).await?;
+        if !state.tools.contains_key(&id) {
+            let assembled = match state.agent(&id) {
+                None => Err(gone(&id)),
+                Some(profile) => match state.providers.value.profiles.get(&profile.provider) {
+                    Some(provider) => self.assemble(&profile, provider).await,
+                    None => Err("Configure the selected agent's provider with /agents".into()),
+                },
+            };
+            match assembled {
+                Ok((runtime, inventory)) => state.install(kit, &id, runtime, inventory)?,
+                Err(error) => state.setup_error = Some(error),
+            }
+        }
+        state.view(view);
+        Ok(())
+    }
+
+    /// Records `view`'s agent as the one its conversation designates. A
+    /// task's room keeps the agent its task was handed to.
+    async fn designate(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        view: &SessionConfig,
+    ) -> Result<(), String> {
+        let room = view.room.as_str();
+        if self.resources.tasks.root_of(room) != room {
+            return Ok(());
+        }
+        crate::sessions::designate(kit, &view.room, &view.agent)
+            .await
+            .map_err(|_| "Could not record this conversation's agent".into())
+    }
+}
+
+/// What a view says of a conversation whose agent `id` was deleted.
+fn gone(id: &str) -> String {
+    format!("This conversation's agent, {id}, no longer exists: select an agent with /agents")
 }
 
 impl State {

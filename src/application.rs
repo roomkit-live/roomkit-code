@@ -156,7 +156,13 @@ async fn setup(
         .install(kit, profiles.diagnostics.clone());
     resources.turn_ends.install(kit)?;
     crate::delegation::install(kit, resources.tasks.clone(), resources.roster.clone())?;
-    let agent_id = profiles.initialize(kit).await?;
+    // A conversation that is resumed opens with the agent it designates, a
+    // new one with the project's selection.
+    let designated = match settings.session.as_deref().map(roomkit::model::RoomId::new) {
+        Some(Ok(room)) => crate::sessions::designated(kit, &room).await,
+        _ => None,
+    };
+    let agent_id = profiles.initialize(kit, designated).await?;
     let channel = ConversationChannel::new(ChannelId::new(TERMINAL)?);
     kit.register_channel(channel.clone())?;
     profiles.resources.compactions.install(kit, channel.id());

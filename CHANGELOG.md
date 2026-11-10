@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- A conversation keeps its agent. Selecting an agent in one conversation
+  changed the agent of every other: back in a conversation, with `/resume` or
+  at the next launch, the view showed the agent selected last elsewhere, and
+  the next message sent that conversation's history to it and to its provider.
+  Each conversation now records the agent selected in it and opens with it; a
+  new conversation still opens with the project's last selection. A
+  conversation stored before keeps the agent that worked in it last. One whose
+  agent was deleted opens without an agent and says so, rather than with
+  another.
+
 - A compaction's summary names the files the file tools changed before those
   found only around shell commands, which get a line of their own. A merge or
   a checkout run through the shell put the files of the commits it brought

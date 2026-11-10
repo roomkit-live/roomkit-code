@@ -124,8 +124,12 @@ async fn a_global_agent_opens_ready_in_a_new_project_with_its_own_choices() {
     drop(b);
 
     // The first project keeps its own agent and no longer sees the moved one.
+    // Its conversation, where the moved agent was selected, opens without an
+    // agent, saying why, rather than with another.
     let a = Application::open(&a_settings, String::new()).await.unwrap();
-    assert_eq!(a.view.agent.as_str(), "code");
+    assert_eq!(a.view.agent.as_str(), "reviewer");
+    let refused = a.view.submission_error.clone().unwrap();
+    assert!(refused.contains("reviewer, no longer exists"), "{refused}");
     let agents = listed(&a).await;
     assert_eq!(agents.len(), 1, "{agents:?}");
     assert!(agents[0].starts_with("code · project"), "{agents:?}");
@@ -411,11 +415,21 @@ async fn a_project_whose_global_agent_was_deleted_opens_with_one_it_can_use() {
     b.close().await.unwrap();
     drop(b);
 
-    // Deleted from the first project, it leaves the second one too.
+    // Deleted from the first project, it leaves the second one too. The
+    // conversation it was selected in opens without an agent, saying why,
+    // rather than with another.
     let mut a = Application::open(&a_settings, String::new()).await.unwrap();
     delete_agent(&mut a, "beta", || {}).await.unwrap();
     a.close().await.unwrap();
     drop(a);
+    let b = Application::open(&b_settings, String::new()).await.unwrap();
+    assert_eq!(b.view.agent.as_str(), "beta");
+    let refused = b.view.submission_error.clone().unwrap();
+    assert!(refused.contains("beta, no longer exists"), "{refused}");
+    b.close().await.unwrap();
+    drop(b);
+    // A new conversation opens with an agent the project can use.
+    b_settings.session = None;
     let b = Application::open(&b_settings, String::new()).await.unwrap();
     assert_eq!(b.view.agent.as_str(), "alpha");
     assert!(

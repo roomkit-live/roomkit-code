@@ -431,6 +431,9 @@ impl Profiles {
                         self.attach(kit, &next, terminal).await?;
                         state.select_agent(id)?;
                         state.install(kit, id, runtime, tools)?;
+                        // Last: a selection that fails before leaves the
+                        // conversation with the agent its view still shows.
+                        self.designate(kit, &next).await?;
                         state.view(&mut next);
                         Ok(CommandResult::Switch(Box::new(next)))
                     }
@@ -498,6 +501,7 @@ impl Profiles {
                         state.save_agent(profile, scope)?;
                         state.select_agent(next.agent.as_str())?;
                         state.install(kit, next.agent.as_str(), runtime, tools)?;
+                        self.designate(kit, &next).await?;
                     }
                 }
                 state.pending = None;

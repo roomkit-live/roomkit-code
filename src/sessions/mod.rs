@@ -8,11 +8,13 @@ use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::{Choice, Command, CommandSpec, Event, Rejection, Request};
 use roomkit_tui_engine::{CommandHandler, CommandResult, SessionConfig};
 
+mod agent;
 mod live;
 pub(crate) mod names;
 mod rooms;
 pub(crate) mod task_rooms;
 
+pub(crate) use agent::{designate, designated};
 pub(crate) use names::name;
 pub(crate) use rooms::{create, empty};
 

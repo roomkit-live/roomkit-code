@@ -182,6 +182,13 @@ impl Profiles {
                 Some(Err(error)) => state.setup_error = Some(error),
                 None => {}
             }
+            // The person confirmed the switch: the conversation designates
+            // the agent that replaces the deleted one. Without one, or if
+            // the record fails, it keeps the deleted agent, and opens with no
+            // agent rather than with another.
+            if next.is_some() {
+                let _ = self.designate(kit, &current).await;
+            }
         }
         state.view(&mut current);
         Ok(CommandResult::Switch(Box::new(current)))

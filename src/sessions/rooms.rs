@@ -76,6 +76,8 @@ pub(crate) async fn create(
         && draft
         && let Some(id) = unused_draft(kit, leases, channel, agent).await?
     {
+        // Nothing was sent in a draft: it takes the agent it is opened with.
+        super::designate(kit, &id, agent).await?;
         return Ok(id);
     }
     let id = RoomId::new(name.map_or_else(
@@ -109,6 +111,9 @@ pub(crate) async fn create(
     for id in [channel, agent] {
         kit.attach_channel(&room.id, id, Default::default()).await?;
     }
+    // A conversation designates its agent from its start: an existing one,
+    // returned above, keeps the agent selected in it.
+    super::designate(kit, &room.id, agent).await?;
     leases.keep(claim)?;
     Ok(room.id)
 }
@@ -300,8 +305,12 @@ impl Sessions {
         }
         let mut next = current;
         next.room = room.clone();
+        // The conversation's agent, not the one the view comes with: its
+        // history must not reach an agent selected elsewhere.
+        let agent = super::designated(&self.kit, &room).await;
+        let agent = agent.unwrap_or_else(|| next.agent.clone());
         self.profiles
-            .attach(&self.kit, &next, &self.channel)
+            .show(&self.kit, &mut next, &self.channel, agent)
             .await?;
         self.services
             .sessions

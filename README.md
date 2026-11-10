@@ -368,15 +368,27 @@ agent cannot become global, and a new agent's default ID avoids those. A global
 agent's provider, model, instructions and tools are shared; its MCP servers and
 enabled skills stay each project's choice, because servers are configured per
 project. Deleting a global agent removes it from every project; a project that
-was using it opens with another agent it can use. A new global agent never
-inherits the choices a project kept for an earlier one with the same ID. The
-tools field accepts comma-separated names; an empty field creates an agent
-without tools. Saving an agent also selects it. Selection and configuration
+was using it opens a new conversation with another agent it can use. A new
+global agent never inherits the choices a project kept for an earlier one with
+the same ID. The tools field accepts comma-separated names; an empty field
+creates an agent without tools. Saving an agent also selects it. Selection and configuration
 wait for the current execution to finish. The selected agent's
 name/model appear in the footer, and only that agent receives the next message.
 The conversation remains shared, with stable authorship for previous messages;
 selecting a different provider can therefore send existing conversation context
 to that provider. This version does not orchestrate simultaneous responders.
+
+Each conversation keeps the agent selected in it. Selecting an agent changes the
+conversation you are in, and the agent a new conversation opens with at the next
+launch; it never changes another conversation. Resuming one, with `/resume` or at
+launch, shows its own agent: its history does not reach an agent, or a provider,
+selected elsewhere. `/new` starts with the agent of the conversation you leave.
+A conversation stored before its agent was recorded keeps the agent that worked
+in it last. If a conversation's agent was deleted or cannot be configured, the
+conversation still opens and says why nothing can be sent, until you select an
+agent there; no other agent takes its place. Deleting the agent of the
+conversation you are in switches that conversation to the agent the confirmation
+names.
 
 Forms use **Tab / Shift+Tab** for fields, **Left / Right** for choices,
 **Alt+Enter** for multiline instructions, **Ctrl+U** to clear a field,
@@ -917,6 +929,9 @@ tool `mcp__<server>__<tool>`, serves only the selected ones, and closes the
 servers; the engine's `roomkit-mcp` crate owns protocol calls and each stdio
 server's process group.
 `src/sessions/` routes application commands and owns the project session catalogue.
+It keeps each conversation's agent as the active agent of the room's RoomKit
+conversation state, which the engine stores in the room's metadata: an
+orchestration strategy installed on a room reads and writes the same record.
 The TUI receives only its generic client connection, preserving the boundary
 needed for a future remote host.
 

@@ -1893,6 +1893,7 @@ mod ask_user;
 mod breakdown;
 mod catalogue;
 mod compaction;
+mod conversation_agent;
 mod delegation;
 mod docs;
 mod exit_summary;
