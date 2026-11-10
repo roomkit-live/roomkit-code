@@ -49,6 +49,15 @@ impl Budget {
         true
     }
 
+    pub(super) fn diagnostic(&self, context: &AiContext, fixed: bool) -> serde_json::Value {
+        serde_json::json!({"max_tokens":context.max_tokens.or(self.manual),
+            "budget":if fixed {"fixed"} else {"auto"}})
+    }
+
+    pub(super) fn fixed(&self, context: &AiContext) -> bool {
+        context.max_tokens.is_some() || self.manual.is_some()
+    }
+
     fn available(&self, context: &AiContext) -> u32 {
         let available = self.context.map_or(u64::MAX, |window| {
             // Conservative local estimate, with room for tokenizer differences.

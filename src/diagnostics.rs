@@ -77,7 +77,15 @@ impl Diagnostics {
             }),
             panics: AtomicUsize::new(0),
         });
-        diagnostics.record("application_started", json!({"debug":debug}), None);
+        diagnostics.record(
+            "application_started",
+            json!({
+                "debug":debug, "version":env!("CARGO_PKG_VERSION"),
+                "target":env!("ROOMKIT_BUILD_TARGET"),
+                "release":env!("ROOMKIT_RELEASE_BUILD") == "1", "build_id":managed_build_id(),
+            }),
+            None,
+        );
         Ok(diagnostics)
     }
 
@@ -372,3 +380,11 @@ pub(crate) use panics::report as report_panics;
 
 #[cfg(test)]
 mod tests;
+
+// Managed installs are content-addressed. Record their digest, never a home path.
+fn managed_build_id() -> Option<String> {
+    let executable = std::env::current_exe().ok()?;
+    let directory = executable.parent()?.file_name()?.to_str()?;
+    let (_, digest) = directory.rsplit_once('-')?;
+    (digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit())).then(|| digest.to_owned())
+}

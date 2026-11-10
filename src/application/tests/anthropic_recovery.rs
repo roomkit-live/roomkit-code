@@ -201,6 +201,32 @@ async fn auto_grows_once_keeps_usage_and_never_repeats_a_tool() {
             .iter()
             .any(|e| matches!(e, Event::ContextUpdated { usage, .. } if usage.tokens == 50))
     );
+    let records = log
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .collect::<Vec<_>>();
+    let starts = records
+        .iter()
+        .filter(|r| r["event"] == "provider_request_started")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        starts
+            .iter()
+            .map(|r| r["max_tokens"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        [32000, 64000, 64000]
+    );
+    assert!(starts.iter().all(|r| r["budget"] == "auto"));
+    assert_eq!(starts[0]["generation"], starts[1]["generation"]);
+    assert_ne!(starts[1]["generation"], starts[2]["generation"]);
+    assert_eq!(starts[2]["restored_tool_inputs"], 1);
+    assert!(
+        records
+            .iter()
+            .any(|r| r["event"] == "provider_request_finished"
+                && r["finish_reason"] == "max_tokens"
+                && r["usage"]["output_tokens"] == 32000)
+    );
     assert!(log.contains("output_budget"));
     assert_eq!(log.matches("\"event\":\"tool_finished\"").count(), 1);
 }
@@ -227,7 +253,7 @@ async fn rejected_thinking_stays_removed_while_new_signed_rounds_are_preserved()
     assert_eq!(server.requests.lock().unwrap().len(), 4);
     assert_eq!(log.matches("\"event\":\"tool_finished\"").count(), 2);
     assert!(log.contains("reasoning_replay"));
-    assert!(!log.contains("signature"));
+    assert!(!log.contains("\"bad\""));
 }
 
 #[tokio::test]
@@ -316,6 +342,11 @@ async fn repeated_exhaustion_and_repeated_signature_rejection_stay_bounded() {
     )));
     assert_eq!(server.requests.lock().unwrap().len(), 4);
     assert_eq!(log.matches("\"reason\":\"reasoning_replay\"").count(), 1);
+    assert!(
+        log.lines()
+            .map(|l| serde_json::from_str::<Value>(l).unwrap())
+            .any(|r| r["recovery"] == "already_repaired" && r["http_status"] == 400)
+    );
 }
 
 #[tokio::test]
@@ -349,4 +380,60 @@ async fn dropping_the_stream_before_the_retry_prevents_another_request() {
     drop(stream);
     tokio::task::yield_now().await;
     assert_eq!(server.requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn an_unrecognized_reasoning_error_has_actionable_private_diagnostics() {
+    let server = Server::start(|_, _| {
+        error(
+            "messages.2.content.1: thinking signature check failed: PRIVATE_PROMPT sk-ant-private"
+                .into(),
+        )
+    })
+    .await;
+    let (events, log) = run(&server, Some(8192)).await;
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::OperationFinished {
+            outcome: RunOutcome::Failed,
+            ..
+        }
+    )));
+    let records = log
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .collect::<Vec<_>>();
+    let start = records
+        .iter()
+        .find(|r| r["event"] == "provider_request_started")
+        .expect("request start");
+    let failure = records
+        .iter()
+        .find(|r| r["event"] == "provider_request_finished")
+        .expect("request failure");
+    assert_eq!(start["max_tokens"], 8192);
+    assert_eq!(start["budget"], "fixed");
+    assert_eq!(start["request"], failure["request"]);
+    assert!(
+        start["turn"]
+            .as_str()
+            .is_some_and(|s| s.starts_with("turn-"))
+    );
+    assert_eq!(start["turn"], failure["turn"]);
+    assert_eq!(start["channel"], "code");
+    assert_eq!(failure["outcome"], "error");
+    assert_eq!(failure["http_status"], 400);
+    assert_eq!(failure["reasoning_error"], "other");
+    assert_eq!(failure["recovery"], "unsupported_error");
+    assert_eq!(failure["block_path"], json!([2, 1]));
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    for private in [
+        "PRIVATE_PROMPT",
+        "sk-ant-private",
+        "fixture-key",
+        "safe fixture",
+        "signature check failed",
+    ] {
+        assert!(!log.contains(private), "leaked {private}");
+    }
 }

@@ -952,7 +952,16 @@ effort, as `--model` sets its model; an unattended run uses it to pin the effort
 `/diagnostics` shows recent operational records and the exact log location. Each
 project's private state directory contains `diagnostics.jsonl` and, after rotation,
 `diagnostics.previous.jsonl` (at most 1 MiB each). Records include an instance ID;
-concurrent writers coordinate append and rotation. The panel shows the current
+concurrent writers coordinate append and rotation. Startup records identify the
+version, target and managed binary digest. Anthropic requests record start and end,
+turn/request identifiers, effective output budget, effort, content-block counts,
+duration, stop reason and numeric usage. Failed requests also record the HTTP
+status, reasoning-error category, numeric block path and exact recovery decision
+(for example `unsupported_error`, `target_not_thinking`, `already_repaired` or
+`response_started`). Raw and combined-role target positions help diagnose API
+validation differences; only the combined-role view drives recovery. Dropping an
+active stream records cancellation. These records do not require `--debug`.
+The panel shows the current
 instance's recent activity. Errors and tool outcomes are
 recorded automatically using RoomKit's `ON_ERROR`, `ON_TOOL_CALL` and framework
 events. Run `roomkit-code --debug` for additional lifecycle and delivery records.

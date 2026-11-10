@@ -33,16 +33,17 @@ pub(super) fn prepare(context: &mut AiContext) {
     remove_empty(context);
 }
 
-pub(super) fn repair(context: &mut AiContext, error: &ProviderError) -> usize {
+pub(super) fn repair(
+    context: &mut AiContext,
+    error: &ProviderError,
+) -> Result<usize, &'static str> {
     // One repair per turn; the hashes survive the engine's next context rebuild.
     if !removed(context).is_empty() {
-        return 0;
+        return Err("already_repaired");
     }
-    let Some((message, block)) = rejected_block(error) else {
-        return 0;
-    };
+    let (message, block) = rejected_block(error)?;
     let Some((message, index)) = thinking_location(context, message, block) else {
-        return 0;
+        return Err("target_not_thinking");
     };
     let removed = remove_suffix(context, message, index);
     let count = removed.len();
@@ -51,7 +52,7 @@ pub(super) fn repair(context: &mut AiContext, error: &ProviderError) -> usize {
         Value::Array(removed.into_iter().map(Value::String).collect()),
     );
     remove_empty(context);
-    count
+    Ok(count)
 }
 
 fn thinking_location(context: &AiContext, message: usize, block: usize) -> Option<(usize, usize)> {
@@ -108,20 +109,72 @@ fn remove_suffix(context: &mut AiContext, message_index: usize, index: usize) ->
     removed
 }
 
-fn rejected_block(error: &ProviderError) -> Option<(usize, usize)> {
+fn rejected_block(error: &ProviderError) -> Result<(usize, usize), &'static str> {
     if error.status_code != Some(400) {
-        return None;
+        return Err("wrong_http_status");
     }
     let text = error.message.replace('`', "");
-    let (path, explanation) = text.split_once(':')?;
-    if !explanation.contains("Invalid signature in thinking block") {
-        return None;
+    if !text
+        .split_once(':')
+        .is_some_and(|(_, explanation)| explanation.contains("Invalid signature in thinking block"))
+    {
+        return Err("unsupported_error");
     }
+    block_path(&text).ok_or("missing_block_path")
+}
+
+fn block_path(text: &str) -> Option<(usize, usize)> {
+    let (path, _) = text.split_once(':')?;
     let (message, block) = path
         .trim()
         .strip_prefix("messages.")?
         .split_once(".content.")?;
     Some((message.parse().ok()?, block.parse().ok()?))
+}
+
+pub(super) fn error_details(context: &AiContext, error: &ProviderError) -> Value {
+    let text = error.message.replace('`', "");
+    let lower = text.to_ascii_lowercase();
+    let kind = if lower.contains("bound to a different conversation") {
+        "prefix_mismatch"
+    } else if lower.contains("thinking") && lower.contains("modified") {
+        "thinking_modified"
+    } else if text.contains("Invalid signature in thinking block") {
+        "invalid_signature"
+    } else if lower.contains("thinking") || lower.contains("reasoning") {
+        "other"
+    } else {
+        "none"
+    };
+    let path = block_path(&text);
+    serde_json::json!({
+        "reasoning_error":kind, "block_path":path,
+        "grouped_target":path.and_then(|(m,b)| thinking_location(context,m,b)),
+        // Diagnostic only: do not guess when validation stages address different views.
+        "raw_target":path.and_then(|(m,b)| raw_location(context,m,b)),
+    })
+}
+
+fn raw_location(context: &AiContext, message: usize, block: usize) -> Option<(usize, usize)> {
+    let turn = context.messages.get(message)?;
+    if turn.role != AiRole::Assistant {
+        return None;
+    }
+    let AiMessageContent::Parts(parts) = &turn.content else {
+        return None;
+    };
+    let (index, part) = parts
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| serialized(p))
+        .nth(block)?;
+    matches!(part, AiContentPart::Thinking(_)).then_some((message, index))
+}
+
+pub(super) fn restored_inputs(context: &AiContext) -> usize {
+    context.messages.iter().filter_map(|m| match &m.content {
+        AiMessageContent::Parts(p) => Some(p), _ => None,
+    }).flatten().filter(|p| matches!(p, AiContentPart::ToolCall(c) if c.metadata.get(INPUT).is_some_and(Value::is_object))).count()
 }
 
 fn serialized(part: &AiContentPart) -> bool {
@@ -150,105 +203,5 @@ fn remove_empty(context: &mut AiContext) {
 }
 
 #[cfg(test)]
-mod tests {
-    #![allow(
-        clippy::unwrap_used,
-        clippy::panic,
-        reason = "A broken fixture fails the test"
-    )]
-    use super::*;
-    use roomkit_ai::{AiMessage, AiRole, AiTextPart, ProviderErrorOptions};
-
-    fn signed(signature: &str) -> AiContentPart {
-        AiContentPart::Thinking(AiThinkingPart {
-            signature: Some(signature.into()),
-            ..AiThinkingPart::default()
-        })
-    }
-    fn error(path: &str, status: u16) -> ProviderError {
-        ProviderError::new(
-            format!(
-                "{path}: Invalid `signature` in `thinking` block. The block is bound to a different conversation."
-            ),
-            ProviderErrorOptions {
-                status_code: Some(status),
-                ..ProviderErrorOptions::default()
-            },
-        )
-    }
-    fn context() -> AiContext {
-        AiContext {
-            messages: vec![AiMessage::new(
-                AiRole::Assistant,
-                vec![
-                    signed("first"),
-                    AiContentPart::Thinking(AiThinkingPart::new("unsigned")),
-                    AiContentPart::Text(AiTextPart::new("Keep text")),
-                    signed("second"),
-                    AiContentPart::Thinking(AiThinkingPart {
-                        redacted: Some("opaque".into()),
-                        ..AiThinkingPart::default()
-                    }),
-                ],
-            )],
-            ..AiContext::default()
-        }
-    }
-    #[test]
-    fn wire_indices_skip_unsigned_thinking_and_discard_only_the_rejected_suffix() {
-        let original = context();
-        let mut repaired = original.clone();
-        assert_eq!(
-            repair(&mut repaired, &error("messages.0.content.2", 400)),
-            2
-        );
-        assert!(repaired.messages[0].text().contains("Keep text"));
-        let AiMessageContent::Parts(parts) = &repaired.messages[0].content else {
-            panic!("parts")
-        };
-        assert!(parts.contains(&signed("first")));
-        assert!(!parts.contains(&signed("second")));
-        let mut next = original; // The engine still holds earlier rounds.
-        prepare(&mut next);
-        assert_eq!(next.messages, repaired.messages);
-        assert_eq!(repair(&mut next, &error("messages.0.content.0", 400)), 0);
-        let stored = next.response_metadata.get(REMOVED).unwrap().to_string();
-        assert!(!stored.contains("second") && !stored.contains("opaque"));
-    }
-    #[test]
-    fn unrelated_status_invalid_path_and_a_path_to_text_never_repair() {
-        for (path, status) in [
-            ("messages.0.content.0", 500),
-            ("messages.4.content.0", 400),
-            ("messages.0.content.1", 400),
-            ("messages.0.content.99", 400),
-            ("messages.no.content.0", 400),
-        ] {
-            let mut context = context();
-            let before = context.messages.clone();
-            assert_eq!(repair(&mut context, &error(path, status)), 0);
-            assert_eq!(context.messages, before);
-        }
-    }
-
-    #[test]
-    fn error_paths_address_combined_roles_and_combined_content() {
-        let mut context = context();
-        context.messages.splice(
-            0..0,
-            [
-                AiMessage::new(AiRole::User, "First instruction"),
-                AiMessage::new(AiRole::System, "More instruction"),
-                AiMessage::new(AiRole::Tool, "Tool text"),
-                AiMessage::new(AiRole::Assistant, "Narration"),
-            ],
-        );
-        assert_eq!(repair(&mut context, &error("messages.1.content.3", 400)), 2);
-        assert_eq!(context.messages[3].text(), "Narration");
-        let AiMessageContent::Parts(parts) = &context.messages[4].content else {
-            panic!("parts")
-        };
-        assert!(parts.contains(&signed("first")));
-        assert!(!parts.contains(&signed("second")));
-    }
-}
+#[path = "replay_tests.rs"]
+mod tests;

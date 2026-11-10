@@ -1,8 +1,10 @@
-"""Opt-in paid check: recover from a real Fable signature-prefix rejection.
+"""Opt-in paid check: recover from a real Fable signature rejection.
 
-Set ANTHROPIC_API_KEY and build first. A local test proxy changes the synthetic
-system prefix after the first signed tool round. Only disposable project data
-reaches Anthropic; credentials and raw provider responses are never printed.
+Set ANTHROPIC_API_KEY and build first (or set ANTHROPIC_TEST_BINARY).
+A local proxy changes the synthetic system prefix after the first signed round.
+ANTHROPIC_TEST_SIGNATURE_MODE=invalid instead corrupts that round's signature.
+Only disposable project data reaches Anthropic; credentials and raw provider
+responses are never printed.
 """
 import http.server
 import json
@@ -22,7 +24,9 @@ def main():
         raise SystemExit("Set ANTHROPIC_API_KEY to run this paid integration check")
     metadata = json.loads(subprocess.check_output(
         ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True))
-    binary = Path(metadata["target_directory"]) / "debug" / "roomkit-code"
+    binary = Path(os.environ.get("ANTHROPIC_TEST_BINARY", str(Path(metadata["target_directory"]) / "debug" / "roomkit-code")))
+    invalid = os.environ.get("ANTHROPIC_TEST_SIGNATURE_MODE") == "invalid"
+    corrupted = None
     state = {"changed": False, "rejections": 0, "requests": 0, "recovered": False, "errors": []}
 
     class Proxy(http.server.BaseHTTPRequestHandler):
@@ -30,6 +34,7 @@ def main():
             pass
 
         def do_POST(self):
+            nonlocal corrupted
             body = json.loads(self.rfile.read(int(self.headers["content-length"])))
             state["requests"] += 1
             thinking = any(part.get("type") == "thinking"
@@ -37,7 +42,17 @@ def main():
                            if isinstance(message.get("content"), list)
                            for part in message["content"])
             state["changed"] |= thinking
-            if state["changed"]:
+            if invalid:
+                for message in body["messages"]:
+                    if not isinstance(message.get("content"), list):
+                        continue
+                    for part in message["content"]:
+                        if part.get("type") == "thinking":
+                            if corrupted is None:
+                                corrupted = part["signature"]
+                            if part["signature"] == corrupted:
+                                part["signature"] = "invalid-signature"
+            elif state["changed"]:
                 # Keep this prefix edit on the retry and every later request.
                 body["system"].append({"type": "text", "text": "Keep the final confirmation brief."})
             headers = {name: self.headers[name] for name in
@@ -61,7 +76,7 @@ def main():
                     "path": re.findall(r"messages\.\d+\.content\.\d+", message),
                     "expected_wording": "Invalid signature in thinking block" in message.replace("`", ""),
                     "bound": "bound to a different conversation" in message})
-                if status == 400 and b"bound to a different conversation" in payload:
+                if status == 400 and (b"signature" in payload if invalid else b"bound to a different conversation" in payload):
                     state["rejections"] += 1
             self.send_response(status)
             self.send_header("content-type", kind)
@@ -93,16 +108,23 @@ def main():
                 safe = [{k: r[k] for k in ("event", "code", "reason") if k in r} for r in records if r.get("event") in ("engine_error", "provider_recovery")]
                 raise AssertionError(f"Synthetic launch failed ({result.returncode}); {state}; {safe}")
             assert (project / "result.txt").read_text().strip() == token
-            assert state["rejections"] == 1, "Expected exactly one real signature-prefix rejection"
+            assert state["rejections"] == 1, "Expected exactly one real signature rejection"
             assert state["recovered"], "No successful request after the rejection"
             logs = list((root / "state").rglob("diagnostics.jsonl"))
             records = [json.loads(line) for path in logs for line in path.read_text().splitlines()]
             assert sum(r.get("reason") == "reasoning_replay" for r in records) == 1
+            failures = [r for r in records if r.get("event") == "provider_request_finished"
+                        and r.get("outcome") == "error"]
+            assert len(failures) == 1
+            assert failures[0]["http_status"] == 400
+            assert failures[0]["recovery"] == "retry"
+            assert failures[0]["block_path"] is not None
+            assert failures[0]["grouped_target"] is not None
     finally:
         server.shutdown()
         server.server_close()
         worker.join()
-    print("Fable live recovery passed: one real prefix rejection, automatic retry and completed tools")
+    print("Fable live recovery passed: one real signature rejection, automatic retry and completed tools")
 
 
 if __name__ == "__main__":

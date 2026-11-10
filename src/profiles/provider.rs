@@ -30,7 +30,8 @@ impl Profiles {
                             profile.max_output_tokens,
                             profile.context_window,
                             self.diagnostics.clone(),
-                        ),
+                        )
+                        .for_agent(&profile.id),
                         vision: profile.vision,
                     })
                     .map_err(|_| "Cannot initialize the Anthropic connection".into())

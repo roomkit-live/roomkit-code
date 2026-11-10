@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Record Anthropic request budgets, timing, stop reasons, usage, reasoning-error
+  paths and recovery decisions in private diagnostics, including failed and
+  cancelled requests. Identify the managed binary at startup.
+
 - An agent can ask you questions (`ask_user`, HITL 946ebf73): up to four at
   once, with options and your own words, on a card after any approval; it
   reads your answers, or that you closed the card. It needs no approval, Plan
