@@ -1,6 +1,7 @@
 //! The engine's delegation as this application serves it (RMK-1532; HITL
-//! 2b4cc82b, f7f700bc, a7392f28). Every agent can hand a task to another
-//! configured agent with the engine's `delegate_task`: the worker runs in a
+//! 2b4cc82b, f7f700bc, a7392f28). A conversation's agent can hand a task to
+//! another configured agent with the engine's `delegate_task`, and the agent
+//! of a task cannot hand it on (HITL d4ede844): the worker runs in a
 //! child room, in the background, and the delegating agent says its result in
 //! a turn of its own. `task_status` and `cancel_task` follow and cancel the
 //! conversation's tasks. No message of the conversation is handed over: what
@@ -383,10 +384,10 @@ mod tests {
         );
     }
 
-    /// A worker's worker can still hand a task on; one level deeper cannot,
-    /// nor a room whose conversation is unknown.
+    /// The conversation's agent hands a task over; the agent of a task, or
+    /// of a room whose conversation is unknown, cannot hand it on.
     #[test]
-    fn a_task_is_handed_on_at_most_three_rooms_deep() {
+    fn only_the_conversation_s_agent_hands_a_task_over() {
         assert_eq!(nesting_refusal(0), None);
         assert!(nesting_refusal(1).is_some());
         assert!(nesting_refusal(usize::MAX).is_some());

@@ -318,9 +318,9 @@ async fn a_target_works_with_its_connection_as_it_stands() {
     assert_eq!((worker(&before), worker(&after)), (2, 2));
 }
 
-/// A model server whose workers each hand the task on to the other agent
-/// and answer once that is done, and whose delegating agent starts the chain:
-/// `code`, then `review`, `code` and `review` again, which is refused.
+/// A model server whose workers each try to hand the task on to the other
+/// agent and answer once that is done, and whose delegating agent starts the
+/// chain: `code`, then `review`, whose call is refused.
 async fn nesting_server() -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
     let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
     let seen = requests.clone();

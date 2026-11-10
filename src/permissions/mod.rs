@@ -71,8 +71,8 @@ const DELEGATED: &str = "Leaving Plan mode needs the person's review of a plan, 
 
 /// How many rooms up a delegated task's room is followed to its conversation:
 /// past it, the chain is taken for a loop and the room for one whose
-/// conversation is unknown. The gate stops nesting well before
-/// (`delegation::MAX_DEPTH`).
+/// conversation is unknown. The gate lets only a conversation's agent
+/// delegate (`delegation::nesting_refusal`).
 const MAX_DELEGATION_DEPTH: usize = 16;
 
 #[derive(Clone)]

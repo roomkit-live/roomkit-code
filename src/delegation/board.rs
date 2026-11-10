@@ -129,8 +129,8 @@ struct Board {
     version: u64,
     /// What each conversation's own agent cost, as of a `version`.
     own_costs: HashMap<String, (u64, Option<ConversationCost>)>,
-    /// The turns recorded in each task's room since launch: a reading of a
-    /// task's figures begun before one of them is stale.
+    /// The turns recorded in each room since launch: a reading of a task's
+    /// figures begun before one in its room is stale.
     readings: HashMap<String, u64>,
 }
 

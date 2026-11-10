@@ -88,7 +88,7 @@ async fn decide(gate: &Gate, event: ToolCallEvent, context: &RoomContext) -> Ver
 }
 
 /// Why a `delegate_task` call cannot hand its task over, if it cannot: a
-/// channel to share, a task handed on too many times already, an agent that
+/// channel to share, a call from a task's own agent, an agent that
 /// is no other configured agent, or one that cannot run, assembled here from
 /// its current settings.
 async fn delegation_refusal(gate: &Gate, event: &ToolCallEvent) -> Option<String> {
