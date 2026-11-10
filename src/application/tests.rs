@@ -1541,6 +1541,19 @@ async fn edit_profile(
     app.view = *view;
 }
 
+/// Adds a connection through its form, which then offers its models.
+async fn add_connection(app: &Application, changes: &[(&str, &str)]) {
+    use roomkit_tui_engine::CommandResult;
+    let result = submit_profile(app, "providers", "add", changes).await;
+    let Ok(CommandResult::Events(events)) = result else {
+        panic!("Expected the new connection's models")
+    };
+    assert!(
+        matches!(&events[..], [Event::Choices { title, .. }] if title.starts_with("Connected")),
+        "{events:?}"
+    );
+}
+
 /// Opens the `command` form for `action`, changes `changes` and submits it.
 async fn submit_profile(
     app: &Application,
@@ -1598,10 +1611,8 @@ async fn profiles_select_independent_providers_tools_and_auth_in_one_durable_con
     let mut app = Application::open(&settings, String::new()).await.unwrap();
     let room = app.view.room.clone();
     turn_operation(&app, "first-agent-turn").await;
-    edit_profile(
-        &mut app,
-        "providers",
-        "add",
+    add_connection(
+        &app,
         &[
             ("id", "secondary"),
             ("label", "Second connection"),
@@ -1745,13 +1756,7 @@ async fn unconfigured_start_can_create_profiles_without_a_dummy_model_or_endpoin
     let mut app = Application::open(&settings, String::new()).await.unwrap();
     assert!(app.view.model.is_none());
     assert!(app.view.submission_error.is_some());
-    edit_profile(
-        &mut app,
-        "providers",
-        "add",
-        &[("id", "local"), ("url", &provider.base_url)],
-    )
-    .await;
+    add_connection(&app, &[("id", "local"), ("url", &provider.base_url)]).await;
     let CommandResult::Events(events) = profile_command(
         &app,
         Command::Invoke {
@@ -1899,6 +1904,7 @@ mod processes;
 mod accounts;
 mod anthropic;
 mod anthropic_recovery;
+mod model_choice;
 mod profile_deletion;
 mod provider_errors;
 mod subscriptions;

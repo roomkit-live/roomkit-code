@@ -4,6 +4,7 @@ mod deletion;
 mod discovery;
 mod mcp;
 pub(crate) mod model;
+mod model_choice;
 mod provider;
 mod reasoning;
 pub(crate) mod sidebar;
@@ -30,6 +31,8 @@ use crate::{
     config::Settings,
     storage::Storage,
 };
+#[cfg(test)]
+pub(crate) use discovery::SUBSCRIPTION_SERVER;
 pub(crate) use mcp::McpTools;
 use model::{Agent, Authentication, PROJECT_SCHEMA, Project, Provider, Providers, TOOLS};
 use slot::AgentSlot;

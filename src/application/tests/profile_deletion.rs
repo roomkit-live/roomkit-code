@@ -122,13 +122,7 @@ async fn deletion_handles_active_inactive_and_last_agents_without_erasing_histor
     .unwrap();
     assert!(saved["profiles"].as_object().unwrap().is_empty());
     assert!(!app.session().snapshot().await.unwrap().items.is_empty());
-    edit_profile(
-        &mut app,
-        "providers",
-        "add",
-        &[("id", "new"), ("url", &mock.base_url)],
-    )
-    .await;
+    add_connection(&app, &[("id", "new"), ("url", &mock.base_url)]).await;
     add_agent(&mut app, "code", "new").await;
     assert!(app.view.submission_error.is_none());
     turn_operation(&app, "recreated-agent").await;
@@ -270,13 +264,7 @@ async fn an_open_agent_form_cannot_restore_a_deleted_provider_reference_and_edit
     let mock = Mock::start(vec![]).await;
     let a_settings = settings(first.path(), state.path(), &mock.base_url);
     let mut a = Application::open(&a_settings, String::new()).await.unwrap();
-    edit_profile(
-        &mut a,
-        "providers",
-        "add",
-        &[("id", "unused"), ("url", &mock.base_url)],
-    )
-    .await;
+    add_connection(&a, &[("id", "unused"), ("url", &mock.base_url)]).await;
     let mut b_settings = settings(second.path(), state.path(), &mock.base_url);
     b_settings.base_url.clear();
     b_settings.model.clear();

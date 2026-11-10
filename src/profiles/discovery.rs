@@ -11,7 +11,7 @@ pub(super) async fn discover(provider: &Provider) -> Result<Vec<(String, Option<
         return openai(provider).await;
     }
     let mut config = AnthropicConfig::new(provider.authentication.key()?, "discovery");
-    config.base_url = Some(provider.base_url.clone());
+    config.base_url = Some(server(provider)?.to_owned());
     config.timeout = Duration::from_secs(10);
     let client =
         AnthropicAiProvider::new(config).map_err(|_| "Cannot initialize connection check")?;
@@ -37,7 +37,7 @@ async fn openai(provider: &Provider) -> Result<Vec<(String, Option<u64>)>, Strin
         .map_err(|_| "Cannot initialize connection check")?;
     let mut request = client.get(format!(
         "{}/models",
-        provider.base_url.trim_end_matches('/')
+        server(provider)?.trim_end_matches('/')
     ));
     let key = provider.authentication.key()?;
     if !key.is_empty() {
@@ -67,6 +67,31 @@ async fn openai(provider: &Provider) -> Result<Vec<(String, Option<u64>)>, Strin
     let json: serde_json::Value = serde_json::from_slice(&body)
         .map_err(|_| "Server did not return a JSON model catalogue")?;
     accepted(listed(&json, provider.subscription())?)
+}
+
+/// The server `provider`'s models are listed from: its own.
+#[cfg(not(test))]
+fn server(provider: &Provider) -> Result<&str, String> {
+    Ok(&provider.base_url)
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    /// The mock server a test lists a subscription's models from, a
+    /// subscription's own URL being fixed.
+    pub(crate) static SUBSCRIPTION_SERVER: String;
+}
+
+/// The server `provider`'s models are listed from: a subscription's never
+/// its real service in a test, which names its mock server instead.
+#[cfg(test)]
+fn server(provider: &Provider) -> Result<String, String> {
+    if provider.subscription().is_none() {
+        return Ok(provider.base_url.clone());
+    }
+    SUBSCRIPTION_SERVER
+        .try_with(Clone::clone)
+        .map_err(|_| "Tests list a subscription's models from their mock server".into())
 }
 
 /// The models a `GET /models` answer lists, with their reported capacity: a

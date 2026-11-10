@@ -75,3 +75,36 @@ async fn the_router_refuses_what_no_command_owns() {
     );
     app.close().await.unwrap();
 }
+
+/// `/model` is advertised to the terminal and reaches the profiles, which
+/// list the current agent's models.
+#[tokio::test]
+async fn model_is_advertised_and_answered_by_the_profiles() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let router = app.router(&settings.workspace);
+    assert!(
+        crate::sessions::commands()
+            .iter()
+            .any(|c| c.name == "model")
+    );
+    let request = Request::new(
+        RequestId::new(1),
+        "routing",
+        app.view.room.as_str(),
+        invoke("model", ""),
+    );
+    let Ok(roomkit_tui_engine::CommandResult::Events(events)) =
+        router.handle(request, app.view.clone()).await
+    else {
+        panic!("Expected the current agent's models")
+    };
+    assert!(
+        matches!(&events[..], [Event::Choices { command, .. }] if command == "model"),
+        "{events:?}"
+    );
+    app.close().await.unwrap();
+}

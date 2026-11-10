@@ -3,7 +3,6 @@ use roomkit_tui::protocol::{
 };
 use roomkit_tui_engine::CommandResult;
 
-use super::discovery::discover;
 use super::*;
 use crate::providers::ProviderKind;
 use catalog::Scope;
@@ -111,11 +110,11 @@ impl Profiles {
             Command::SubmitForm { .. } => true,
             Command::Invoke { name, arguments } => {
                 (name == "agents" && arguments.starts_with("select:"))
-                    || (name == "effort" && !arguments.trim().is_empty())
+                    || (matches!(name.as_str(), "effort" | "model") && !arguments.trim().is_empty())
             }
             _ => false,
         };
-        let _edit_lease = mutating
+        let edit_lease = mutating
             .then(|| store::edit_lease(&self.state_dir))
             .transpose()?;
         match request.command {
@@ -128,42 +127,31 @@ impl Profiles {
                 if state.providers.value.schema != 1 {
                     return Err("Unsupported profile file version".into());
                 }
+                // A model ID may hold colons: it is the whole argument.
+                if name == "model" {
+                    return self.model(kit, state, current, arguments.trim()).await;
+                }
                 let mut parts = arguments.trim().splitn(3, ':');
                 let action = parts.next().unwrap_or_default();
                 let id = parts.next().unwrap_or_default();
                 let model = parts.next().unwrap_or_default();
                 match (name.as_str(), action) {
-                    ("effort", effort) => {
-                        let mut agent = state
+                    ("effort", "") => {
+                        state
                             .agent(current.agent.as_str())
-                            .ok_or("Configure an agent with /agents first")?
-                            .clone();
-                        if effort.is_empty() {
-                            return Ok(choices(
-                                &current,
-                                "effort",
-                                "Reasoning effort · supported levels depend on the model",
-                                effort_choices(),
-                            ));
-                        }
-                        agent.reasoning_effort = if effort == "default" {
-                            None
-                        } else {
-                            Some(effort.into())
-                        };
-                        agent.validate()?;
-                        let provider = state
-                            .providers
-                            .value
-                            .profiles
-                            .get(&agent.provider)
-                            .ok_or("Unknown provider")?;
-                        let (runtime, tools) = self.assemble(&agent, provider).await?;
-                        state.update_agent(agent)?;
-                        state.install(kit, current.agent.as_str(), runtime, tools)?;
-                        let mut next = current;
-                        state.view(&mut next);
-                        Ok(CommandResult::Switch(Box::new(next)))
+                            .ok_or("Configure an agent with /agents first")?;
+                        Ok(choices(
+                            &current,
+                            "effort",
+                            "Reasoning effort · supported levels depend on the model",
+                            effort_choices(),
+                        ))
+                    }
+                    ("effort", effort) => {
+                        self.change_current(kit, &mut state, current, |agent| {
+                            agent.reasoning_effort = (effort != "default").then(|| effort.into());
+                        })
+                        .await
                     }
                     ("providers", "") => Ok(provider_choices(&state, &current)),
                     ("providers", "chatgpt-use") => {
@@ -347,29 +335,8 @@ impl Profiles {
                             .profiles
                             .get(id)
                             .ok_or("Unknown provider")?;
-                        let models = discover(provider).await?;
-                        Ok(choices(
-                            &current,
-                            "providers",
-                            "Connection successful · choose a model to create an agent",
-                            models
-                                .into_iter()
-                                .map(|(model, capacity)| {
-                                    choice(
-                                        format!("model:{id}:{model}"),
-                                        model,
-                                        capacity.map_or_else(
-                                            || "Create agent with this model".into(),
-                                            |n| {
-                                                format!(
-                                                    "Reported capacity: {n} tokens · create agent"
-                                                )
-                                            },
-                                        ),
-                                    )
-                                })
-                                .collect(),
-                        ))
+                        let title = "Connection successful · choose a model to create an agent";
+                        self.creation_choices(&current, provider, title).await
                     }
                     ("providers", "model") => {
                         if !state.providers.value.profiles.contains_key(id)
@@ -470,9 +437,11 @@ impl Profiles {
                 }
                 let target = pending.target.clone();
                 let mut next = current;
+                let mut created = None;
                 match &target {
                     Target::Provider(original) => {
                         let profile = parse_provider(&values, original.as_deref(), &state)?;
+                        created = original.is_none().then(|| profile.clone());
                         self.save_connection(kit, &mut state, &next, profile)
                             .await?;
                     }
@@ -486,6 +455,7 @@ impl Profiles {
                             original.as_deref(),
                             &state,
                         )?;
+                        created = original.is_none().then(|| profile.clone());
                         self.save_connection(kit, &mut state, &next, profile)
                             .await?;
                     }
@@ -509,6 +479,19 @@ impl Profiles {
                     }
                 }
                 state.pending = None;
+                // A new connection the current agent does not use offers its
+                // models; one it uses, recreated, refreshes its view.
+                let current_uses = |p: &Provider| {
+                    state
+                        .agent(next.agent.as_str())
+                        .is_some_and(|a| a.provider == p.id)
+                };
+                if let Some(provider) = created.filter(|p| !current_uses(p)) {
+                    // A listing reads a server: no profile edit waits on it.
+                    drop(edit_lease);
+                    drop(state);
+                    return Ok(self.after_connecting(&next, &provider).await);
+                }
                 state.view(&mut next);
                 Ok(CommandResult::Switch(Box::new(next)))
             }

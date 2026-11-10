@@ -91,10 +91,8 @@ async fn anthropic_profiles_discover_call_tools_compact_and_resume() {
     settings.base_url.clear();
     settings.model.clear();
     let mut app = Application::open(&settings, String::new()).await.unwrap();
-    edit_profile(
-        &mut app,
-        "providers",
-        "add",
+    add_connection(
+        &app,
         &[
             ("id", "native"),
             ("kind", "anthropic"),

@@ -54,6 +54,11 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "<command>",
         ),
         (
+            "model",
+            "Choose the current agent's model among its connection's",
+            "[model-id]",
+        ),
+        (
             "effort",
             "Choose reasoning effort for the current agent",
             "[default|low|medium|high|xhigh|max]",
@@ -262,7 +267,7 @@ impl Sessions {
                 self.services.sidebar_changes.send_replace(());
                 return result;
             }
-            "providers" | "agents" | "effort" => {
+            "providers" | "agents" | "model" | "effort" => {
                 return self
                     .profiles
                     .handle(&self.kit, &self.channel, request, current)

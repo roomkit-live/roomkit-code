@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A new connection lists the models it serves as soon as it is saved, as a
+  ChatGPT sign-in does: choose one to create an agent, instead of typing its
+  ID. `/model` lists the current agent's models and switches it to another;
+  `/model <model-id>` sets one by its ID.
+
 - The agent's tools no longer mislead it. A missing file reads `no such file
   or directory: src/absent.rs` instead of `Tool 'read' failed (ToolIOError)`;
   grep and glob at the project's root skip what `.gitignore` excludes, so

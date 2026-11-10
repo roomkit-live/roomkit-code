@@ -1,5 +1,6 @@
 //! A subscription with a pasted key, connected and edited from /providers.
 use super::*;
+use crate::profiles::SUBSCRIPTION_SERVER;
 use crate::profiles::model::{Authentication, Provider};
 use roomkit_tui::protocol::{FormSpec, FormValues};
 use roomkit_tui_engine::CommandResult;
@@ -32,7 +33,7 @@ fn form(events: &[Event]) -> FormSpec {
         .unwrap()
 }
 
-async fn submit(app: &Application, form: FormSpec, changes: &[(&str, &str)]) {
+async fn submit(app: &Application, form: FormSpec, changes: &[(&str, &str)]) -> CommandResult {
     let mut values = form
         .fields
         .iter()
@@ -41,7 +42,7 @@ async fn submit(app: &Application, form: FormSpec, changes: &[(&str, &str)]) {
     for (name, value) in changes {
         values.insert(*name, *value);
     }
-    let result = profile_command(
+    profile_command(
         app,
         Command::SubmitForm {
             name: form.command,
@@ -50,8 +51,72 @@ async fn submit(app: &Application, form: FormSpec, changes: &[(&str, &str)]) {
         },
     )
     .await
-    .unwrap();
-    assert!(matches!(result, CommandResult::Switch(_)));
+    .unwrap()
+}
+
+/// The models a saved connection's answer offers, by their choices' values.
+fn offered(result: &CommandResult) -> Vec<String> {
+    let CommandResult::Events(events) = result else {
+        panic!("Expected the connection's models")
+    };
+    let Event::Choices {
+        command, choices, ..
+    } = &events[0]
+    else {
+        panic!("Expected the connection's models, not {:?}", events[0])
+    };
+    assert_eq!(command, "providers");
+    choices.iter().map(|c| c.value.clone()).collect()
+}
+
+/// A server that lists models as OpenCode Go's does, keeping the
+/// authorization each listing carried.
+struct Catalogue {
+    url: String,
+    authorizations: Arc<Mutex<Vec<String>>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Catalogue {
+    async fn start() -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let authorizations = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&authorizations);
+        let entry = |id: &str, api: &str, price: f64| {
+            json!({"id": id, "object": "model", "api": {api: {}},
+                "cost": {"text": {"input": {"price": price}}}, "limit": {"context": 262_144}})
+        };
+        let list = json!({"object": "list", "data": [
+            entry("kimi-k3", "chat-completions", 0.6),
+            entry("beam-free", "chat-completions", 0.0),
+            entry("minimax-m3", "messages", 0.3),
+        ]});
+        let router = Router::new().route(
+            "/models",
+            axum::routing::get(move |headers: axum::http::HeaderMap| async move {
+                let authorization = headers.get("authorization").map(|v| v.to_str().unwrap());
+                seen.lock()
+                    .unwrap()
+                    .push(authorization.unwrap_or_default().into());
+                Json(list)
+            }),
+        );
+        let task = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        Self {
+            url,
+            authorizations,
+            task,
+        }
+    }
+}
+
+impl Drop for Catalogue {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 fn saved(settings: &Settings, id: &str) -> Value {
@@ -64,6 +129,13 @@ fn saved(settings: &Settings, id: &str) -> Value {
 
 #[tokio::test]
 async fn opencode_go_connects_with_a_pasted_key_and_edits_without_retyping_it() {
+    let catalogue = Catalogue::start().await;
+    SUBSCRIPTION_SERVER
+        .scope(catalogue.url.clone(), connect_and_edit(&catalogue))
+        .await;
+}
+
+async fn connect_and_edit(catalogue: &Catalogue) {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let mock = Mock::start(vec![]).await;
@@ -90,7 +162,13 @@ async fn opencode_go_connects_with_a_pasted_key_and_edits_without_retyping_it() 
         .map(|f| f.name.clone())
         .collect();
     assert_eq!(fields, ["label", "key", "timeout"]);
-    submit(&app, form(&connect), &[("key", " go-test-key\n")]).await;
+    // Saved, it offers the models it can call, listed with its key.
+    let connected = submit(&app, form(&connect), &[("key", " go-test-key\n")]).await;
+    assert_eq!(offered(&connected), ["model:opencode-go-1:kimi-k3"]);
+    assert_eq!(
+        *catalogue.authorizations.lock().unwrap(),
+        ["Bearer go-test-key"]
+    );
     let connection = saved(&settings, "opencode-go-1");
     assert_eq!(connection["subscription"], "opencode-go");
     assert_eq!(connection["base_url"], GO);
@@ -106,23 +184,40 @@ async fn opencode_go_connects_with_a_pasted_key_and_edits_without_retyping_it() 
         .find(|f| f.name == "key")
         .unwrap();
     assert!(key.value.is_empty());
-    submit(&app, form(&edit), &[("label", "My Go")]).await;
+    let edited = submit(&app, form(&edit), &[("label", "My Go")]).await;
+    assert!(matches!(edited, CommandResult::Switch(_)));
     let connection = saved(&settings, "opencode-go-1");
     assert_eq!(connection["label"], "My Go");
     assert_eq!(connection["authentication"]["key"], "go-test-key");
 
     // A second subscription takes the next ID.
     let second = providers(&app, "subscription:opencode-go").await;
-    submit(&app, form(&second), &[("key", "other-key")]).await;
+    let connected_again = submit(&app, form(&second), &[("key", "other-key")]).await;
+    assert_eq!(offered(&connected_again), ["model:opencode-go-2:kimi-k3"]);
     assert_eq!(
         saved(&settings, "opencode-go-2")["authentication"]["key"],
         "other-key"
     );
 
+    // Choosing a model opens a new agent's form on that connection.
+    let agent = form(&providers(&app, "model:opencode-go-1:kimi-k3").await);
+    let value = |name: &str| {
+        let field = agent.fields.iter().find(|f| f.name == name);
+        field.unwrap().value.clone()
+    };
+    assert_eq!(
+        (value("provider"), value("model")),
+        ("opencode-go-1".into(), "kimi-k3".into())
+    );
+
     // No menu or form ever shows the key, and nothing reached a model.
+    let CommandResult::Events(connected) = connected else {
+        unreachable!("offered the models")
+    };
     for events in [
         menu,
         connect,
+        connected,
         edit,
         providers(&app, "open:opencode-go-1").await,
     ] {

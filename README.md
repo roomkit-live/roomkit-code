@@ -339,10 +339,18 @@ variable. Stored keys live in a private local file (0600), not an OS keychain;
 secret fields are masked, never prefilled, never echoed in diagnostics and never
 stored in chat history. Leaving a stored-key field blank preserves that key.
 Choosing another authentication mode removes the stored key from that profile.
-Testing a connection makes a bounded `GET /models` request (`/v1/models` for Anthropic) with no redirects;
-it sends no conversation. Some compatible servers do not implement discovery,
-so model identifiers can always be entered manually. Subscriptions have their
-own entries: [OpenCode Go](#opencode-go) and [Sign in with ChatGPT](#sign-in-with-chatgpt).
+Saving a new connection lists the models it serves, and choosing one opens the
+form of an agent using it; **Test connection and list models** lists them again.
+The listing is a bounded `GET /models` request (`/v1/models` for Anthropic) with
+no redirects; it sends no conversation. Some compatible servers do not implement
+discovery: the connection is saved all the same, and model identifiers can
+always be entered manually. Subscriptions have their own entries:
+[OpenCode Go](#opencode-go) and [Sign in with ChatGPT](#sign-in-with-chatgpt).
+
+**/model** lists the models of the current agent's connection and switches the
+agent to the one you choose; `/model <model-id>` sets one by its ID, listed or
+not. The agent keeps its other settings, the context capacity included, and the
+conversation.
 
 **/agents** manages the interlocutors. Each has a stable ID, display name,
 provider, model, optional context capacity and output limit, additional instructions, selected
@@ -943,9 +951,9 @@ MIT licensed. This is an initial development version, not a published release.
 
 Open `/providers`, choose **Connect OpenCode Go**, and paste the API key from
 your [OpenCode console](https://opencode.ai/console). The connection calls
-`https://opencode.ai/inference/go/openai/v1` and nowhere else. **Test connection
-and list models** offers the paid models Go serves over Chat Completions; choose
-one to create an agent. Free models answer only OpenCode's own client, and the
+`https://opencode.ai/inference/go/openai/v1` and nowhere else. Once saved, it
+lists the paid models Go serves over Chat Completions; choose one to create an
+agent, and `/model` to switch an agent to another. Free models answer only OpenCode's own client, and the
 models Go serves over the Responses, Anthropic or Gemini APIs are not offered yet.
 
 Every request carries the agent's cache key, the same for that agent in this
