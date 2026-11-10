@@ -196,17 +196,19 @@ impl Provider {
         if !(1..=86_400).contains(&self.timeout_seconds) {
             return Err("Timeout must be between 1 and 86400 seconds".into());
         }
-        if let Authentication::ChatGpt { account } = &self.authentication
-            && (self.kind != crate::providers::ProviderKind::OpenAi
-                || self.base_url != roomkit_auth::CHATGPT_API_ROOT
-                || uuid::Uuid::parse_str(account).is_err())
+        // Its credential may only go to the subscription's own API.
+        if let Some(subscription) = self.subscription()
+            && (self.kind != subscription.kind || self.base_url != subscription.base_url)
         {
-            return Err(
-                "ChatGPT accounts require the trusted public OpenAI API and a valid account ID"
-                    .into(),
-            );
+            return Err(format!(
+                "{} connections use only its own API, {}",
+                subscription.name, subscription.base_url
+            ));
         }
         match &self.authentication {
+            Authentication::ChatGpt { account } if uuid::Uuid::parse_str(account).is_err() => {
+                return Err("Invalid ChatGPT account ID".into());
+            }
             Authentication::Stored { key } if !text(key, 8192) => {
                 return Err("Enter a nonempty API key without control characters".into());
             }
@@ -222,6 +224,24 @@ impl Provider {
             _ => {}
         }
         Ok(())
+    }
+}
+
+impl Provider {
+    /// The subscription this connection goes through, if any: an account
+    /// credential belongs to its service.
+    pub fn subscription(&self) -> Option<&'static super::subscriptions::Subscription> {
+        match self.authentication {
+            Authentication::ChatGpt { .. } => Some(&super::subscriptions::CHATGPT),
+            _ => None,
+        }
+    }
+
+    /// The subscription whose account manages this connection, if any: its
+    /// settings change through that account's menu, not the provider form.
+    pub fn account_managed(&self) -> Option<&'static super::subscriptions::Subscription> {
+        self.subscription()
+            .filter(|s| s.credential == super::subscriptions::Credential::Account)
     }
 }
 

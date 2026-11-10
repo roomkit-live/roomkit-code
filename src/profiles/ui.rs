@@ -182,8 +182,9 @@ impl Profiles {
                         let _edit_lease = store::edit_lease(&self.state_dir)?;
                         state.providers.reload()?;
                         let provider_id = format!("chatgpt-{id}");
+                        let chatgpt = &super::subscriptions::CHATGPT;
                         let provider = Provider {
-                            kind: ProviderKind::OpenAi,
+                            kind: chatgpt.kind,
                             id: provider_id.clone(),
                             label: format!(
                                 "ChatGPT · {}",
@@ -195,7 +196,7 @@ impl Profiles {
                                     .take(80)
                                     .collect::<String>()
                             ),
-                            base_url: roomkit_auth::CHATGPT_API_ROOT.into(),
+                            base_url: chatgpt.base_url.into(),
                             authentication: Authentication::ChatGpt { account: id.into() },
                             timeout_seconds: 600,
                         };
@@ -286,13 +287,8 @@ impl Profiles {
                         if existing.is_none() && state.providers.value.profiles.len() >= 128 {
                             return Err("Maximum of 128 provider profiles reached".into());
                         }
-                        if existing.is_some_and(|p| {
-                            matches!(p.authentication, Authentication::ChatGpt { .. })
-                        }) {
-                            return Err(
-                                "Manage ChatGPT connections through the ChatGPT account menu"
-                                    .into(),
-                            );
+                        if let Some(subscription) = existing.and_then(Provider::account_managed) {
+                            return Err(managed_elsewhere(subscription));
                         }
                         let target = Target::Provider(existing.map(|p| p.id.clone()));
                         let form =
@@ -493,18 +489,15 @@ fn open_form(
 }
 
 pub(super) fn provider_choices(state: &State, current: &SessionConfig) -> CommandResult {
-    let mut entries = vec![
-        choice(
-            "add",
-            "+ Add provider",
-            "OpenAI-compatible or Anthropic connection",
-        ),
-        choice(
-            "chatgpt:menu",
-            "Sign in with ChatGPT",
-            "Use your ChatGPT account and manage connected accounts",
-        ),
-    ];
+    let mut entries = vec![choice(
+        "add",
+        "+ Add provider",
+        "OpenAI-compatible or Anthropic connection",
+    )];
+    entries.extend(super::subscriptions::ALL.iter().map(|subscription| {
+        let offer = &subscription.offer;
+        choice(offer.action, offer.label, offer.description)
+    }));
     entries.extend(state.providers.value.profiles.values().map(|p| {
         choice(
             format!("open:{}", p.id),
@@ -816,6 +809,12 @@ fn agent_form(
     ))
 }
 
+fn managed_elsewhere(subscription: &super::subscriptions::Subscription) -> String {
+    format!(
+        "Manage {name} connections through the {name} account menu",
+        name = subscription.name
+    )
+}
 fn value<'a>(values: &'a FormValues, key: &str) -> &'a str {
     values.get(key).unwrap_or("")
 }
@@ -839,11 +838,11 @@ fn parse_provider(
         original,
         state.providers.value.profiles.contains_key(id),
     )?;
-    if original
+    if let Some(subscription) = original
         .and_then(|id| state.providers.value.profiles.get(id))
-        .is_some_and(|p| matches!(p.authentication, Authentication::ChatGpt { .. }))
+        .and_then(Provider::account_managed)
     {
-        return Err("Manage ChatGPT connections through the ChatGPT account menu".into());
+        return Err(managed_elsewhere(subscription));
     }
     let authentication = match value(values, "auth") {
         "none" => Authentication::None,

@@ -45,45 +45,21 @@ impl Profiles {
         provider: &Provider,
     ) -> Result<roomkit_openai::OpenAiConfig, String> {
         let config = match &provider.authentication {
-            Authentication::ChatGpt { account } => {
-                let connected = self
-                    .accounts
-                    .auth
-                    .accounts()
-                    .map_err(|e| e.to_string())?
-                    .into_iter()
-                    .find(|a| &a.id == account)
-                    .ok_or("ChatGPT account not found; open /providers")?;
-                if !connected.connected {
-                    return Err("Sign in to this ChatGPT account with /providers".into());
-                }
-                if !connected.plan_usage {
-                    return Err("Authorize ChatGPT plan usage with /providers".into());
-                }
-                // An agent's requests share their prompt's start: one key
-                // routes them to one prompt cache. Without it, a turn's later
-                // steps mostly missed it too (RMK-1481).
-                let (extra_body, headers) = cache_routing(&self.workspace, &profile.id);
-                roomkit_openai::OpenAiConfig {
-                    base_url: Some(roomkit_auth::CHATGPT_API_ROOT.into()),
-                    api: roomkit_openai::OpenAiApi::Responses,
-                    tool_namespace: Some((
-                        "functions".into(),
-                        "Tools available to this assistant".into(),
-                    )),
-                    token_source: Some(Arc::new(crate::accounts::Credential {
-                        auth: self.accounts.auth.clone(),
-                        account: account.clone(),
-                    })),
-                    extra_body: Some(extra_body),
-                    default_headers: Some(headers),
-                    ..roomkit_openai::OpenAiConfig::new("", &profile.model)
-                }
-            }
+            Authentication::ChatGpt { account } => roomkit_openai::OpenAiConfig {
+                token_source: Some(self.accounts.token_source(account)?),
+                ..roomkit_openai::OpenAiConfig::new("", &profile.model)
+            },
             _ => roomkit_openai::OpenAiConfig {
                 base_url: Some(provider.base_url.clone()),
                 ..roomkit_openai::OpenAiConfig::new(provider.authentication.key()?, &profile.model)
             },
+        };
+        // An agent's requests share their prompt's start: one key routes them
+        // to one prompt cache. Without it, a turn's later steps mostly missed
+        // it too (RMK-1481).
+        let config = match provider.subscription() {
+            Some(subscription) => subscription.configure(config, &self.workspace, &profile.id),
+            None => config,
         };
         Ok(roomkit_openai::OpenAiConfig {
             timeout: std::time::Duration::from_secs(provider.timeout_seconds),

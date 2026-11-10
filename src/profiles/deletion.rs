@@ -82,10 +82,12 @@ impl Profiles {
             self.check_provider_references(&state, id)?;
             (
                 provider.label.clone(),
-                if matches!(provider.authentication, Authentication::ChatGpt { .. }) {
-                    "Remove this shared connection. The ChatGPT account stays connected; sign out separately from the account menu.".into()
-                } else {
-                    "Remove this shared connection and its stored API key, if any.".into()
+                match provider.account_managed() {
+                    Some(subscription) => format!(
+                        "Remove this shared connection. The {} account stays connected; sign out separately from the account menu.",
+                        subscription.name
+                    ),
+                    None => "Remove this shared connection and its stored API key, if any.".into(),
                 },
             )
         } else {

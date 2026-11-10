@@ -35,6 +35,30 @@ impl Accounts {
             events: watch::channel(None).0,
         }))
     }
+    /// The renewable credential of a saved account that may make model
+    /// requests; an account signed out or without plan usage has none.
+    pub fn token_source(
+        &self,
+        account: &str,
+    ) -> Result<Arc<dyn roomkit_openai::TokenSource>, String> {
+        let saved = self
+            .auth
+            .accounts()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|a| a.id == account)
+            .ok_or("ChatGPT account not found; open /providers")?;
+        if !saved.connected {
+            return Err("Sign in to this ChatGPT account with /providers".into());
+        }
+        if !saved.plan_usage {
+            return Err("Authorize ChatGPT plan usage with /providers".into());
+        }
+        Ok(Arc::new(Credential {
+            auth: self.auth.clone(),
+            account: account.into(),
+        }))
+    }
     pub fn subscribe(&self) -> watch::Receiver<Option<Event>> {
         self.events.subscribe()
     }

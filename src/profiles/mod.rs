@@ -11,6 +11,7 @@ mod skills;
 mod slot;
 mod startup;
 mod store;
+mod subscriptions;
 mod targets;
 mod ui;
 
@@ -20,11 +21,7 @@ use roomkit_ai::AiTool;
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::ModelInfo;
 use roomkit_tui_engine::SessionConfig;
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -89,21 +86,6 @@ struct State {
     setup_error: Option<String>,
     /// The price the configuration states for one server and model.
     configured_price: Option<ConfiguredPrice>,
-}
-
-/// What asks OpenAI to route an agent's requests to one prompt cache: a key,
-/// a digest of the workspace and the agent which tells neither, as the body's
-/// `prompt_cache_key` and as the `session-id` header, from which ChatGPT's
-/// backend derives its cache affinity. Codex sends both, the same.
-fn cache_routing(
-    workspace: &Path,
-    agent: &str,
-) -> (roomkit::model::Metadata, BTreeMap<String, String>) {
-    let digest = crate::digest::sha256_hex(format!("{}\0{agent}", workspace.display()));
-    let key = format!("roomkit-code-{}", &digest[..32]);
-    let mut body = roomkit::model::Metadata::new();
-    body.insert("prompt_cache_key".into(), key.clone().into());
-    (body, BTreeMap::from([("session-id".to_owned(), key)]))
 }
 
 /// The tokens `profile`'s history compacts under: its context capacity, else
@@ -541,30 +523,6 @@ mod tests {
             model: model.into(),
             pricing: roomkit_ai::ModelPricing::new(0.5, 1.5, verified).unwrap(),
         }
-    }
-
-    /// RMK-1481: one key per agent and workspace, the same at every launch,
-    /// that names neither.
-    #[test]
-    fn an_agent_s_cache_key_is_its_own_and_stable() {
-        let key = |workspace: &str, agent: &str| {
-            let (body, headers) = cache_routing(Path::new(workspace), agent);
-            let key = body["prompt_cache_key"].as_str().unwrap().to_owned();
-            assert_eq!(
-                headers,
-                BTreeMap::from([("session-id".into(), key.clone())])
-            );
-            key
-        };
-        let code = key("/work/project", "code");
-        assert_eq!(code, key("/work/project", "code"));
-        assert_ne!(code, key("/work/project", "review"));
-        assert_ne!(code, key("/work/other", "code"));
-        assert!(
-            code.starts_with("roomkit-code-") && code.len() == 45,
-            "{code}"
-        );
-        assert!(!code.contains("work") && !code.contains("project"));
     }
 
     /// RMK-1461: the kit's catalogue prices its models, a ChatGPT account's
