@@ -171,6 +171,8 @@ impl Diagnostics {
                 async move {
                     // Tool names come from this application's known inventory;
                     // call IDs, arguments, results and error bodies are not logged.
+                    // The outcome says how the call ended: a tool's error is
+                    // not the engine's, so the engine classifier does not read it.
                     let name = if crate::profiles::model::TOOLS.contains(&event.name.as_str()) {
                         event.name.as_str()
                     } else {
@@ -183,7 +185,7 @@ impl Diagnostics {
                             "channel":event.channel_id.as_str(),
                             "tool":name, "outcome":crate::hooks::tool_outcome(&event),
                         }),
-                        event.error_detail.as_deref(),
+                        None,
                     );
                 }
             },

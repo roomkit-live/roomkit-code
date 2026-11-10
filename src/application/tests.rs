@@ -1970,6 +1970,7 @@ mod images;
 mod shell;
 mod skills;
 mod steering;
+mod tool_failures;
 mod turn_ends;
 
 mod mcp;
