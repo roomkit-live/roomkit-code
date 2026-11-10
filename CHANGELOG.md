@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The agent's instructions now state what it had to find out by failing: a
+  shell command is stopped after 10 seconds unless `timeout_ms` asks for more
+  and is POSIX `sh`, not bash; a `grep` `include` glob is relative to its
+  `path`, where `*` stops at a directory; the tool calls of one step start
+  together. Of several mode changes during a turn, each notice says the last
+  one counts.
+
 - A conversation's record of the nested rules an agent was given failed
   silently when it could not be read or saved. `/diagnostics` now notes it as
   `instruction_record_not_read` or `instruction_record_not_kept`, with the

@@ -311,6 +311,51 @@ async fn a_mode_change_during_a_turn_reaches_that_turn() {
     app.close().await.unwrap();
 }
 
+/// Changed twice while a turn runs, the turn reads a notice for each, in the
+/// order they came: a model took the earlier one for the mode in force. Each
+/// notice says the last one counts.
+#[tokio::test]
+async fn of_two_mode_changes_during_a_turn_the_last_notice_counts() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![(
+        "write",
+        json!({"path":"note.txt", "content":"first"}),
+    )])
+    .await;
+    let settings = settings(project.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let handler = app.router(&settings.workspace);
+    let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+    let task = tokio::spawn(app.session().run_with_commands(host, handler));
+    event(&client).await;
+
+    submit(&client, 1, "Write the note.");
+    let permission = approval(&client).await;
+    set_mode(&client, 2, "plan");
+    until(&client, reply(2)).await;
+    set_mode(&client, 3, "yolo");
+    until(&client, reply(3)).await;
+    let decide = Command::Decide {
+        permission: permission.id,
+        decision: Decision::Allow,
+    };
+    command(&client, 4, "main", decide);
+    until(&client, |e| finished(e, "operation-1")).await;
+
+    let next = asked(&mock, 1);
+    assert_eq!(next.matches(MODE_CHANGED).count(), 2, "{next}");
+    assert_eq!(next.matches("the last notice counts").count(), 2, "{next}");
+    let (plan, yolo) = (
+        next.rfind("Application mode: Plan").unwrap(),
+        next.rfind("Application mode: Yolo").unwrap(),
+    );
+    assert!(plan < yolo, "the mode in force comes last: {next}");
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.close().await.unwrap();
+}
+
 /// Between turns nothing runs to tell: the next turn starts on the new mode.
 #[tokio::test]
 async fn a_mode_change_between_turns_only_changes_the_next_turn() {

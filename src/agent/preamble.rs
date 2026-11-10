@@ -410,6 +410,17 @@ mod tests {
         }
     }
 
+    /// A command that asked for no `timeout_ms` was stopped after a default
+    /// the prompt never stated, only the maximum.
+    #[test]
+    fn the_prompt_states_the_shell_default_the_tool_applies() {
+        for unattended in [false, true] {
+            let seconds = crate::agent::shell_limits(unattended).default_timeout_ms / 1000;
+            let stated = format!("stopped after {seconds} seconds unless timeout_ms asks for more");
+            assert!(INSTRUCTIONS.contains(&stated), "{stated}");
+        }
+    }
+
     #[test]
     fn the_prompt_states_the_process_maximum_the_tool_enforces() {
         // A larger timeout_ms is refused, not capped.

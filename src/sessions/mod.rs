@@ -456,7 +456,7 @@ impl Sessions {
     /// Tells the turn `agent` runs in `room` the new mode.
     async fn steer_mode(&self, current: &SessionConfig, room: RoomId, agent: &ChannelId) {
         let update = roomkit::model::UpdateSystemPrompt::new(format!(
-            "\n\nThe user changed the application mode during this turn. The instruction below replaces the mode instruction elsewhere in this conversation, wherever it appears, unless a plan mode tool you call after reading this reports another mode.\n{}",
+            "\n\nThe user changed the application mode during this turn. The instruction below replaces the mode instruction elsewhere in this conversation, wherever it appears, and any earlier notice like this one: the last notice counts, unless a plan mode tool you call after reading this reports another mode.\n{}",
             self.policy.instruction(room.as_str())
         ));
         let options = roomkit::SteerOptions {
