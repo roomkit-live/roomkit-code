@@ -370,12 +370,13 @@ async fn nesting_server() -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinH
     (base, requests, task)
 }
 
-/// Two agents handing a task back and forth stop three delegated rooms deep:
-/// the third worker's `delegate_task` is refused, so a model that keeps
-/// handing work on spends no more.
+/// A worker cannot hand its task on (HITL d4ede844): its `delegate_task` is
+/// refused, and it is told of no agent to hand it to. A task it handed on
+/// came back to it once its own task had ended, and never reached the
+/// conversation.
 #[tokio::test]
-async fn a_task_is_handed_on_three_levels_deep_at_most() {
-    const REFUSED: &str = "handed on too many times";
+async fn a_worker_cannot_hand_its_task_on() {
+    const REFUSED: &str = "cannot be handed on";
     let project = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let (base, requests, server) = nesting_server().await;
@@ -408,14 +409,15 @@ async fn a_task_is_handed_on_three_levels_deep_at_most() {
             last["role"] == "tool" && last.to_string().contains("delegated")
         })
         .count();
-    // The conversation's agent, its worker and that worker's worker each
-    // handed the task on; the next one was refused.
-    assert_eq!(delegated, 3);
-    let deepest = requests
+    // The conversation's agent handed the task over; its worker was refused.
+    assert_eq!(delegated, 1);
+    let worker = requests
         .iter()
         .find(|r| r.to_string().contains(REFUSED))
-        .unwrap();
-    assert!(deepest.to_string().contains("(ID: review)") && deepest.to_string().contains(WORKER));
+        .unwrap()
+        .to_string();
+    assert!(worker.contains(WORKER));
+    assert!(!worker.contains("Agents you can hand a task to"));
 }
 
 /// A launch nobody watches ends with its turn, before a task handed over

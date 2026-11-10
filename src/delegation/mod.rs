@@ -70,16 +70,21 @@ pub(crate) fn worker_note(room: &roomkit::model::Room) -> Option<&'static str> {
     })
 }
 
-/// How many delegated tasks' rooms deep a task can still be handed on from:
-/// the conversation's agent, its worker and that worker's worker. Two agents
-/// would otherwise hand a task back and forth without end.
+/// How many delegated tasks' rooms deep a task's room can be, read back: the
+/// conversation's agent, its worker and that worker's worker, as earlier
+/// launches let them hand a task on.
 pub(crate) const MAX_DEPTH: usize = 3;
 
-/// Why an agent `depth` delegated tasks' rooms deep cannot hand a task on, if
-/// it cannot.
+/// Why an agent `depth` delegated tasks' rooms deep cannot hand a task on,
+/// if it cannot: only the conversation's agent hands tasks over. A task a
+/// worker handed on came back to it once its own task had ended, so its
+/// result never reached the conversation (HITL d4ede844); a worker hands on
+/// again once the kit lets it wait for that task.
 pub(crate) fn nesting_refusal(depth: usize) -> Option<String> {
-    (depth >= MAX_DEPTH).then(|| {
-        "This task was handed on too many times to hand it on again: do the work yourself, or say in your answer what is left.".to_owned()
+    (depth >= 1).then(|| {
+        "A task handed to you cannot be handed on: do the work yourself, and say in your answer \
+         what you could not do."
+            .to_owned()
     })
 }
 
@@ -383,8 +388,7 @@ mod tests {
     #[test]
     fn a_task_is_handed_on_at_most_three_rooms_deep() {
         assert_eq!(nesting_refusal(0), None);
-        assert_eq!(nesting_refusal(MAX_DEPTH - 1), None);
-        assert!(nesting_refusal(MAX_DEPTH).is_some());
+        assert!(nesting_refusal(1).is_some());
         assert!(nesting_refusal(usize::MAX).is_some());
     }
 }

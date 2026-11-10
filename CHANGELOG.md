@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A delegated agent can no longer hand its task on (HITL d4ede844): what it
+  handed on came back to it after its own task had ended and never reached the
+  conversation. It returns once the kit lets a worker wait for that task.
+
 - A `--prompt` launch watched from a terminal shows where and how it runs
   (workspace, model, provider, mode, session) and a line per tool call as it
   happens; pipes and `--json` are unchanged. Its answer drops the blank lines a

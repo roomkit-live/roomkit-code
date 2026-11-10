@@ -78,7 +78,10 @@ impl AgentSlot {
         self.compactions.tell_snapshot(room, agent, &project);
         let mut parts = vec![self.policy.instruction(room).to_owned()];
         parts.extend(worker.map(str::to_owned));
-        parts.extend(self.roster.instruction(agent));
+        // A task's agent hands nothing on (`delegation::nesting_refusal`).
+        if worker.is_none() {
+            parts.extend(self.roster.instruction(agent));
+        }
         parts.extend(told);
         if !self.still_read(&project, event, history) {
             parts.push(project);
