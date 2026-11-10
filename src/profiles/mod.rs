@@ -377,6 +377,13 @@ impl Profiles {
         self.state.lock().await.view(view);
     }
 
+    /// The name of the connection agent `id` runs on.
+    pub async fn provider_label(&self, id: &str) -> Option<String> {
+        let state = self.state.lock().await;
+        let agent = state.agent(id)?;
+        Some(state.provider_label(&agent).to_owned())
+    }
+
     pub async fn tools(&self, id: &str) -> Vec<AiTool> {
         self.state
             .lock()
@@ -418,6 +425,15 @@ impl Profiles {
 }
 
 impl State {
+    /// The name of the connection `agent` runs on, its identity without one.
+    fn provider_label<'a>(&'a self, agent: &'a Agent) -> &'a str {
+        self.providers
+            .value
+            .profiles
+            .get(&agent.provider)
+            .map_or(agent.provider.as_str(), |provider| provider.label.as_str())
+    }
+
     fn view(&self, view: &mut SessionConfig) {
         let agent = self.agent(view.agent.as_str());
         let served = self.tools.contains_key(view.agent.as_str());

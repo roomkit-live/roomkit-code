@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A `--prompt` launch watched from a terminal shows where and how it runs
+  (workspace, model, provider, mode, session) and a line per tool call as it
+  happens; pipes and `--json` are unchanged. Its answer drops the blank lines a
+  model opens or closes on, and an exit report on the default storage gives a
+  resume command without `--state-dir`.
+
 - A delegated task's result comes back to the agent up to 20,000 characters,
   4,000 before: a long review no longer stops short (RMK-1617).
 

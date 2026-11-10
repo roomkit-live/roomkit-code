@@ -158,3 +158,35 @@ fn unrepresentable_paths_disable_only_resume() {
             .is_none()
     );
 }
+
+#[test]
+fn a_person_reads_the_command_without_the_default_storage() {
+    let root = tempfile::tempdir().unwrap();
+    let cli = crate::config::Cli::try_parse_from([
+        "roomkit-code",
+        root.path().to_str().unwrap(),
+        "--state-dir",
+        root.path().join("storage").to_str().unwrap(),
+    ])
+    .unwrap();
+    let mut settings = Settings::load(&cli).unwrap();
+    let named = Resume::shown(&settings).command("room", "ask").unwrap();
+    assert!(named.iter().any(|arg| arg == "--state-dir"), "{named:?}");
+    settings.default_storage = true;
+    let default = Resume::shown(&settings).command("room", "ask").unwrap();
+    let workspace = root.path().canonicalize().unwrap();
+    assert_eq!(
+        default,
+        [
+            "roomkit-code",
+            workspace.to_str().unwrap(),
+            "--session",
+            "room",
+            "--mode",
+            "ask"
+        ]
+    );
+    // Herdr's command runs later, possibly from another environment.
+    let full = Resume::new(&settings).command("room", "ask").unwrap();
+    assert!(full.iter().any(|arg| arg == "--state-dir"), "{full:?}");
+}

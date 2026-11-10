@@ -94,14 +94,7 @@ impl Profiles {
         let agent = state.agent(current.agent.as_str());
         let mut agent_entries = Vec::new();
         if let Some(profile) = agent {
-            let label = state
-                .providers
-                .value
-                .profiles
-                .get(&profile.provider)
-                .map_or(profile.provider.as_str(), |provider| {
-                    provider.label.as_str()
-                });
+            let label = state.provider_label(&profile);
             agent_entries.push(
                 SidebarEntry::new(label.chars().take(64).collect::<String>())
                     .with_tone(SidebarTone::Muted)

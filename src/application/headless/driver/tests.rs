@@ -124,6 +124,24 @@ fn a_turn_cut_by_its_round_limit_fails_the_launch() {
 }
 
 #[test]
+fn the_answer_drops_its_blank_edges_and_keeps_its_indentation() {
+    for (text, answer) in [
+        ("\n\nDone.\n\n", "Done."),
+        ("\r\n\r\nDone.\r\n", "Done."),
+        ("\n\u{a0}\nÉté.\n", "Été."),
+        ("  \n\t\nDone.", "Done."),
+        ("\n    indented\n  rest\n", "    indented\n  rest"),
+        ("a\n\nb", "a\n\nb"),
+        ("\n \n", ""),
+    ] {
+        let mut driver = driver();
+        driver.on_event(&snapshot());
+        driver.on_event(&message("agent", text));
+        assert_eq!(driver.answer(), Some(answer), "{text:?}");
+    }
+}
+
+#[test]
 fn the_launch_waits_for_every_run_the_operation_started() {
     let mut driver = driver();
     driver.on_event(&snapshot());

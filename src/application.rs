@@ -244,7 +244,7 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
     let renderers = crate::tool_views::renderers(&settings.workspace);
     // The final observation outlives the view: it names the conversation to resume.
     let observer = roomkit_tui::SessionObserver::default();
-    let resume = integrations::Resume::new(&settings);
+    let resume = integrations::Resume::shown(&settings);
     let integrations = integrations::Integration::start(
         &settings,
         app.profiles.diagnostics.clone(),

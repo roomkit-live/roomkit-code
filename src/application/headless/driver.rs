@@ -145,9 +145,10 @@ impl Driver {
         })
     }
 
-    /// The agent's latest finished message.
+    /// The agent's latest finished message, without the blank lines a model
+    /// may open or close it on.
     pub fn answer(&self) -> Option<&str> {
-        self.answer.as_deref()
+        self.answer.as_deref().map(without_blank_edges)
     }
 
     /// The conversation the message went to, and the agent that answers it.
@@ -230,6 +231,14 @@ impl Driver {
             command,
         )))
     }
+}
+
+/// `text` from its first line holding something, indentation kept, to the end
+/// of its last.
+fn without_blank_edges(text: &str) -> &str {
+    let blank = text.len() - text.trim_start().len();
+    let first_line = text[..blank].rfind('\n').map_or(0, |newline| newline + 1);
+    text[first_line..].trim_end()
 }
 
 #[cfg(test)]

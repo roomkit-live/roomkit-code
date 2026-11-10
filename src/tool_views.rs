@@ -17,6 +17,8 @@ use roomkit_tui::{
 };
 use serde::{Deserialize, de::DeserializeOwned};
 
+pub(crate) use labels::plain_label;
+
 pub(crate) fn renderers(workspace: &std::path::Path) -> Renderers {
     let mut renderers = Renderers::default();
     for name in ["list", "glob", "grep", "read", "code_outline"] {

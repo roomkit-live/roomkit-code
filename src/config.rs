@@ -311,6 +311,8 @@ pub(crate) struct Settings {
     pub resume_options: Option<Vec<String>>,
     pub workspace: PathBuf,
     pub state_dir: PathBuf,
+    /// Neither the flag nor its variable named the storage.
+    pub default_storage: bool,
     pub session: Option<String>,
     pub base_url: String,
     pub model: String,
@@ -512,6 +514,7 @@ impl Settings {
             workspace,
             debug: cli.debug,
             state_dir,
+            default_storage: cli.state_dir.is_none(),
             session: cli.session.clone(),
             mode: cli.mode.unwrap_or(file.permissions.mode),
             base_url,

@@ -15,6 +15,16 @@ fn cli(root: &std::path::Path) -> Cli {
 }
 
 #[test]
+fn only_a_launch_that_names_no_storage_uses_the_default_one() {
+    let root = tempfile::tempdir().unwrap();
+    let mut cli = cli(root.path());
+    cli.state_dir = None;
+    assert!(Settings::load(&cli).unwrap().default_storage);
+    cli.state_dir = Some(root.path().join("storage"));
+    assert!(!Settings::load(&cli).unwrap().default_storage);
+}
+
+#[test]
 fn resume_options_exclude_provider_bootstrap_values() {
     let root = tempfile::tempdir().unwrap();
     let mut cli = cli(root.path());

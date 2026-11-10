@@ -4,22 +4,24 @@
 //! the agent's answer, or every event as one JSON line; standard error gets
 //! what a person should know and the exit report.
 
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
-use roomkit_tui::protocol::limits::MAX_TEXT_BYTES;
+use roomkit_tui::protocol::{Snapshot, limits::MAX_TEXT_BYTES};
 use roomkit_tui::{Client, connection};
 
 use super::{Application, QUEUE, integrations::Resume};
 use crate::{Result, config::Cli, config::Settings};
 
 mod driver;
+mod progress;
 
 use driver::{Driver, Ending, Step};
+use progress::Progress;
 
 /// How often the launch looks for a signal between host events.
 const POLL: Duration = Duration::from_millis(100);
@@ -66,6 +68,9 @@ struct Outcome {
     answer: Option<String>,
     /// The conversation and its agent, once the host named them.
     conversation: Option<(String, String)>,
+    /// Someone watched the launch's progress: the answer and the report
+    /// stand apart from it.
+    framed: bool,
 }
 
 pub(crate) async fn run(settings: Settings, prompt: Prompt) -> Result<ExitCode> {
@@ -73,11 +78,8 @@ pub(crate) async fn run(settings: Settings, prompt: Prompt) -> Result<ExitCode> 
     // from being sent, and the launch still closes what it opened.
     let signals = listen()?;
     let api_key = std::env::var("ROOMKIT_API_KEY").unwrap_or_default();
-    let app = Application::open(&settings, api_key).await?;
-    if let Err(error) = app.session().snapshot().await {
-        let _ = app.close().await;
-        return Err(error.into());
-    }
+    let (app, first) = open(&settings, api_key).await?;
+    let progress = watcher(&app, &settings, &first, prompt.json).await;
     let (client, host) = connection(QUEUE);
     let adapter = tokio::spawn(
         app.session()
@@ -86,8 +88,10 @@ pub(crate) async fn run(settings: Settings, prompt: Prompt) -> Result<ExitCode> 
     let Prompt { text, json } = prompt;
     let launch = format!("headless-{}", uuid::Uuid::new_v4().simple());
     let driver = Driver::new(text, launch);
-    let driven =
-        tokio::task::spawn_blocking(move || drive(&client, driver, json, &signals.pending)).await;
+    let driven = tokio::task::spawn_blocking(move || {
+        drive(&client, driver, json, &signals.pending, progress)
+    })
+    .await;
     // The view ended with its client: the host stops serving it.
     let attached = adapter.await;
     let summary = match &driven {
@@ -120,6 +124,37 @@ pub(crate) async fn run(settings: Settings, prompt: Prompt) -> Result<ExitCode> 
     })
 }
 
+/// The application and its conversation as the launch opens it, closed again
+/// should the conversation not read.
+async fn open(settings: &Settings, api_key: String) -> Result<(Application, Snapshot)> {
+    let app = Application::open(settings, api_key).await?;
+    match app.session().snapshot().await {
+        Ok(snapshot) => Ok((app, snapshot)),
+        Err(error) => {
+            let _ = app.close().await;
+            Err(error.into())
+        }
+    }
+}
+
+/// What shows the launch's progress, to a person at a terminal: a program
+/// reads the events, and a log has the report.
+async fn watcher(
+    app: &Application,
+    settings: &Settings,
+    first: &Snapshot,
+    json: bool,
+) -> Option<Progress> {
+    if json || !std::io::stderr().is_terminal() {
+        return None;
+    }
+    let provider = app
+        .profiles
+        .provider_label(first.selected_agent.as_str())
+        .await;
+    Some(Progress::new(&settings.workspace, provider))
+}
+
 /// Write the answer, unless the events were, then the conversation's part of
 /// the exit report: before closing, which can take a while. The rest of the
 /// report, the processes closing leaves running, comes once it has.
@@ -130,18 +165,33 @@ async fn report(
     json: bool,
 ) -> Option<crate::exit_summary::Summary> {
     if !json && let Some(answer) = &outcome.answer {
+        apart(outcome);
         write_answer(answer);
     }
     let summary = summarize(app, settings, outcome).await?;
+    apart(outcome);
     for line in summary.conversation_report() {
         eprintln!("{line}");
     }
     Some(summary)
 }
 
+/// A blank line, under the progress someone watched.
+fn apart(outcome: &Outcome) {
+    if outcome.framed {
+        eprintln!();
+    }
+}
+
 /// Serve the driver the host's events until the launch ends; with `json`,
-/// write each event first.
-fn drive(client: &Client, mut driver: Driver, json: bool, stop: &AtomicBool) -> Result<Outcome> {
+/// write each event first, and with `progress`, what it says of each.
+fn drive(
+    client: &Client,
+    mut driver: Driver,
+    json: bool,
+    stop: &AtomicBool,
+    mut progress: Option<Progress>,
+) -> Result<Outcome> {
     let mut out = std::io::stdout().lock();
     loop {
         if stop.swap(false, Ordering::SeqCst) {
@@ -155,6 +205,7 @@ fn drive(client: &Client, mut driver: Driver, json: bool, stop: &AtomicBool) -> 
                 ending,
                 answer: driver.answer().map(str::to_owned),
                 conversation,
+                framed: progress.is_some(),
             });
         }
         match client.recv_timeout(POLL) {
@@ -163,6 +214,9 @@ fn drive(client: &Client, mut driver: Driver, json: bool, stop: &AtomicBool) -> 
                     write_event(&mut out, &event)
                         .map_err(|error| format!("Cannot write the events: {error}"))?;
                 }
+                if let Some(progress) = &mut progress {
+                    tell(&progress.on_event(&event));
+                }
                 apply(client, driver.on_event(&event))?;
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -170,6 +224,12 @@ fn drive(client: &Client, mut driver: Driver, json: bool, stop: &AtomicBool) -> 
                 return Err("The conversation stopped before its turn ended".into());
             }
         }
+    }
+}
+
+fn tell(lines: &[String]) {
+    for line in lines {
+        eprintln!("{line}");
     }
 }
 
@@ -240,7 +300,7 @@ async fn summarize(
 ) -> Option<crate::exit_summary::Summary> {
     let (room, agent) = outcome.conversation.as_ref()?;
     let mode = app.policy.state(room).selected;
-    let command = Resume::new(settings).command(room, &mode);
+    let command = Resume::shown(settings).command(room, &mode);
     let priced = super::priced(app, room, agent).await;
     let processes = &app.profiles.resources.processes;
     let shown = Some((room.clone(), command));

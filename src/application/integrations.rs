@@ -82,6 +82,20 @@ impl Resume {
         }
     }
 
+    /// The command as a person reads it in the exit report: the default
+    /// storage goes without saying. Herdr keeps the full one, which it runs
+    /// later, possibly from another environment.
+    pub(super) fn shown(settings: &Settings) -> Self {
+        let mut resume = Self::new(settings);
+        if settings.default_storage
+            && let Some(prefix) = &mut resume.prefix
+        {
+            // The program and the workspace stay.
+            prefix.truncate(2);
+        }
+        resume
+    }
+
     /// Arguments reopening `conversation` in `mode`, or None when they cannot
     /// be expressed safely (unknown mode, non-UTF-8 path, quote in a path).
     pub(super) fn command(&self, conversation: &str, mode: &str) -> Option<Vec<String>> {

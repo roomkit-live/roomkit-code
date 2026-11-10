@@ -53,13 +53,27 @@ pub(super) fn activity(call: &ToolCall) -> Option<String> {
     }
 }
 
+/// `call` on a line of plain text: the command itself for a call that runs
+/// one, which the activity line leaves to the model's intention; otherwise the
+/// activity line's words, down to the tool's name.
+pub(crate) fn plain_label(call: &ToolCall) -> String {
+    let command = call.arguments.get("command").and_then(Value::as_str);
+    match (call.name.as_str(), command) {
+        ("shell", Some(command)) => format!("Run {command}"),
+        ("process_start", Some(command)) => format!("Start {command}"),
+        _ => activity(call)
+            .or_else(|| call.intent.clone())
+            .unwrap_or_else(|| call.name.clone()),
+    }
+}
+
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "test assertions")]
 mod tests {
     use roomkit_tui::protocol::{ToolCall, ToolState};
     use serde_json::{Value, json};
 
-    use super::activity;
+    use super::{activity, plain_label};
 
     fn call(name: &str, arguments: Value) -> ToolCall {
         ToolCall::new("c1", name, arguments, ToolState::Running)
@@ -88,6 +102,29 @@ mod tests {
         ] {
             assert_eq!(activity(&call(name, arguments)).unwrap(), label);
         }
+    }
+
+    #[test]
+    fn plain_text_names_the_command_a_call_runs() {
+        for (name, arguments, label) in [
+            ("shell", json!({"command": "cargo test"}), "Run cargo test"),
+            (
+                "process_start",
+                json!({"command": "make serve"}),
+                "Start make serve",
+            ),
+            ("read", json!({"path": "src/main.rs"}), "Read src/main.rs"),
+        ] {
+            let said = call(name, arguments).with_intent("What the model says");
+            assert_eq!(plain_label(&said), label);
+        }
+    }
+
+    #[test]
+    fn plain_text_falls_back_on_the_intention_then_the_name() {
+        let intended = call("mcp__s__t", json!({})).with_intent("Open the ticket");
+        assert_eq!(plain_label(&intended), "Open the ticket");
+        assert_eq!(plain_label(&call("mcp__s__t", json!({}))), "mcp__s__t");
     }
 
     #[test]

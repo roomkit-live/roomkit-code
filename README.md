@@ -132,14 +132,16 @@ Once the view has closed, the terminal prints a short report:
 ```text
 Session: 8275ad8052ba446aa433e9bade3f744d
 To continue this session, run:
-  roomkit-code /path/to/project --state-dir /path/to/state --session 8275ad8052ba446aa433e9bade3f744d --mode ask
+  roomkit-code /path/to/project --session 8275ad8052ba446aa433e9bade3f744d --mode ask
 Token usage: total=245120 input=188331 (+ 1204553 cached) output=56789 · 19 turns
 Stopped 1 background process:
   p1 · npm run dev · 4m 12s
 ```
 
 The command reopens the conversation shown at exit, in its current mode, with
-the launch's explicit options such as `--config` and display flags. With
+the launch's explicit options such as `--config` and display flags. It names
+the storage only when the launch did, with `--state-dir` or
+`ROOMKIT_CODE_STATE_DIR`. With
 `cargo run`, replace `roomkit-code` by `cargo run --locked --`. An unused draft
 has no resume line. Token usage covers every turn of the conversation, across
 launches and agents: `input` excludes the cached input shown in parentheses and
@@ -195,8 +197,25 @@ history and compaction, and the same tools but those below. Standard output
 receives the agent's last message; with `--json`, it receives every event of the
 conversation instead, one JSON object per line, in the terminal protocol's own
 form (`run_started`, `item` for each tool call and its result,
-`message_finalized`, `usage_updated`, `run_finished`…). Notices, refusals and the exit report (session, resume command,
-usage) go to standard error. The exit status is 0 when the turn ended with its
+`message_finalized`, `usage_updated`, `run_finished`…). The answer comes without
+the blank lines a model may open or close it on. Notices, refusals and the exit report (session, resume command,
+usage) go to standard error.
+
+When standard error is a terminal and the events are not asked for, it also
+shows the launch as it runs: the workspace, model, provider, mode and session
+first, then a line as each tool call starts, and one when it ends refused,
+failed, cancelled, or after 3 seconds or more. Pipes and logs get none of it.
+
+```text
+roomkit-code · /path/to/project
+model: qwen3 · provider: Local · mode: ask (approvals refused) · session: session-39c9…
+
+  Run cargo test
+  Run cargo test · failed · 12s
+  Write src/lib.rs · refused
+```
+
+The exit status is 0 when the turn ended with its
 answer, 1 when the message was refused or the turn ended without its answer (its
 round limit, an error), and 130 when SIGINT or SIGTERM cut it: the signal
 interrupts the turn, which stops the commands still running and records what it

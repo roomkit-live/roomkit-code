@@ -1,10 +1,17 @@
-"""Exercise --prompt as an integrator runs it: no terminal, pipes, exit status."""
+"""Exercise --prompt as an integrator runs it: no terminal, pipes, exit status.
+
+With an argument, only the scenarios whose name holds it run.
+"""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import pty
+import select
+import shlex
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -73,22 +80,30 @@ class Model:
         return [message for request in self.requests for message in request["messages"] if message.get("role") == "tool"]
 
 
-def launch(root, model, *options, stdin=None, name="fixture-model"):
-    """Start the binary on pipes, the way a benchmark harness does."""
+def environment(root):
+    """The launch's environment: its default storage stays under `root`."""
     storage = root / "storage"
     env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
     env.update({"HOME": str(storage / "home"), "XDG_DATA_HOME": str(storage / "data")})
-    argv = [str(binary), str(root / "project"), "--state-dir", str(storage / "state"), "--base-url", model.url, "--model", name, "--no-update-check", *options]
-    return subprocess.Popen(argv, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    return env
 
 
-def run(root, model, *options, stdin=None, name="fixture-model"):
-    process = launch(root, model, *options, stdin=stdin, name=name)
+def launch(root, model, *options, stdin=None, name="fixture-model", stderr=subprocess.PIPE, named_storage=True):
+    """Start the binary on pipes, the way a benchmark harness does."""
+    storage = ["--state-dir", str(root / "storage" / "state")] if named_storage else []
+    argv = [str(binary), str(root / "project"), *storage, "--base-url", model.url, "--model", name, "--no-update-check", *options]
+    return subprocess.Popen(argv, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=stderr, text=True, env=environment(root))
+
+
+def run(root, model, *options, stdin=None, name="fixture-model", named_storage=True):
+    process = launch(root, model, *options, stdin=stdin, name=name, named_storage=named_storage)
     out, err = process.communicate(stdin, timeout=60)
     return process.returncode, out, err
 
 
 def scenario(name, replies, check):
+    if len(sys.argv) > 1 and sys.argv[1] not in name:
+        return
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         (root / "project").mkdir()
@@ -107,6 +122,10 @@ def yolo_text(root, model):
     assert out == ANSWER + "\n", out
     assert (root / "project" / "note.txt").read_text() == "hello\n"
     assert "Session: " in err and "--session" in err, err
+    # Nobody watches pipes: no header, no line per call. A storage named at
+    # launch is named again to reopen it.
+    assert "model: " not in err and "Write note.txt" not in err, err
+    assert "--state-dir" in err, err
     # Nobody could approve leaving Plan: the mode tools are not offered. Nor
     # are the plans and the guide, to keep each request small; the web stays.
     tools = model.tools()
@@ -281,6 +300,109 @@ def long_shell(root, model):
     assert (root / "project" / "long").read_text() == "ran"
 
 
+class Screen:
+    """A terminal standing in for a person's, on standard error alone."""
+
+    def __init__(self):
+        self.master, self.slave = pty.openpty()
+        self.seen = ""
+
+    def launched(self):
+        """Once the launch holds the terminal, this end must not keep it open."""
+        os.close(self.slave)
+
+    def read(self, timeout):
+        """What came next; False once the launch closed the terminal."""
+        ready, _, _ = select.select([self.master], [], [], timeout)
+        if not ready:
+            return True
+        try:
+            data = os.read(self.master, 65536)
+        except OSError:
+            return False
+        self.seen += data.decode(errors="replace").replace("\r\n", "\n")
+        return bool(data)
+
+    def wait(self, text):
+        deadline = time.monotonic() + 30
+        while text not in self.seen:
+            assert time.monotonic() < deadline, (text, self.seen)
+            assert self.read(0.1), (text, self.seen)
+
+    def rest(self):
+        """All the launch wrote; what it left running cannot hold this up."""
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and self.read(0.1):
+            pass
+        os.close(self.master)
+        return self.seen
+
+
+def watched(root, model):
+    screen = Screen()
+    process = launch(root, model, "--mode", "yolo", "--prompt", "Wait for a while.", stderr=screen.slave)
+    screen.launched()
+    # The call shows while it runs, not when the launch ends.
+    screen.wait("Run sleep 3")
+    assert process.poll() is None, screen.seen
+    out = process.stdout.read()
+    process.wait(timeout=60)
+    lines = screen.rest().split("\n")
+    assert process.returncode == 0, lines
+    assert out == ANSWER + "\n", out
+    assert lines[0] == f"roomkit-code · {(root / 'project').resolve()}", lines
+    assert lines[1].startswith("model: fixture-model · provider: ") and " · mode: yolo · session: " in lines[1], lines
+    assert lines[2:4] == ["", "  Run sleep 3"], lines
+    assert not any(ANSWER in line for line in lines), lines
+    assert any(line.startswith("Session: ") for line in lines), lines
+    assert any(line.startswith("  Run sleep 3 · 3s") for line in lines), lines
+
+
+def watched_refusal(root, model):
+    # Whoever watches an Ask launch learns before the first refusal.
+    screen = Screen()
+    process = launch(root, model, "--prompt", "Create the file.", stderr=screen.slave)
+    screen.launched()
+    out = process.stdout.read()
+    process.wait(timeout=60)
+    lines = screen.rest().split("\n")
+    assert out == ANSWER + "\n", (out, lines)
+    assert " · mode: ask (approvals refused) · session: " in lines[1], lines
+    assert "  Run touch denied.txt · refused" in lines, lines
+
+
+def watched_json(root, model):
+    # Events are for a program, whatever standard error is: nothing is added.
+    screen = Screen()
+    process = launch(root, model, "--mode", "yolo", "--json", "--prompt", "Write the note.", stderr=screen.slave)
+    screen.launched()
+    process.stdout.read()
+    process.wait(timeout=60)
+    seen = screen.rest()
+    assert process.returncode == 0, seen
+    assert "model: " not in seen and "Write note.txt" not in seen, seen
+
+
+def blank_edges(root, model):
+    # A model may open and close on blank lines: a script captures the answer.
+    code, out, err = run(root, model, "--prompt", "Say it.")
+    assert code == 0, (code, err)
+    assert out == ANSWER + "\n", repr(out)
+
+
+def default_storage(root, model):
+    # The default storage needs no naming, to read or to paste.
+    code, out, err = run(root, model, "--prompt", "Task one.", named_storage=False)
+    assert code == 0, (code, err)
+    lines = err.splitlines()
+    command = shlex.split(lines[lines.index("To continue this session, run:") + 1])
+    assert "--state-dir" not in command, command
+    # The command as printed reopens the conversation.
+    again = subprocess.run([str(binary), *command[1:], "--prompt", "Task two."], capture_output=True, text=True, stdin=subprocess.DEVNULL, env=environment(root), timeout=60)
+    assert again.returncode == 0, again.stderr
+    assert any("Task one." in json.dumps(m) for m in model.requests[1]["messages"]), model.requests[1]["messages"]
+
+
 def alive(pid):
     """Whether pid runs: it exists, and on Linux is no zombie."""
     try:
@@ -371,4 +493,9 @@ scenario("a shell command past two minutes", [call("shell", command="printf ran 
 WRITER = "(i=0; while :; do echo line; i=$((i+1)); echo $i > count; sleep 0.02; done) & echo $! > job.pid"
 scenario("what the agent started runs on", [call("shell", command=WRITER), call("process_start", command="echo $$ > server.pid; exec sleep 60"), ANSWER], left_running)
 scenario("invalid launches", [ANSWER], refused_without_agent)
+scenario("watched from a terminal", [call("shell", command="sleep 3"), ANSWER], watched)
+scenario("watched refusal", [call("shell", command="touch denied.txt"), ANSWER], watched_refusal)
+scenario("watched events", [call("write", path="note.txt", content="hello\n"), ANSWER], watched_json)
+scenario("blank lines around the answer", ["\n\n" + ANSWER + "\n\n"], blank_edges)
+scenario("default storage", ["Answer one.", "Answer two."], default_storage)
 print("headless checks passed")

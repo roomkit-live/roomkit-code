@@ -419,7 +419,7 @@ fn quoted(arg: &str) -> String {
 }
 
 /// A command on one bounded line, without terminal control characters.
-fn one_line(command: &str) -> String {
+pub(crate) fn one_line(command: &str) -> String {
     let text = command
         .split(|c: char| c.is_whitespace() || c.is_control())
         .filter(|part| !part.is_empty())
@@ -432,7 +432,7 @@ fn one_line(command: &str) -> String {
     }
 }
 
-fn elapsed(duration: Duration) -> String {
+pub(crate) fn elapsed(duration: Duration) -> String {
     let seconds = duration.as_secs();
     match (seconds / 3600, seconds / 60 % 60, seconds % 60) {
         (0, 0, s) => format!("{s}s"),
