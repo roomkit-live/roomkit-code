@@ -79,10 +79,13 @@ impl Task {
         self.ended.is_none()
     }
 
-    /// Whether its launch ended before it could record how it ended: what its
-    /// last turn used was never recorded.
-    pub(crate) fn interrupted(&self) -> bool {
-        matches!(self.ended, Some((_, Outcome::Interrupted)))
+    /// Whether it was stopped or its launch ended before all it used could
+    /// be recorded: a request under way may be billed all the same.
+    pub(crate) fn cut_short(&self) -> bool {
+        matches!(
+            self.ended,
+            Some((_, Outcome::Interrupted | Outcome::Cancelled))
+        )
     }
 
     /// Its state in a few words: "running 42 s", "completed in 58 s".

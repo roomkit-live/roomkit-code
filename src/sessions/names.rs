@@ -82,16 +82,27 @@ impl Sessions {
         arguments: &str,
     ) -> Result<CommandResult, String> {
         let name = parse(arguments)?;
-        if empty(&self.kit, &current.room)
+        // A task's room belongs to its conversation, the one /resume lists.
+        let root = self.profiles.resources.tasks.root_of(current.room.as_str());
+        let room = RoomId::new(&root).map_err(|_| "This conversation cannot be named")?;
+        if empty(&self.kit, &room)
             .await
             .map_err(|_| "Could not inspect the current session".to_string())?
         {
             return Err("Send a first message before naming this conversation".into());
         }
-        set(&self.kit, &current.room, &name).await?;
-        Ok(CommandResult::Events(vec![Event::TitleChanged {
-            conversation: current.room.as_str().into(),
-            title: title(&self.workspace, &current.room, Some(&name)),
+        set(&self.kit, &room, &name).await?;
+        let conversation = current.room.as_str().into();
+        Ok(CommandResult::Events(vec![if room == current.room {
+            Event::TitleChanged {
+                conversation,
+                title: title(&self.workspace, &room, Some(&name)),
+            }
+        } else {
+            Event::Notice {
+                conversation,
+                text: format!("Conversation renamed: {name}"),
+            }
         }]))
     }
 }

@@ -18,10 +18,25 @@ pub(super) async fn reporting_server(
     reporting_server_answering(hangs, RESULT.to_owned()).await
 }
 
+/// The same server, whose worker never answers its very first request.
+async fn server_hanging_at_once() -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
+    serving(true, true, RESULT.to_owned()).await
+}
+
 /// The same server, whose worker's result is `answer`, which starts with
 /// [`RESULT`].
 pub(super) async fn reporting_server_answering(
     hangs: bool,
+    answer: String,
+) -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
+    serving(hangs, false, answer).await
+}
+
+/// The server: a worker that `hangs` does so from its first request when
+/// `at_once`, else after its first tool.
+async fn serving(
+    hangs: bool,
+    at_once: bool,
     answer: String,
 ) -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
     let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
@@ -34,7 +49,7 @@ pub(super) async fn reporting_server_answering(
                 seen.lock().unwrap().push(request.clone());
                 let worker = super::rooms::is_worker(&request.to_string());
                 let last = request["messages"].as_array().unwrap().last().unwrap();
-                if worker && hangs && last["role"] == "tool" {
+                if worker && hangs && (at_once || last["role"] == "tool") {
                     tokio::time::sleep(Duration::from_secs(60)).await;
                 }
                 let delta = if worker && hangs {
@@ -191,6 +206,40 @@ async fn a_task_s_cost_shows_by_task_by_agent_and_in_the_total_and_after_a_resta
 
 /// A task stopped before its worker's usage was whole has a cost that cannot
 /// be: the total says so, as the task's own line does.
+/// Stopped before its first request ended, a task recorded nothing, though
+/// that request may be billed: its zero is no complete figure.
+#[tokio::test]
+async fn a_task_stopped_during_its_first_request_leaves_the_total_partial() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let (base, requests, server) = server_hanging_at_once().await;
+    let settings = priced_settings(project.path(), state.path(), &base).await;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let handler = sessions(&app, project.path());
+    let mut updates = handler.subscribe(app.view.clone()).unwrap();
+    turn(&app).await;
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while !requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.to_string().contains(WORKER))
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    let task = app.profiles.resources.tasks.of("main").remove(0).1;
+    let options = roomkit::CancelTaskOptions::default();
+    assert!(app.kit.cancel_task(&task.id, options).await);
+    let cost = until(&mut updates, related).await;
+    assert!(!cost.complete, "{cost:?}");
+    app.close().await.unwrap();
+    server.abort();
+}
+
 #[tokio::test]
 async fn a_stopped_task_leaves_the_total_partial() {
     let project = tempfile::tempdir().unwrap();

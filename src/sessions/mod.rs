@@ -9,7 +9,7 @@ use roomkit_tui::protocol::{Choice, Command, CommandSpec, Event, Rejection, Requ
 use roomkit_tui_engine::{CommandHandler, CommandResult, SessionConfig};
 
 mod live;
-mod names;
+pub(crate) mod names;
 mod rooms;
 pub(crate) mod task_rooms;
 

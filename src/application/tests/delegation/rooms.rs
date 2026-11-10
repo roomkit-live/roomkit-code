@@ -426,6 +426,53 @@ async fn a_task_handed_on_comes_back_to_the_worker_that_handed_it() {
     server.abort();
 }
 
+/// `/rename` in a task's room names the conversation the task belongs to,
+/// the one `/resume` lists, and the view stays in the room.
+#[tokio::test]
+async fn a_task_s_room_renames_its_conversation() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let (base, requests, server) = attentive_worker().await;
+    let settings = settings(project.path(), state.path(), &base);
+    with_a_reviewer(&settings).await;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let (client, host) = connection(NonZeroUsize::new(1_024).unwrap());
+    let router = app.router(&settings.workspace);
+    let view = tokio::spawn(app.session().run_with_commands(host, router));
+    snapshot_of(&client, "main").await;
+    client
+        .try_send(submit(1, "main", "code", "Review the diff"))
+        .unwrap();
+    until_requested(&requests, |request| request.to_string().contains(WORKER)).await;
+    let task = app.profiles.resources.tasks.of("main").remove(0).1;
+    client.try_send(invoke(2, "main", "tasks", "next")).unwrap();
+    snapshot_of(&client, &task.room).await;
+
+    client
+        .try_send(invoke(3, &task.room, "rename", "Release review"))
+        .unwrap();
+    until(&client, |event| match event {
+        Event::Reply { request, error } if *request == RequestId::new(3) => {
+            assert!(error.is_none(), "{error:?}");
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
+
+    let room = |id: &str| roomkit::model::RoomId::new(id).unwrap();
+    let conversation = crate::sessions::names::name(&app.kit, &room("main")).await;
+    assert_eq!(conversation.as_deref(), Some("Release review"));
+    assert_eq!(
+        crate::sessions::names::name(&app.kit, &room(&task.room)).await,
+        None
+    );
+    drop(client);
+    view.await.unwrap().unwrap();
+    app.close().await.unwrap();
+    server.abort();
+}
+
 /// Runs a task through to its result, written to while it works, then leaves
 /// the view in the conversation with the result relayed.
 async fn a_finished_task(

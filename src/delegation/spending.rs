@@ -70,7 +70,7 @@ async fn spent(
     let room = RoomId::new(&task.room).ok()?;
     let agent = ChannelId::new(&task.agent_id).ok()?;
     let mut usage = crate::exit_summary::usage(kit, &room).await.ok()?;
-    usage.complete &= !task.interrupted();
+    usage.complete &= !task.cut_short();
     let (cost, _) = priced(kit, profiles, &room, &agent, organization, usage.complete).await?;
     Some(Spent { usage, cost })
 }

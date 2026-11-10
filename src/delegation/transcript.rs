@@ -89,10 +89,10 @@ fn line(event: &RoomEvent, agent: &str, ended: &HashSet<&str>) -> Option<String>
             if text.trim().is_empty() {
                 return None;
             }
-            let who = if event.source.channel_id.as_str() == SYSTEM {
-                "Task"
-            } else {
-                agent
+            let who = match event.source.channel_id.as_str() {
+                SYSTEM => "Task",
+                crate::application::TERMINAL => "You",
+                _ => agent,
             };
             Some(format!("{who}: {}", clip(text.trim(), MESSAGE_CHARS)))
         }
@@ -258,6 +258,24 @@ mod tests {
              … shell · Run the tests\n"
         );
         assert_eq!(render(&[], "Review"), "Nothing yet.\n");
+    }
+
+    /// What the person wrote in the task's room is not credited to its agent.
+    #[test]
+    fn the_person_s_words_are_theirs() {
+        let text = |body: &str| EventContent::Text(TextContent::new(body));
+        let events = [
+            event(
+                crate::application::TERMINAL,
+                EventType::Message,
+                text("Look at the tests too"),
+            ),
+            event("agent-3", EventType::Message, text("Done.")),
+        ];
+        assert_eq!(
+            render(&events, "Review"),
+            "You: Look at the tests too\nReview: Done.\n"
+        );
     }
 
     /// A long conversation shows its latest lines only, and says so.
