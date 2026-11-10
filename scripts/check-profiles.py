@@ -215,7 +215,12 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 28, 110, 0, 0))
         os.kill(process.pid, signal.SIGWINCH)
         wait_for(b"Provider connection", offset)
-        save()
+        offset = send(b"\x13")
+        # A new connection offers the models it serves; Esc leaves it unused.
+        wait_for("Connected · choose a model to create an agent".encode(), offset)
+        wait_for(b"fixture-discovered", offset)
+        offset = send(b"\x1b")
+        wait_for(b"Tab commands", offset)
         connections = json.loads((state / "connections.json").read_text())
         assert connections["profiles"]["fixture"]["authentication"]["key"] == secret
         assert (state / "connections.json").stat().st_mode & 0o777 == 0o600

@@ -334,9 +334,12 @@ impl Profiles {
                             .value
                             .profiles
                             .get(id)
-                            .ok_or("Unknown provider")?;
+                            .ok_or("Unknown provider")?
+                            .clone();
+                        // A listing reads a server: no profile command waits on it.
+                        drop(state);
                         let title = "Connection successful · choose a model to create an agent";
-                        self.creation_choices(&current, provider, title).await
+                        self.creation_choices(&current, &provider, title).await
                     }
                     ("providers", "model") => {
                         if !state.providers.value.profiles.contains_key(id)
