@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A question card takes the arrows and Enter, as its keys row says; only the
+  digits did. Ctrl+A and Ctrl+E move to the start and the end of the line in
+  the composer and every text field (roomkit-tui a27b991).
+
 - Recover from Anthropic signature-prefix errors after multiple tool rounds even
   when the API reports internally folded block indices. Reset reasoning once
   while preserving completed work, and record the reported first mismatch path.

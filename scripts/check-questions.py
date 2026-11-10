@@ -95,7 +95,8 @@ def scenario(project, state, url):
         os.write(master, b"2")
         time.sleep(ARMING)
         offset = len(captured)
-        os.write(master, b"2")  # Postgres, then the next question.
+        os.write(master, b"\x1b[B")  # Down to Postgres,
+        os.write(master, b"\r")  # Enter: picked, then the next question.
         wait_for(b"Which checks run before a push?", offset)
         os.write(master, b"1")  # Tests
         os.write(master, b"3")  # Audit
@@ -142,4 +143,4 @@ finally:
     server.server_close()
     thread.join(timeout=5)
 
-print("PTY questions passed: the card shows after its arming delay, digits pick, own words answer, the model reads the answers, Esc closes unanswered.")
+print("PTY questions passed: the card shows after its arming delay, arrows and Enter choose, digits pick, own words answer, the model reads the answers, Esc closes unanswered.")
