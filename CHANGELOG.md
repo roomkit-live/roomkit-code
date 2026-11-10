@@ -15,7 +15,8 @@
   reads your answers, or that you closed the card. It needs no approval, Plan
   included; `--prompt` does not offer it, a delegated agent is told to put its
   question in its result, and Herdr shows the session blocked meanwhile
-  (roomkit-tui a1a34d6).
+  (roomkit-tui a1a34d6). The tool comes from roomkit-tools, whose checks
+  refuse a question too long for the card with what to fix.
 
 - Anthropic output budgets now default to Auto (32K, bounded by model and
   context capacity), with one larger retry per turn for an exhausted response

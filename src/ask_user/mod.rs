@@ -1,7 +1,8 @@
 //! The tool through which an agent asks the person questions, `ask_user`,
-//! served by RoomKit's human input: the kit opens a request and waits for its
-//! answer; an `ON_USER_INPUT_REQUIRED` hook shows the request's questions to
-//! the conversation's view, whose answer, or refusal, is what the agent reads.
+//! from roomkit-tools, served by RoomKit's human input: the kit opens a
+//! request and waits for its answer; an `ON_USER_INPUT_REQUIRED` hook shows
+//! the request's questions to the conversation's view, whose answer, or
+//! refusal, is what the agent reads.
 //! Only an attended launch offers the tool, and only a conversation's own
 //! agent may ask: a delegated agent puts its question in its task's result.
 
@@ -11,11 +12,13 @@ use roomkit::human_input::PendingInputEvent;
 use roomkit::model::hook::AllowOptions;
 use roomkit::model::{ChannelId, HookResult, RoomId};
 use roomkit::{HookOptions, HookTrigger, RejectInputOptions, RoomKit};
-use roomkit_ai::{AiTool, HumanInputToolHandler, HumanInputToolHandlerOptions};
+use roomkit_ai::HumanInputToolHandler;
 use roomkit_sqlite::SqliteStore;
+use roomkit_tools_agents::{AskUserQuestion, AskUserTool};
+use roomkit_tools_core::ToolError;
 use roomkit_tui::protocol::{QuestionItem, QuestionOption};
 use roomkit_tui_engine::{ConversationChannel, QuestionRequest};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 use crate::Result;
 use crate::permissions::Policy;
@@ -27,67 +30,13 @@ pub(crate) const ASK_USER: &str = "ask_user";
 /// approval, and the person may be away for a while.
 const WAIT: Duration = Duration::from_secs(24 * 60 * 60);
 
-const MAX_QUESTIONS: usize = 4;
-const MAX_OPTIONS: usize = 4;
+/// The width of a question's header in the view, which the tool asks of the
+/// model.
 const MAX_HEADER_CHARS: usize = 12;
-
-const DESCRIPTION: &str = "Ask the user one to four questions and wait for the answers. \
-Use it only when you are blocked on a decision that is genuinely theirs: a preference, a choice \
-between valid approaches, information the project cannot tell you. Do not use it to ask for \
-permission to act (approvals handle that), to ask whether to continue, or for what you can find by \
-reading the project. Ask independent questions in one call. Offer two to four options when the \
-answer is a choice, the most likely first, its label ending with \"(Recommended)\" when you \
-recommend it; leave the options empty for a free answer. The user can always answer in their own \
-words: never add an \"Other\" option. Never write a multiple-choice question as a message instead. \
-If the user does not answer, continue with your best judgement and do not ask again.";
-
-/// The tool as the model is shown it.
-pub(crate) fn definition() -> AiTool {
-    let option = json!({
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["label"],
-        "properties": {
-            "label": {"type": "string", "description": "One to five words: what the user picks."},
-            "description": {"type": "string", "description": "What picking it means."}
-        }
-    });
-    let question = json!({
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["question"],
-        "properties": {
-            "header": {"type": "string", "description": "A label of at most 12 characters naming the question."},
-            "question": {"type": "string", "description": "The question, ending with a question mark."},
-            "options": {"type": "array", "maxItems": MAX_OPTIONS, "items": option},
-            "multi_select": {"type": "boolean", "description": "Whether the user may pick several options."}
-        }
-    });
-    AiTool {
-        name: ASK_USER.to_owned(),
-        description: DESCRIPTION.to_owned(),
-        parameters: json!({
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["questions"],
-            "properties": {
-                "questions": {"type": "array", "minItems": 1, "maxItems": MAX_QUESTIONS, "items": question}
-            }
-        }),
-        tags: Vec::new(),
-        changes_state: false,
-        defer_loading: false,
-    }
-}
 
 /// What serves the tool: the kit's human input, waiting [`WAIT`] at most.
 pub(crate) fn handler() -> Result<HumanInputToolHandler> {
-    let options = HumanInputToolHandlerOptions {
-        timeout: WAIT,
-        tool_definitions: vec![definition()],
-        ..HumanInputToolHandlerOptions::default()
-    };
-    Ok(HumanInputToolHandler::new([ASK_USER], options)?)
+    Ok(roomkit_tools_roomkit::ask_user_handler(WAIT)?)
 }
 
 /// Show the conversation's view the questions of each `ask_user` request,
@@ -163,71 +112,29 @@ fn show(
 pub(crate) fn questions(
     arguments: &Map<String, Value>,
 ) -> std::result::Result<Vec<QuestionItem>, String> {
-    let Some(asked) = arguments.get("questions").and_then(Value::as_array) else {
-        return Err("ask_user takes `questions`, a list of one to four questions.".into());
-    };
-    if asked.is_empty() || asked.len() > MAX_QUESTIONS {
-        return Err(format!(
-            "ask_user takes one to {MAX_QUESTIONS} questions; {} were given.",
-            asked.len()
-        ));
-    }
-    asked
-        .iter()
-        .enumerate()
-        .map(|(index, question)| item(index, question))
-        .collect()
+    let input = AskUserTool::read(arguments).map_err(|error| match error {
+        ToolError::InvalidInput(fix) | ToolError::LimitExceeded(fix) => fix,
+        other => other.to_string(),
+    })?;
+    Ok(input.questions.iter().map(item).collect())
 }
 
-fn item(index: usize, question: &Value) -> std::result::Result<QuestionItem, String> {
-    let text = |name: &str| {
-        question
-            .get(name)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .unwrap_or_default()
-    };
-    let number = index + 1;
-    let asked = text("question");
-    if asked.is_empty() {
-        return Err(format!("Question {number} has no text."));
-    }
-    let header: String = text("header").chars().take(MAX_HEADER_CHARS).collect();
+/// A question as the view shows it: trimmed, its header cut to the view's
+/// width.
+fn item(question: &AskUserQuestion) -> QuestionItem {
+    let header: String = question
+        .header
+        .trim()
+        .chars()
+        .take(MAX_HEADER_CHARS)
+        .collect();
     let options = question
-        .get("options")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    if options.len() > MAX_OPTIONS {
-        return Err(format!(
-            "Question {number} offers {} options; at most {MAX_OPTIONS}.",
-            options.len()
-        ));
-    }
-    let mut labels = std::collections::BTreeSet::new();
-    let mut offered = Vec::new();
-    for option in &options {
-        let label = option
-            .get("label")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .unwrap_or_default();
-        if label.is_empty() || !labels.insert(label.to_owned()) {
-            return Err(format!(
-                "Question {number} needs distinct, non-empty option labels."
-            ));
-        }
-        let description = option
-            .get("description")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        offered.push(QuestionOption::new(label, description.trim()));
-    }
-    let multi = question
-        .get("multi_select")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    Ok(QuestionItem::new(header, asked, offered).with_multi_select(multi))
+        .options
+        .iter()
+        .map(|option| QuestionOption::new(option.label.trim(), option.description.trim()))
+        .collect();
+    QuestionItem::new(header, question.question.trim(), options)
+        .with_multi_select(question.multi_select)
 }
 
 #[cfg(test)]

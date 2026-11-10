@@ -28,16 +28,17 @@ roomkit-anthropic = { version = "0.1.0", git = "https://github.com/roomkit-live/
 roomkit-sqlite = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "31789d5d830aa3bb4b86df5d02cf496032d5cb15" }
 roomkit-tui-engine = { version = "0.2.0", git = "https://github.com/roomkit-live/roomkit-tui", rev = "a1a34d6c96f0740fde2db3e1ae11ddb7c0e732f1" }
 roomkit-tui = { version = "0.2.0", git = "https://github.com/roomkit-live/roomkit-tui", rev = "a1a34d6c96f0740fde2db3e1ae11ddb7c0e732f1" }
-roomkit-tools-code = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "5bf7f78b494dc9d241d19f0bcb9e4e9049a3eccf" }
-roomkit-tools-fs = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "5bf7f78b494dc9d241d19f0bcb9e4e9049a3eccf" }
-roomkit-tools-process = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "5bf7f78b494dc9d241d19f0bcb9e4e9049a3eccf" }
-roomkit-tools-roomkit = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "5bf7f78b494dc9d241d19f0bcb9e4e9049a3eccf", features = ["plans", "docs"] }
-roomkit-tools-plans = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "5bf7f78b494dc9d241d19f0bcb9e4e9049a3eccf" }
+roomkit-tools-code = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "d6bb59beabc7d03ff62dcb27347da921f94943dc" }
+roomkit-tools-fs = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "d6bb59beabc7d03ff62dcb27347da921f94943dc" }
+roomkit-tools-process = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "d6bb59beabc7d03ff62dcb27347da921f94943dc" }
+roomkit-tools-roomkit = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "d6bb59beabc7d03ff62dcb27347da921f94943dc", features = ["plans", "docs"] }
+roomkit-tools-plans = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "d6bb59beabc7d03ff62dcb27347da921f94943dc" }
 # The application's own guide is served from local files only.
-roomkit-tools-docs = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "5bf7f78b494dc9d241d19f0bcb9e4e9049a3eccf", features = ["files"] }
-roomkit-tools-core = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "5bf7f78b494dc9d241d19f0bcb9e4e9049a3eccf" }
-roomkit-tools-web = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "5bf7f78b494dc9d241d19f0bcb9e4e9049a3eccf" }
-roomkit-tools-search = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "5bf7f78b494dc9d241d19f0bcb9e4e9049a3eccf", default-features = false, features = ["exa"] }
+roomkit-tools-docs = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "d6bb59beabc7d03ff62dcb27347da921f94943dc", features = ["files"] }
+roomkit-tools-core = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "d6bb59beabc7d03ff62dcb27347da921f94943dc" }
+roomkit-tools-agents = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "d6bb59beabc7d03ff62dcb27347da921f94943dc" }
+roomkit-tools-web = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "d6bb59beabc7d03ff62dcb27347da921f94943dc" }
+roomkit-tools-search = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "d6bb59beabc7d03ff62dcb27347da921f94943dc", default-features = false, features = ["exa"] }
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
