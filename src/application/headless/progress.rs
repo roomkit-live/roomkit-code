@@ -1,13 +1,15 @@
 //! What a person watching an unattended launch from a terminal reads on
-//! standard error: where and how it runs, then each tool call as it happens.
-//! Decided from the host's events alone: writing it stays with the caller.
+//! standard error: where and how it runs, then what the agent says and each
+//! tool call as they happen. Decided from the host's events alone: writing it
+//! stays with the caller.
 
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
 
-use roomkit_tui::protocol::{CallId, Event, Item, RunId, Snapshot, ToolCall, ToolState};
+use roomkit_tui::protocol::{ActorId, CallId, Event, Item, RunId, Snapshot, ToolCall, ToolState};
 
+use super::driver::without_blank_edges;
 use crate::exit_summary::{elapsed, one_line};
 use crate::tool_views::plain_label;
 
@@ -21,10 +23,15 @@ pub(super) struct Progress {
     workspace: String,
     provider: Option<String>,
     header_told: bool,
-    /// A blank line set the calls apart from the header.
+    /// A blank line set what follows apart from the header.
     spaced: bool,
     started: BTreeSet<Key>,
     settled: BTreeSet<Key>,
+    /// The agent whose messages show, as the first snapshot names it.
+    agent: Option<ActorId>,
+    /// The agent's latest message, held until something follows it: the
+    /// last one is the answer, which standard output gets alone.
+    held: Option<String>,
 }
 
 impl Progress {
@@ -36,21 +43,42 @@ impl Progress {
             spaced: false,
             started: BTreeSet::new(),
             settled: BTreeSet::new(),
+            agent: None,
+            held: None,
         }
     }
 
     /// The lines `event` adds.
     pub fn on_event(&mut self, event: &Event) -> Vec<String> {
-        match event {
-            Event::Snapshot(snapshot) => self.header(snapshot),
+        let lines = match event {
+            Event::Snapshot(snapshot) => return self.header(snapshot),
+            Event::MessageFinalized { message, .. }
+                if Some(&message.actor) == self.agent.as_ref() =>
+            {
+                let older = self.held.replace(message.text.clone());
+                older.map_or_else(Vec::new, |text| message_lines(&text))
+            }
             Event::Item {
                 item: Item::Tool { run, call, .. },
                 ..
-            } => self
-                .call(run, call)
-                .map_or_else(Vec::new, |line| self.spaced(line)),
-            _ => Vec::new(),
-        }
+            } => match self.call(run, call) {
+                Some(line) => {
+                    let mut lines = self.release();
+                    lines.push(line);
+                    lines
+                }
+                None => return Vec::new(),
+            },
+            _ => return Vec::new(),
+        };
+        self.spaced(lines)
+    }
+
+    /// The held message, which something followed: it was not the answer.
+    fn release(&mut self) -> Vec<String> {
+        self.held
+            .take()
+            .map_or_else(Vec::new, |text| message_lines(&text))
     }
 
     /// Where and how the launch runs, from the first snapshot alone: a later
@@ -59,6 +87,7 @@ impl Progress {
         if std::mem::replace(&mut self.header_told, true) {
             return Vec::new();
         }
+        self.agent = Some(snapshot.selected_agent.clone());
         let mut settings = Vec::new();
         if let Some(model) = &snapshot.model {
             settings.push(format!("model: {}", model.model));
@@ -95,13 +124,12 @@ impl Progress {
         }
     }
 
-    /// `line`, after the blank line that sets the first call apart.
-    fn spaced(&mut self, line: String) -> Vec<String> {
-        if std::mem::replace(&mut self.spaced, true) {
-            vec![line]
-        } else {
-            vec![String::new(), line]
+    /// `lines`, after the blank line that sets the first ones apart.
+    fn spaced(&mut self, mut lines: Vec<String>) -> Vec<String> {
+        if !lines.is_empty() && !std::mem::replace(&mut self.spaced, true) {
+            lines.insert(0, String::new());
         }
+        lines
     }
 }
 
@@ -114,10 +142,19 @@ fn mode_field(selected: &str) -> String {
     }
 }
 
-/// `text` without its control characters. A path, a configured name: none
-/// comes from the model, yet a terminal must read each as text.
-fn printable(text: &str) -> String {
+/// A line of `text` without its control characters, which a terminal would
+/// read as commands: what the model writes, but also a path or a name.
+pub(super) fn printable(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).collect()
+}
+
+/// An agent's message as lines a terminal shows as written; a tab, a control
+/// character too, becomes spaces so that code keeps its indentation.
+fn message_lines(text: &str) -> Vec<String> {
+    without_blank_edges(text)
+        .lines()
+        .map(|line| printable(&line.replace('\t', "    ")))
+        .collect()
 }
 
 /// `call` on one line. Its arguments and intention come from the model: the

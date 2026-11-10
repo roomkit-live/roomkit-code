@@ -235,7 +235,7 @@ impl Driver {
 
 /// `text` from its first line holding something, indentation kept, to the end
 /// of its last.
-fn without_blank_edges(text: &str) -> &str {
+pub(super) fn without_blank_edges(text: &str) -> &str {
     let blank = text.len() - text.trim_start().len();
     let first_line = text[..blank].rfind('\n').map_or(0, |newline| newline + 1);
     text[first_line..].trim_end()

@@ -258,7 +258,10 @@ fn apply(client: &Client, steps: Vec<Step>) -> Result<()> {
             Step::Send(request) => client
                 .try_send(request)
                 .map_err(|_| "The conversation no longer accepts requests")?,
-            Step::Tell(text) => eprintln!("{text}"),
+            Step::Tell(text) => {
+                let lines: Vec<String> = text.lines().map(progress::printable).collect();
+                tell(&lines);
+            }
         }
     }
     Ok(())

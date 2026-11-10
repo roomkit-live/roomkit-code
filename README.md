@@ -203,8 +203,11 @@ usage) go to standard error.
 
 When standard error is a terminal and the events are not asked for, it also
 shows the launch as it runs: the workspace, model, provider, mode and session
-first, then a line as each tool call starts, and one when it ends refused,
-failed, cancelled, or after 3 seconds or more. Pipes and logs get none of it.
+first, then each message the agent follows with a call, a line as each tool
+call starts, and one when it ends refused, failed, cancelled, or after 3
+seconds or more. Standard output still receives the agent's last message; a
+message no call follows shows there alone. Pipes and logs get none of it. What standard error shows holds no
+control character.
 
 ```text
 roomkit-code · /path/to/project
@@ -212,6 +215,7 @@ model: qwen3 · provider: Local · mode: ask (approvals refused) · session: ses
 
   Run cargo test
   Run cargo test · failed · 12s
+Two tests fail on date parsing; fixing them.
   Write src/lib.rs · refused
 ```
 

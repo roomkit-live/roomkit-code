@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A watched `--prompt` launch also shows each message the agent follows with
+  a call; the answer, which no call follows, stays on standard output alone.
+  Notices and refusals reach standard error without control characters, and a
+  provider failure is told once (roomkit-tui f79fd41).
+
 - A delegated agent can no longer hand its task on (HITL d4ede844): what it
   handed on came back to it after its own task had ended and never reached the
   conversation. It returns once the kit lets a worker wait for that task.

@@ -10,6 +10,7 @@ import pty
 import select
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -383,6 +384,35 @@ def watched_json(root, model):
     assert "model: " not in seen and "Write note.txt" not in seen, seen
 
 
+def watched_messages(root, model):
+    # What the agent says between its calls shows to whoever watches; its
+    # answer stays on standard output alone. Pipes get neither.
+    code, out, err = run(root, model, "--mode", "yolo", "--prompt", "Look around.")
+    assert (code, out) == (0, ANSWER + "\n"), (code, out, err)
+    assert "Looking around first." not in err, err
+    screen = Screen()
+    process = launch(root, model, "--mode", "yolo", "--prompt", "Look around.", stderr=screen.slave)
+    screen.launched()
+    out = process.stdout.read()
+    process.wait(timeout=60)
+    lines = screen.rest().split("\n")
+    assert out == ANSWER + "\n", (out, lines)
+    said = lines.index("Looking around first.")
+    assert lines[said + 1] == "  List .", lines
+    assert not any(ANSWER in line for line in lines), lines
+
+
+def unreachable_once(root, model):
+    # A server nobody answers on is explained once, not once per layer.
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    argv = [str(binary), str(root / "project"), "--state-dir", str(root / "storage" / "state"), "--base-url", f"http://127.0.0.1:{port}/v1", "--model", "fixture-model", "--no-update-check", "--prompt", "Hello."]
+    done = subprocess.run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL, env=environment(root), timeout=120)
+    assert done.returncode == 1, (done.returncode, done.stderr)
+    assert done.stderr.count("Cannot reach the model server") == 1, done.stderr
+
+
 def blank_edges(root, model):
     # A model may open and close on blank lines: a script captures the answer.
     code, out, err = run(root, model, "--prompt", "Say it.")
@@ -496,6 +526,8 @@ scenario("invalid launches", [ANSWER], refused_without_agent)
 scenario("watched from a terminal", [call("shell", command="sleep 3"), ANSWER], watched)
 scenario("watched refusal", [call("shell", command="touch denied.txt"), ANSWER], watched_refusal)
 scenario("watched events", [call("write", path="note.txt", content="hello\n"), ANSWER], watched_json)
+scenario("watched messages", [call("list", "Looking around first.", path="."), ANSWER, call("list", "Looking around first.", path="."), ANSWER], watched_messages)
+scenario("unreachable server", [ANSWER], unreachable_once)
 scenario("blank lines around the answer", ["\n\n" + ANSWER + "\n\n"], blank_edges)
 scenario("default storage", ["Answer one.", "Answer two."], default_storage)
 print("headless checks passed")

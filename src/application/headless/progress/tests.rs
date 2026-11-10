@@ -187,3 +187,85 @@ fn other_events_add_nothing() {
     };
     assert!(progress().on_event(&notice).is_empty());
 }
+
+fn said(actor: &str, text: &str) -> Event {
+    Event::MessageFinalized {
+        conversation: "room".into(),
+        draft: "draft".into(),
+        message: roomkit_tui::protocol::Message::new("m", actor, text),
+    }
+}
+
+/// A progress past its header, which named the agent.
+fn watching() -> Progress {
+    let mut progress = progress();
+    progress.on_event(&snapshot("yolo"));
+    progress
+}
+
+#[test]
+fn an_agent_message_shows_once_a_call_follows_it() {
+    let mut progress = watching();
+    assert!(
+        progress
+            .on_event(&said("agent", "Looking first."))
+            .is_empty()
+    );
+    assert_eq!(
+        progress.on_event(&item("run", shell(ToolState::Running))),
+        ["", "Looking first.", "  Run cargo test"]
+    );
+}
+
+#[test]
+fn the_last_message_stays_for_the_answer() {
+    let mut progress = watching();
+    progress.on_event(&item("run", shell(ToolState::Running)));
+    assert!(progress.on_event(&said("agent", "Done.")).is_empty());
+    let end = item("run", shell(ToolState::Succeeded).with_duration_ms(10));
+    assert!(
+        progress.on_event(&end).is_empty(),
+        "nothing follows the answer"
+    );
+}
+
+#[test]
+fn a_newer_message_lets_the_older_one_show() {
+    let mut progress = watching();
+    progress.on_event(&said("agent", "First."));
+    assert_eq!(progress.on_event(&said("agent", "Second.")), ["", "First."]);
+}
+
+#[test]
+fn only_the_agent_s_messages_show() {
+    let mut progress = watching();
+    progress.on_event(&said("local-user", "Fix the build."));
+    assert_eq!(
+        progress.on_event(&item("run", shell(ToolState::Running))),
+        ["", "  Run cargo test"]
+    );
+}
+
+#[test]
+fn a_message_keeps_its_lines_without_blank_edges_or_control_characters() {
+    let mut progress = watching();
+    progress.on_event(&said(
+        "agent",
+        "\n\nFirst\u{1b}[2J line\n  second\u{7}\n\tthird\n\n",
+    ));
+    assert_eq!(
+        progress.on_event(&item("run", shell(ToolState::Running))),
+        [
+            "",
+            "First[2J line",
+            "  second",
+            "    third",
+            "  Run cargo test"
+        ]
+    );
+}
+
+#[test]
+fn a_printable_line_holds_no_control_character() {
+    assert_eq!(printable("a\u{1b}[2Jb\r\u{7}\tc"), "a[2Jbc");
+}
