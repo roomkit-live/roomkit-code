@@ -10,15 +10,21 @@ use std::sync::Arc;
 use roomkit_core::rules::transcript::json_text_line;
 use roomkit_tools_plans::{Plan, StepStatus};
 
-use crate::files::{Change, Files};
+use crate::files::{Change, Effect, Files};
 use crate::plans::Plans;
 
 /// The most plans a summary names.
 const PLANS: usize = 5;
 /// The most steps under way a plan's line names.
 const STEPS: usize = 5;
-/// The most changed files a summary names: the latest changed.
+/// The most changed files a summary names: the latest changed, those the
+/// file tools changed before those found only around shell commands.
 const FILES: usize = 40;
+/// How a summary introduces the files the file tools changed.
+const BY_TOOLS: &str = "Files changed in this conversation with the file tools";
+/// How it introduces those found only by comparing the project around shell
+/// commands: what a command changed, and whatever else changed meanwhile.
+const AROUND_COMMANDS: &str = "Files that changed only while this conversation's shell commands ran, by a command such as a merge or by another program meanwhile";
 
 /// What the application records of each conversation, for its summaries.
 pub(crate) struct Recorded {
@@ -40,7 +46,7 @@ impl Recorded {
         if plans.len() > PLANS {
             lines.push(format!("- {} more plans.", plans.len() - PLANS));
         }
-        lines.extend(files_line(&self.files.changes(room).await));
+        lines.extend(files_lines(&self.files.changes(room).await));
         (!lines.is_empty()).then(|| {
             format!(
                 "Recorded by the application when this summary was written:\n{}",
@@ -74,32 +80,42 @@ fn plan_line(plan: &Plan) -> String {
     )
 }
 
-/// The files `changes` name, the latest changed first, on a line; none
-/// without a change.
-fn files_line(changes: &[(String, Change)]) -> Option<String> {
-    if changes.is_empty() {
-        return None;
-    }
-    let named: Vec<String> = changes
+/// The files `changes` name, the latest changed first: a line for those the
+/// file tools changed, then one for those found only around shell commands.
+/// A merge run through the shell changes the files of the commits it brings:
+/// in one list they came before the agent's own, which the bound then left
+/// out. The two lines name `FILES` files in all, the first one first.
+fn files_lines(changes: &[Effect]) -> Vec<String> {
+    let (commands, tools): (Vec<&Effect>, Vec<&Effect>) =
+        changes.iter().partition(|file| file.shell);
+    let left = FILES.saturating_sub(tools.len());
+    [(BY_TOOLS, tools, FILES), (AROUND_COMMANDS, commands, left)]
+        .into_iter()
+        .filter(|(_, files, _)| !files.is_empty())
+        .map(|(what, files, room)| files_line(what, &files, room))
+        .collect()
+}
+
+/// `what`, then at most `room` of `files` named, and how many more there are.
+fn files_line(what: &str, files: &[&Effect], room: usize) -> String {
+    let named: Vec<String> = files
         .iter()
-        .take(FILES)
-        .map(|(path, change)| {
-            let how = match change {
+        .take(room)
+        .map(|file| {
+            let how = match file.change {
                 Change::Created => "created",
                 Change::Modified => "modified",
                 Change::Deleted => "deleted",
             };
-            format!("{how} {}", json_text_line(path))
+            format!("{how} {}", json_text_line(&file.path))
         })
         .collect();
-    let more = match changes.len().saturating_sub(FILES) {
-        0 => String::new(),
-        more => format!(", and {more} more"),
+    let list = match (named.len(), files.len().saturating_sub(named.len())) {
+        (0, more) => format!("{more}, not named here"),
+        (_, 0) => named.join(", "),
+        (_, more) => format!("{}, and {more} more", named.join(", ")),
     };
-    Some(format!(
-        "- Files changed in this conversation: {}{more}.",
-        named.join(", ")
-    ))
+    format!("- {what}: {list}.")
 }
 
 #[cfg(test)]
@@ -135,21 +151,77 @@ mod tests {
         );
     }
 
+    fn file(path: &str, change: Change, shell: bool) -> Effect {
+        Effect {
+            path: path.into(),
+            change,
+            shell,
+        }
+    }
+
     #[test]
     fn the_files_changed_are_named_up_to_a_bound() {
-        assert_eq!(files_line(&[]), None);
+        assert!(files_lines(&[]).is_empty());
         let few = [
-            ("src/new file.rs".to_owned(), Change::Created),
-            ("old.rs".to_owned(), Change::Deleted),
+            file("src/new file.rs", Change::Created, false),
+            file("old.rs", Change::Deleted, false),
         ];
         assert_eq!(
-            files_line(&few).unwrap(),
-            "- Files changed in this conversation: created \"src/new file.rs\", deleted \"old.rs\"."
+            files_lines(&few),
+            [format!(
+                "- {BY_TOOLS}: created \"src/new file.rs\", deleted \"old.rs\"."
+            )]
         );
         let many: Vec<_> = (0..FILES + 3)
-            .map(|file| (format!("f{file}.rs"), Change::Modified))
+            .map(|n| file(&format!("f{n}.rs"), Change::Modified, false))
             .collect();
-        let line = files_line(&many).unwrap();
-        assert!(line.ends_with("modified \"f39.rs\", and 3 more."), "{line}");
+        let lines = files_lines(&many);
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].ends_with("modified \"f39.rs\", and 3 more."),
+            "{}",
+            lines[0]
+        );
+    }
+
+    /// Found in use: a merge run through the shell listed the files of the
+    /// commits it brought before the agent's own, and the bound left 14 of
+    /// the agent's out.
+    #[test]
+    fn the_files_of_the_file_tools_come_before_those_only_commands_changed() {
+        // The latest changes are the merge's; the agent's own edit is older.
+        let mut changes: Vec<_> = (0..FILES)
+            .map(|n| file(&format!("merged{n}.rs"), Change::Modified, true))
+            .collect();
+        changes.push(file("src/own.rs", Change::Modified, false));
+        let lines = files_lines(&changes);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(lines[0], format!("- {BY_TOOLS}: modified \"src/own.rs\"."));
+        assert!(
+            lines[1].starts_with(&format!("- {AROUND_COMMANDS}: modified \"merged0.rs\", ")),
+            "{}",
+            lines[1]
+        );
+        // One of the bound's 40 names went to the agent's own file.
+        assert!(
+            lines[1].ends_with("modified \"merged38.rs\", and 1 more."),
+            "{}",
+            lines[1]
+        );
+        // The file tools' files can take the whole bound: the others are counted.
+        let full: Vec<_> = (0..FILES)
+            .map(|n| file(&format!("own{n}.rs"), Change::Modified, false))
+            .chain([file("merged.rs", Change::Created, true)])
+            .collect();
+        assert_eq!(
+            files_lines(&full)[1],
+            format!("- {AROUND_COMMANDS}: 1, not named here.")
+        );
+        // Without a file of the file tools, the commands' line stands alone.
+        let only = [file("Cargo.lock", Change::Modified, true)];
+        assert_eq!(
+            files_lines(&only),
+            [format!("- {AROUND_COMMANDS}: modified \"Cargo.lock\".")]
+        );
     }
 }

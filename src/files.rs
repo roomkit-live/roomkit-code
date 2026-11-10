@@ -189,13 +189,19 @@ impl Files {
         record
     }
 
-    /// The files `room`'s conversation changed, the latest changed first.
-    pub(crate) async fn changes(&self, room: &str) -> Vec<(String, Change)> {
+    /// The files `room`'s conversation changed, the latest changed first:
+    /// each one's net change, marked `shell` when only comparisons around
+    /// shell commands found it.
+    pub(crate) async fn changes(&self, room: &str) -> Vec<Effect> {
         let record = self.record(room).await;
         let changes = record.changes();
         changes
             .into_iter()
-            .map(|changed| (changed.path.clone(), changed.change))
+            .map(|changed| Effect {
+                path: changed.path.clone(),
+                change: changed.change,
+                shell: changed.shell,
+            })
             .collect()
     }
 

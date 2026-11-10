@@ -421,7 +421,8 @@ async fn a_summary_carries_the_files_the_conversation_changed() {
         "{later}"
     );
     assert!(
-        later.contains("Files changed in this conversation: created") && later.contains("note.txt"),
+        later.contains("Files changed in this conversation with the file tools: created")
+            && later.contains("note.txt"),
         "{later}"
     );
     app.close().await.unwrap();

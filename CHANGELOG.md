@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A compaction's summary names the files the file tools changed before those
+  found only around shell commands, which get a line of their own. A merge or
+  a checkout run through the shell put the files of the commits it brought
+  before the agent's own, and the bound of 40 named files left the agent's
+  out.
+
 - The list of changed files no longer holds a write's staging file. A command
   run in the same step as a `write` or an `edit` saw the `.roomkit-write-…`
   file they stage beside their destination, then no longer, and the sidebar,

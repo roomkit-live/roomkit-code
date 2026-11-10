@@ -867,7 +867,10 @@ for, one line saying what the call was and how it ended, such as
 newest lines first, within half the ceiling. Beside what the model wrote, the
 summary carries what the application recorded when it was written: the agent's
 plans in the conversation, with their progress, and the files the conversation
-changed. The summary's request states no output budget of its own: it takes the
+changed, 40 named at most: those its file tools changed first, then, on a line
+of their own, those found only around shell commands, such as the files of the
+commits a merge brings. The summary's request states no output budget of its
+own: it takes the
 agent's, as its turns do, so a model that reasons has room for its reasoning and
 for the summary, which it is asked to keep under 800 words. A summary cut at
 that budget, or longer than about 3,000 tokens, is kept without its end: it says
