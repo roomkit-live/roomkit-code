@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- A compaction's summary is no longer cut mid-sentence by its own budget. Its
+  request asked for 2,000 output tokens, which a model that reasons spent on
+  its reasoning first: one summary was left 701 tokens. The request now takes
+  the agent's output budget, as its turns do, and asks for under 800 words. A
+  summary that is still cut is kept, says that its end is missing, and the
+  status line and the conversation's line say so.
+
+- A compaction's summary no longer loses what a turn did through its tools.
+  It reads, for each tool call of the turns it stands for, one line saying
+  what the call was and how it ended, never a result, and it carries the
+  agent's plans with their progress and the files the conversation changed, as
+  the application recorded them.
+
 - A turn is told what its history does not say. After a turn that ended
   without a final answer (an error, an interruption, the limit of tool rounds),
   the agent's next turn reads how it ended and that you read no conclusion,

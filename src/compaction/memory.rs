@@ -136,7 +136,15 @@ impl<P: AiProvider> TieredMemory<P> {
             return None;
         }
         let prior = compacted.map(|c| c.summary.as_str());
-        let read = (&events[..cut], agent);
+        // The calls of the turns the summary stands for: a cut falls on a
+        // turn's start, so they come before the first event kept whole.
+        let kept_from = events.get(cut).map_or(u64::MAX, |kept| kept.index);
+        let summarized_from = compacted.map_or(0, |c| c.from);
+        let calls = self
+            .compactions
+            .calls((room, agent), summarized_from..kept_from)
+            .await;
+        let read = (&events[..cut], calls.as_slice(), agent);
         let chars = tiers::summary_chars(self.ceiling);
         let (_running, began) = (self.compactions.running(room), Instant::now());
         let Some(written) = summary::summarize(&self.provider, prior, read, chars).await else {
@@ -149,6 +157,7 @@ impl<P: AiProvider> TieredMemory<P> {
             );
             return None;
         };
+        let (written, cut_short) = (written.text, written.cut);
         let newest = events.last().map_or(0, |event| event.index);
         // The messages the summary stands for, not the rows of tool calls
         // and read instructions between them.
@@ -162,9 +171,10 @@ impl<P: AiProvider> TieredMemory<P> {
             snapshot: self.compactions.snapshot(room, agent),
             summarized: compacted.map_or(0, |c| c.summarized) + summarized,
             at: newest,
+            recorded: self.compactions.recorded(room, agent).await,
         };
         let sizes = (measured.now(compacted), measured.total(Some(&made), cut));
-        let told = (sizes, began.elapsed());
+        let told = (sizes, began.elapsed(), cut_short);
         self.compactions
             .record((room, agent), (made.clone(), summarized), told)
             .await;

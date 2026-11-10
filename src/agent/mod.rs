@@ -119,13 +119,21 @@ impl Resources {
             max_output_bytes: 8192,
             ..WebFetchLimits::default()
         };
+        let plans = Arc::new(crate::plans::Plans::new(state.join("plans")));
+        let files = crate::files::Files::new(root);
+        let compactions = Arc::new(crate::compaction::Compactions::new(
+            &state.join("compactions"),
+        ));
+        // A summary carries the plans and the files changed, as recorded.
+        compactions.carry(crate::compaction::Recorded::new(
+            plans.clone(),
+            files.clone(),
+        ));
         Ok(Self {
             instructions: crate::instructions::Instructions::new(root, global),
-            compactions: Arc::new(crate::compaction::Compactions::new(
-                &state.join("compactions"),
-            )),
-            plans: Arc::new(crate::plans::Plans::new(state.join("plans"))),
-            files: crate::files::Files::new(root),
+            compactions,
+            plans,
+            files,
             docs: crate::docs::guide(global)?,
             mutations,
             processes,

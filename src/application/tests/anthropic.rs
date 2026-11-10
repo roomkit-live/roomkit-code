@@ -207,8 +207,11 @@ async fn anthropic_profiles_discover_call_tools_compact_and_resume() {
     })
     .await
     .unwrap();
+    // The summary states no budget of its own: it takes the agent's, the
+    // 2,048 tokens its profile sets, as its turns do. A model that reasons
+    // shares it between its reasoning and the summary.
     assert!(native.requests.lock().unwrap().iter().any(|r| {
-        r["max_tokens"] == 2000
+        r["max_tokens"] == 2048
             && r["system"]
                 .to_string()
                 .contains("You summarize a conversation")

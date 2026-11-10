@@ -846,8 +846,18 @@ message you send while the summary is written waits for it, then the agent reads
 the compacted conversation. A compaction only happens between turns: a turn whose
 tool calls pass the window falls back on the engine's own compaction.
 
-The summary reads the messages, not the tool calls' results, the newest first
-within half the ceiling. A summary the model does not write compacts nothing:
+The summary reads the messages and, for each tool call of the turns it stands
+for, one line saying what the call was and how it ended, such as
+`tool: Run cargo test → exit_code=0`; never a call's result. It reads the
+newest lines first, within half the ceiling. Beside what the model wrote, the
+summary carries what the application recorded when it was written: the agent's
+plans in the conversation, with their progress, and the files the conversation
+changed. The summary's request states no output budget of its own: it takes the
+agent's, as its turns do, so a model that reasons has room for its reasoning and
+for the summary, which it is asked to keep under 800 words. A summary cut at
+that budget, or longer than about 3,000 tokens, is kept without its end: it says
+so to the agent, and the status line and the conversation's line say so to you.
+A summary the model does not write compacts nothing:
 the status line says so and the next turn tries again. The summary's request is
 not counted in the turn's tokens or the conversation's cost.
 

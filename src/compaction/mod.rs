@@ -8,12 +8,14 @@ mod history;
 mod line;
 pub(crate) use line::tokens;
 mod memory;
+mod recorded;
 mod runs;
 mod summary;
 mod tiers;
 mod turns;
 
 pub(crate) use memory::TieredMemory;
+pub(crate) use recorded::Recorded;
 pub(crate) use runs::Compactor;
 pub(crate) use tiers::ceiling;
 pub(crate) use turns::lifecycle;
@@ -61,6 +63,12 @@ pub(crate) struct Compacted {
     /// sent until then measured the history before the cut.
     #[serde(default)]
     pub at: u64,
+    /// What the application recorded of the conversation when the summary
+    /// was written, which its message carries beside it: the plans and the
+    /// files changed ([`recorded`]). None for a compaction made before it
+    /// kept them, or with nothing recorded.
+    #[serde(default)]
+    pub recorded: Option<String>,
 }
 
 /// One conversation's file: each agent's compaction.
@@ -91,6 +99,9 @@ pub(crate) struct Compactions {
     tasks: Mutex<Vec<tokio::task::AbortHandle>>,
     /// Set as the application closes: no compaction starts outside the turns.
     closed: std::sync::atomic::AtomicBool,
+    /// What the application records of the conversations, which each summary
+    /// carries; none before `carry`.
+    recorded: std::sync::OnceLock<Recorded>,
     changes: Arc<watch::Sender<()>>,
 }
 
@@ -121,6 +132,7 @@ impl Compactions {
             journal: line::Journal::default(),
             tasks: Mutex::default(),
             closed: std::sync::atomic::AtomicBool::new(false),
+            recorded: std::sync::OnceLock::new(),
             changes,
         }
     }
@@ -129,6 +141,34 @@ impl Compactions {
     /// to, from the terminal's channel.
     pub fn install(&self, kit: &RoomKit<SqliteStore>, terminal: &ChannelId) {
         self.journal.install(kit, terminal);
+    }
+
+    /// Each summary carries what `recorded` holds of its conversation when
+    /// it is written.
+    pub fn carry(&self, recorded: Recorded) {
+        let _ = self.recorded.set(recorded);
+    }
+
+    /// What the application recorded of `room` for `agent`, for a summary
+    /// written now.
+    async fn recorded(&self, room: &str, agent: &str) -> Option<String> {
+        self.recorded.get()?.of(room, agent).await
+    }
+
+    /// The lines a summary reads of `agent`'s ended tool calls in `room`
+    /// whose index is within `range`. None without an engine, or when its
+    /// store cannot be read: the summary then reads the messages alone.
+    async fn calls(
+        &self,
+        (room, agent): (&str, &str),
+        range: std::ops::Range<u64>,
+    ) -> Vec<(u64, String)> {
+        let Some(kit) = self.journal.kit() else {
+            return Vec::new();
+        };
+        history::calls(kit, (room, agent), range)
+            .await
+            .unwrap_or_default()
     }
 
     /// What compacts `agent`'s conversations outside its turns.
@@ -159,12 +199,13 @@ impl Compactions {
 
     /// Records `compacted` for `agent` in `room`, in its file first, and
     /// leaves its line in the conversation: how many messages it summarized
-    /// anew, the estimated request before and after, and how long it `took`.
+    /// anew, the estimated request before and after, how long it `took`, and
+    /// whether its summary was `cut` short.
     pub async fn record(
         &self,
         (room, agent): (&str, &str),
         (compacted, summarized): (Compacted, usize),
-        (sizes, took): ((usize, usize), Duration),
+        (sizes, took, cut): ((usize, usize), Duration, bool),
     ) {
         let from = compacted.from;
         // Written outside the lock: another conversation's turn need not
@@ -186,11 +227,17 @@ impl Compactions {
             sizes,
             took,
             unsaved,
+            cut,
         };
         self.journal.write(&told).await;
         // A view keeps its status line's last notice: this one replaces the
         // compaction's seconds, the line in the conversation saying the rest.
-        self.notice(room, "Conversation compacted");
+        let notice = if cut {
+            "Conversation compacted; its summary was cut at the model's output limit"
+        } else {
+            "Conversation compacted"
+        };
+        self.notice(room, notice);
     }
 
     /// Tells the views of `room` `text`, in their status line.
@@ -414,6 +461,7 @@ mod tests {
             snapshot: Some("Project instruction snapshot".into()),
             summarized: 12,
             at: from + 9,
+            recorded: Some("Recorded by the application: a plan.".into()),
         }
     }
 
@@ -428,7 +476,7 @@ mod tests {
             .record(
                 ("room", "code"),
                 (compacted(40), 12),
-                ((90_000, 31_000), TOOK),
+                ((90_000, 31_000), TOOK, false),
             )
             .await;
         assert_eq!(compactions.get("room", "code"), Some(compacted(40)));
@@ -464,7 +512,7 @@ mod tests {
         std::fs::write(compactions.path("room"), "not json").unwrap();
         assert_eq!(compactions.get("room", "code"), None);
         compactions
-            .record(("room", "code"), (compacted(7), 12), ((1, 1), TOOK))
+            .record(("room", "code"), (compacted(7), 12), ((1, 1), TOOK, false))
             .await;
         let reopened = Compactions::new(dir.path());
         assert_eq!(reopened.get("room", "code"), Some(compacted(7)));

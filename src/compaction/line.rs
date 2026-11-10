@@ -37,6 +37,9 @@ pub(super) struct Told<'a> {
     pub took: Duration,
     /// Whether its record could not be saved.
     pub unsaved: bool,
+    /// Whether its summary's end is missing: the model ran out of output
+    /// room, or wrote more than a summary keeps.
+    pub cut: bool,
 }
 
 impl Journal {
@@ -105,6 +108,9 @@ fn text(told: &Told<'_>) -> String {
         tokens(after),
         duration(told.took)
     );
+    if told.cut {
+        text.push_str(" · summary cut at the model's output limit: its end is missing");
+    }
     if told.unsaved {
         text.push_str(" · not saved: a resumed conversation compacts again");
     }
@@ -146,7 +152,16 @@ mod tests {
             sizes: (180_400, 39_600),
             took: Duration::from_millis(12_400),
             unsaved: false,
+            cut: false,
         };
+        let cut = Told { cut: true, ..told };
+        assert!(
+            text(&cut)
+                .ends_with("12 s · summary cut at the model's output limit: its end is missing"),
+            "{}",
+            text(&cut)
+        );
+        let told = Told { cut: false, ..cut };
         assert_eq!(
             text(&told),
             "Conversation compacted · 42 messages summarized · ≈180k → ≈40k tokens · 12 s"

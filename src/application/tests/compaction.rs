@@ -335,15 +335,23 @@ async fn compact_starts_at_once_and_leaves_its_line_in_the_conversation() {
 }
 
 /// A compaction outside the turns summarizes what a turn's would: the
-/// messages, not the agent's tool calls nor the instructions its turns read.
+/// messages and, of each of the agent's tool calls, a line saying what it
+/// was and how it ended; neither a call's result nor the instructions its
+/// turns read. A summary that read the messages alone knew nothing of the
+/// work of a turn made of calls and one answer.
 #[tokio::test]
-async fn compact_summarizes_the_messages_alone() {
+async fn compact_summarizes_the_messages_and_a_line_of_each_call() {
     let (root, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     write(root.path(), "AGENTS.md", "PROJECT_RULES_TEXT");
+    write(root.path(), "LISTED_ONLY.txt", "contents");
     let mock = Mock::start(vec![("list", json!({"path":"."}))]).await;
     let (app, settings) = three_turns(root.path(), state.path(), &mock).await;
     let called = mock.requests.lock().unwrap()[1].to_string();
     assert!(called.contains("PROJECT_RULES_TEXT") && called.contains("tool_calls"));
+    assert!(
+        called.contains("LISTED_ONLY"),
+        "the call's result: {called}"
+    );
     handler(&app, &settings)
         .handle(invoke(&app, "compact"), app.view.clone())
         .await
@@ -361,9 +369,61 @@ async fn compact_summarizes_the_messages_alone() {
         .unwrap()
         .to_string();
     assert!(asked.contains("Inspect the project."), "{asked}");
-    for read in ["tool_call", "Application mode", "PROJECT_RULES_TEXT"] {
+    assert!(asked.contains("tool: List . → ok"), "{asked}");
+    let unread = [
+        "tool_call",
+        "Application mode",
+        "PROJECT_RULES_TEXT",
+        "LISTED_ONLY",
+    ];
+    for read in unread {
         assert!(!asked.contains(read), "the summary read {read}: {asked}");
     }
+    app.close().await.unwrap();
+}
+
+/// A summary its model wrote alone could leave out a file the conversation
+/// changed: what the application recorded rides the summary, and the turns
+/// that follow read it.
+#[tokio::test]
+async fn a_summary_carries_the_files_the_conversation_changed() {
+    let (root, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let written = json!({"path":"note.txt", "content":"NOTE_CONTENT_TEXT"});
+    let mock = Mock::start(vec![("write", written)]).await;
+    let mut settings = settings(root.path(), state.path(), &mock.base_url);
+    settings.context_window = Some(200_000);
+    settings.mode = crate::permissions::Mode::Yolo;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    for turn in ["first", "second", "third"] {
+        turn_operation(&app, turn).await;
+    }
+    handler(&app, &settings)
+        .handle(invoke(&app, "compact"), app.view.clone())
+        .await
+        .unwrap();
+    let room = app.view.room.to_string();
+    let compactions = app.profiles.resources.compactions.clone();
+    until("the conversation compacts", || {
+        compactions.lines(&room).is_some()
+    })
+    .await;
+    let asked = {
+        let requests = mock.requests.lock().unwrap();
+        let summary = requests.iter().find(|r| r["stream"] != true);
+        summary.unwrap().to_string()
+    };
+    assert!(asked.contains("tool: Write note.txt → ok"), "{asked}");
+    assert!(!asked.contains("NOTE_CONTENT_TEXT"), "{asked}");
+    turn_operation(&app, "after-the-compaction").await;
+    let later = mock.requests.lock().unwrap().last().unwrap().to_string();
+    assert!(
+        later.contains("Recorded by the application when this summary was written"),
+        "{later}"
+    );
+    assert!(
+        later.contains("Files changed in this conversation: created") && later.contains("note.txt"),
+        "{later}"
+    );
     app.close().await.unwrap();
 }
 

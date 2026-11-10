@@ -146,6 +146,22 @@ impl Plans {
             .await
     }
 
+    /// The plans `agent` holds in `room`, the one selected first; none when
+    /// they cannot be read.
+    pub(crate) async fn held(&self, room: &str, agent: &str) -> Vec<Plan> {
+        let scope = PlanScope {
+            room_id: room.into(),
+            caller_id: agent.into(),
+        };
+        let Ok(document) = self.snapshot(&scope).await else {
+            return Vec::new();
+        };
+        let selected = document.selected;
+        let mut plans: Vec<Plan> = document.plans.into_values().collect();
+        plans.sort_by_key(|plan| selected.as_deref() != Some(plan.plan_id.as_str()));
+        plans
+    }
+
     pub async fn select(&self, scope: &PlanScope, id: &str) -> Result<(), ToolError> {
         let id = id.to_owned();
         self.access(scope, &CancellationToken::new(), move |doc| {

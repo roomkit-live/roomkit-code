@@ -189,6 +189,16 @@ impl Files {
         record
     }
 
+    /// The files `room`'s conversation changed, the latest changed first.
+    pub(crate) async fn changes(&self, room: &str) -> Vec<(String, Change)> {
+        let record = self.record(room).await;
+        let changes = record.changes();
+        changes
+            .into_iter()
+            .map(|changed| (changed.path.clone(), changed.change))
+            .collect()
+    }
+
     /// The stored record, empty when there is none; `None` when it cannot be
     /// read or decoded.
     async fn load(&self, room: &str) -> Option<Record> {

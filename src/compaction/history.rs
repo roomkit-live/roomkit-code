@@ -2,8 +2,9 @@
 //! once: what a turn's memory of its reads, the room's latest messages as
 //! the agent may know them. As in a turn, the agent's own rows of tool calls
 //! and read instructions are left out of them (roomkit-ai
-//! `AiChannel::recalled`): the summary reads the messages. What a turn
-//! replays of those rows is counted apart, as a turn's footprint counts it.
+//! `AiChannel::recalled`): the summary reads the messages, and of each ended
+//! call a line ([`calls`]). What a turn replays of those rows is counted
+//! apart, as a turn's footprint counts it.
 
 use roomkit::model::{ChannelId, EventContent, EventType, RoomContext, RoomEvent, RoomId};
 use roomkit::store::ListEventsOptions;
@@ -98,6 +99,46 @@ async fn replayed(
         }));
         if !full {
             return Some(pieces);
+        }
+    }
+}
+
+/// `agent`'s ended tool calls in `room` whose index is within `range`, each
+/// with the line a summary reads of it, oldest first; none when the store
+/// cannot be read.
+pub(super) async fn calls(
+    kit: &RoomKit<SqliteStore>,
+    (room, agent): (&str, &str),
+    range: std::ops::Range<u64>,
+) -> Option<Vec<(u64, String)>> {
+    let (room, agent) = (RoomId::new(room).ok()?, ChannelId::new(agent).ok()?);
+    let filter = EventFilter {
+        event_types: Some(vec![EventType::ToolCallEnd]),
+        source_channel_id: Some(agent),
+        ..EventFilter::default()
+    };
+    let mut lines = Vec::new();
+    let mut after = range.start.checked_sub(1);
+    loop {
+        let page = ListEventsOptions {
+            limit: ROWS_PAGE,
+            event_filter: Some(filter.clone()),
+            after_index: after,
+            ..ListEventsOptions::default()
+        };
+        let page = kit.store().list_events(&room, page).await.ok()?;
+        let full = u64::try_from(page.len()).is_ok_and(|read| read >= ROWS_PAGE);
+        after = page.last().map(|last| last.index).or(after);
+        for row in &page {
+            if row.index >= range.end {
+                return Some(lines);
+            }
+            if let EventContent::ToolCall(call) = &row.content {
+                lines.push((row.index, super::summary::call_line(call)));
+            }
+        }
+        if !full {
+            return Some(lines);
         }
     }
 }
