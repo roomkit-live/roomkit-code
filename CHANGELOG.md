@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A tool result is handed to the model whole up to a tenth of the agent's
+  context capacity, between 5,000 and 16,000 estimated tokens, where the
+  engine's 5,000 applied to every agent: a file of 450 lines took four calls to
+  read. A full 50 KiB page of `read` or `grep` passes whole from a capacity of
+  131,072 tokens; an agent without a known capacity keeps the 5,000-token bound.
+
 - Exploring a directory without `AGENTS.md` rules no longer adds an empty
   instruction snapshot to the tool's result: the model reads a file's text as
   it is, where the added field made it a JSON string, and the result is about

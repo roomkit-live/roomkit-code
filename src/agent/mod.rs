@@ -265,6 +265,7 @@ pub(crate) async fn create(
         retry_policy: Some(retry_policy()),
         reasoning_effort: profile.reasoning_effort.clone(),
         memory: memory((ceiling, &profile.id), &provider, resources),
+        evict_threshold_tokens: stored_result_threshold(ceiling),
         image_resolver: Some(images),
         human_input_handler: human_input,
         // Native tools stay declared; only MCP tools wait behind find_tools.
@@ -294,6 +295,24 @@ fn memory(
     ));
     compactions.register(agent, memory.clone());
     Some(memory)
+}
+
+/// The most estimated tokens of a tool's result an agent reads whole,
+/// whatever its window: the largest page a native tool returns, the 50 KiB
+/// of `read` and `grep`, with what its envelope adds.
+const STORED_RESULT_MAX_TOKENS: u64 = 16_000;
+
+/// The estimated tokens past which the engine hands an agent a preview of a
+/// tool's result and stores the whole for `read_stored_result`: a tenth of
+/// the tokens its history compacts under, `ceiling`, so that one result never
+/// takes more of the window, between the engine's own threshold, which an
+/// agent without a known window keeps, and [`STORED_RESULT_MAX_TOKENS`]. At
+/// the engine's 5,000 tokens, a file of 450 lines took four calls to read,
+/// each page a JSON string.
+fn stored_result_threshold(ceiling: Option<u64>) -> u64 {
+    let engine = AiChannelOptions::default().evict_threshold_tokens;
+    let most = STORED_RESULT_MAX_TOKENS.max(engine);
+    ceiling.map_or(engine, |ceiling| (ceiling / 10).clamp(engine, most))
 }
 
 /// The tools an unattended launch leaves out, whatever the profile selects:
@@ -473,5 +492,33 @@ mod shell_tests {
         assert!(unattended.keep_background_jobs);
         assert_eq!(terminal.max_timeout_ms, 120_000);
         assert_eq!(unattended.max_timeout_ms, 3_600_000);
+    }
+}
+
+#[cfg(test)]
+mod stored_result_tests {
+    use super::{STORED_RESULT_MAX_TOKENS, stored_result_threshold};
+
+    /// The engine estimates a quarter of the characters, plus one.
+    const fn tokens(bytes: u64) -> u64 {
+        bytes / 4 + 1
+    }
+
+    #[test]
+    fn a_result_is_read_whole_within_a_tenth_of_the_window_and_a_native_page() {
+        let engine = roomkit_ai::AiChannelOptions::default().evict_threshold_tokens;
+        // Without a known window, and in a small one, the engine's threshold.
+        assert_eq!(stored_result_threshold(None), engine);
+        assert_eq!(stored_result_threshold(Some(32_768)), engine);
+        assert_eq!(stored_result_threshold(Some(100_000)), 10_000);
+        // A full page of `read` or `grep`, 50 KiB, passes whole from there on.
+        let page = tokens(50 * 1024);
+        assert!(stored_result_threshold(Some(131_072)) >= page);
+        assert!(STORED_RESULT_MAX_TOKENS >= page);
+        // No window makes a result past the largest native page pass whole.
+        assert_eq!(
+            stored_result_threshold(Some(1_000_000)),
+            STORED_RESULT_MAX_TOKENS
+        );
     }
 }

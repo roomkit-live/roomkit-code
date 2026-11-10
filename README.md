@@ -478,7 +478,12 @@ network destinations are refused by default, including redirects. Search queries
 are sent to Exa; keep project secrets and private source out of queries. Retrieved
 content is untrusted data. Web-service configuration in the UI is not yet exposed.
 
-Returned pages and scans are bounded by the tools' defaults. Hidden files are
+Returned pages and scans are bounded by the tools' defaults. A result past a
+tenth of the agent's context capacity, between 5,000 and 16,000 estimated tokens
+(four characters each), reaches the model as a preview of its first and last
+lines; `read_stored_result` pages through the whole or searches it. A full
+50 KiB page of `read` or `grep` passes whole from a capacity of 131,072 tokens;
+an agent without a known capacity keeps the 5,000-token bound. Hidden files are
 included and ignore files are not applied; choose a workspace appropriate to
 share with the configured model. Filesystem tools check paths under the configured
 root. Shell uses `/bin/sh -c` with your user permissions; its initial
