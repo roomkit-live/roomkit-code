@@ -25,6 +25,12 @@ const METADATA: [&str; 4] = [".git", ".hg", ".svn", ".jj"];
 /// Files whose change can hide or reveal others that nobody touched.
 const RULES: [&str; 2] = [".gitignore", ".ignore"];
 
+/// How the file tools name the file they stage a write in, beside its
+/// destination, until they rename it (roomkit-tools-fs). It is never a
+/// project file: a command run beside a write saw it before and no longer
+/// after, and listed it as deleted.
+const STAGED: &str = ".roomkit-write-";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Stat {
     len: u64,
@@ -84,7 +90,8 @@ impl Digests {
 
 /// Walk `root`, honoring `.gitignore`, `.ignore` and global excludes even
 /// outside a repository. Hidden files are included: `.env` or `.github` are
-/// project files. `None` when the project holds more than `LIMIT` files.
+/// project files; a write the file tools are staging is not. `None` when the
+/// project holds more than `LIMIT` files.
 pub(super) fn take(root: &Path, digests: &mut Digests) -> Option<Snapshot> {
     let taken = SystemTime::now();
     let walk = WalkBuilder::new(root)
@@ -96,7 +103,8 @@ pub(super) fn take(root: &Path, digests: &mut Digests) -> Option<Snapshot> {
     // Count files before reading any: a project over the limit costs a walk.
     let mut found = Vec::new();
     for entry in walk.flatten() {
-        if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+        let staged = entry.file_name().to_string_lossy().starts_with(STAGED);
+        if staged || !entry.file_type().is_some_and(|kind| kind.is_file()) {
             continue;
         }
         let (Ok(metadata), Ok(relative)) = (entry.metadata(), entry.path().strip_prefix(root))

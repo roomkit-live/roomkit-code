@@ -733,7 +733,8 @@ changes while a command runs is credited to it, including a background process,
 an editor or another instance; between commands, background processes are not
 followed. A cancelled or timed-out command is still compared, and quitting waits
 up to ten seconds for those comparisons. A file created and then deleted leaves
-the list.
+the list. The file tools stage each write in a `.roomkit-write-…` file beside
+its destination, then rename it: a comparison never lists that file.
 
 A project with more than 50,000 files is not compared: the section then says
 shell changes are not tracked. The latest 500 changed and 500 read files are

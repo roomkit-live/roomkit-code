@@ -185,6 +185,29 @@ fn unpacked_files_with_old_times_are_still_created() {
     );
 }
 
+/// Found in use: a command run in the same step as a `write` or an `edit`
+/// saw the file they stage beside their destination, then no longer, and the
+/// list held it as deleted.
+#[test]
+fn a_write_being_staged_is_not_a_file_a_command_changed() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    put(root, "src/lib.rs", "before");
+    // A write is staged as the command starts, and renamed before it ends.
+    put(root, "src/.roomkit-write-a1B2c3", "after");
+    let mut digests = Digests::default();
+    let before = snapshot::take(root, &mut digests).unwrap();
+    let staged = root.join("src/.roomkit-write-a1B2c3");
+    std::fs::rename(staged, root.join("src/lib.rs")).unwrap();
+    // Another one is staged as the command ends.
+    put(root, ".roomkit-write-d4E5f6", "next");
+    let after = snapshot::take(root, &mut digests).unwrap();
+    assert_eq!(
+        snapshot::compare(root, &before, &after),
+        [("src/lib.rs".into(), Change::Modified)]
+    );
+}
+
 /// A shell that writes a file, then runs until the call is dropped.
 struct Hanging(std::path::PathBuf);
 

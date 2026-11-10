@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The list of changed files no longer holds a write's staging file. A command
+  run in the same step as a `write` or an `edit` saw the `.roomkit-write-…`
+  file they stage beside their destination, then no longer, and the sidebar,
+  `/files` and a compaction's summary listed it as deleted.
+
 - Models are chosen from the list their connection serves, instead of typing
   their ID: a new connection lists them once saved, as a ChatGPT sign-in does;
   in `/agents`, **+ Add agent** lists the chosen connection's models before
