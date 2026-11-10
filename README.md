@@ -767,9 +767,13 @@ the larger budget. A numeric limit, including an existing 8192 setting, stays
 fixed; explicit compaction budgets also remain fixed. Its prompt caching,
 usage, model prices and context compaction use the Anthropic provider.
 Anthropic tool rounds preserve their signed thinking and original tool inputs.
-If the API rejects a specific reasoning signature, one recovery per turn removes
-that block and subsequent reasoning, preserving text and tool results. Removed
-blocks stay out of subsequent requests. Other providers keep their existing
+A confirmed signature-prefix mismatch resets the turn's reasoning before one
+retry, preserving text, tool calls and results. Anthropic may report internally
+folded tool-turn indices, so this recovery does not guess a local block from the
+error path. For a cryptographically invalid signature with a localizable path,
+recovery removes that block and subsequent reasoning. Only one recovery is
+allowed per turn, before the rejected request emits visible output; removed
+blocks stay out of later requests. Other providers keep their existing
 model-specific reasoning replay policy.
 Recoveries appear in `/diagnostics` without raw reasoning or signatures. The usage
 of an exhausted attempt is retained there even if the retry fails before any
@@ -956,11 +960,12 @@ concurrent writers coordinate append and rotation. Startup records identify the
 version, target and managed binary digest. Anthropic requests record start and end,
 turn/request identifiers, effective output budget, effort, content-block counts,
 duration, stop reason and numeric usage. Failed requests also record the HTTP
-status, reasoning-error category, numeric block path and exact recovery decision
-(for example `unsupported_error`, `target_not_thinking`, `already_repaired` or
+status, reasoning-error category, numeric block path, first reported mismatch path
+when available, and exact recovery decision (for example `unsupported_error`, `target_not_thinking`, `already_repaired` or
 `response_started`). Raw and combined-role target positions help diagnose API
-validation differences; only the combined-role view drives recovery. Dropping an
-active stream records cancellation. These records do not require `--debug`.
+validation differences; prefix-mismatch recovery resets reasoning without using
+these positions. A successful recovery records whether it reset the turn's
+reasoning or removed a suffix. Dropping an active stream records cancellation. These records do not require `--debug`.
 The panel shows the current
 instance's recent activity. Errors and tool outcomes are
 recorded automatically using RoomKit's `ON_ERROR`, `ON_TOOL_CALL` and framework

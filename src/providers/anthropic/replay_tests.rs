@@ -14,9 +14,7 @@ fn signed(signature: &str) -> AiContentPart {
 }
 fn error(path: &str, status: u16) -> ProviderError {
     ProviderError::new(
-        format!(
-            "{path}: Invalid `signature` in `thinking` block. The block is bound to a different conversation."
-        ),
+        format!("{path}: Invalid `signature` in `thinking` block."),
         ProviderErrorOptions {
             status_code: Some(status),
             ..ProviderErrorOptions::default()
@@ -116,7 +114,7 @@ fn diagnostic_paths_distinguish_raw_and_combined_views_without_changing_repair()
     assert_eq!(fields["block_path"], serde_json::json!([0, 1]));
     assert_eq!(fields["grouped_target"], serde_json::json!([1, 0]));
     assert!(fields["raw_target"].is_null());
-    assert_eq!(fields["reasoning_error"], "prefix_mismatch");
+    assert_eq!(fields["reasoning_error"], "invalid_signature");
     assert_eq!(repair(&mut context, &failure), Ok(4));
 }
 
@@ -128,5 +126,73 @@ fn failed_repairs_explain_the_decision() {
         ("messages.0.content.1", 400, "target_not_thinking"),
     ] {
         assert_eq!(repair(&mut context(), &error(path, status)), Err(reason));
+    }
+}
+
+#[test]
+fn prefix_mismatch_resets_reasoning_without_a_local_path_and_never_retries_an_empty_reset() {
+    let failure = ProviderError::new(
+        "messages.9.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation. Content before this block differs, first at `messages.62.content.0`.",
+        ProviderErrorOptions {
+            status_code: Some(400),
+            ..ProviderErrorOptions::default()
+        },
+    );
+    let mut context = context();
+    let details = error_details(&context, &failure);
+    assert_eq!(details["mismatch_path"], serde_json::json!([62, 0]));
+    assert!(details["grouped_target"].is_null());
+    assert_eq!(repair(&mut context, &failure), Ok(4));
+    assert_eq!(context.messages[0].text(), "Keep text");
+    assert_eq!(repair(&mut context, &failure), Err("already_repaired"));
+    assert_eq!(
+        repair(&mut AiContext::default(), &failure),
+        Err("no_thinking_blocks")
+    );
+}
+
+#[test]
+fn prefix_reset_requires_both_strict_error_phrases_and_http_400() {
+    for (message, status) in [
+        (
+            "messages.9.content.0: Invalid signature in thinking block. The block is bound to a different conversation.",
+            500,
+        ),
+        (
+            "messages.9.content.0: Invalid signature in thinking block.",
+            400,
+        ),
+        (
+            "messages.9.content.0: The block is bound to a different conversation.",
+            400,
+        ),
+    ] {
+        let failure = ProviderError::new(
+            message,
+            ProviderErrorOptions {
+                status_code: Some(status),
+                ..ProviderErrorOptions::default()
+            },
+        );
+        let mut context = context();
+        let before = context.messages.clone();
+        assert!(repair(&mut context, &failure).is_err());
+        assert_eq!(context.messages, before);
+    }
+}
+
+#[test]
+fn mismatch_paths_are_numeric_and_truncated_or_unknown_details_stay_absent() {
+    assert_eq!(
+        mismatch_path("first at messages.12.content.3."),
+        Some((12, 3))
+    );
+    for text in [
+        "first at messages.12.content.3",
+        "first at messages.12.content.private",
+        "first at messages.12.content.3secret",
+        "system prompt changed",
+    ] {
+        assert_eq!(mismatch_path(text), None);
     }
 }

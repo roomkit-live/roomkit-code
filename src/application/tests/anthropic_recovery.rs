@@ -437,3 +437,65 @@ async fn an_unrecognized_reasoning_error_has_actionable_private_diagnostics() {
         assert!(!log.contains(private), "leaked {private}");
     }
 }
+
+#[tokio::test]
+async fn prefix_mismatch_after_multiple_rounds_recovers_without_guessing_the_api_index() {
+    let server = Server::start(|i, r| match i {
+        0 => response(vec![thinking("old-first"), tool("one")], "tool_use", 30),
+        1 => response(vec![thinking("old-second"), tool("two")], "tool_use", 30),
+        2 => error("messages.9.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation.".into()),
+        3 => {
+            assert!(!blocks(r).any(|p| p["type"] == "thinking"));
+            assert_eq!(blocks(r).filter(|p| p["type"] == "tool_use").count(), 2);
+            assert_eq!(blocks(r).filter(|p| p["type"] == "tool_result").count(), 2);
+            response(vec![thinking("fresh"), tool("three")], "tool_use", 30)
+        }
+        _ => {
+            assert_eq!(blocks(r).filter(|p| p["type"] == "thinking").count(), 1);
+            assert!(blocks(r).any(|p| p["signature"] == "fresh"));
+            answer()
+        }
+    }).await;
+    let (events, log) = run(&server, None).await;
+    completed(&events);
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 5);
+    let without_thinking = |r: &Value| {
+        blocks(r)
+            .filter(|p| p["type"] != "thinking")
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        without_thinking(&requests[2]),
+        without_thinking(&requests[3])
+    );
+    assert_eq!(log.matches("\"event\":\"tool_finished\"").count(), 3);
+    assert_eq!(log.matches("\"reason\":\"reasoning_replay\"").count(), 1);
+}
+
+#[tokio::test]
+async fn prefix_mismatch_after_visible_output_never_replays_the_request() {
+    let server = Server::start(|i, _| {
+        if i == 0 { return response(vec![thinking("kept"), tool("one")], "tool_use", 30); }
+        let events = [
+            json!({"type":"message_start", "message":{"model":"claude-fable-5-2", "usage":{"input_tokens":20,"output_tokens":0}}}),
+            json!({"type":"content_block_start", "index":0, "content_block":{"type":"text","text":""}}),
+            json!({"type":"content_block_delta", "index":0, "delta":{"type":"text_delta","text":"Partial answer"}}),
+            json!({"type":"error", "error":{"type":"invalid_request_error", "message":"messages.9.content.0: Invalid signature in thinking block. The block is bound to a different conversation."}}),
+        ];
+        let body = events.into_iter().map(|e| format!("event: {}\ndata: {e}\n\n", e["type"].as_str().unwrap())).collect::<String>();
+        ([("content-type", "text/event-stream")], body).into_response()
+    }).await;
+    let (events, log) = run(&server, None).await;
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::OperationFinished {
+            outcome: RunOutcome::Failed,
+            ..
+        }
+    )));
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
+    assert!(!log.contains("\"reason\":\"reasoning_replay\""));
+    assert!(log.contains("\"recovery\":\"response_started\""));
+}

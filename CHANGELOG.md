@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Recover from Anthropic signature-prefix errors after multiple tool rounds even
+  when the API reports internally folded block indices. Reset reasoning once
+  while preserving completed work, and record the reported first mismatch path.
+
 - Record Anthropic request budgets, timing, stop reasons, usage, reasoning-error
   paths and recovery decisions in private diagnostics, including failed and
   cancelled requests. Identify the managed binary at startup.

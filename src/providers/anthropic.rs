@@ -111,6 +111,7 @@ impl Anthropic {
         if let Ok(count) = result {
             trace.recovery(json!({
                 "reason":"reasoning_replay", "removed_blocks":count, "http_status":400,
+                "scope":if replay::prefix_mismatch(error) {"turn_reasoning"} else {"suffix"},
             }));
             return true;
         }

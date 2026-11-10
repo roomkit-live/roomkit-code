@@ -41,12 +41,20 @@ pub(super) fn repair(
     if !removed(context).is_empty() {
         return Err("already_repaired");
     }
-    let (message, block) = rejected_block(error)?;
-    let Some((message, index)) = thinking_location(context, message, block) else {
-        return Err("target_not_thinking");
+    let (message, index) = if prefix_mismatch(error) {
+        // Anthropic can report indices in an internally folded tool turn.
+        // Do not guess which local block it means: reset the reasoning only.
+        // Text, calls and results stay intact, including executed side effects.
+        (0, 0)
+    } else {
+        let (message, block) = rejected_block(error)?;
+        thinking_location(context, message, block).ok_or("target_not_thinking")?
     };
     let removed = remove_suffix(context, message, index);
     let count = removed.len();
+    if count == 0 {
+        return Err("no_thinking_blocks");
+    }
     context.response_metadata.insert(
         REMOVED,
         Value::Array(removed.into_iter().map(Value::String).collect()),
@@ -109,6 +117,13 @@ fn remove_suffix(context: &mut AiContext, message_index: usize, index: usize) ->
     removed
 }
 
+pub(super) fn prefix_mismatch(error: &ProviderError) -> bool {
+    let text = error.message.replace('`', "");
+    error.status_code == Some(400)
+        && text.contains("Invalid signature in thinking block")
+        && text.contains("The block is bound to a different conversation.")
+}
+
 fn rejected_block(error: &ProviderError) -> Result<(usize, usize), &'static str> {
     if error.status_code != Some(400) {
         return Err("wrong_http_status");
@@ -149,10 +164,23 @@ pub(super) fn error_details(context: &AiContext, error: &ProviderError) -> Value
     let path = block_path(&text);
     serde_json::json!({
         "reasoning_error":kind, "block_path":path,
+        "mismatch_path":mismatch_path(&text),
         "grouped_target":path.and_then(|(m,b)| thinking_location(context,m,b)),
         // Diagnostic only: do not guess when validation stages address different views.
         "raw_target":path.and_then(|(m,b)| raw_location(context,m,b)),
     })
+}
+
+fn mismatch_path(text: &str) -> Option<(usize, usize)> {
+    // Diagnostic only. The API's explanatory wording is not a retry contract.
+    let rest = text.split_once("first at messages.")?.1;
+    let (message, rest) = rest.split_once(".content.")?;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    // A provider message can be truncated; do not report half an index.
+    if !rest.get(digits.len()..)?.starts_with(['.', ',', ' ']) {
+        return None;
+    }
+    Some((message.parse().ok()?, digits.parse().ok()?))
 }
 
 fn raw_location(context: &AiContext, message: usize, block: usize) -> Option<(usize, usize)> {

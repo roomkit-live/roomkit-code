@@ -3,6 +3,8 @@
 Set ANTHROPIC_API_KEY and build first (or set ANTHROPIC_TEST_BINARY).
 A local proxy changes the synthetic system prefix after the first signed round.
 ANTHROPIC_TEST_SIGNATURE_MODE=invalid instead corrupts that round's signature.
+Set it to late_prefix to edit a tool result only after two signed tool rounds;
+this exercises the API's internally folded error indices.
 Only disposable project data reaches Anthropic; credentials and raw provider
 responses are never printed.
 """
@@ -25,7 +27,10 @@ def main():
     metadata = json.loads(subprocess.check_output(
         ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True))
     binary = Path(os.environ.get("ANTHROPIC_TEST_BINARY", str(Path(metadata["target_directory"]) / "debug" / "roomkit-code")))
-    invalid = os.environ.get("ANTHROPIC_TEST_SIGNATURE_MODE") == "invalid"
+    mode = os.environ.get("ANTHROPIC_TEST_SIGNATURE_MODE", "prefix")
+    assert mode in ("prefix", "invalid", "late_prefix"), "Unknown signature test mode"
+    invalid = mode == "invalid"
+    late = mode == "late_prefix"
     corrupted = None
     state = {"changed": False, "rejections": 0, "requests": 0, "recovered": False, "errors": []}
 
@@ -41,7 +46,10 @@ def main():
                            for message in body["messages"]
                            if isinstance(message.get("content"), list)
                            for part in message["content"])
-            state["changed"] |= thinking
+            signed_turns = sum(isinstance(m.get("content"), list) and
+                               any(p.get("type") == "thinking" for p in m["content"])
+                               for m in body["messages"])
+            state["changed"] |= signed_turns >= 2 if late else thinking
             if invalid:
                 for message in body["messages"]:
                     if not isinstance(message.get("content"), list):
@@ -54,7 +62,12 @@ def main():
                                 part["signature"] = "invalid-signature"
             elif state["changed"]:
                 # Keep this prefix edit on the retry and every later request.
-                body["system"].append({"type": "text", "text": "Keep the final confirmation brief."})
+                if late:
+                    result = next(p for m in body["messages"] if isinstance(m.get("content"), list)
+                                  for p in m["content"] if p["type"] == "tool_result")
+                    result["content"] += "\nSynthetic metadata changed after the next signed round."
+                else:
+                    body["system"].append({"type": "text", "text": "Keep the final confirmation brief."})
             headers = {name: self.headers[name] for name in
                        ("x-api-key", "anthropic-version", "content-type")}
             if self.headers.get("anthropic-beta"):
@@ -119,7 +132,13 @@ def main():
             assert failures[0]["http_status"] == 400
             assert failures[0]["recovery"] == "retry"
             assert failures[0]["block_path"] is not None
-            assert failures[0]["grouped_target"] is not None
+            recovery = next(r for r in records if r.get("reason") == "reasoning_replay")
+            if invalid:
+                assert failures[0]["grouped_target"] is not None
+            else:
+                assert recovery["scope"] == "turn_reasoning"
+            if late:
+                assert failures[0]["mismatch_path"] is not None
     finally:
         server.shutdown()
         server.server_close()
