@@ -58,6 +58,7 @@ async fn opening_account_menus_does_not_start_login_or_change_existing_connectio
 #[test]
 fn oauth_accounts_cannot_forward_credentials_to_a_custom_endpoint_or_static_key_path() {
     let mut provider = Provider {
+        subscription: None,
         kind: crate::providers::ProviderKind::OpenAi,
         id: "account-provider".into(),
         label: "ChatGPT".into(),

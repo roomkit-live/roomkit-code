@@ -70,7 +70,12 @@ impl Profiles {
             // base URL. On OpenAI's own endpoint its catalogue still decides for
             // the models it tags.
             supports_reasoning_effort_with_tools: Some(true),
-            thinking_field: reasoning::thinking_field(&provider.base_url, &profile.model),
+            thinking_field: match provider.subscription() {
+                Some(subscription) => {
+                    subscription.thinking_field(&provider.base_url, &profile.model)
+                }
+                None => reasoning::thinking_field(&provider.base_url, &profile.model),
+            },
             // No cap unless the agent sets one: the endpoint decides how long
             // a reply may be, as each model has its own limit.
             max_tokens: profile.max_output_tokens,

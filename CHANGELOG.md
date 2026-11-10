@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `/providers` offers **Connect OpenCode Go**: paste the subscription's API key,
+  then choose among the paid models Go serves over Chat Completions. Requests
+  carry the session header Go requires and name RoomKit Code as the client.
+
 - The agent's instructions now state what it had to find out by failing: a
   shell command is stopped after 10 seconds unless `timeout_ms` asks for more
   and is POSIX `sh`, not bash; a `grep` `include` glob is relative to its

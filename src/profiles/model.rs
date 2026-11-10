@@ -66,6 +66,10 @@ impl Authentication {
 pub(crate) struct Provider {
     #[serde(default)]
     pub kind: crate::providers::ProviderKind,
+    /// The subscription a connection with a pasted key belongs to; an account
+    /// credential names its own. Written only when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscription: Option<String>,
     pub id: String,
     pub label: String,
     pub base_url: String,
@@ -196,15 +200,7 @@ impl Provider {
         if !(1..=86_400).contains(&self.timeout_seconds) {
             return Err("Timeout must be between 1 and 86400 seconds".into());
         }
-        // Its credential may only go to the subscription's own API.
-        if let Some(subscription) = self.subscription()
-            && (self.kind != subscription.kind || self.base_url != subscription.base_url)
-        {
-            return Err(format!(
-                "{} connections use only its own API, {}",
-                subscription.name, subscription.base_url
-            ));
-        }
+        self.validate_subscription()?;
         match &self.authentication {
             Authentication::ChatGpt { account } if uuid::Uuid::parse_str(account).is_err() => {
                 return Err("Invalid ChatGPT account ID".into());
@@ -229,12 +225,42 @@ impl Provider {
 
 impl Provider {
     /// The subscription this connection goes through, if any: an account
-    /// credential belongs to its service.
+    /// credential belongs to its service, a pasted key to the one the
+    /// connection names.
     pub fn subscription(&self) -> Option<&'static super::subscriptions::Subscription> {
         match self.authentication {
             Authentication::ChatGpt { .. } => Some(&super::subscriptions::CHATGPT),
-            _ => None,
+            _ => self
+                .subscription
+                .as_deref()
+                .and_then(super::subscriptions::find),
         }
+    }
+
+    /// A subscription's connection reaches only its service, with the kind
+    /// of credential it takes.
+    fn validate_subscription(&self) -> Result<(), String> {
+        use super::subscriptions::{Credential, find};
+        if let Some(id) = &self.subscription {
+            let named = find(id).ok_or("Unknown subscription")?;
+            let pasted_key = matches!(
+                self.authentication,
+                Authentication::Stored { .. } | Authentication::Environment { .. }
+            );
+            if !matches!(named.credential, Credential::Key { .. }) || !pasted_key {
+                return Err(format!("{} connections take an API key", named.name));
+            }
+        }
+        // Its credential may only go to the subscription's own API.
+        if let Some(subscription) = self.subscription()
+            && (self.kind != subscription.kind || self.base_url != subscription.base_url)
+        {
+            return Err(format!(
+                "{} connections use only {}'s own API, {}",
+                subscription.name, subscription.name, subscription.base_url
+            ));
+        }
+        Ok(())
     }
 
     /// The subscription whose account manages this connection, if any: its

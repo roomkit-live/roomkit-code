@@ -1882,6 +1882,7 @@ mod anthropic;
 mod anthropic_recovery;
 mod profile_deletion;
 mod provider_errors;
+mod subscriptions;
 
 #[tokio::test]
 async fn effort_selection_persists_reconfigures_requests_and_can_restore_provider_default() {

@@ -11,6 +11,7 @@ mod skills;
 mod slot;
 mod startup;
 mod store;
+mod subscription_form;
 mod subscriptions;
 mod targets;
 mod ui;
@@ -506,6 +507,7 @@ mod tests {
 
     fn connection(authentication: Authentication) -> Provider {
         Provider {
+            subscription: None,
             kind: crate::providers::ProviderKind::OpenAi,
             id: "local".into(),
             label: "Local".into(),

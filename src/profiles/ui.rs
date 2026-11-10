@@ -16,6 +16,11 @@ pub(super) struct Pending {
 #[derive(Clone)]
 enum Target {
     Provider(Option<String>),
+    /// A subscription's connection with a pasted key, new or `original`.
+    Subscription {
+        subscription: &'static super::subscriptions::Subscription,
+        original: Option<String>,
+    },
     Agent(Option<String>),
 }
 
@@ -40,7 +45,7 @@ fn effort_choices() -> Vec<Choice> {
     .collect()
 }
 
-fn field(
+pub(super) fn field(
     name: &str,
     label: &str,
     value: impl Into<String>,
@@ -184,6 +189,7 @@ impl Profiles {
                         let provider_id = format!("chatgpt-{id}");
                         let chatgpt = &super::subscriptions::CHATGPT;
                         let provider = Provider {
+                            subscription: None,
                             kind: chatgpt.kind,
                             id: provider_id.clone(),
                             label: format!(
@@ -256,7 +262,11 @@ impl Profiles {
                                 choice(
                                     format!("edit:{id}"),
                                     "Edit connection",
-                                    "URL, authentication and timeout",
+                                    if p.subscription().is_some() {
+                                        "Name, API key and timeout"
+                                    } else {
+                                        "URL, authentication and timeout"
+                                    },
                                 ),
                                 choice(
                                     format!("test:{id}"),
@@ -290,9 +300,44 @@ impl Profiles {
                         if let Some(subscription) = existing.and_then(Provider::account_managed) {
                             return Err(managed_elsewhere(subscription));
                         }
+                        // A pasted-key subscription edits through its own form.
+                        if let Some((subscription, existing)) =
+                            existing.and_then(|p| Some((p.subscription()?, p)))
+                        {
+                            let target = Target::Subscription {
+                                subscription,
+                                original: Some(existing.id.clone()),
+                            };
+                            let form = super::subscription_form::form(
+                                subscription,
+                                Some(existing),
+                                uuid::Uuid::new_v4().to_string(),
+                            );
+                            return Ok(open_form(&mut state, &current, form, target));
+                        }
                         let target = Target::Provider(existing.map(|p| p.id.clone()));
                         let form =
                             provider_form(existing, &state, uuid::Uuid::new_v4().to_string());
+                        Ok(open_form(&mut state, &current, form, target))
+                    }
+                    ("providers", "subscription") => {
+                        let subscription = super::subscriptions::find(id)
+                            .filter(|s| {
+                                matches!(s.credential, super::subscriptions::Credential::Key { .. })
+                            })
+                            .ok_or("Unknown subscription")?;
+                        if state.providers.value.profiles.len() >= 128 {
+                            return Err("Maximum of 128 provider profiles reached".into());
+                        }
+                        let target = Target::Subscription {
+                            subscription,
+                            original: None,
+                        };
+                        let form = super::subscription_form::form(
+                            subscription,
+                            None,
+                            uuid::Uuid::new_v4().to_string(),
+                        );
                         Ok(open_form(&mut state, &current, form, target))
                     }
                     ("providers", "test") => {
@@ -428,20 +473,21 @@ impl Profiles {
                 match &target {
                     Target::Provider(original) => {
                         let profile = parse_provider(&values, original.as_deref(), &state)?;
-                        let runtime = if let Some(agent) = state
-                            .agent(next.agent.as_str())
-                            .filter(|a| a.provider == profile.id)
-                        {
-                            Some(self.assemble(&agent, &profile).await?)
-                        } else {
-                            None
-                        };
-                        let mut providers = state.providers.value.clone();
-                        providers.profiles.insert(profile.id.clone(), profile);
-                        state.providers.save(providers)?;
-                        if let Some((agent, tools)) = runtime {
-                            state.install(kit, next.agent.as_str(), agent, tools)?;
-                        }
+                        self.save_connection(kit, &mut state, &next, profile)
+                            .await?;
+                    }
+                    Target::Subscription {
+                        subscription,
+                        original,
+                    } => {
+                        let profile = super::subscription_form::parse(
+                            &values,
+                            subscription,
+                            original.as_deref(),
+                            &state,
+                        )?;
+                        self.save_connection(kit, &mut state, &next, profile)
+                            .await?;
                     }
                     Target::Agent(original) => {
                         // A provider may have been deleted while this form was open.
@@ -468,6 +514,31 @@ impl Profiles {
             }
             _ => Err("Unsupported profile request".into()),
         }
+    }
+
+    /// Saves a connection, reinstalling the current agent when it uses it.
+    async fn save_connection(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        state: &mut State,
+        current: &SessionConfig,
+        profile: Provider,
+    ) -> Result<(), String> {
+        let runtime = if let Some(agent) = state
+            .agent(current.agent.as_str())
+            .filter(|a| a.provider == profile.id)
+        {
+            Some(self.assemble(&agent, &profile).await?)
+        } else {
+            None
+        };
+        let mut providers = state.providers.value.clone();
+        providers.profiles.insert(profile.id.clone(), profile);
+        state.providers.save(providers)?;
+        if let Some((agent, tools)) = runtime {
+            state.install(kit, current.agent.as_str(), agent, tools)?;
+        }
+        Ok(())
     }
 }
 
@@ -547,7 +618,7 @@ fn agent_choices(state: &State, current: &SessionConfig) -> CommandResult {
     )
 }
 
-fn next_id(prefix: &str, occupied: impl Fn(&str) -> bool) -> String {
+pub(super) fn next_id(prefix: &str, occupied: impl Fn(&str) -> bool) -> String {
     (1..=129)
         .map(|n| format!("{prefix}-{n}"))
         .find(|id| !occupied(id))
@@ -556,6 +627,7 @@ fn next_id(prefix: &str, occupied: impl Fn(&str) -> bool) -> String {
 
 fn provider_form(existing: Option<&Provider>, state: &State, id: String) -> FormSpec {
     let default = Provider {
+        subscription: None,
         kind: ProviderKind::OpenAi,
         id: next_id("provider", |id| {
             state.providers.value.profiles.contains_key(id)
@@ -810,12 +882,18 @@ fn agent_form(
 }
 
 fn managed_elsewhere(subscription: &super::subscriptions::Subscription) -> String {
-    format!(
-        "Manage {name} connections through the {name} account menu",
-        name = subscription.name
-    )
+    match subscription.credential {
+        super::subscriptions::Credential::Account => format!(
+            "Manage {name} connections through the {name} account menu",
+            name = subscription.name
+        ),
+        super::subscriptions::Credential::Key { .. } => format!(
+            "Edit {} connections from their own form in /providers",
+            subscription.name
+        ),
+    }
 }
-fn value<'a>(values: &'a FormValues, key: &str) -> &'a str {
+pub(super) fn value<'a>(values: &'a FormValues, key: &str) -> &'a str {
     values.get(key).unwrap_or("")
 }
 fn identity(id: &str, original: Option<&str>, exists: bool) -> Result<(), String> {
@@ -840,7 +918,7 @@ fn parse_provider(
     )?;
     if let Some(subscription) = original
         .and_then(|id| state.providers.value.profiles.get(id))
-        .and_then(Provider::account_managed)
+        .and_then(Provider::subscription)
     {
         return Err(managed_elsewhere(subscription));
     }
@@ -876,6 +954,7 @@ fn parse_provider(
     };
     let url = value(values, "url").trim().trim_end_matches('/');
     let provider = Provider {
+        subscription: None,
         kind,
         id: id.into(),
         label: value(values, "label").trim().into(),

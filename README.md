@@ -341,7 +341,8 @@ stored in chat history. Leaving a stored-key field blank preserves that key.
 Choosing another authentication mode removes the stored key from that profile.
 Testing a connection makes a bounded `GET /models` request (`/v1/models` for Anthropic) with no redirects;
 it sends no conversation. Some compatible servers do not implement discovery,
-so model identifiers can always be entered manually.
+so model identifiers can always be entered manually. Subscriptions have their
+own entries: [OpenCode Go](#opencode-go) and [Sign in with ChatGPT](#sign-in-with-chatgpt).
 
 **/agents** manages the interlocutors. Each has a stable ID, display name,
 provider, model, optional context capacity and output limit, additional instructions, selected
@@ -919,6 +920,26 @@ removes its stored credential. `ANTHROPIC_TEST_MODEL` overrides its default
 `claude-sonnet-5-5` model. This check is excluded from the normal gates and CI.
 
 MIT licensed. This is an initial development version, not a published release.
+
+## OpenCode Go
+
+Open `/providers`, choose **Connect OpenCode Go**, and paste the API key from
+your [OpenCode console](https://opencode.ai/console). The connection calls
+`https://opencode.ai/inference/go/openai/v1` and nowhere else. **Test connection
+and list models** offers the paid models Go serves over Chat Completions; choose
+one to create an agent. Free models answer only OpenCode's own client, and the
+models Go serves over the Responses, Anthropic or Gemini APIs are not offered yet.
+
+Every request carries the agent's cache key, the same for that agent in this
+workspace, in the `x-opencode-session` header Go requires, and names RoomKit Code
+as its client. The key
+is stored like any other connection's key, in a private local file (0600);
+editing the connection with an empty key field keeps it.
+
+Some models, such as DeepSeek's, are hosted outside Europe and the United States.
+By default OpenCode refuses them with an HTTP 400, which RoomKit Code reports as
+a rejected request: select **Global** in the console's privacy settings to use
+them. Usage counts against your Go plan's limits.
 
 ## Sign in with ChatGPT
 
