@@ -171,8 +171,9 @@ impl Profiles {
     }
 
     /// `/model`: the models the current agent's connection serves, or, given
-    /// one's ID, that model for the current agent. An ID is any the server
-    /// serves, listed or not; a listing that fails leaves it to be typed.
+    /// one's ID, that model for the current agent in this conversation, which
+    /// keeps it (`conversation`). An ID is any the server serves, listed or
+    /// not; a listing that fails leaves it to be typed.
     pub(super) async fn model(
         &self,
         kit: &RoomKit<SqliteStore>,
@@ -186,7 +187,7 @@ impl Profiles {
                 .await;
         }
         let agent = state
-            .agent(current.agent.as_str())
+            .running_agent(current.room.as_str(), current.agent.as_str())
             .ok_or("Configure an agent with /agents first")?;
         let provider = state
             .providers
@@ -210,34 +211,6 @@ impl Profiles {
                 .map(|m| listed_choice(m.id.clone(), m, &agent.model))
                 .collect(),
         ))
-    }
-
-    /// Saves `change` to the current agent and reinstalls it, as `/effort`
-    /// and `/model` do.
-    pub(super) async fn change_current(
-        &self,
-        kit: &RoomKit<SqliteStore>,
-        state: &mut State,
-        current: SessionConfig,
-        change: impl FnOnce(&mut Agent),
-    ) -> Result<CommandResult, String> {
-        let mut agent = state
-            .agent(current.agent.as_str())
-            .ok_or("Configure an agent with /agents first")?;
-        change(&mut agent);
-        agent.validate()?;
-        let provider = state
-            .providers
-            .value
-            .profiles
-            .get(&agent.provider)
-            .ok_or("Unknown provider")?;
-        let (runtime, tools) = self.assemble(&agent, provider).await?;
-        state.update_agent(agent)?;
-        state.install(kit, current.agent.as_str(), runtime, tools)?;
-        let mut next = current;
-        state.view(&mut next);
-        Ok(CommandResult::Switch(Box::new(next)))
     }
 }
 

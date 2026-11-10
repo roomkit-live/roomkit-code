@@ -9,6 +9,10 @@ use std::sync::{Arc, RwLock};
 
 use crate::agent::CodeAgent;
 
+/// The configuration an agent runs with in a conversation that keeps a model
+/// or an effort of its own for it, or why it could not be assembled.
+type Fitted = Result<Arc<CodeAgent>, String>;
+
 #[derive(Clone)]
 pub(super) struct AgentSlot {
     instructions: Arc<crate::instructions::Instructions>,
@@ -22,6 +26,10 @@ pub(super) struct AgentSlot {
     turn_ends: Arc<crate::turn_ends::TurnEnds>,
     id: ChannelId,
     current: Arc<RwLock<Option<Arc<CodeAgent>>>>,
+    /// The conversations that keep a model or an effort of their own for
+    /// the agent, by room: the configuration it runs with there, or why it
+    /// could not be assembled.
+    fitted: Arc<RwLock<std::collections::HashMap<String, Fitted>>>,
     /// The requests its agents' `ask_user` opens, which the engine
     /// announces once the slot declares them as it registers.
     human_input: Option<roomkit::human_input::HumanInputHandler>,
@@ -45,6 +53,7 @@ impl AgentSlot {
             turn_ends: Arc::default(),
             id,
             current: Arc::new(RwLock::new(agent.map(Arc::new))),
+            fitted: Arc::default(),
             human_input: None,
         }
     }
@@ -84,6 +93,35 @@ impl AgentSlot {
     }
     pub fn disable(&self) {
         *crate::sync::write(&self.current) = None;
+        crate::sync::write(&self.fitted).clear();
+    }
+    /// Makes the agent's turns in conversation `room` run with `agent`, the
+    /// configuration the conversation keeps for it, or refuse to start for
+    /// the reason given.
+    pub fn fit(&self, room: &str, agent: Result<CodeAgent, String>) {
+        crate::sync::write(&self.fitted).insert(room.into(), agent.map(Arc::new));
+    }
+    /// Makes the agent's turns in `room` run with its own configuration.
+    pub fn unfit(&self, room: &str) {
+        crate::sync::write(&self.fitted).remove(room);
+    }
+    /// The configuration a turn in `room` runs with: the conversation's
+    /// when it keeps one, else the agent's own. A conversation whose own
+    /// could not be assembled runs no turn, rather than one on another
+    /// model.
+    fn configuration(&self, room: &str) -> Fitted {
+        if let Some(fitted) = crate::sync::read(&self.fitted).get(room) {
+            return fitted.clone();
+        }
+        let own = crate::sync::read(&self.current).clone();
+        own.ok_or_else(|| "Configure a provider and agent first".to_owned())
+    }
+    /// Every configuration the slot holds.
+    fn configurations(&self) -> Vec<Arc<CodeAgent>> {
+        let own = crate::sync::read(&self.current).clone();
+        let fitted = crate::sync::read(&self.fitted);
+        let fitted = fitted.values().filter_map(|agent| agent.clone().ok());
+        own.into_iter().chain(fitted).collect()
     }
     /// What a turn reads as it starts: its mode's instruction, what a
     /// delegated task's worker must know, the agents it can hand a task to,
@@ -130,7 +168,7 @@ impl AgentSlot {
     fn still_read(&self, project: &str, event: &RoomEvent, history: &[RoomEvent]) -> bool {
         let (room, agent) = (event.room_id.as_str(), self.id.as_str());
         if roomkit_core::rules::instructions::is_standalone(event)
-            || !self.compactions.bounded(agent)
+            || !self.compactions.bounded(room, agent)
         {
             return false;
         }
@@ -231,8 +269,9 @@ impl Channel for AgentSlot {
     /// replaced since the turn began has no loop for it; the message then
     /// gets a turn of its own.
     fn steer_turn(&self, directive: &SteeringDirective, turn_id: &str) -> Option<usize> {
-        let agent = crate::sync::read(&self.current).clone()?;
-        agent.steer_turn(directive, turn_id)
+        self.configurations()
+            .into_iter()
+            .find_map(|agent| agent.steer_turn(directive, turn_id))
     }
     /// The slot's own answers, and the tools a room serves its turns, as an AI
     /// channel takes them: `delegate_task`, `task_status` and `cancel_task`
@@ -274,9 +313,7 @@ impl Channel for AgentSlot {
         if !self.answers(&event, &context) {
             return Ok(ChannelOutput::default());
         }
-        let agent = crate::sync::read(&self.current)
-            .clone()
-            .ok_or("Configure a provider and agent first")?;
+        let agent = self.configuration(context.room.id.as_str())?;
         // A delegated task's room takes its conversation's mode.
         self.policy.adopt(&context.room);
         let input = self.turn_input(event, &mut context).await;
@@ -289,8 +326,7 @@ impl Channel for AgentSlot {
     /// tools.
     async fn close(&self) {
         self.files.settle(crate::timeouts::SETTLE).await;
-        let agent = crate::sync::read(&self.current).clone();
-        if let Some(agent) = agent {
+        for agent in self.configurations() {
             agent.close().await;
         }
     }

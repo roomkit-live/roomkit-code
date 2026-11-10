@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- A conversation keeps its model, its reasoning effort and its mode. `/model`
+  and `/effort` changed the agent itself: every conversation of that agent, in
+  every project for a global one, answered on the model chosen last anywhere.
+  They now change the conversation you are in and nothing else. The agent's
+  own model and effort, which a new conversation starts with, are set in its
+  form in `/agents`; saving the form with another model also applies it to the
+  conversation you save it from. A conversation stored before keeps the model
+  of its last answer. A conversation also opens in the mode it was left in,
+  Yolo included, unless `--mode` names one; a launch without the terminal
+  interface keeps its own mode.
+
 - A conversation keeps its agent. Selecting an agent in one conversation
   changed the agent of every other: back in a conversation, with `/resume` or
   at the next launch, the view showed the agent selected last elsewhere, and

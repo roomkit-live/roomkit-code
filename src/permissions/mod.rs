@@ -56,7 +56,14 @@ pub(crate) enum Mode {
 }
 
 impl Mode {
-    fn value(self) -> &'static str {
+    /// The mode `value` names, as [`Mode::value`] writes it.
+    pub(crate) fn named(value: &str) -> Option<Self> {
+        [Self::Ask, Self::Plan, Self::Yolo]
+            .into_iter()
+            .find(|mode| mode.value() == value)
+    }
+
+    pub(crate) fn value(self) -> &'static str {
         match self {
             Self::Ask => "ask",
             Self::Plan => "plan",
@@ -197,6 +204,27 @@ impl Policy {
     pub(crate) fn apply(&self, room: &str, mode: Mode) {
         crate::sync::lock(&self.modes).insert(room.into(), mode);
         self.changes.send_replace(());
+    }
+
+    /// Gives conversation `room` the mode it opens with, unless it has one
+    /// already: `kept`, the mode it was left in, else the launch's, which it
+    /// keeps from then on, whatever mode a later launch is given.
+    pub(crate) fn open(&self, room: &str, kept: Option<Mode>) {
+        crate::sync::lock(&self.modes)
+            .entry(room.into())
+            .or_insert(kept.unwrap_or(self.initial));
+        self.changes.send_replace(());
+    }
+
+    /// The mode of each conversation that has one of its own, by room. The
+    /// rooms of delegated tasks are left out: nothing reads a mode there.
+    pub(crate) fn chosen(&self) -> Vec<(String, Mode)> {
+        let delegated = crate::sync::lock(&self.parents).clone();
+        crate::sync::lock(&self.modes)
+            .iter()
+            .filter(|(room, _)| !delegated.contains_key(*room))
+            .map(|(room, mode)| (room.clone(), *mode))
+            .collect()
     }
 
     pub async fn gate(&self, channel: &ConversationChannel, event: ToolCallEvent) -> Verdict {

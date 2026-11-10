@@ -1894,6 +1894,7 @@ mod breakdown;
 mod catalogue;
 mod compaction;
 mod conversation_agent;
+mod conversation_settings;
 mod delegation;
 mod docs;
 mod exit_summary;

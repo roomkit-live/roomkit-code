@@ -12,11 +12,15 @@ mod agent;
 mod live;
 pub(crate) mod names;
 mod rooms;
+mod settings;
 pub(crate) mod task_rooms;
 
 pub(crate) use agent::{designate, designated};
 pub(crate) use names::name;
 pub(crate) use rooms::{create, empty};
+pub(crate) use settings::{
+    Running, follow_modes, forget, keep, keep_modes, kept, kept_mode, last_model,
+};
 
 pub(crate) fn commands() -> Vec<CommandSpec> {
     [

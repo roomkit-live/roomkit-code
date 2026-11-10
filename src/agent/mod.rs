@@ -206,6 +206,10 @@ pub(crate) struct Extensions {
     /// announces its requests (`crate::ask_user`); none when nobody watches
     /// the launch, which then offers no such tool.
     pub human_input: Option<roomkit_ai::HumanInputToolHandler>,
+    /// The conversation the agent is assembled for, where it runs with a
+    /// model or an effort that is not its own: what it registers to compact
+    /// its history is then that conversation's alone.
+    pub conversation: Option<String>,
 }
 
 pub(crate) async fn create(
@@ -238,6 +242,7 @@ pub(crate) async fn create(
         images,
         ceiling,
         human_input,
+        conversation,
         ..
     } = extensions;
     let preamble = preamble(
@@ -281,7 +286,11 @@ pub(crate) async fn create(
         max_context_events: HISTORY,
         retry_policy: Some(retry_policy()),
         reasoning_effort: profile.reasoning_effort.clone(),
-        memory: memory((ceiling, &profile.id), &provider, resources),
+        memory: memory(
+            (ceiling, &profile.id),
+            &provider,
+            (resources, conversation.as_deref()),
+        ),
         evict_threshold_tokens: stored_result_threshold(ceiling),
         image_resolver: Some(images),
         human_input_handler: human_input,
@@ -300,7 +309,7 @@ pub(crate) async fn create(
 fn memory(
     (ceiling, agent): (Option<u64>, &str),
     provider: &CodeProvider,
-    resources: &Resources,
+    (resources, conversation): (&Resources, Option<&str>),
 ) -> Option<Arc<dyn roomkit_ai::memory::MemoryProvider>> {
     let ceiling = ceiling?;
     let summarizer = provider.clone();
@@ -310,7 +319,12 @@ fn memory(
         (ceiling, agent),
         compactions.clone(),
     ));
-    compactions.register(agent, memory.clone());
+    // In a conversation that keeps a model of its own, its summaries are
+    // that model's.
+    match conversation {
+        Some(room) => compactions.register_in(room, agent, memory.clone()),
+        None => compactions.register(agent, memory.clone()),
+    }
     Some(memory)
 }
 

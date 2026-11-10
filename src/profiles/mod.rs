@@ -1,5 +1,6 @@
 //! User connections and project agent composition, independent of terminal widgets.
 mod catalog;
+mod conversation;
 mod deletion;
 mod discovery;
 mod mcp;
@@ -90,6 +91,14 @@ struct State {
     pending: Option<ui::Pending>,
     pending_delete: Option<deletion::Pending>,
     setup_error: Option<String>,
+    /// The model and the effort each agent runs with in the conversations
+    /// this instance opened, as each conversation keeps them: by room and
+    /// agent.
+    running: BTreeMap<(String, String), crate::sessions::Running>,
+    /// Why an agent could not be given the model and the effort a
+    /// conversation keeps for it, by room and agent: its turns there do not
+    /// start.
+    unfitted: BTreeMap<(String, String), String>,
     /// The price the configuration states for one server and model.
     configured_price: Option<ConfiguredPrice>,
 }
@@ -231,6 +240,8 @@ impl Profiles {
                 pending: None,
                 pending_delete: None,
                 setup_error: None,
+                running: BTreeMap::new(),
+                unfitted: BTreeMap::new(),
                 configured_price: settings.pricing.clone().map(|pricing| ConfiguredPrice {
                     kind: settings.provider,
                     base_url: settings.base_url.clone(),
@@ -295,10 +306,23 @@ impl Profiles {
         Ok(channel)
     }
 
+    /// Assembles `profile` on `provider`, as the agent's own configuration.
     async fn assemble(
         &self,
         profile: &Agent,
         provider: &Provider,
+    ) -> Result<(CodeAgent, Inventory), String> {
+        self.assemble_for(profile, provider, None).await
+    }
+
+    /// Assembles `profile` on `provider`: the agent's own configuration, or
+    /// the one it runs with in `conversation`, which keeps a model or an
+    /// effort of its own for it.
+    async fn assemble_for(
+        &self,
+        profile: &Agent,
+        provider: &Provider,
+        conversation: Option<&str>,
     ) -> Result<(CodeAgent, Inventory), String> {
         profile.validate()?;
         provider.validate()?;
@@ -323,6 +347,7 @@ impl Profiles {
             images: self.images.clone(),
             ceiling: ceiling(profile, provider.kind),
             human_input: self.asking.clone(),
+            conversation: conversation.map(str::to_owned),
         };
         let created = crate::agent::create(
             &self.workspace,
@@ -336,7 +361,11 @@ impl Profiles {
             |_| "Could not configure this agent; verify its provider, credential and workspace",
         )?;
         let compactions = &self.resources.compactions;
-        compactions.set_bounded(&profile.id, ceiling(profile, provider.kind).is_some());
+        let bounded = ceiling(profile, provider.kind).is_some();
+        match conversation {
+            Some(room) => compactions.set_bounded_in(room, &profile.id, bounded),
+            None => compactions.set_bounded(&profile.id, bounded),
+        }
         Ok(created)
     }
 
@@ -415,11 +444,15 @@ impl Profiles {
                 },
             };
             match assembled {
-                Ok((runtime, inventory)) => state.install(kit, &id, runtime, inventory)?,
+                Ok((runtime, inventory)) => {
+                    self.installed(kit, &mut state, &id, runtime, inventory)
+                        .await?;
+                }
                 Err(error) => state.setup_error = Some(error),
             }
         }
-        state.view(view);
+        // With the model and the effort the conversation keeps for it.
+        self.settle_in(kit, &mut state, view).await;
         Ok(())
     }
 
@@ -456,7 +489,8 @@ impl State {
     }
 
     fn view(&self, view: &mut SessionConfig) {
-        let agent = self.agent(view.agent.as_str());
+        // The agent as it runs in the view's conversation.
+        let agent = self.running_agent(view.room.as_str(), view.agent.as_str());
         let served = self.tools.contains_key(view.agent.as_str());
         view.can_attach_images = served && agent.as_ref().is_some_and(|a| a.vision);
         view.actor_names = self
@@ -494,7 +528,10 @@ impl State {
             view.context_capacity = None;
             view.pricing = None;
         }
-        view.submission_error = if self.tools.contains_key(view.agent.as_str()) {
+        let key = (view.room.to_string(), view.agent.to_string());
+        view.submission_error = if let Some(reason) = self.unfitted.get(&key) {
+            Some(reason.clone())
+        } else if self.tools.contains_key(view.agent.as_str()) {
             None
         } else {
             Some(self.setup_error.clone().unwrap_or_else(|| "Configure a connection with /providers, then create or select an agent with /agents".into()))

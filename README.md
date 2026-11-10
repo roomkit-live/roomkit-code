@@ -349,9 +349,10 @@ the agent's form. Subscriptions have their own entries:
 [OpenCode Go](#opencode-go) and [Sign in with ChatGPT](#sign-in-with-chatgpt).
 
 **/model** lists the models of the current agent's connection and switches the
-agent to the one you choose; `/model <model-id>` sets one by its ID, listed or
-not. The agent keeps its other settings, the context capacity included, and the
-conversation.
+agent to the one you choose, in the conversation you are in; `/model <model-id>`
+sets one by its ID, listed or not. The agent keeps its other settings, the
+context capacity included, and the conversation. Its own model, which a new
+conversation starts with, is set in its form in `/agents`.
 
 In **/agents**, **+ Add agent** asks for the connection when there are several,
 lists that connection's models, then opens the form of an agent using the one
@@ -389,6 +390,18 @@ conversation still opens and says why nothing can be sent, until you select an
 agent there; no other agent takes its place. Deleting the agent of the
 conversation you are in switches that conversation to the agent the confirmation
 names.
+
+A conversation also keeps the model and the reasoning effort its agent runs
+with. `/model` and `/effort` change them in the conversation you are in and
+nowhere else: not in the agent's other conversations, nor in the agent's own
+model and effort, which a new conversation starts with and which its form in
+`/agents` sets. Saving that form with another model or effort also applies them
+to the conversation you save it from; the agent's other conversations keep
+theirs. A conversation stored before it kept these settings keeps the model of
+its agent's last answer there. If the model a conversation keeps cannot be
+configured any more, the conversation says so and sends nothing until you choose
+one with `/model`: it never answers on another model. A delegated task runs with
+its agent's own model and effort.
 
 Forms use **Tab / Shift+Tab** for fields, **Left / Right** for choices,
 **Alt+Enter** for multiline instructions, **Ctrl+U** to clear a field,
@@ -625,9 +638,14 @@ Actions already dispatched are not revoked. Yolo permits subsequent selected
 tool calls without asking; tool path, revision, timeout and size checks still
 apply.
 
-Modes are kept per conversation for this process. Restart defaults to Ask;
-`--mode plan`, `--mode yolo` or `[permissions] mode = "plan"` (or `"yolo"`) in an explicitly loaded TOML file
-can select a different starting mode. Project files never implicitly select it.
+Each conversation keeps its mode: it opens in the mode it was left in, Yolo
+included, at the next launch as when you come back to it with `/resume`. A new
+conversation starts in the launch's mode: Ask, unless `--mode plan`,
+`--mode yolo` or `[permissions] mode = "plan"` (or `"yolo"`) in an explicitly
+loaded TOML file selects another. `--mode` on the command line also opens an
+existing conversation in that mode, which it then keeps. A launch without the
+terminal interface uses its own mode and leaves the conversation's as it was.
+Project files never implicitly select a mode.
 
 ## Plans and progress
 
@@ -932,6 +950,8 @@ server's process group.
 It keeps each conversation's agent as the active agent of the room's RoomKit
 conversation state, which the engine stores in the room's metadata: an
 orchestration strategy installed on a room reads and writes the same record.
+The conversation's mode, and the model and effort each agent runs with there,
+are the application's own record, in the room's private state.
 The TUI receives only its generic client connection, preserving the boundary
 needed for a future remote host.
 
@@ -1022,8 +1042,9 @@ forwarding and device-code sign-in are not implemented in this first version.
 
 ### Reasoning effort and diagnostics
 
-Use `/effort` to select the active agent's reasoning effort, or edit **Reasoning
-effort** in `/agents`. The setting is saved per agent and applies to subsequent
+Use `/effort` to select the reasoning effort the active agent runs with in the
+conversation you are in, which keeps it; **Reasoning effort** in `/agents` sets
+the agent's own, which a new conversation starts with. It applies to subsequent
 requests, including tool rounds. `default` leaves the parameter out; other levels
 must be supported by the chosen model. On OpenAI's own endpoint, some models take
 the effort RoomKit's catalogue states on a turn with tools, whatever this setting

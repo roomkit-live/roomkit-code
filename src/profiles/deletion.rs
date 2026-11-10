@@ -177,7 +177,8 @@ impl Profiles {
             state.setup_error = None;
             match replacement {
                 Some(Ok((agent, tools))) => {
-                    state.install(kit, current.agent.as_str(), agent, tools)?
+                    self.installed(kit, state, current.agent.as_str(), agent, tools)
+                        .await?;
                 }
                 Some(Err(error)) => state.setup_error = Some(error),
                 None => {}
@@ -190,7 +191,7 @@ impl Profiles {
                 let _ = self.designate(kit, &current).await;
             }
         }
-        state.view(&mut current);
+        self.settle_in(kit, state, &mut current).await;
         Ok(CommandResult::Switch(Box::new(current)))
     }
 
@@ -274,5 +275,8 @@ impl State {
         }
         self.tools.remove(id);
         self.compositions.remove(id);
+        // What the conversations keep for it is read again when it is shown.
+        self.running.retain(|(_, agent), _| agent != id);
+        self.unfitted.retain(|(_, agent), _| agent != id);
     }
 }

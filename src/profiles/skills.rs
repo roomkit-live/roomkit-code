@@ -239,7 +239,8 @@ impl Profiles {
                     return Err(error);
                 }
             };
-            state.install(kit, &agent.id, runtime, tools)?;
+            self.installed(kit, &mut state, &agent.id, runtime, tools)
+                .await?;
             let mut current = current;
             state.view(&mut current);
             return Ok(CommandResult::Switch(Box::new(current)));
@@ -269,7 +270,8 @@ impl Profiles {
                 .ok_or("Unknown provider")?;
             let (runtime, tools) = self.assemble(&agent, provider).await?;
             state.update_agent(agent.clone())?;
-            state.install(kit, &agent.id, runtime, tools)?;
+            self.installed(kit, &mut state, &agent.id, runtime, tools)
+                .await?;
         } else if action == "use" {
             let (name, task) = name.split_once(' ').unwrap_or((
                 name,

@@ -99,6 +99,11 @@ impl Application {
         self.profiles.mcp_runtime.close().await;
         // Closing cancels running shell calls: the agents' slots record what
         // they changed as they close, before the engine closes its store.
+        // The conversations' modes, kept as they change, once more before the
+        // engine closes its store.
+        if !self.profiles.unattended() {
+            crate::sessions::keep_modes(&self.kit, &self.policy).await;
+        }
         step("engine");
         let engine = self.kit.close().await;
         step("hooks");
@@ -177,6 +182,9 @@ async fn setup(
     gate::install(kit, gate)?;
     crate::ask_user::install(kit, channel.clone(), policy.clone())?;
     model_results::install(kit)?;
+    if !settings.unattended {
+        crate::sessions::follow_modes(kit, policy);
+    }
     let view = first_view(
         settings, kit, profiles, services, policy, &channel, agent_id,
     )
@@ -213,9 +221,21 @@ async fn first_view(
         "Run a shell command in this project",
     )];
     view.cycle_command = Some(crate::delegation::panel::COMMAND.to_owned());
+    // A conversation someone watches opens in the mode it was left in,
+    // unless the launch names one, and keeps the mode it is in. A launch
+    // nobody watches keeps its own mode, and leaves the conversation's.
+    if !settings.unattended {
+        let kept = if settings.mode_given {
+            None
+        } else {
+            crate::sessions::kept_mode(kit, &view.room).await
+        };
+        policy.open(view.room.as_str(), kept);
+    }
     view.mode = Some(policy.state(view.room.as_str()));
     profiles.attach(kit, &view, channel.id()).await?;
-    profiles.configure_view(&mut view).await;
+    // Its agent runs with the model and the effort the conversation keeps.
+    profiles.settle(kit, &mut view).await;
     let source = if settings.session.is_some() {
         "resume"
     } else {

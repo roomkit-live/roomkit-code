@@ -331,6 +331,9 @@ pub(crate) struct Settings {
     pub debug: bool,
     pub ui: UiOptions,
     pub mode: Mode,
+    /// Whether the launch named its mode: a conversation then opens in it,
+    /// not in the mode it was left in.
+    pub mode_given: bool,
     /// Host variables commands receive beyond the development list.
     pub inherit_env: Vec<String>,
     /// Rounds of tool calls one turn may run.
@@ -539,6 +542,7 @@ impl Settings {
             default_storage: cli.state_dir.is_none(),
             session: cli.session.clone(),
             mode: cli.mode.unwrap_or(file.permissions.mode),
+            mode_given: cli.mode.is_some(),
             provider,
             base_url,
             model,

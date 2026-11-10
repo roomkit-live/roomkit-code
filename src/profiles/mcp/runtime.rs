@@ -294,7 +294,8 @@ impl Profiles {
             state.update_agent(profile.clone())?;
             self.diagnostics.record("mcp_selection",serde_json::json!({"agent":profile.id,"server":id,"tools":profile.mcp.get(id).map_or(0,Vec::len),"automatic":true}),None);
         }
-        state.install(kit, &profile.id, agent, tools)?;
+        self.installed(kit, &mut state, &profile.id, agent, tools)
+            .await?;
         Ok(note)
     }
 }

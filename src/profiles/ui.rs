@@ -430,11 +430,11 @@ impl Profiles {
                         next.agent = ChannelId::new(id).map_err(|_| "Invalid agent ID")?;
                         self.attach(kit, &next, terminal).await?;
                         state.select_agent(id)?;
-                        state.install(kit, id, runtime, tools)?;
+                        self.installed(kit, &mut state, id, runtime, tools).await?;
                         // Last: a selection that fails before leaves the
                         // conversation with the agent its view still shows.
                         self.designate(kit, &next).await?;
-                        state.view(&mut next);
+                        self.settle_in(kit, &mut state, &mut next).await;
                         Ok(CommandResult::Switch(Box::new(next)))
                     }
                     _ => Err("Unknown profile action; reopen /providers or /agents".into()),
@@ -487,7 +487,12 @@ impl Profiles {
                     Target::Agent(original) => {
                         // A provider may have been deleted while this form was open.
                         state.providers.reload()?;
+                        let before = original
+                            .as_deref()
+                            .and_then(|id| state.agent(id))
+                            .map(|agent| conversation::own(&agent));
                         let (profile, scope) = parse_agent(&values, original.as_deref(), &state)?;
+                        let saved = conversation::own(&profile);
                         let provider = state
                             .providers
                             .value
@@ -500,8 +505,15 @@ impl Profiles {
                         self.attach(kit, &next, terminal).await?;
                         state.save_agent(profile, scope)?;
                         state.select_agent(next.agent.as_str())?;
-                        state.install(kit, next.agent.as_str(), runtime, tools)?;
+                        self.installed(kit, &mut state, next.agent.as_str(), runtime, tools)
+                            .await?;
                         self.designate(kit, &next).await?;
+                        // A model or an effort set in the form is also that of
+                        // the conversation it is saved from: the person set it
+                        // here. The agent's other conversations keep theirs.
+                        if before.as_ref() != Some(&saved) {
+                            self.adopt(kit, &mut state, &next, saved).await?;
+                        }
                     }
                 }
                 state.pending = None;
@@ -518,7 +530,7 @@ impl Profiles {
                     drop(state);
                     return Ok(self.after_connecting(&next, &provider).await);
                 }
-                state.view(&mut next);
+                self.settle_in(kit, &mut state, &mut next).await;
                 Ok(CommandResult::Switch(Box::new(next)))
             }
             _ => Err("Unsupported profile request".into()),
@@ -545,7 +557,8 @@ impl Profiles {
         providers.profiles.insert(profile.id.clone(), profile);
         state.providers.save(providers)?;
         if let Some((agent, tools)) = runtime {
-            state.install(kit, current.agent.as_str(), agent, tools)?;
+            self.installed(kit, state, current.agent.as_str(), agent, tools)
+                .await?;
         }
         Ok(())
     }

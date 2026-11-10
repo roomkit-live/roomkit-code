@@ -175,7 +175,8 @@ impl Profiles {
                     .ok_or("Unknown provider")?;
                 let (runtime, tools) = self.assemble(&agent, provider).await?;
                 state.update_agent(agent.clone())?;
-                state.install(kit, &agent.id, runtime, tools)?;
+                self.installed(kit, &mut state, &agent.id, runtime, tools)
+                    .await?;
 
                 self.diagnostics.record("mcp_selection", serde_json::json!({"agent":agent.id,"server":id,"tools":agent.mcp.get(id).map_or(0,Vec::len)}), None);
                 let page = parts.get(3).and_then(|p| p.parse().ok()).unwrap_or(0);

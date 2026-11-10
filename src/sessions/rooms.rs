@@ -76,8 +76,10 @@ pub(crate) async fn create(
         && draft
         && let Some(id) = unused_draft(kit, leases, channel, agent).await?
     {
-        // Nothing was sent in a draft: it takes the agent it is opened with.
+        // Nothing was sent in a draft: it takes the agent it is opened with,
+        // and starts anew, with that agent's own model and the launch's mode.
         super::designate(kit, &id, agent).await?;
+        super::forget(kit, &id).await?;
         return Ok(id);
     }
     let id = RoomId::new(name.map_or_else(
@@ -214,7 +216,15 @@ impl Sessions {
         .await
         .map_err(|error| error.to_string())?;
         self.services.hooks.note_source(room.as_str(), "new");
-        Ok(self.switched(current, room).await)
+        // A new conversation starts in the launch's mode, its agent with its
+        // own model and effort, whatever the conversation it is opened from
+        // was set. One a retried command finds again is as it was left.
+        let mut next = current;
+        next.room = room.clone();
+        let kept = super::kept_mode(&self.kit, &room).await;
+        self.policy.open(room.as_str(), kept);
+        self.profiles.settle(&self.kit, &mut next).await;
+        Ok(self.switched(next, room).await)
     }
 
     /// Whether an earlier `/new` from this session kept it as the draft.
@@ -312,6 +322,9 @@ impl Sessions {
         self.profiles
             .show(&self.kit, &mut next, &self.channel, agent)
             .await?;
+        // And in the mode it was left in.
+        let kept = super::kept_mode(&self.kit, &room).await;
+        self.policy.open(room.as_str(), kept);
         self.services
             .sessions
             .keep(claim)

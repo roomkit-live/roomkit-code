@@ -85,6 +85,9 @@ pub(crate) struct Compactions {
     rooms: Mutex<HashMap<String, Record>>,
     /// The agents whose memory compacts, by ID: those with a known window.
     bounded: Mutex<HashSet<String>>,
+    /// Whether an agent's memory compacts where it runs with a configuration
+    /// of its own, by room and agent.
+    fitted: Mutex<HashMap<(String, String), bool>>,
     /// The conversations whose next turn compacts, by room and agent.
     forced: Mutex<HashSet<(String, String)>>,
     /// The project snapshot each agent's latest turn read, by room and agent.
@@ -125,6 +128,7 @@ impl Compactions {
             dir: dir.into(),
             rooms: Mutex::default(),
             bounded: Mutex::default(),
+            fitted: Mutex::default(),
             forced: Mutex::default(),
             snapshots: Mutex::default(),
             notices: Mutex::default(),
@@ -176,6 +180,12 @@ impl Compactions {
         self.runs.register(agent, compactor);
     }
 
+    /// What compacts `agent`'s conversation in `room` outside its turns,
+    /// where it runs with a configuration of its own.
+    pub fn register_in(&self, room: &str, agent: &str, compactor: Arc<dyn Compactor>) {
+        self.runs.register_in(room, agent, compactor);
+    }
+
     /// States whether `agent`'s memory compacts, as its agent is assembled.
     pub fn set_bounded(&self, agent: &str, bounded: bool) {
         let mut agents = crate::sync::lock(&self.bounded);
@@ -186,8 +196,24 @@ impl Compactions {
         }
     }
 
-    pub fn bounded(&self, agent: &str) -> bool {
-        crate::sync::lock(&self.bounded).contains(agent)
+    /// States whether `agent`'s memory compacts in `room`, where it runs
+    /// with a configuration of its own.
+    pub fn set_bounded_in(&self, room: &str, agent: &str, bounded: bool) {
+        crate::sync::lock(&self.fitted).insert((room.into(), agent.into()), bounded);
+    }
+
+    /// `agent` runs in `room` with its own configuration again.
+    pub fn forget_in(&self, room: &str, agent: &str) {
+        crate::sync::lock(&self.fitted).remove(&(room.to_owned(), agent.to_owned()));
+        self.runs.forget_in(room, agent);
+    }
+
+    /// Whether `agent`'s memory compacts in `room`.
+    pub fn bounded(&self, room: &str, agent: &str) -> bool {
+        let fitted = crate::sync::lock(&self.fitted)
+            .get(&(room.to_owned(), agent.to_owned()))
+            .copied();
+        fitted.unwrap_or_else(|| crate::sync::lock(&self.bounded).contains(agent))
     }
 
     /// `agent`'s compaction in `room`, read from its file the first time.
@@ -249,7 +275,7 @@ impl Compactions {
     /// Asks `agent`'s next turn in `room` to compact; false when its memory
     /// does not compact.
     pub fn force(&self, room: &str, agent: &str) -> bool {
-        if !self.bounded(agent) {
+        if !self.bounded(room, agent) {
             return false;
         }
         crate::sync::lock(&self.forced).insert((room.into(), agent.into()));
@@ -270,7 +296,7 @@ impl Compactions {
     /// once the turns under way end, its next turn compacting it should one
     /// start first.
     pub fn request(self: &Arc<Self>, room: &str, agent: &str) -> Requested {
-        if !self.bounded(agent) {
+        if !self.bounded(room, agent) {
             return Requested::Unbounded;
         }
         let key = (room.to_owned(), agent.to_owned());
@@ -354,7 +380,8 @@ impl Compactions {
         if !self.take_forced(room, agent) {
             return;
         }
-        let (Some(compactor), Some(kit)) = (self.runs.compactor(agent), self.journal.kit()) else {
+        let (Some(compactor), Some(kit)) = (self.runs.compactor(room, agent), self.journal.kit())
+        else {
             return;
         };
         let from = self.get(room, agent).map_or(0, |compacted| compacted.from);
@@ -553,6 +580,6 @@ mod tests {
         assert!(compactions.take_forced("room", "code"));
         assert!(!compactions.take_forced("room", "code"));
         compactions.set_bounded("code", false);
-        assert!(!compactions.bounded("code"));
+        assert!(!compactions.bounded("room", "code"));
     }
 }

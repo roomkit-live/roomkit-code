@@ -52,6 +52,9 @@ pub(super) struct Runs {
     locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// What compacts each agent's conversations, by agent ID.
     compactors: Mutex<HashMap<String, Arc<dyn Compactor>>>,
+    /// What compacts an agent's conversation where it runs with a
+    /// configuration of its own, by room and agent.
+    fitted: Mutex<HashMap<(String, String), Arc<dyn Compactor>>>,
     changes: Arc<watch::Sender<()>>,
 }
 
@@ -61,6 +64,7 @@ impl Runs {
             rooms: Mutex::default(),
             locks: Mutex::default(),
             compactors: Mutex::default(),
+            fitted: Mutex::default(),
             changes,
         }
     }
@@ -69,8 +73,20 @@ impl Runs {
         crate::sync::lock(&self.compactors).insert(agent.into(), compactor);
     }
 
-    pub fn compactor(&self, agent: &str) -> Option<Arc<dyn Compactor>> {
-        crate::sync::lock(&self.compactors).get(agent).cloned()
+    pub fn register_in(&self, room: &str, agent: &str, compactor: Arc<dyn Compactor>) {
+        crate::sync::lock(&self.fitted).insert((room.into(), agent.into()), compactor);
+    }
+
+    pub fn forget_in(&self, room: &str, agent: &str) {
+        crate::sync::lock(&self.fitted).remove(&(room.to_owned(), agent.to_owned()));
+    }
+
+    /// What compacts `agent`'s conversation in `room`: the configuration it
+    /// runs with there when it has one of its own, else the agent's.
+    pub fn compactor(&self, room: &str, agent: &str) -> Option<Arc<dyn Compactor>> {
+        let key = (room.to_owned(), agent.to_owned());
+        let fitted = crate::sync::lock(&self.fitted).get(&key).cloned();
+        fitted.or_else(|| crate::sync::lock(&self.compactors).get(agent).cloned())
     }
 
     /// `room`'s lock, which a compaction holds while it runs.
