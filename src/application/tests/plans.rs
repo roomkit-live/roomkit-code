@@ -372,6 +372,7 @@ async fn plan_views_follow_live_records_bound_long_steps_and_reject_stale_action
                 title: None,
                 objective: None,
                 steps: Some(steps),
+                step_changes: None,
             },
             &cancel,
         )

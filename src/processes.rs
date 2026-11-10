@@ -362,10 +362,10 @@ impl Processes {
                 .read(
                     p.owner.as_deref(),
                     ProcessReadInput {
-                        process_id: id.clone(),
                         stdout_offset: stdout,
                         stderr_offset: stderr,
                         max_bytes: NonZeroUsize::new(PAGE as usize),
+                        ..ProcessReadInput::new(id.clone())
                     },
                     &CancellationToken::new(),
                 )

@@ -43,8 +43,8 @@ class Model(BaseHTTPRequestHandler):
             assert "Application mode: Plan" in request["messages"][-1]["content"]
             call = ("plan_create", {"title": "A checked project change", "objective": "Improve the project and verify it.", "steps": steps})
         elif index == 2:
-            receipt = json.loads(request["messages"][-1]["content"])
-            plan_id = receipt["plan_id"]
+            # The model reads the plan as lines, its ID first.
+            plan_id = request["messages"][-1]["content"].split()[0]
             answer = "Plan prepared. Switch mode and request implementation when ready."
         elif index == 3:
             assert any("Application mode: Ask" in str(message.get("content")) for message in request["messages"]), request["messages"]

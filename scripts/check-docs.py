@@ -125,10 +125,12 @@ try:
                 assert b"Allow docs_" not in screen, "Guide lookups must not ask for approval"
                 assert b'"data":' not in screen, "Tools must use their product presentations"
                 assert len(requests) == 4
-                found = json.loads(requests[1]["messages"][-1]["content"])
-                assert found["matches"][0]["document"]["document_id"] == "command-hooks.md"
-                page = json.loads(requests[3]["messages"][-1]["content"])
-                assert page["lines"][0]["text"] == "# Command hooks"
+                # The model reads the results as lines: the first hit's quoted
+                # ID, then the page's lines numbered as read numbers them.
+                found = requests[1]["messages"][-1]["content"]
+                assert '\n1. "command-hooks.md" ' in found, found
+                page = requests[3]["messages"][-1]["content"]
+                assert "\n1: # Command hooks\n" in page, page
                 assert len(list((storage / "docs").glob("*/command-hooks.md"))) == 1
             finally:
                 app.close()

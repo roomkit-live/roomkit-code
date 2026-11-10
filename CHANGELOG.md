@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- The agent's tools no longer mislead it. A missing file reads `no such file
+  or directory: src/absent.rs` instead of `Tool 'read' failed (ToolIOError)`;
+  grep and glob at the project's root skip what `.gitignore` excludes, so
+  `target/` no longer makes them fail; `include: *.rs` searches every
+  directory below the path; `process_read` waits, up to two minutes, for a
+  build to end or print rather than being polled; changing one step of a plan
+  sends and reads only that step, and plans and documentation read as lines.
+
+- A tool call that fails is recorded in the diagnostics as the tool's
+  `failed` outcome, no longer as `engine_failed`, "Engine execution failed".
+
 - A compaction's summary is no longer cut mid-sentence by its own budget. Its
   request asked for 2,000 output tokens, which a model that reasons spent on
   its reasoning first: one summary was left 701 tokens. The request now takes

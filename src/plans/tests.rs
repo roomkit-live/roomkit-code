@@ -30,6 +30,7 @@ fn update(plan: &Plan, status: StepStatus) -> PlanUpdateInput {
         title: None,
         objective: None,
         steps: Some(steps),
+        step_changes: None,
     }
 }
 
