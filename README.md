@@ -1458,9 +1458,17 @@ match or every directory under the project. A `patch` dry-run also loads scopes
 for every source and destination, including both sides of moves.
 
 Exploration results carry a `project_instructions` field beside the tool's text
-when needed. Unchanged scope snapshots are deduplicated within a turn, separately
-for each session and agent. Changed or removed rules are reported on subsequent
-exploration; each new turn starts fresh. The agent is instructed to read existing
+when a rule or a loading error applies along the explored path. Directories
+without rules add nothing, and the tool's text reaches the model as it is.
+Unchanged scope snapshots are deduplicated within a turn, separately for each
+session and agent; each new turn carries them again. Changed rules are reported
+on the next exploration, and so are removed ones, in a later turn too: the agent
+is told once that the rules it was given no longer apply. The conversation keeps,
+for each agent, the directories whose rules it was given, so a conversation
+resumed after a restart takes back the rules removed meanwhile and adds nothing
+elsewhere. A conversation from before that record may hold rules removed since:
+each directory's first exploration reports once, even when it finds none, over
+all its later launches. The agent is instructed to read existing
 files, inspect the nearest existing parent before creating files, and preview
 patches before applying them. These are model instructions, not an enforced
 proof of compliance: an arbitrary shell command, running process or remote MCP

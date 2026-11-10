@@ -204,6 +204,39 @@ async fn instructions_deleted_scope_is_explicit_on_next_exploration() {
     app.close().await.unwrap();
 }
 
+/// Exploring a directory without rules came with an empty snapshot, whose
+/// field makes the model read the file's text as a JSON string: at every
+/// turn, then at every launch of a resumed conversation, whose history might
+/// hold rules removed since. The conversation keeps what its agent was given.
+#[tokio::test]
+async fn a_directory_without_rules_is_read_as_plain_text_after_a_restart_too() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    write(root.path(), "src/file.rs", "contents");
+    let read = || ("read", json!({"path":"src/file.rs"}));
+    let mock = Mock::start(vec![read(), ("", json!(null)), read()]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let plain = |request: &Value| {
+        let results = tools(request);
+        let latest = results.last().unwrap();
+        assert!(latest.is_string(), "{latest}");
+        assert!(latest.as_str().unwrap().contains("1: contents"), "{latest}");
+    };
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    turn_operation(&app, "first-launch").await;
+    plain(&mock.requests.lock().unwrap()[1]);
+    app.close().await.unwrap();
+    drop(app);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    turn_operation(&app, "later-launch").await;
+    {
+        let requests = mock.requests.lock().unwrap();
+        assert_eq!(requests.len(), 4, "a call and an answer at each launch");
+        plain(&requests[3]);
+    }
+    app.close().await.unwrap();
+}
+
 /// RMK-1317: the preamble vouches for the application's instruction, which
 /// carries the project's files. A file must not close its block and speak as
 /// the application from outside it.

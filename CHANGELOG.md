@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Exploring a directory without `AGENTS.md` rules no longer adds an empty
+  instruction snapshot to the tool's result: the model reads a file's text as
+  it is, where the added field made it a JSON string, and the result is about
+  900 characters shorter. Rules still come with each turn's first exploration
+  of their directory, and removed rules are still taken back, in a later turn
+  and after a restart too: the conversation keeps, for each agent, the
+  directories whose rules it was given. A conversation from an earlier version
+  reports each directory once.
+
 - A question card takes the arrows and Enter, as its keys row says; only the
   digits did. Ctrl+A and Ctrl+E move to the start and the end of the line in
   the composer and every text field (roomkit-tui a27b991).

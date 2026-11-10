@@ -86,7 +86,12 @@ impl AgentSlot {
         worker: Option<&'static str>,
     ) -> String {
         let (room, agent) = (event.room_id.as_str(), self.id.as_str());
-        self.instructions.begin(room, agent);
+        // Its answers and its rows of tool calls, whose results carry the
+        // nested rules it read.
+        let earlier = history
+            .iter()
+            .any(|past| past.id != event.id && past.source.channel_id == self.id);
+        self.instructions.begin(room, agent, earlier).await;
         let project = self.instructions.load(vec![], true).await.render();
         self.compactions.tell_snapshot(room, agent, &project);
         let mut parts = vec![self.policy.instruction(room).to_owned()];

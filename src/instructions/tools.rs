@@ -81,6 +81,9 @@ impl Tool for Scoped {
             if !instructions.emit(&room, &agent, &report) {
                 return Ok(result);
             }
+            // Kept before the result is: a record ahead of the history only
+            // takes back rules once more than it needs to.
+            instructions.keep(&room, &agent).await;
             let guidance = report.scoped();
             match result {
                 ToolResult::Json(serde_json::Value::Object(mut object)) => {

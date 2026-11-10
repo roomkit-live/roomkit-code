@@ -150,6 +150,7 @@ async fn setup(
     profiles.diagnostics.install(kit).await?;
     services.hooks.install(kit)?;
     profiles.resources.files.install(kit);
+    profiles.resources.instructions.install(kit);
     let resources = &profiles.resources;
     crate::delegation::install(kit, resources.tasks.clone(), resources.roster.clone())?;
     let agent_id = profiles.initialize(kit).await?;
