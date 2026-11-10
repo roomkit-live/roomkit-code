@@ -413,6 +413,19 @@ def unreachable_once(root, model):
     assert done.stderr.count("Cannot reach the model server") == 1, done.stderr
 
 
+def misspelled_intent(root, model):
+    # A model that drops the intent's leading underscore still runs its call,
+    # and the person still reads what it does.
+    code, out, err = run(root, model, "--mode", "yolo", "--json", "--prompt", "Write it.")
+    assert code == 0, (code, err)
+    assert (root / "project" / "done").read_text() == "ok"
+    tools = [json.loads(line)["item"] for line in out.splitlines() if json.loads(line)["kind"] == "item"]
+    shell = [item["call"] for item in tools if item.get("kind") == "tool" and item["call"]["name"] == "shell"]
+    assert shell and shell[-1]["state"] == "succeeded", shell
+    assert shell[-1].get("intent") == "Je l'écris.", shell[-1]
+    assert "roomkit_intent" not in shell[-1]["arguments"], shell[-1]
+
+
 def blank_edges(root, model):
     # A model may open and close on blank lines: a script captures the answer.
     code, out, err = run(root, model, "--prompt", "Say it.")
@@ -528,6 +541,7 @@ scenario("watched refusal", [call("shell", command="touch denied.txt"), ANSWER],
 scenario("watched events", [call("write", path="note.txt", content="hello\n"), ANSWER], watched_json)
 scenario("watched messages", [call("list", "Looking around first.", path="."), ANSWER, call("list", "Looking around first.", path="."), ANSWER], watched_messages)
 scenario("unreachable server", [ANSWER], unreachable_once)
+scenario("misspelled intent", [("shell", {"command": "printf ok > done", "roomkit_intent": "Je l'écris."}), ANSWER], misspelled_intent)
 scenario("blank lines around the answer", ["\n\n" + ANSWER + "\n\n"], blank_edges)
 scenario("default storage", ["Answer one.", "Answer two."], default_storage)
 print("headless checks passed")

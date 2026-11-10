@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A tool call whose model writes the intent without its leading underscore,
+  `roomkit_intent`, runs with that intent shown, instead of being refused as an
+  unknown argument and written again (roomkit-rs f5a56a9).
+
 - A watched `--prompt` launch also shows each message the agent follows with
   a call; the answer, which no call follows, stays on standard output alone.
   Notices and refusals reach standard error without control characters, and a
