@@ -129,6 +129,9 @@ struct Board {
     version: u64,
     /// What each conversation's own agent cost, as of a `version`.
     own_costs: HashMap<String, (u64, Option<ConversationCost>)>,
+    /// The turns recorded in each task's room since launch: a reading of a
+    /// task's figures begun before one of them is stale.
+    readings: HashMap<String, u64>,
 }
 
 /// The tasks agents handed over, the notices they left, and the `/tasks`
@@ -257,18 +260,27 @@ impl Tasks {
         crate::sync::lock(&self.board).restored.remove(room);
     }
 
-    /// Keeps what task `id`'s worker consumed, read from the board's
-    /// `version`: a reading a later turn or task overtook is dropped, and the
-    /// next view reads the room again. Nothing changes on screen but what the
-    /// view that read it is about to show.
-    pub(crate) fn keep_spent(&self, id: &str, spent: Spent, version: u64) {
+    /// Where readings of `room`'s figures stand: [`Self::keep_spent`] keeps
+    /// one only while no turn was recorded there since.
+    pub(crate) fn reading(&self, room: &str) -> u64 {
+        let board = crate::sync::lock(&self.board);
+        board.readings.get(room).copied().unwrap_or_default()
+    }
+
+    /// Keeps what task `id`'s worker consumed, read from its room at
+    /// `reading`: a reading a turn recorded there since overtook is dropped,
+    /// and the next view reads the room again. Nothing changes on screen but
+    /// what the view that read it is about to show.
+    pub(crate) fn keep_spent(&self, id: &str, spent: Spent, reading: u64) {
         let mut board = crate::sync::lock(&self.board);
-        if board.version != version {
+        let Some(index) = board.tasks.iter().position(|task| task.id == id) else {
+            return;
+        };
+        let room = &board.tasks[index].room;
+        if board.readings.get(room).copied().unwrap_or_default() != reading {
             return;
         }
-        if let Some(task) = board.tasks.iter_mut().find(|task| task.id == id) {
-            task.spent = Some(spent);
-        }
+        board.tasks[index].spent = Some(spent);
     }
 
     /// Shows `text` in `room`'s status line for a few seconds.
@@ -361,6 +373,7 @@ impl Tasks {
     pub(crate) fn consumed(&self, room: &str) {
         let mut board = crate::sync::lock(&self.board);
         board.version += 1;
+        *board.readings.entry(room.to_owned()).or_default() += 1;
         for task in board
             .tasks
             .iter_mut()
@@ -625,8 +638,8 @@ mod tests {
         let tasks = Tasks::default();
         tasks.ended(ended(task("a", "main", "main::a"), Outcome::Completed));
         tasks.ended(ended(task("b", "main", "main::b"), Outcome::Completed));
-        tasks.keep_spent("a", spent(), tasks.version());
-        tasks.keep_spent("b", spent(), tasks.version());
+        tasks.keep_spent("a", spent(), tasks.reading("main::a"));
+        tasks.keep_spent("b", spent(), tasks.reading("main::b"));
         let read = |id: &str| tasks.find("main", id).unwrap().spent.is_some();
         let before = tasks.version();
         tasks.consumed("main::a");
@@ -642,15 +655,19 @@ mod tests {
     #[test]
     fn a_task_s_figures_read_before_a_new_turn_are_not_kept() {
         let tasks = Tasks::default();
-        tasks.ended(ended(task("a", "main", "main::a"), Outcome::Completed));
-        let reading_from = tasks.version();
-        tasks.consumed("main::a");
-        let spent = super::Spent {
+        let spent = || super::Spent {
             usage: crate::exit_summary::Usage::for_tests(10, 1),
             cost: None,
         };
-        tasks.keep_spent("a", spent, reading_from);
-        assert!(tasks.find("main", "a").unwrap().spent.is_none());
+        tasks.ended(ended(task("a", "main", "main::a"), Outcome::Completed));
+        tasks.ended(ended(task("b", "main", "main::b"), Outcome::Completed));
+        let (a, b) = (tasks.reading("main::a"), tasks.reading("main::b"));
+        tasks.consumed("main::a");
+        tasks.keep_spent("a", spent(), a);
+        tasks.keep_spent("b", spent(), b);
+        let read = |id: &str| tasks.find("main", id).unwrap().spent.is_some();
+        // A turn in another task's room leaves this reading as it is.
+        assert!(!read("a") && read("b"));
     }
 
     /// A read that failed is tried again by the conversation's next view.

@@ -51,9 +51,9 @@ pub(crate) async fn read(
             continue;
         }
         let organization = current.organization.clone();
-        let version = tasks.version();
+        let reading = tasks.reading(&task.room);
         if let Some(spent) = spent(kit, profiles, &task, organization).await {
-            tasks.keep_spent(&task.id, spent, version);
+            tasks.keep_spent(&task.id, spent, reading);
         }
     }
 }

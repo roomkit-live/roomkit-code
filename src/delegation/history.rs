@@ -28,13 +28,14 @@ pub(crate) async fn restore(
     if !tasks.restoring(current.room.as_str()) {
         return;
     }
-    let (mut children, whole) = task_rooms(kit, current.organization.clone()).await;
-    if !whole {
+    let (mut children, failure) = task_rooms(kit, current.organization.clone()).await;
+    if let Some(error) = failure {
         tasks.unread(current.room.as_str());
         let room = json!({"room": current.room.as_str()});
+        let error = error.to_string();
         profiles
             .diagnostics
-            .record("tasks_not_restored", room, None);
+            .record("tasks_not_restored", room, Some(&error));
     }
     let mut found = Vec::new();
     let mut rooms = vec![(current.room.as_str().to_owned(), 0)];
@@ -52,14 +53,14 @@ pub(crate) async fn restore(
 }
 
 /// Every room that holds a task, by the room that handed it over, the oldest
-/// first, and whether all of them could be read: what could be read when the
+/// first, and why not all of them could be read: what could be read when the
 /// store fails. A store reads every room to filter them by metadata, so they
 /// are read once, whatever the tasks.
 async fn task_rooms(
     kit: &RoomKit<SqliteStore>,
     organization_id: Option<String>,
-) -> (HashMap<String, Vec<Room>>, bool) {
-    let (rooms, whole) = pages(PAGE, |offset| {
+) -> (HashMap<String, Vec<Room>>, Option<roomkit::StoreError>) {
+    let (rooms, failure) = pages(PAGE, |offset| {
         let options = FindRoomsOptions {
             organization_id: organization_id.clone(),
             limit: PAGE,
@@ -79,24 +80,25 @@ async fn task_rooms(
     for rooms in by_parent.values_mut() {
         rooms.sort_by_key(|room| room.created_at);
     }
-    (by_parent, whole)
+    (by_parent, failure)
 }
 
 /// Every page `read` gives from an offset, `size` items each, until a shorter
-/// one; and whether the last was reached, not a failure.
-async fn pages<T, E, Page>(size: u64, mut read: impl FnMut(u64) -> Page) -> (Vec<T>, bool)
+/// one; and the failure that stopped it before the last, if one did.
+async fn pages<T, E, Page>(size: u64, mut read: impl FnMut(u64) -> Page) -> (Vec<T>, Option<E>)
 where
     Page: Future<Output = Result<Vec<T>, E>>,
 {
     let mut items = Vec::new();
     loop {
-        let Ok(page) = read(items.len() as u64).await else {
-            return (items, false);
+        let page = match read(items.len() as u64).await {
+            Ok(page) => page,
+            Err(error) => return (items, Some(error)),
         };
         let last = (page.len() as u64) < size;
         items.extend(page);
         if last {
-            return (items, true);
+            return (items, None);
         }
     }
 }
@@ -126,11 +128,55 @@ fn task(room: &Room, roster: &Roster) -> Option<Task> {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, reason = "A broken fixture fails the test")]
+    use roomkit::model::RoomId;
+    use serde_json::json;
+
     use super::*;
 
+    fn room(status: &str) -> Room {
+        let mut room = Room::new(RoomId::new("main::task-1").unwrap());
+        room.created_at = "2026-11-09T10:00:00Z".parse().unwrap();
+        room.updated_at = "2026-11-09T10:00:42Z".parse().unwrap();
+        room.metadata = roomkit::model::Metadata::from_iter([
+            ("task_id".to_owned(), json!("t1")),
+            ("parent_room_id".to_owned(), json!("main")),
+            ("task_agent_id".to_owned(), json!("review")),
+            ("task_input".to_owned(), json!("Review the diff")),
+            ("task_status".to_owned(), json!(status)),
+        ]);
+        room
+    }
+
+    /// A room keeps who worked, on what, for how long and how it ended.
+    #[test]
+    fn a_room_reads_back_as_its_task() {
+        let task = task(&room("completed"), &Roster::default()).unwrap();
+        assert_eq!(
+            (&*task.id, &*task.parent, &*task.room, &*task.agent_id),
+            ("t1", "main", "main::task-1", "review")
+        );
+        assert_eq!(&*task.input, "Review the diff");
+        assert_eq!(task.state(), "completed in 42 s");
+    }
+
+    /// One a crash left running says so, with no duration it cannot know.
+    #[test]
+    fn a_task_a_crash_left_running_reads_interrupted() {
+        let task = task(&room("in_progress"), &Roster::default()).unwrap();
+        assert!(task.cut_short());
+        assert_eq!(task.state(), "interrupted");
+    }
+
+    #[test]
+    fn a_room_that_names_no_task_is_none() {
+        let mut plain = room("completed");
+        plain.metadata.remove("task_id");
+        assert!(task(&plain, &Roster::default()).is_none());
+    }
+
     #[tokio::test]
-    async fn a_page_that_fails_says_the_rooms_are_not_all_read() {
-        let (read, whole) = pages(2, |offset| async move {
+    async fn a_page_that_fails_says_why_the_rooms_are_not_all_read() {
+        let (read, failure) = pages(2, |offset| async move {
             match offset {
                 0 => Ok(vec![1, 2]),
                 _ => Err("the store failed"),
@@ -138,12 +184,12 @@ mod tests {
         })
         .await;
         assert_eq!(read, [1, 2]);
-        assert!(!whole);
+        assert_eq!(failure, Some("the store failed"));
     }
 
     #[tokio::test]
     async fn a_short_page_ends_the_reading() {
-        let (read, whole) = pages(2, |offset| async move {
+        let (read, failure) = pages(2, |offset| async move {
             Ok::<_, &str>(match offset {
                 0 => vec![1, 2],
                 2 => vec![3],
@@ -152,6 +198,6 @@ mod tests {
         })
         .await;
         assert_eq!(read, [1, 2, 3]);
-        assert!(whole);
+        assert_eq!(failure, None);
     }
 }
