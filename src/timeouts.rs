@@ -67,6 +67,9 @@ mod tests {
             assert!(tool_call(unattended) > shell, "unattended: {unattended}");
         }
         assert!(shell_max_seconds(true) > shell_max_seconds(false));
+        // A process read waits at most this long, within one tool call.
+        let wait = Duration::from_millis(crate::agent::process_limits().max_wait_ms);
+        assert!(tool_call(false) > wait && tool_call(true) > wait);
         // The most handlers a source allows, each at its timeout and drained.
         let handlers = roomkit_hooks::SOURCE_BUDGET_SECONDS / roomkit_hooks::MIN_HANDLER_SECONDS;
         let source = Duration::from_secs(roomkit_hooks::SOURCE_BUDGET_SECONDS)

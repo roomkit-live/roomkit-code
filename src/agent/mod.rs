@@ -164,10 +164,13 @@ impl Resources {
 }
 
 /// The limits of every agent's processes: 4 KiB read pages, as for the
-/// output archives. The system prompt states their maximum `timeout_ms`.
+/// output archives, and reads that wait as long as a terminal shell command
+/// may run, within a tool call's timeout. The system prompt states their
+/// maximum `timeout_ms`.
 pub(crate) fn process_limits() -> ProcessLimits {
     ProcessLimits {
         max_read_bytes: 4096,
+        max_wait_ms: crate::timeouts::shell_max_seconds(false) * 1000,
         ..ProcessLimits::default()
     }
 }
