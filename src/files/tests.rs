@@ -124,7 +124,7 @@ fn a_shell_comparison_honors_ignore_rules_and_skips_repository_metadata() {
     put(root, ".git/index", "metadata");
     let after = snapshot::take(root, &mut digests).unwrap();
     assert_eq!(
-        snapshot::compare(root, &before, &after),
+        snapshot::compare(root, &before, &after).unwrap(),
         [
             (".env".into(), Change::Created),
             ("src/edit.rs".into(), Change::Modified),
@@ -156,7 +156,7 @@ fn identical_rewrites_and_changed_ignore_rules_are_not_changes() {
     put(root, ".gitignore", "build/\n");
     let after = snapshot::take(root, &mut digests).unwrap();
     assert_eq!(
-        snapshot::compare(root, &before, &after),
+        snapshot::compare(root, &before, &after).unwrap(),
         [(".gitignore".into(), Change::Modified)]
     );
 }
@@ -177,7 +177,7 @@ fn unpacked_files_with_old_times_are_still_created() {
     }
     let after = snapshot::take(root, &mut digests).unwrap();
     assert_eq!(
-        snapshot::compare(root, &before, &after),
+        snapshot::compare(root, &before, &after).unwrap(),
         [
             (".gitignore".into(), Change::Created),
             ("src/lib.rs".into(), Change::Created),
@@ -203,7 +203,7 @@ fn a_write_being_staged_is_not_a_file_a_command_changed() {
     put(root, ".roomkit-write-d4E5f6", "next");
     let after = snapshot::take(root, &mut digests).unwrap();
     assert_eq!(
-        snapshot::compare(root, &before, &after),
+        snapshot::compare(root, &before, &after).unwrap(),
         [("src/lib.rs".into(), Change::Modified)]
     );
 }

@@ -15,16 +15,16 @@ the installer and updater; drafts and prereleases are not.
 4. Run `make check`, `make msrv` and `make audit`, review the changes and push
    the tested commit to `main`. Tests use local fixtures, never model accounts.
 
-The first public binary release uses **v0.1.1**. The existing v0.1.0
-tag predates the current fixes and must not be moved or replaced.
+The first public binary release uses **v0.1.2**. The existing v0.1.0 and
+v0.1.1 tags predate the native-build fixes and must not be moved or replaced.
 
 ## Build the draft
 
 From the reviewed commit on `main`:
 
 ```sh
-git tag -a v0.1.1 -m 'RoomKit Code 0.1.1'
-git push origin v0.1.1
+git tag -a v0.1.2 -m 'RoomKit Code 0.1.2'
+git push origin v0.1.2
 ```
 
 The workflow validates the tag, manifest version, release notes and membership
@@ -55,7 +55,7 @@ installation on Linux and macOS and confirm that the documented minimum systems
 and signing limitations still apply. Publish the draft in GitHub, or explicitly:
 
 ```sh
-gh release edit v0.1.1 --repo roomkit-live/roomkit-code --draft=false --latest
+gh release edit v0.1.2 --repo roomkit-live/roomkit-code --draft=false --latest
 ```
 
 Do not replace published binaries or move a published tag. Ship a new version
@@ -69,7 +69,7 @@ unpublished. Fix the underlying issue, then rerun the workflow for the existing
 tag using **Run workflow**, or:
 
 ```sh
-gh workflow run release.yml --repo roomkit-live/roomkit-code -f tag=v0.1.1
+gh workflow run release.yml --repo roomkit-live/roomkit-code -f tag=v0.1.2
 ```
 
 If a draft already exists, inspect it before proceeding. The workflow refuses

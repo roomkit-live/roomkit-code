@@ -40,10 +40,22 @@ struct Stat {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct File {
     stat: Stat,
-    /// When the file itself last changed (its inode change time on Unix).
-    /// Copying, unpacking or moving sets it to now, whatever their mtime.
+    /// Compared between snapshots, never against the wall clock.
     changed: Option<SystemTime>,
     digest: Option<[u8; 32]>,
+}
+
+impl File {
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        Self {
+            stat: Stat {
+                len: metadata.len(),
+                modified: metadata.modified().ok(),
+            },
+            changed: changed(metadata),
+            digest: None,
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -59,10 +71,39 @@ fn changed(metadata: &std::fs::Metadata) -> Option<SystemTime> {
     metadata.created().ok()
 }
 
-/// The project's files, and when the walk started.
+/// Visible files and a bounded inventory that also includes ignored paths.
 pub(super) struct Snapshot {
     files: HashMap<String, File>,
-    taken: SystemTime,
+    /// An incomplete inventory cannot prove that a newly visible path is new.
+    known: Option<HashMap<String, File>>,
+}
+
+/// Read names and metadata, never ignored contents. Filesystem timestamps can
+/// be less precise than the clock, so they cannot prove whether a path existed.
+/// Failure or a large ignored tree only disables comparisons of changed rules.
+fn inventory(root: &Path, limit: usize) -> Option<HashMap<String, File>> {
+    let walk = WalkBuilder::new(root)
+        .standard_filters(false)
+        .follow_links(false)
+        .filter_entry(|entry| {
+            !METADATA.iter().any(|name| entry.file_name() == *name)
+                && !entry.file_name().to_string_lossy().starts_with(STAGED)
+        })
+        .build();
+    let mut paths = HashMap::new();
+    for (count, entry) in walk.enumerate() {
+        if count > limit {
+            return None;
+        }
+        let entry = entry.ok()?;
+        if entry.file_type()?.is_file() {
+            paths.insert(
+                display(entry.path().strip_prefix(root).ok()?),
+                File::from_metadata(&entry.metadata().ok()?),
+            );
+        }
+    }
+    Some(paths)
 }
 
 /// Content digests from earlier snapshots, reused while a file's size and time
@@ -76,7 +117,10 @@ impl Digests {
         if stat.len > DIGESTED {
             return None;
         }
-        if let Some((known, digest)) = self.0.get(path)
+        // Rules decide which other paths are visible. Always read their bytes:
+        // editors and archive tools can preserve both their size and mtime.
+        if !is_rule(path)
+            && let Some((known, digest)) = self.0.get(path)
             && *known == stat
         {
             return Some(*digest);
@@ -93,7 +137,7 @@ impl Digests {
 /// project files; a write the file tools are staging is not. `None` when the
 /// project holds more than `LIMIT` files.
 pub(super) fn take(root: &Path, digests: &mut Digests) -> Option<Snapshot> {
-    let taken = SystemTime::now();
+    let known = inventory(root, LIMIT);
     let walk = WalkBuilder::new(root)
         .hidden(false)
         .require_git(false)
@@ -120,21 +164,13 @@ pub(super) fn take(root: &Path, digests: &mut Digests) -> Option<Snapshot> {
     let files: HashMap<_, _> = found
         .into_iter()
         .map(|(path, metadata, absolute)| {
-            let stat = Stat {
-                len: metadata.len(),
-                modified: metadata.modified().ok(),
-            };
-            let digest = digests.of(&path, stat, &absolute, &mut budget);
-            let file = File {
-                stat,
-                changed: changed(&metadata),
-                digest,
-            };
+            let mut file = File::from_metadata(&metadata);
+            file.digest = digests.of(&path, file.stat, &absolute, &mut budget);
             (path, file)
         })
         .collect();
     digests.0.retain(|path, _| files.contains_key(path));
-    Some(Snapshot { files, taken })
+    Some(Snapshot { files, known })
 }
 
 /// Workspace-relative, `/`-separated, as the file tools report paths.
@@ -145,28 +181,52 @@ pub(super) fn display(path: &Path) -> String {
         .join("/")
 }
 
-/// Created, modified and deleted files, sorted by path.
-pub(super) fn compare(root: &Path, before: &Snapshot, after: &Snapshot) -> Vec<(String, Change)> {
-    // A changed ignore rule hides files that still exist and reveals files that
-    // existed before the command: neither was touched by it.
-    let rules_changed = before
+/// A changed rule can hide or reveal files that the command did not touch.
+fn rules_changed(before: &Snapshot, after: &Snapshot) -> bool {
+    before
         .files
         .keys()
         .chain(after.files.keys())
-        .filter(|path| {
-            RULES
-                .iter()
-                .any(|rule| path.rsplit('/').next() == Some(*rule))
-        })
-        .any(|path| before.files.get(path) != after.files.get(path));
+        .filter(|path| is_rule(path))
+        .any(
+            |path| match (before.files.get(path), after.files.get(path)) {
+                (Some(then), Some(now)) => match (then.digest, now.digest) {
+                    (Some(then), Some(now)) => then != now,
+                    _ => then.stat != now.stat || then.changed != now.changed,
+                },
+                _ => true,
+            },
+        )
+}
+
+fn is_rule(path: &str) -> bool {
+    RULES
+        .iter()
+        .any(|rule| path.rsplit('/').next() == Some(*rule))
+}
+
+/// Created, modified and deleted files, sorted by path. Unknown when ignore
+/// rules changed and the earlier inventory could not establish which existed.
+pub(super) fn compare(
+    root: &Path,
+    before: &Snapshot,
+    after: &Snapshot,
+) -> Option<Vec<(String, Change)>> {
+    let known = if rules_changed(before, after) {
+        Some(before.known.as_ref()?)
+    } else {
+        None
+    };
     let mut changes: Vec<_> = after
         .files
         .iter()
-        .filter_map(|(path, now)| match before.files.get(path) {
-            None if rules_changed && now.changed.is_some_and(|c| c < before.taken) => None,
-            None => Some((path.clone(), Change::Created)),
-            Some(then) if modified(then, now) => Some((path.clone(), Change::Modified)),
-            Some(_) => None,
+        .filter_map(|(path, now)| {
+            let change = match before.files.get(path) {
+                None => revealed(known.and_then(|paths| paths.get(path)), now),
+                Some(then) if modified(then, now) => Some(Change::Modified),
+                Some(_) => None,
+            };
+            change.map(|change| (path.clone(), change))
         })
         .chain(
             before
@@ -178,10 +238,24 @@ pub(super) fn compare(root: &Path, before: &Snapshot, after: &Snapshot) -> Vec<(
         )
         .collect();
     changes.sort_by(|a, b| a.0.cmp(&b.0));
-    changes
+    Some(changes)
 }
 
-/// A new size or time, unless the content is known to be identical.
-fn modified(then: &File, now: &File) -> bool {
-    then.stat != now.stat && (then.digest.is_none() || then.digest != now.digest)
+/// A newly visible path may have existed, and been edited, while ignored.
+fn revealed(known: Option<&File>, now: &File) -> Option<Change> {
+    let Some(known) = known else {
+        return Some(Change::Created);
+    };
+    (known.stat != now.stat || known.changed != now.changed).then_some(Change::Modified)
 }
+
+/// Compare known content first, falling back to the file's size and time.
+fn modified(then: &File, now: &File) -> bool {
+    match (then.digest, now.digest) {
+        (Some(then), Some(now)) => then != now,
+        _ => then.stat != now.stat,
+    }
+}
+
+#[cfg(test)]
+mod tests;

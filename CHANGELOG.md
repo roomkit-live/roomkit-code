@@ -2,10 +2,13 @@
 
 ## Unreleased
 
-## [0.1.1]
+## [0.1.2]
 
 Initial public binary release for Linux x86-64/ARM64 and macOS Intel/Apple Silicon.
 
+- Detect newly created shell files even when filesystem timestamps are coarse
+  or an archive preserves old modification times while changing ignore rules.
+- Run the instruction-file FIFO rejection test on both Linux and macOS.
 - Finish compaction records before shutdown so resuming immediately does not
   wait for a missing delivery cursor update.
 
@@ -21,6 +24,12 @@ Initial public binary release for Linux x86-64/ARM64 and macOS Intel/Apple Silic
 
 Linux requires glibc 2.35 or newer. macOS requires version 12 or newer; binaries
 are ad-hoc signed, without Apple Developer ID signing or notarization.
+
+## [0.1.1]
+
+Unpublished release attempt. Native checks found a macOS-only test compilation
+failure and unreliable shell file detection on Linux. The tag is retained;
+version 0.1.2 includes the fixes and the initial public release features above.
 
 ## Development history
 

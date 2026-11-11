@@ -779,8 +779,12 @@ up to ten seconds for those comparisons. A file created and then deleted leaves
 the list. The file tools stage each write in a `.roomkit-write-…` file beside
 its destination, then rename it: a comparison never lists that file.
 
-A project with more than 50,000 files is not compared: the section then says
-shell changes are not tracked. The latest 500 changed and 500 read files are
+A project with more than 50,000 visible files is not compared: the section then
+says shell changes are not tracked. Changing ignore rules also requires a
+complete inventory of existing paths, bounded at 50,000 entries including
+ignored files and directories. If that inventory is unavailable, that command's
+shell changes are not tracked; ordinary comparisons still work. The latest
+500 changed and 500 read files are
 kept, and `/files` says when older ones were dropped. The list is stored with
 the conversation and returns with `/resume`; if a stored list cannot be read, it
 is left untouched and the section shows only what happened since.
@@ -1602,7 +1606,7 @@ sh /tmp/roomkit-code-install/install.sh
 ```
 
 For a public release, the installer can also download anonymously with curl.
-A specific stable version can be selected with `sh install.sh 0.1.1`. The
+A specific stable version can be selected with `sh install.sh 0.1.2`. The
 installer uses `sha256sum` on Linux or `shasum` on macOS, verifies the binary's
 SHA-256 and version, and installs in `~/.local/bin`. Override this with
 `ROOMKIT_CODE_BIN_DIR=/your/bin`. It never invokes sudo or edits shell profiles;

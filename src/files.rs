@@ -108,11 +108,14 @@ impl Files {
     }
 
     async fn compared(&self, room: &str, before: Option<Snapshot>, after: Option<Snapshot>) {
-        let (Some(before), Some(after)) = (before, after) else {
+        let changes = before
+            .zip(after)
+            .and_then(|(before, after)| snapshot::compare(&self.root, &before, &after));
+        let Some(changes) = changes else {
             self.update(room, |record| record.untracked = true).await;
             return;
         };
-        let effects: Vec<_> = snapshot::compare(&self.root, &before, &after)
+        let effects: Vec<_> = changes
             .into_iter()
             .map(|(path, change)| Effect {
                 path,

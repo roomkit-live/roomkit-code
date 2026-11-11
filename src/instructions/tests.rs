@@ -109,14 +109,14 @@ async fn invalid_oversize_and_symlink_files_are_visible_without_disclosure_or_fa
     );
     assert!(loader.load(vec![], true).await.problems[0].contains("16 KiB"));
     std::fs::remove_file(root.path().join("AGENTS.override.md")).unwrap();
-    rustix::fs::mknodat(
-        rustix::fs::CWD,
-        root.path().join("AGENTS.override.md"),
-        rustix::fs::FileType::Fifo,
-        rustix::fs::Mode::RUSR,
-        0,
-    )
-    .unwrap();
+    // rustix's mknodat is unavailable on macOS; mkfifo is POSIX on both hosts.
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(root.path().join("AGENTS.override.md"))
+            .status()
+            .unwrap()
+            .success()
+    );
     let fifo = tokio::time::timeout(std::time::Duration::from_secs(2), loader.load(vec![], true))
         .await
         .unwrap();
