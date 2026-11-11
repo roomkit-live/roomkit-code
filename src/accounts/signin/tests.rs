@@ -4,7 +4,10 @@ use super::*;
 use roomkit_tui::protocol::{Actor, CommandSpec, Snapshot};
 
 fn authorization() -> url::Url {
-    url::Url::parse("https://auth.example/authorize?state=fixture").unwrap()
+    url::Url::parse(&format!(
+        "https://auth.example/authorize?response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&scope=openid+profile+email&code_challenge=fixture&state={}",
+        "x".repeat(180)
+    )).unwrap()
 }
 
 #[test]
@@ -15,6 +18,7 @@ fn sign_in_displays_the_link_and_private_return_field_together() {
     assert_ne!(form.id, super::form(&url).id);
     assert_eq!(form.command, "providers");
     assert!(form.wait_for_completion);
+    assert!(form.description_markdown);
     assert!(form.description.contains(url.as_str()));
     assert!(form.description.contains("connection error"));
     assert!(!form.description.contains("SSH"));
@@ -132,15 +136,23 @@ fn sign_in_renders_the_exact_browser_destination_as_a_native_terminal_link() {
         conversation: "room".into(),
         form: form(&url),
     });
-    let frame = roomkit_tui::render::screen(
-        &session,
-        100,
-        30,
-        &roomkit_tui::render::Renderers::default(),
-    );
-    assert!(frame.spans.iter().flatten().any(|span| {
-        span.hyperlink
-            .as_ref()
-            .is_some_and(|link| link.url() == url.as_str())
-    }));
+    let renderers = roomkit_tui::render::Renderers::default();
+    for width in [40, 100, 140] {
+        let frame = roomkit_tui::render::screen(&session, width, 40, &renderers);
+        let links: Vec<_> = frame
+            .spans
+            .iter()
+            .flatten()
+            .filter(|span| span.hyperlink.is_some())
+            .collect();
+        assert!(
+            links
+                .iter()
+                .all(|span| span.hyperlink.as_ref().unwrap().url() == url.as_str())
+        );
+        let linked_text: String = links.iter().map(|span| span.text.as_str()).collect();
+        assert!(linked_text.starts_with("Open sign-in page"));
+        assert!(linked_text.contains(url.as_str()));
+        assert!(frame.lines.join("\n").contains("Paste the return URL"));
+    }
 }

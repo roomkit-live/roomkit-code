@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Provider sign-in links use the conversation's Markdown renderer, with a
+  clickable "Open sign-in page" label and the full address available to copy.
+  Links in provider field help are clickable too.
+
 - Links in agent replies are native terminal hyperlinks, including Markdown
   labels, bare URLs, wrapped text and tables. Sign-in links are underlined and
   share Codex's OSC 8 wire format.

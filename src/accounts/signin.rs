@@ -117,8 +117,8 @@ fn form(url: &url::Url) -> FormSpec {
             "Paste the full address, including everything after ?."
         ),
     ])
-    .with_description(format!(
-        "Cmd-click (macOS) or Ctrl-click (Linux), or copy this link:\n\n{url}\n\nAfter sign-in, copy the complete return URL from the address bar and paste it below. If the browser shows a connection error, copy the address anyway. This attempt expires in ten minutes."
+    .with_markdown_description(format!(
+        "Cmd-click (macOS) or Ctrl-click (Linux), or copy this link:\n\n[Open sign-in page](<{url}>)\n\nAfter sign-in, copy the complete return URL from the address bar and paste it below. If the browser shows a connection error, copy the address anyway. This attempt expires in ten minutes."
     ))
     .with_dismiss(format!("chatgpt:dismiss:{id}"))
     .with_async_completion()
