@@ -8,6 +8,9 @@ use roomkit_anthropic::AnthropicAiProvider;
 use roomkit_openai::OpenAiAiProvider;
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+mod openai_tests;
+
 /// Wire protocol of a connection. Older profiles use OpenAI-compatible requests.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]

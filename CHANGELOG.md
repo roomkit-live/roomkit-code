@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A ChatGPT plan usage limit now explains where to check the plan or app
+  limit in ChatGPT Settings > Usage, instead of reporting invalid request
+  parameters when the Responses stream rejects inference.
+
 - The context gauge follows a compaction (RMK-1648). A compaction made between
   turns, such as `/compact`, sends no request of the agent's: the gauge kept
   the measure of the history before it, until the next turn's first answer,
