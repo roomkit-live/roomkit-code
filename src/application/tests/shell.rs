@@ -99,7 +99,7 @@ async fn user_shell_persists_output_and_next_model_turn_sees_it_without_automati
     assert!(output.contains("quoted two words"));
     assert!(output.contains("stderr marker"));
     assert!(output.contains("exit 7"));
-    assert!(output.contains(root.path().to_str().unwrap()));
+    assert!(output.contains(settings.workspace.to_str().unwrap()));
     assert!(mock.requests.lock().unwrap().is_empty());
     drop(client);
     task.await.unwrap().unwrap();
