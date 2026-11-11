@@ -15,7 +15,7 @@ the installer and updater; drafts and prereleases are not.
 4. Run `make check`, `make msrv` and `make audit`, review the changes and push
    the tested commit to `main`. Tests use local fixtures, never model accounts.
 
-The first public binary release is prepared as **v0.1.1**. The existing v0.1.0
+The first public binary release uses **v0.1.1**. The existing v0.1.0
 tag predates the current fixes and must not be moved or replaced.
 
 ## Build the draft

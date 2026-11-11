@@ -2,13 +2,12 @@
 
 ## Unreleased
 
-- Finish compaction records before shutdown so resuming immediately does not
-  wait for a missing delivery cursor update.
-
 ## [0.1.1]
 
-Initial public binary release, prepared for Linux x86-64/ARM64 and macOS
-Intel/Apple Silicon.
+Initial public binary release for Linux x86-64/ARM64 and macOS Intel/Apple Silicon.
+
+- Finish compaction records before shutdown so resuming immediately does not
+  wait for a missing delivery cursor update.
 
 - Explore, plan, edit and test projects with Ask, Plan and Yolo permissions.
 - Configure Anthropic, OpenAI-compatible, ChatGPT and OpenCode Go connections.

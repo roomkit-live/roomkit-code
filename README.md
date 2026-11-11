@@ -24,16 +24,17 @@ an implementation plan, edit files and run tests with the model you choose.
 
 ## Install
 
-The first public binary release is being prepared. Downloads will appear on the
-[releases page](https://github.com/roomkit-live/roomkit-code/releases) after all
-four platform builds and checks pass. Source build instructions are below.
+Stable binaries are distributed through the
+[releases page](https://github.com/roomkit-live/roomkit-code/releases). A release
+is published after all four platform builds and checks pass. Source build
+instructions are below.
 
 | Platform | Architectures | Minimum system |
 | --- | --- | --- |
 | Linux | x86-64, ARM64 | glibc 2.35 (for example Ubuntu 22.04) |
 | macOS | Intel, Apple Silicon | macOS 12 |
 
-Once a release is published, download its installer:
+Download the latest stable release's installer:
 
 ```sh
 roomkit_install_dir=$(mktemp -d)
@@ -114,9 +115,8 @@ make build
 ./target/release/roomkit-code /path/to/project
 ```
 
-The `roomkit-rs` dependency is currently private. Until it is published, source
-builds require Git read access to that repository. Other RoomKit dependencies
-are public and pinned to immutable Git revisions.
+RoomKit dependencies are public and pinned to immutable Git revisions. Cargo
+fetches their sources directly; no sibling checkout or GitHub token is required.
 
 For local installation, run `make install`. See [CONTRIBUTING.md](CONTRIBUTING.md)
 for the checks and [RELEASING.md](RELEASING.md) for tags and GitHub releases.

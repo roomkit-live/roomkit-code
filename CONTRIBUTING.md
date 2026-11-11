@@ -29,10 +29,10 @@ also exclude local planning and credentials. Do not force-add ignored files.
 ## Dependency access in CI
 
 Public dependencies need no GitHub token, including on fork pull requests.
-While a dependency remains private, trusted workflows can use the optional
+For a fork that uses private dependencies, trusted workflows can use the optional
 repository Actions secret named
-`ROOMKIT_DEPS_READ_CI`. Use a fine-grained GitHub token with **Contents: read** on the private dependencies (currently
-`roomkit-live/roomkit-rs`). No write permission is needed. An organization may
+`ROOMKIT_DEPS_READ_CI`. Use a fine-grained GitHub token with **Contents: read** on
+those private repositories. No write permission is needed. An organization may
 require approval for its use. Add it using the hidden interactive prompt:
 
 ```sh
