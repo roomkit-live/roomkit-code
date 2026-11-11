@@ -169,7 +169,7 @@ async fn hooks_span_real_tool_rounds_preserve_correlation_and_resume_without_rep
         first_execution
     );
     app.close().await.unwrap();
-    let project = crate::digest::sha256_hex(root.path().as_os_str().as_encoded_bytes());
+    let project = crate::digest::sha256_hex(settings.workspace.as_os_str().as_encoded_bytes());
     let log = std::fs::read_to_string(
         state
             .path()

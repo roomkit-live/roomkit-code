@@ -160,7 +160,14 @@ impl Installation {
             "Another version was activated. Restart RoomKit Code before updating again";
         // A later update may have removed this process's version directory.
         let running = exe.canonicalize().map_err(|_| RESTART)?;
-        if self.resolve("current")?.join("roomkit-code") != running {
+        // The configured bin directory can contain an alias such as macOS's
+        // /var -> /private/var. Resolve both sides after validating the receipt.
+        if self
+            .resolve("current")?
+            .join("roomkit-code")
+            .canonicalize()?
+            != running
+        {
             return Err(RESTART.into());
         }
         Ok(())

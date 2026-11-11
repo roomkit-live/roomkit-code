@@ -49,8 +49,8 @@ async fn first_skill_creation_has_host_locations_before_discovery_and_enablement
     let prompt = system(&first);
     let roots = [
         state_dir.join("skills"),
-        root.path().join(".agents/skills"),
-        root.path().join(".roomkit/skills"),
+        settings.workspace.join(".agents/skills"),
+        settings.workspace.join(".roomkit/skills"),
     ];
     let CommandResult::Events(events) = command(&app, "locations").await.unwrap() else {
         panic!("Expected discovery information")

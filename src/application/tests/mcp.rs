@@ -642,6 +642,7 @@ impl HttpFixture {
         let script = root.join("mcp_http.py");
         std::fs::write(&script, include_str!("mcp_http_server.py")).unwrap();
         let port = root.join("http.port");
+        let errors = root.join("http.stderr");
         let child = std::process::Command::new("python3")
             .arg(script)
             .arg(&port)
@@ -649,25 +650,39 @@ impl HttpFixture {
             .arg("PATH")
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::fs::File::create(&errors).unwrap())
             .spawn()
             .unwrap();
         let mut fixture = Self {
             child,
             url: String::new(),
         };
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while !port.exists() {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .unwrap();
+        fixture.wait_ready(&port, &errors).await;
         fixture.url = format!(
             "http://127.0.0.1:{}/mcp",
             std::fs::read_to_string(port).unwrap()
         );
         fixture
+    }
+
+    async fn wait_ready(&mut self, port: &std::path::Path, errors: &std::path::Path) {
+        let ready = tokio::time::timeout(Duration::from_secs(5), async {
+            while !port.exists() {
+                if let Some(status) = self.child.try_wait().unwrap() {
+                    panic!(
+                        "HTTP fixture exited with {status}: {}",
+                        std::fs::read_to_string(errors).unwrap()
+                    );
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(
+            ready.is_ok(),
+            "HTTP fixture did not start: {}",
+            std::fs::read_to_string(errors).unwrap()
+        );
     }
 }
 impl Drop for HttpFixture {

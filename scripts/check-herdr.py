@@ -201,7 +201,7 @@ if mode == "fail": sys.exit(1)
             resumed = app.report(lambda a: a[1] == "report-agent-session" and option(a, "--agent-session-id") == initial_id, offset)
             assert option(resumed, "--mode") == "yolo"
             resume = resumed[resumed.index("--") + 1:]
-            assert resume[:4] == ["roomkit-code", str(project), "--state-dir", str(storage)]
+            assert resume[:4] == ["roomkit-code", str(project.resolve()), "--state-dir", str(storage)]
             assert option(resume, "--config") == str(config)
             app.send("Fail safely\r")
             app.text("Execution Failed")

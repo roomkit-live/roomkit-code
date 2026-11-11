@@ -3,6 +3,46 @@ use super::*;
 use std::fs;
 
 #[test]
+fn a_managed_installation_accepts_an_aliased_parent_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let actual = temp.path().join("actual");
+    let alias = temp.path().join("alias");
+    fs::create_dir(&actual).unwrap();
+    std::os::unix::fs::symlink(&actual, &alias).unwrap();
+    let installation = Installation {
+        bin: alias.join("bin"),
+    };
+    let source = temp.path().join("binary");
+    fs::write(&source, "first binary").unwrap();
+    installation
+        .activate(&source, "0.1.0", &install::digest(&source).unwrap(), None)
+        .unwrap();
+    let running = installation
+        .bin
+        .join("roomkit-code")
+        .canonicalize()
+        .unwrap();
+    installation.ensure_current(&running).unwrap();
+    fs::write(&source, "second binary").unwrap();
+    installation
+        .activate(
+            &source,
+            "0.2.0",
+            &install::digest(&source).unwrap(),
+            Some(&running),
+        )
+        .unwrap();
+    assert!(installation.ensure_current(&running).is_err());
+    let current = installation
+        .bin
+        .join("roomkit-code")
+        .canonicalize()
+        .unwrap();
+    installation.rollback(&current, "0.1.0").unwrap();
+    assert_eq!(fs::read(&running).unwrap(), b"first binary");
+}
+
+#[test]
 fn managed_install_update_rollback_and_stale_running_process() {
     let temp = tempfile::tempdir().unwrap();
     let bin = temp.path().join("bin");

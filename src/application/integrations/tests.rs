@@ -52,7 +52,12 @@ fn resume_follows_the_displayed_session_and_confirmed_mode_with_explicit_options
         &args[..8],
         [
             "roomkit-code",
-            root.path().join("project with spaces").to_str().unwrap(),
+            root.path()
+                .join("project with spaces")
+                .canonicalize()
+                .unwrap()
+                .to_str()
+                .unwrap(),
             "--state-dir",
             root.path().join("storage").to_str().unwrap(),
             "--session",

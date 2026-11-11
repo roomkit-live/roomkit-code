@@ -3,7 +3,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+from socketserver import TCPServer
 import sys
+
+
+class LoopbackHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer normally resolves the host's name here. This fixture only
+        # serves loopback and must start independently of the runner's DNS.
+        TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
 
 
 def start(portfile, trace, token_variable="MCP_FIXTURE_TOKEN"):
@@ -66,7 +76,7 @@ def start(portfile, trace, token_variable="MCP_FIXTURE_TOKEN"):
             else:
                 self.respond(200, body, session=method == "initialize")
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = LoopbackHTTPServer(("127.0.0.1", 0), Handler)
     ready = portfile.with_suffix(".ready")
     ready.write_text(str(server.server_port))
     ready.replace(portfile)

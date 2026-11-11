@@ -9,6 +9,8 @@ Initial public binary release for Linux x86-64/ARM64 and macOS Intel/Apple Silic
 - Detect newly created shell files even when filesystem timestamps are coarse
   or an archive preserves old modification times while changing ignore rules.
 - Run the instruction-file FIFO rejection test on both Linux and macOS.
+- Recognize managed installations through parent directory aliases, including
+  macOS temporary paths, when updating or rolling back.
 - Finish compaction records before shutdown so resuming immediately does not
   wait for a missing delivery cursor update.
 
