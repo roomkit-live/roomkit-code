@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## [0.1.1]
+
+Initial public binary release, prepared for Linux x86-64/ARM64 and macOS
+Intel/Apple Silicon.
+
+- Explore, plan, edit and test projects with Ask, Plan and Yolo permissions.
+- Configure Anthropic, OpenAI-compatible, ChatGPT and OpenCode Go connections.
+- Resume local conversations, recall earlier inputs and open provider links
+  with the same terminal rendering as conversation links.
+- Use file and code tools, shell commands, delegated tasks, MCP, skills and hooks.
+- Install checksummed binaries without Rust; review updates and roll back to
+  the previous binary from the application.
+- Provide a concise illustrated README, a complete embedded user guide and
+  a verified four-platform draft release workflow.
+
+Linux requires glibc 2.35 or newer. macOS requires version 12 or newer; binaries
+are ad-hoc signed, without Apple Developer ID signing or notarization.
+
+## Development history
+
 - Provider sign-in links use the conversation's Markdown renderer, with a
   clickable "Open sign-in page" label and the full address available to copy.
   Links in provider field help are clickable too.

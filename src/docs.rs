@@ -1,5 +1,5 @@
 //! RoomKit Code's own user guide, served read-only through the documentation
-//! tools. The guide is this crate's README, embedded at build time and split
+//! tools. The guide is this crate's USER_GUIDE.md, embedded at build time and split
 //! into one document per level-two section: the tools return one excerpt per
 //! document, so a single large file would make search land on unrelated lines.
 
@@ -13,8 +13,8 @@ use std::{
 
 use crate::Result;
 
-/// The README is part of the package, so every installed binary carries it.
-const GUIDE: &str = include_str!("../README.md");
+/// The user guide is part of the package, so every installed binary carries it.
+const GUIDE: &str = include_str!("../USER_GUIDE.md");
 
 /// One document of the guide, written as `file` in the guide directory.
 #[derive(Debug, PartialEq, Eq)]

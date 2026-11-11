@@ -2,11 +2,17 @@ name: CI
 
 on:
   push:
+    branches: ['**']
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 jobs:
   checks:
@@ -16,14 +22,14 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: Configure private dependency access
+      - name: Configure dependency access when a token is supplied
         env:
           ROOMKIT_DEPS_READ_CI: ${{ secrets.ROOMKIT_DEPS_READ_CI }}
         run: bash scripts/ci-dependency-access.sh
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - name: Install pinned Rust toolchain
@@ -39,11 +45,11 @@ jobs:
   dependencies:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: EmbarkStudios/cargo-deny-action@b66acf5e9fe20f8aba065be86778a8a4c846f902 # v2
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
         with:
-          credentials: https://x-access-token:${{ secrets.ROOMKIT_DEPS_READ_CI }}@github.com
+          credentials: ${{ secrets.ROOMKIT_DEPS_READ_CI != '' && format('https://x-access-token:{0}@github.com', secrets.ROOMKIT_DEPS_READ_CI) || '' }}

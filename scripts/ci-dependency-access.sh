@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Repository secrets do not propagate from our private dependencies.
+# Public dependencies and fork pull requests need no repository secret.
 if [[ -z "${ROOMKIT_DEPS_READ_CI:-}" ]]; then
-    echo 'Set ROOMKIT_DEPS_READ_CI with Contents: read on roomkit-rs, roomkit-tui, roomkit-tools and roomkit-auth.' >&2
-    exit 1
+    echo 'Using anonymous dependency access.'
+    exit 0
 fi
 umask 077
 roomkit_credential_dir="$RUNNER_TEMP/roomkit-code-dependency-access"

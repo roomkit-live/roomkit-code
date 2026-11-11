@@ -37,6 +37,7 @@ with tempfile.TemporaryDirectory(prefix='roomkit-distribution-') as directory:
     gh.write_text('''#!/usr/bin/env python3
 import hashlib, os, pathlib, shutil, sys
 args=sys.argv[1:]
+if os.environ.get('FIXTURE_PUBLIC'): sys.exit(1)
 if args[:2] == ['auth','status']: sys.exit(0)
 if args[:1] == ['api']: print('v'+os.environ['FIXTURE_VERSION']); sys.exit(0)
 if args[:2] == ['release','download']:
@@ -52,6 +53,27 @@ if args[:2] == ['release','download']:
 sys.exit(1)
 ''')
     gh.chmod(0o755)
+    curl = fake / 'curl'
+    curl.write_text('''#!/usr/bin/env python3
+import hashlib, json, os, pathlib, shutil, sys
+args=sys.argv[1:]
+urls=[arg for arg in args if arg.startswith('https://')]
+assert len(urls)==1 and os.environ.get('FIXTURE_PUBLIC')
+url=urls[0]
+if url=='https://api.github.com/repos/roomkit-live/roomkit-code/releases/latest':
+    print(json.dumps({'tag_name':'v'+os.environ['FIXTURE_VERSION']})); sys.exit(0)
+assert url.startswith('https://github.com/roomkit-live/roomkit-code/releases/download/')
+assert '--proto-redir' in args and '--max-filesize' in args
+name=url.rsplit('/',1)[1]
+out=pathlib.Path(args[args.index('-o')+1])
+source=pathlib.Path(os.environ['FIXTURE_BINARY'])
+if name.endswith('.sha256'):
+    digest=hashlib.sha256(source.read_bytes()).hexdigest()
+    if os.environ.get('FIXTURE_CORRUPT'): digest='0'*64
+    out.write_text(f'{digest}  {name[:-7]}\\n')
+else: shutil.copyfile(source,out)
+''')
+    curl.chmod(0o755)
     env = {k:v for k,v in os.environ.items() if not k.startswith(('ROOMKIT_', 'GH_', 'GITHUB_', 'HERDR_'))}
     env.update(HOME=str(home), XDG_DATA_HOME=str(home/'data'), PATH=str(fake)+os.pathsep+os.environ['PATH'],
                ROOMKIT_CODE_BIN_DIR=str(bin_dir), FIXTURE_BINARY=str(fixture_binary), FIXTURE_VERSION=version,
@@ -66,6 +88,16 @@ sys.exit(1)
     bad = subprocess.run(['sh', 'install.sh', version], env=dict(env, FIXTURE_CORRUPT='1'), capture_output=True)
     assert bad.returncode != 0 and b'Checksum verification failed' in bad.stderr
     assert entry.resolve() == first
+    public_bin = root / 'public-bin'
+    public_env = dict(env, FIXTURE_PUBLIC='1', ROOMKIT_CODE_BIN_DIR=str(public_bin))
+    subprocess.run(['sh', 'install.sh'], env=public_env, check=True)
+    public_entry = public_bin / 'roomkit-code'
+    assert public_entry.is_symlink()
+    assert subprocess.check_output([str(public_entry), '--version'], env=public_env, text=True).strip() == f'roomkit-code {version}'
+    public_first = public_entry.resolve()
+    bad = subprocess.run(['sh', 'install.sh'], env=dict(public_env, FIXTURE_CORRUPT='1'), capture_output=True)
+    assert bad.returncode != 0 and b'Checksum verification failed' in bad.stderr
+    assert public_entry.resolve() == public_first
     external = root / 'external'; external.mkdir(); (external/'roomkit-code').write_text('external binary')
     bad = subprocess.run([str(fixture_binary), '--install-dir', str(external)], env=env, capture_output=True)
     assert bad.returncode != 0 and (external/'roomkit-code').read_text() == 'external binary'
@@ -97,4 +129,4 @@ sys.exit(1)
     finally:
         if process.poll() is None: process.kill(); process.wait()
         os.close(master); os.close(slave)
-print('Distribution checks passed: verified install, repeat install, corruption, external binary protection, welcome version, rollback error and terminal restoration.')
+print('Distribution checks passed: anonymous curl and authenticated gh installs, latest version, repeat install, corruption, external binary protection, welcome version, rollback error and terminal restoration.')

@@ -4,14 +4,14 @@ members = [".", "crates/roomkit-hooks"]
 
 [package]
 name = "roomkit-code"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.94"
 description = "A coding assistant assembled from the RoomKit conversation framework"
 license = "MIT"
 repository = "https://github.com/roomkit-live/roomkit-code"
 publish = false
-include = ["build.rs", "src/**", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
+include = ["build.rs", "src/**", "Cargo.toml", "Cargo.lock", "README.md", "USER_GUIDE.md", "LICENSE"]
 
 [dependencies]
 roomkit-hooks = { path = "crates/roomkit-hooks", version = "0.1.0" }

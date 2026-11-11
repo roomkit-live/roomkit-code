@@ -26,12 +26,13 @@ examples. Local `docs/`, agent configuration, `*.local.toml`, `.env*`, databases
 and build output are ignored. Cargo's package allowlist and `make package-check`
 also exclude local planning and credentials. Do not force-add ignored files.
 
-## Private dependency access in CI
+## Dependency access in CI
 
-Until dependencies are public, set a repository Actions secret named
-`ROOMKIT_DEPS_READ_CI`. Use a fine-grained GitHub token with **Contents: read** on
-`roomkit-live/roomkit-rs`, `roomkit-live/roomkit-tui` and
-`roomkit-live/roomkit-tools` and `roomkit-live/roomkit-auth`. No write permission is needed. An organization may
+Public dependencies need no GitHub token, including on fork pull requests.
+While a dependency remains private, trusted workflows can use the optional
+repository Actions secret named
+`ROOMKIT_DEPS_READ_CI`. Use a fine-grained GitHub token with **Contents: read** on the private dependencies (currently
+`roomkit-live/roomkit-rs`). No write permission is needed. An organization may
 require approval for its use. Add it using the hidden interactive prompt:
 
 ```sh
@@ -44,3 +45,13 @@ secret; do not run untrusted PR code in a privileged `pull_request_target` job.
 
 Use conventional commit subjects such as `feat(agent): add a review command`.
 Document user-visible behavior under `Unreleased` in `CHANGELOG.md`.
+
+## Documentation and releases
+
+Keep the README focused on installation and first use. The full user guide is
+`USER_GUIDE.md`; it is embedded in the binary and served by the documentation
+tools, so retain its topic headings when moving content. Local `docs/` is
+ignored and is not part of the public repository.
+
+Follow [RELEASING.md](RELEASING.md) for version changes, immutable tags, native
+builds and reviewed GitHub draft releases.

@@ -5,7 +5,7 @@
 BIN_DIR ?= $(HOME)/.local/bin
 TARGET_DIR := $(or $(CARGO_TARGET_DIR),target)
 
-check: fmt-check clippy test doc package-check terminal-check distribution-check
+check: fmt-check clippy test doc package-check terminal-check distribution-check release-check
 
 fmt:
 	cargo fmt --all
@@ -67,6 +67,10 @@ clipboard-check:
 distribution-check:
 	ROOMKIT_RELEASE_BUILD=1 cargo build --locked
 	python3 scripts/check-distribution.py
+
+.PHONY: release-check
+release-check:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_release.py'
 
 # Production binary: release profile, with the distribution marker so that a
 # managed installation keeps update checks and rollback.

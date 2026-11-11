@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing stable tag matching Cargo.toml (for example v0.1.0)
+        description: Existing stable tag matching Cargo.toml (for example v0.1.1)
         required: true
         type: string
 
@@ -21,9 +21,31 @@ env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
   CARGO_BUILD_JOBS: 4
   CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 jobs:
+  source:
+    runs-on: ubuntu-22.04
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Verify tag, version, main ancestry and release notes
+        id: source
+        run: |
+          python3 scripts/release.py source "$RELEASE_TAG"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: source
     strategy:
       fail-fast: false
       matrix:
@@ -34,29 +56,19 @@ jobs:
             target: aarch64-unknown-linux-gnu
           - os: macos-15-intel
             target: x86_64-apple-darwin
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
-          fetch-depth: 0
+          ref: ${{ needs.source.outputs.commit }}
           persist-credentials: false
-      - name: Verify tagged source and version
-        run: |
-          python3 - <<'PY'
-          import os, re
-          tag = os.environ['RELEASE_TAG']
-          assert re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', tag)
-          PY
-          test "$(git rev-parse HEAD)" = "$(git rev-parse "$RELEASE_TAG^{commit}")"
-          git merge-base --is-ancestor HEAD origin/main
-      - name: Configure private dependency access
+      - name: Configure dependency access when a token is supplied
         env:
           ROOMKIT_DEPS_READ_CI: ${{ secrets.ROOMKIT_DEPS_READ_CI }}
         run: bash scripts/ci-dependency-access.sh
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - name: Install Rust toolchains
@@ -77,7 +89,7 @@ jobs:
         run: |
           python3 scripts/package-release.py '${{ matrix.target }}'
           python3 scripts/check-distribution.py 'target/${{ matrix.target }}/release/roomkit-code'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-${{ matrix.target }}
           path: dist/*
@@ -87,56 +99,51 @@ jobs:
         run: rm -f "$RUNNER_TEMP/roomkit-code-dependency-access/credentials"
 
   audit:
+    needs: source
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.source.outputs.commit }}
           persist-credentials: false
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: EmbarkStudios/cargo-deny-action@b66acf5e9fe20f8aba065be86778a8a4c846f902 # v2
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
         with:
-          credentials: https://x-access-token:${{ secrets.ROOMKIT_DEPS_READ_CI }}@github.com
+          credentials: ${{ secrets.ROOMKIT_DEPS_READ_CI != '' && format('https://x-access-token:{0}@github.com', secrets.ROOMKIT_DEPS_READ_CI) || '' }}
 
-  publish:
-    needs: [build, audit]
+  draft:
+    needs: [source, build, audit]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.source.outputs.commit }}
+          fetch-depth: 0
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: release-*
           path: dist
           merge-multiple: true
-      - name: Validate the complete asset set
+      - name: Validate the unchanged tag and complete asset set
         run: |
-          python3 - <<'PY'
-          import hashlib, os
-          from pathlib import Path
-          root, tag = Path('dist'), os.environ['RELEASE_TAG']
-          targets = ['x86_64-unknown-linux-gnu','aarch64-unknown-linux-gnu','x86_64-apple-darwin','aarch64-apple-darwin']
-          names = {f'roomkit-code-{tag}-{t}{s}' for t in targets for s in ['', '.sha256']}
-          assert {p.name for p in root.iterdir()} == names
-          for t in targets:
-              name = f'roomkit-code-{tag}-{t}'
-              checksum, filename = (root / (name + '.sha256')).read_text().split()
-              assert filename == name
-              assert hashlib.sha256((root / name).read_bytes()).hexdigest() == checksum
-          PY
-          cp install.sh LICENSE README.md dist/
-      - name: Publish only after every platform and audit passed
+          python3 scripts/release.py source "$RELEASE_TAG"
+          python3 scripts/release.py assets "$RELEASE_TAG"
+          python3 scripts/release.py notes "$RELEASE_TAG" > "$RUNNER_TEMP/release-notes.md"
+          cp install.sh LICENSE README.md USER_GUIDE.md SECURITY.md dist/
+      - name: Create a complete draft for publication review
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo 'A release already exists; refusing to overwrite published binaries.' >&2
+            echo 'A release already exists; refusing to overwrite its binaries.' >&2
             exit 1
           fi
-          gh release create "$RELEASE_TAG" dist/* --verify-tag --draft --title "RoomKit Code $RELEASE_TAG" --generate-notes
-          gh release edit "$RELEASE_TAG" --draft=false --latest
+          gh release create "$RELEASE_TAG" dist/* --verify-tag --draft \
+            --title "RoomKit Code $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
