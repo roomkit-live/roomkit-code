@@ -90,7 +90,7 @@ impl Application {
         step("updates");
         self.services.updates.close().await;
         step("compactions");
-        self.profiles.resources.compactions.close();
+        self.profiles.resources.compactions.close().await;
         step("shell");
         self.services.shell.close().await;
         step("accounts");

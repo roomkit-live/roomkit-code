@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Finish compaction records before shutdown so resuming immediately does not
+  wait for a missing delivery cursor update.
+
 ## [0.1.1]
 
 Initial public binary release, prepared for Linux x86-64/ARM64 and macOS

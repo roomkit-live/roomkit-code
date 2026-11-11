@@ -108,7 +108,9 @@ pub(crate) struct Compactions {
     /// Where the compactions' lines go.
     journal: line::Journal,
     /// The compactions running outside the turns.
-    tasks: Mutex<Vec<tokio::task::AbortHandle>>,
+    tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// Records finish before shutdown cancels the remaining summaries.
+    writing: tokio::sync::RwLock<()>,
     /// Set as the application closes: no compaction starts outside the turns.
     closed: std::sync::atomic::AtomicBool,
     /// What the application records of the conversations, which each summary
@@ -144,6 +146,7 @@ impl Compactions {
             runs: Arc::new(runs::Runs::new(changes.clone())),
             journal: line::Journal::default(),
             tasks: Mutex::default(),
+            writing: tokio::sync::RwLock::default(),
             closed: std::sync::atomic::AtomicBool::new(false),
             recorded: std::sync::OnceLock::new(),
             changes,
@@ -242,6 +245,9 @@ impl Compactions {
         (compacted, summarized): (Compacted, usize),
         (sizes, took, cut): ((usize, usize), Duration, bool),
     ) {
+        let Some(_writing) = self.begin_record().await else {
+            return;
+        };
         let from = compacted.from;
         // Written outside the lock: another conversation's turn need not
         // wait for this one's file.
@@ -273,6 +279,12 @@ impl Compactions {
             "Conversation compacted"
         };
         self.notice(room, notice);
+    }
+
+    /// Admits a record until shutdown begins, keeping it alive through commit.
+    async fn begin_record(&self) -> Option<tokio::sync::RwLockReadGuard<'_, ()>> {
+        let writing = self.writing.read().await;
+        (!self.closed.load(std::sync::atomic::Ordering::Acquire)).then_some(writing)
     }
 
     /// Tells the views of `room` `text`, in their status line.
@@ -355,7 +367,7 @@ impl Compactions {
     /// `running` shows.
     fn start(self: &Arc<Self>, room: &str, agent: &str, running: runs::Running) {
         // Taken under the tasks' lock, as `close` sets it: a compaction
-        // starts before the close, which aborts it, or not at all.
+        // starts before the close takes ownership of it, or not at all.
         let mut tasks = crate::sync::lock(&self.tasks);
         if self.closed.load(std::sync::atomic::Ordering::Acquire) {
             return;
@@ -366,19 +378,25 @@ impl Compactions {
             compactions.compact_now(&room, &agent).await;
         });
         tasks.retain(|task| !task.is_finished());
-        tasks.push(task.abort_handle());
+        tasks.push(task);
     }
 
-    /// Stops the compactions running outside the turns before the engine
-    /// closes, and starts no more: one cut short records nothing, so the
-    /// conversation compacts again when it is resumed, or, cut while its line
-    /// is stored, keeps its record without its line.
-    pub fn close(&self) {
-        let mut tasks = crate::sync::lock(&self.tasks);
-        self.closed
-            .store(true, std::sync::atomic::Ordering::Release);
-        for task in tasks.drain(..) {
+    /// Finishes records before cancelling summaries and closing the engine.
+    /// Cancelling a timeline commit partway through can leave a stored row
+    /// beyond the delivery cursor and delay the next turn after resuming.
+    pub async fn close(&self) {
+        {
+            let _tasks = crate::sync::lock(&self.tasks);
+            self.closed
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+        let _writing = self.writing.write().await;
+        let tasks = std::mem::take(&mut *crate::sync::lock(&self.tasks));
+        for task in &tasks {
             task.abort();
+        }
+        for task in tasks {
+            let _ = task.await;
         }
     }
 
@@ -490,6 +508,8 @@ mod tests {
     #![allow(clippy::unwrap_used, reason = "A broken fixture fails the test")]
     use super::*;
 
+    mod shutdown;
+
     fn compacted(from: u64) -> Compacted {
         Compacted {
             from,
@@ -565,20 +585,6 @@ mod tests {
         assert_eq!(compactions.request("room", "code"), Requested::Started);
         assert_eq!(compactions.request("room", "code"), Requested::Running);
         assert!(compactions.take_forced("room", "code"));
-    }
-
-    /// Once the application closes, a compaction that waited for the turns
-    /// starts no more.
-    #[tokio::test]
-    async fn no_compaction_starts_once_closed() {
-        let compactions = Arc::new(Compactions::new(Path::new("/nonexistent")));
-        compactions.set_bounded("code", true);
-        compactions.turn_admitted("room");
-        assert_eq!(compactions.request("room", "code"), Requested::Queued);
-        compactions.close();
-        compactions.turn_finished("room");
-        assert!(crate::sync::lock(&compactions.tasks).is_empty());
-        assert!(!compactions.compacting("room"));
     }
 
     #[test]
