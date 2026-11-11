@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Up/Down reliably browse complete input-history entries, including multiline
+  messages and commands, and restore the unfinished draft and cursor.
+
 - ChatGPT sign-in shows the browser link and a masked return-URL field
   together, using the same flow locally and on a remote machine. The pasted
   one-use callback completes sign-in without port forwarding.
