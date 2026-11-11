@@ -118,3 +118,29 @@ async fn dismissing_a_submitted_form_aborts_the_pending_operation_without_waitin
     );
     assert!(accounts.pending.lock().await.is_none());
 }
+
+#[test]
+fn sign_in_renders_the_exact_browser_destination_as_a_native_terminal_link() {
+    let url = authorization();
+    let mut session = roomkit_tui::Session::default();
+    let mut snapshot = Snapshot::new("room", "Test", Actor::new("agent", "Agent"));
+    snapshot
+        .commands
+        .push(CommandSpec::new("providers", "Providers"));
+    session.apply(Event::Snapshot(snapshot));
+    session.apply(Event::Form {
+        conversation: "room".into(),
+        form: form(&url),
+    });
+    let frame = roomkit_tui::render::screen(
+        &session,
+        100,
+        30,
+        &roomkit_tui::render::Renderers::default(),
+    );
+    assert!(frame.spans.iter().flatten().any(|span| {
+        span.hyperlink
+            .as_ref()
+            .is_some_and(|link| link.url() == url.as_str())
+    }));
+}

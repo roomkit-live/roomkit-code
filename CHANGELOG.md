@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The sign-in link supports native terminal browser opening (Cmd-click on macOS
+  or Ctrl-click on Linux in compatible terminals), including over SSH.
+- Resuming a conversation restores Up/Down recall from its saved messages,
+  instead of showing only inputs typed since launch, such as `/resume`.
+
 - Up/Down reliably browse complete input-history entries, including multiline
   messages and commands, and restore the unfinished draft and cursor.
 

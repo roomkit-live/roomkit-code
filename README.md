@@ -196,6 +196,14 @@ string hides either. Neither is included in messages sent to the model.
 The selected theme supplies its background and text colors; monochrome mode
 uses reverse video to keep the area visible.
 
+## Input history
+
+Up/Down recalls your last 100 saved messages from the selected conversation,
+including after `/resume` or a restart. Down past the newest entry restores your
+unfinished draft. Commands typed during this launch are also recalled; old
+commands are not reconstructed because they are not saved as conversation
+messages.
+
 ## Unattended runs
 
 `--prompt` (`-p`) sends one message without the terminal interface and exits
@@ -1021,7 +1029,9 @@ them. Usage counts against your Go plan's limits.
 Open `/providers`, choose **Sign in with ChatGPT**, then **Connect a ChatGPT
 account**. The same screen shows a link to open in your browser and a masked
 field for the return URL. This works with a browser on the same computer or
-another one, including when RoomKit Code runs over SSH.
+another one, including when RoomKit Code runs over SSH. In a compatible terminal,
+Cmd-click the link on macOS or Ctrl-click on Linux to open your local browser.
+The complete URL remains available to copy.
 
 After consent, copy the complete return URL from the browser's address bar,
 paste it into the field, and press Ctrl+S. If the browser shows a connection

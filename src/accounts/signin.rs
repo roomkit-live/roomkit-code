@@ -118,7 +118,7 @@ fn form(url: &url::Url) -> FormSpec {
         ),
     ])
     .with_description(format!(
-        "Open this link in your browser:\n\n{url}\n\nAfter sign-in, copy the complete return URL from the address bar and paste it below. If the browser shows a connection error, copy the address anyway. This attempt expires in ten minutes."
+        "Cmd-click (macOS) or Ctrl-click (Linux), or copy this link:\n\n{url}\n\nAfter sign-in, copy the complete return URL from the address bar and paste it below. If the browser shows a connection error, copy the address anyway. This attempt expires in ten minutes."
     ))
     .with_dismiss(format!("chatgpt:dismiss:{id}"))
     .with_async_completion()

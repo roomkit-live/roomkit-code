@@ -135,6 +135,15 @@ def scenario(project, state, base_url, resume=False, color="never"):
         os.write(master, b"\x1b[18~")
         wait_for(b"F7 sidebar", offset)
         wait_for(b"Read-only")
+        if resume:
+            # Recall comes from durable messages, not the /resume commands typed
+            # in this new process. A suffix distinguishes the composer from old output.
+            offset = len(captured)
+            os.write(master, b"\x1b[A\x1b[AHISTORY_RECALL_PROBE")
+            wait_for(b"Check the context again.HISTORY_RECALL_PROBE", offset)
+            offset = len(captured)
+            os.write(master, b"\x1b[B\x1b[B")
+            wait_for("› Ask about this project…".encode(), offset)
         # Activity keeps its heading and formatted preview; F2 reveals the full result.
         os.write(master, b"\x1b[5~\x1b[1;3A")
         wait_for(b"Reading the fixture document")
