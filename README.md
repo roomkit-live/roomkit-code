@@ -882,7 +882,10 @@ a line stays in the conversation, for instance `Conversation compacted · 42
 messages summarized · ≈180k → ≈40k tokens · 12 s`. It is shown to you only, never
 to the agent, and comes back in its place when the conversation is resumed. The
 summary is kept in the project's state, so a resumed conversation reads the same
-one.
+one. A compaction made between turns sends no request of the agent's, so nothing
+measures what it left: the context gauge then shows the size the line tells, as
+an estimate marked `~`, live and after a relaunch, until the agent's next turn
+ends.
 
 **/compact** compacts at once whatever the tier, keeping only the latest turns
 whole, four messages at least.

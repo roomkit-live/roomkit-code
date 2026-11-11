@@ -165,15 +165,23 @@ impl<P: AiProvider> TieredMemory<P> {
             .drain(..cut)
             .filter(|event| event.r#type == EventType::Message)
             .count();
-        let made = Compacted {
+        let mut made = Compacted {
             from: events.first().map_or(0, |event| event.index),
             summary: written,
             snapshot: self.compactions.snapshot(room, agent),
             summarized: compacted.map_or(0, |c| c.summarized) + summarized,
             at: newest,
             recorded: self.compactions.recorded(room, agent).await,
+            estimate: None,
         };
         let sizes = (measured.now(compacted), measured.total(Some(&made), cut));
+        // The size after it, which its line tells, is the views' to show
+        // until a turn measures the conversation again.
+        let by = (self.provider.name(), self.provider.model_name());
+        let left = self
+            .compactions
+            .estimated((room, agent), sizes.1, by, newest);
+        made.estimate = Some(left.await);
         let told = (sizes, began.elapsed(), cut_short);
         self.compactions
             .record((room, agent), (made.clone(), summarized), told)

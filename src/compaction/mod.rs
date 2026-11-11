@@ -3,7 +3,11 @@
 //! each conversation's compactions, kept on disk so that a resumed
 //! conversation reads the same summary, its prompt's prefix with it.
 //! `/compact` compacts at once, or once the turns under way end, and every
-//! compaction leaves a line in its conversation (HITL a2dfba34).
+//! compaction leaves a line in its conversation (HITL a2dfba34), and tells
+//! its views what it left until the agent's next turn tells better
+//! ([`estimate`]).
+mod estimate;
+pub(crate) use estimate::Estimate;
 mod history;
 mod line;
 pub(crate) use line::tokens;
@@ -69,6 +73,11 @@ pub(crate) struct Compacted {
     /// kept them, or with nothing recorded.
     #[serde(default)]
     pub recorded: Option<String>,
+    /// What the compaction left, as estimated, for the views to show until
+    /// a turn of the agent tells better ([`estimate`]). None once one did,
+    /// or for a compaction made before it was kept.
+    #[serde(default)]
+    pub estimate: Option<Estimate>,
 }
 
 /// One conversation's file: each agent's compaction.
@@ -489,6 +498,7 @@ mod tests {
             summarized: 12,
             at: from + 9,
             recorded: Some("Recorded by the application: a plan.".into()),
+            estimate: None,
         }
     }
 

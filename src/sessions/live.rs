@@ -112,6 +112,9 @@ async fn events(
     let room = current.room.as_str();
     let compactions = &profiles.resources.compactions;
     let tasks = &profiles.resources.tasks;
+    // What a compaction left, as estimated: the gauge shows it until a turn
+    // of the agent measures the conversation again.
+    events.extend(compactions.estimate(&current.room, &current.agent).await);
     let mut notices = compactions.notices(room);
     notices.extend(tasks.notices(room));
     let delegated = crate::delegation::panel::live(kit, profiles, tasks, current).await;

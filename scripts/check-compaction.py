@@ -1,5 +1,6 @@
 """Exercise /compact through an isolated PTY: it starts at once, or once the turn under way ends, the status line says
-so while the summary is written, its line stays in the conversation, comes back on resume, and the agent never reads it."""
+so while the summary is written, its line stays in the conversation, comes back on resume, and the agent never reads it;
+the context gauge shows what it left, as an estimate."""
 import fcntl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -85,6 +86,26 @@ class App:
             if select.select([self.master], [], [], 0.02)[0]:
                 self.output.extend(os.read(self.master, 65536))
 
+    def rows(self, text, after=0):
+        """The screen rows `text` was written at after `after`: the terminal moves the cursor before each row it writes."""
+        raw, rows = bytes(self.output), []
+        at = raw.find(text.encode(), after)
+        while at >= 0:
+            moves = re.findall(rb"\x1b\[(\d+);\d+H", raw[max(0, at - 400):at])
+            if moves:
+                rows.append(int(moves[-1]))
+            at = raw.find(text.encode(), at + 1)
+        return rows
+
+    def wait_below(self, text, row, after):
+        """Wait until `text` is written after `after` on a screen row below `row`."""
+        deadline = time.monotonic() + 15
+        while not any(written > row for written in self.rows(text, after)):
+            if time.monotonic() > deadline or self.process.poll() is not None:
+                raise AssertionError(f"Missing {text!r} below row {row}: {self.output[-6000:]!r}")
+            if select.select([self.master], [], [], 0.02)[0]:
+                self.output.extend(os.read(self.master, 65536))
+
     def turn(self, text):
         offset = self.send(text + "\r")
         self.wait("Working", offset)
@@ -135,7 +156,12 @@ try:
             summaries_free.set()
             app.wait("● roomkit-code", offset)
             # The first turn's: four messages at least are kept whole.
-            app.wait("Conversation compacted · 2 messages summarized · ≈", offset)
+            line = "Conversation compacted · 2 messages summarized · ≈"
+            app.wait(line, offset)
+            first = max(app.rows(line, offset))
+            # The gauge shows what the compaction left, as an estimate: no request measured it.
+            app.wait(" / 200000 tokens", offset)
+            assert re.search(rb"~\d+ / 200000 tokens", app.text(offset)), app.text(offset)[-3000:]
             # During a turn: queued, then run as the turn ends.
             turns_free.clear()
             offset = app.send("Fourth question\r")
@@ -149,8 +175,10 @@ try:
             assert len(summaries()) == 1
             turns_free.set()
             app.wait("Compaction fixture answer.", offset)
-            # The second turn's, the first being in the earlier summary.
-            app.wait("Conversation compacted · 2 messages summarized · ≈", offset)
+            # The second turn's, the first being in the earlier summary. It stands below the first compaction's line,
+            # which the terminal writes again whenever it repaints its row: the sidebar beside it changes as a turn
+            # starts.
+            app.wait_below(line, first, offset)
             assert len(summaries()) == 2 and len(streamed()) == 4
         finally:
             app.close()
@@ -173,4 +201,4 @@ finally:
     server.shutdown()
     server.server_close()
     thread.join(timeout=5)
-print("PTY compaction passed: /compact at once and during a turn, the status while it runs, its lasting line on resume.")
+print("PTY compaction passed: /compact at once and during a turn, the status while it runs, the gauge's estimate, its lasting line on resume.")

@@ -822,3 +822,5 @@ async fn a_failed_summary_compacts_nothing_and_is_tried_again() {
     assert_eq!(compactions.get(&room, &agent).unwrap().summary, SUMMARY);
     app.close().await.unwrap();
 }
+
+mod estimate;

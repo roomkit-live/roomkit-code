@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- The context gauge follows a compaction (RMK-1648). A compaction made between
+  turns, such as `/compact`, sends no request of the agent's: the gauge kept
+  the measure of the history before it, until the next turn's first answer,
+  and showed it again after a relaunch. It now shows the size the compaction's
+  line tells, as an estimate marked `~`, until the agent's next turn ends. The
+  estimate is kept with the compaction, so a relaunch shows it too
+  (roomkit-tui 03b0588, RMK-1646).
+
 - A conversation keeps its model, its reasoning effort and its mode. `/model`
   and `/effort` changed the agent itself: every conversation of that agent, in
   every project for a global one, answered on the model chosen last anywhere.

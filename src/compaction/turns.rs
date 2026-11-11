@@ -74,6 +74,11 @@ impl SessionLifecycle for Watched {
     ) -> LifecycleFuture<'a, ()> {
         Box::pin(async move {
             self.inner.finished(session, operation, outcome).await;
+            // The turn tells what the conversation takes: what a compaction
+            // estimated before it is no longer its views' to show.
+            self.compactions
+                .turn_told(&session.room, &session.agent)
+                .await;
             self.compactions.turn_finished(session.room.as_str());
         })
     }

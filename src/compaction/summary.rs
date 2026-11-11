@@ -401,6 +401,7 @@ mod tests {
             summarized: 2,
             at: 9,
             recorded: None,
+            estimate: None,
         };
         // The message's text; none for one made of parts, which it is not.
         let text = |compacted: &Compacted| match message(compacted).content {
