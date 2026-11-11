@@ -48,7 +48,7 @@ class Model(BaseHTTPRequestHandler):
             }}]}
             reason = "tool_calls"
         else:
-            delta, reason = {"content": '\n\n## Inspection\n\nFixture **inspection** complete.\n\n- Read `fixture.txt`\n- Read-only\n\n```json\n{"ok": true, "count": 1}\n```\n\nLatest answer marker.\n'}, "stop"
+            delta, reason = {"content": '\n\n## Inspection\n\nFixture **inspection** complete.\n\n- Read `fixture.txt`\n- Read-only\n\n```json\n{"ok": true, "count": 1}\n```\n\nLatest answer marker. [Guide](https://example.com/docs?tab=one&lang=en)\n\nhttps://example.com/~person/guide\n'}, "stop"
         body = ("data: " + json.dumps({"choices": [{"index": 0, "delta": delta}]}) + "\n\n"
                 + "data: " + json.dumps({"choices": [{"index": 0, "delta": {}, "finish_reason": reason}]})
                 + "\n\ndata: " + json.dumps({"choices":[], "usage": {
@@ -135,6 +135,8 @@ def scenario(project, state, base_url, resume=False, color="never"):
         os.write(master, b"\x1b[18~")
         wait_for(b"F7 sidebar", offset)
         wait_for(b"Read-only")
+        wait_for(b"\x1b]8;;https://example.com/docs?tab=one&lang=en\x07")
+        wait_for(b"\x1b]8;;https://example.com/~person/guide\x07")
         if resume:
             # Recall comes from durable messages, not the /resume commands typed
             # in this new process. A suffix distinguishes the composer from old output.

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Links in agent replies are native terminal hyperlinks, including Markdown
+  labels, bare URLs, wrapped text and tables. Sign-in links are underlined and
+  share Codex's OSC 8 wire format.
+
 - The sign-in link supports native terminal browser opening (Cmd-click on macOS
   or Ctrl-click on Linux in compatible terminals), including over SSH.
 - Resuming a conversation restores Up/Down recall from its saved messages,
