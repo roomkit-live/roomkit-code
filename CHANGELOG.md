@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- ChatGPT sign-in shows the browser link and a masked return-URL field
+  together, using the same flow locally and on a remote machine. The pasted
+  one-use callback completes sign-in without port forwarding.
+
 - A ChatGPT plan usage limit now explains where to check the plan or app
   limit in ChatGPT Settings > Usage, instead of reporting invalid request
   parameters when the Responses stream rejects inference.

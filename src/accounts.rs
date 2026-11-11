@@ -1,7 +1,10 @@
-//! Application menus and browser launching over reusable account authentication.
-use roomkit_auth::{Account, ChatGpt, SignOut};
+//! Application menus over reusable account authentication.
+use roomkit_auth::{Account, ChatGpt, RemoteSignIn, SignOut};
 use roomkit_tui::protocol::{Choice, Event, PanelSpec};
+
+mod signin;
 use roomkit_tui_engine::CommandResult;
+pub(crate) use signin::callback_form_id;
 use std::{path::Path, sync::Arc};
 use tokio::{
     sync::{Mutex, watch},
@@ -16,7 +19,7 @@ pub(crate) struct Accounts {
 struct Pending {
     room: String,
     panel: PanelSpec,
-    url: url::Url,
+    remote: Option<RemoteSignIn>,
     task: Option<JoinHandle<()>>,
 }
 impl Drop for Pending {
@@ -91,16 +94,12 @@ impl Accounts {
                 }
                 Ok(result)
             }
-            "cancel" | "dismiss" | "browser" => {
+            "cancel" | "dismiss" => {
                 let mut state = self.pending.lock().await;
-                let Some(pending) = state
+                if !state
                     .as_ref()
-                    .filter(|p| p.room == room && p.panel.id == id)
-                else {
-                    return Ok(CommandResult::Events(Vec::new()));
-                };
-                if action == "browser" {
-                    open_browser(&pending.url)?;
+                    .is_some_and(|p| p.room == room && p.panel.id == id)
+                {
                     return Ok(CommandResult::Events(Vec::new()));
                 }
                 state.take();
@@ -179,105 +178,6 @@ impl Accounts {
             entries,
         ))
     }
-    async fn connect(
-        self: &Arc<Self>,
-        room: &str,
-        account: Option<&str>,
-    ) -> Result<CommandResult, String> {
-        self.close().await;
-        let sign_in = self
-            .auth
-            .sign_in(account)
-            .await
-            .map_err(|e| e.to_string())?;
-        let url = sign_in.url().clone();
-        let id = uuid::Uuid::new_v4().to_string();
-        let browser_opened = open_browser(&url).is_ok();
-        let panel = PanelSpec::new(
-            id.clone(),
-            "providers",
-            "Sign in with ChatGPT",
-            format!(
-                "{}\n\nComplete sign-in in your browser, then return here.\nIf no browser opened, copy this local URL:\n\n{url}\n\nThis attempt expires in ten minutes. Esc cancels sign-in.",
-                if browser_opened {
-                    "Browser launch requested."
-                } else {
-                    "Could not launch a browser automatically."
-                }
-            ),
-        )
-        .with_actions(vec![
-            choice(format!("chatgpt:browser:{id}"), "Open browser", ""),
-            choice(format!("chatgpt:cancel:{id}"), "Cancel sign-in", ""),
-        ])
-        .with_dismiss(format!("chatgpt:dismiss:{id}"));
-        let mut state = self.pending.lock().await;
-        *state = Some(Pending {
-            room: room.into(),
-            panel: panel.clone(),
-            url,
-            task: None,
-        });
-        let weak = Arc::downgrade(self);
-        let task = tokio::spawn(async move {
-            let result = sign_in.wait().await;
-            let Some(this) = weak.upgrade() else {
-                return;
-            };
-            let mut state = this.pending.lock().await;
-            let Some(pending) = state.as_mut().filter(|p| p.panel.id == id) else {
-                return;
-            };
-            match result {
-                Ok(account) => {
-                    pending.panel.title = "ChatGPT account connected".into();
-                    pending.panel.body = format!(
-                        "Connected as {}.\n\n{}",
-                        label(&account),
-                        if account.plan_usage {
-                            "Choose a model to create an agent with this account."
-                        } else {
-                            "Identity verified, but ChatGPT plan usage was not granted. Sign in again to authorize model access."
-                        }
-                    );
-                    pending.panel.actions = if account.plan_usage {
-                        vec![choice(
-                            format!("chatgpt-use:{}", account.id),
-                            "Choose a model",
-                            "",
-                        )]
-                    } else {
-                        vec![choice(
-                            format!("chatgpt:login:{}", account.id),
-                            "Authorize plan usage",
-                            "",
-                        )]
-                    };
-                    pending.panel.actions.push(choice(
-                        format!("chatgpt:account:{}", account.id),
-                        "Manage account",
-                        "",
-                    ));
-                }
-                Err(error) => {
-                    pending.panel.title = "ChatGPT sign-in did not complete".into();
-                    pending.panel.body = error.to_string();
-                    pending.panel.actions = vec![choice("chatgpt:menu", "Back to accounts", "")];
-                }
-            }
-            this.events.send_replace(Some(Event::PanelUpdated {
-                conversation: pending.room.as_str().into(),
-                panel: pending.panel.clone(),
-            }));
-        });
-        if let Some(pending) = state.as_mut() {
-            pending.task = Some(task);
-        }
-        Ok(CommandResult::Events(vec![Event::Panel {
-            conversation: room.into(),
-            panel,
-        }]))
-    }
 }
 
 fn label(account: &Account) -> String {
@@ -297,25 +197,6 @@ fn choices(room: &str, title: &str, choices: Vec<Choice>) -> CommandResult {
         choices,
     }])
 }
-fn open_browser(url: &url::Url) -> Result<(), String> {
-    // This URL is library-generated loopback state, never a model tool argument.
-    #[cfg(target_os = "macos")]
-    let launcher = "open";
-    #[cfg(not(target_os = "macos"))]
-    let launcher = "xdg-open";
-    let mut child = tokio::process::Command::new(launcher)
-        .arg(url.as_str())
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|_| "Could not open the browser; copy the local URL shown above")?;
-    tokio::spawn(async move {
-        let _ = child.wait().await;
-    });
-    Ok(())
-}
-
 pub(crate) struct Credential {
     pub auth: ChatGpt,
     pub account: String,

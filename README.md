@@ -1019,10 +1019,17 @@ them. Usage counts against your Go plan's limits.
 ## Sign in with ChatGPT
 
 Open `/providers`, choose **Sign in with ChatGPT**, then **Connect a ChatGPT
-account**. Complete the browser consent and return to the terminal. If the
-browser does not open, copy the local URL shown in the panel. Esc cancels the
-pending sign-in. Choose a model offered by the connected account, save the
-agent, and use `/agents` to switch interlocutors.
+account**. The same screen shows a link to open in your browser and a masked
+field for the return URL. This works with a browser on the same computer or
+another one, including when RoomKit Code runs over SSH.
+
+After consent, copy the complete return URL from the browser's address bar,
+paste it into the field, and press Ctrl+S. If the browser shows a connection
+error at `127.0.0.1`, copy that address anyway. A browser on the same computer
+can also complete sign-in automatically. Esc cancels the attempt; it expires
+after ten minutes. No port forwarding or copying of access tokens is needed.
+Choose a model offered by the connected account, save the agent, and use
+`/agents` to switch interlocutors.
 
 Each account has its own registration and credentials. Several agents can use
 one account, or different accounts and providers. `/providers` also offers

@@ -101,3 +101,42 @@ async fn missing_account_credentials_fail_safely_without_anonymous_fallback() {
         roomkit_openai::TokenError::SignInRequired
     );
 }
+
+#[tokio::test]
+async fn stale_callback_forms_are_refused_without_saving_their_secret() {
+    use roomkit_tui::protocol::FormValues;
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, "fixture-key".into())
+        .await
+        .unwrap();
+    let mut values = FormValues::new();
+    values.insert(
+        "callback",
+        "http://127.0.0.1:23456/auth/callback?code=PRIVATE_CALLBACK&state=wrong",
+    );
+    let error = profile_command(
+        &app,
+        Command::SubmitForm {
+            name: "providers".into(),
+            form: "chatgpt-callback:stale".into(),
+            values: Box::new(values),
+        },
+    )
+    .await
+    .err()
+    .unwrap()
+    .to_string();
+    assert!(error.contains("sign-in form"));
+    assert!(!error.contains("PRIVATE_CALLBACK"));
+    assert!(app.profiles.accounts.auth.accounts().unwrap().is_empty());
+    app.close().await.unwrap();
+    let history = std::fs::read(&app._storage.database).unwrap();
+    assert!(
+        !history
+            .windows(b"PRIVATE_CALLBACK".len())
+            .any(|window| window == b"PRIVATE_CALLBACK")
+    );
+}

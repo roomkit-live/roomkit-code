@@ -103,6 +103,15 @@ impl Profiles {
             self.state.lock().await.pending_delete = None;
             return self.accounts.handle(current.room.as_str(), action).await;
         }
+        if let Command::SubmitForm { name, form, values } = &request.command
+            && name == "providers"
+            && crate::accounts::callback_form_id(form)
+        {
+            return self
+                .accounts
+                .submit_callback(current.room.as_str(), form, values)
+                .await;
+        }
         let mut state = self.state.lock().await;
         state.pending_delete = None;
         // Menus and model discovery do not hold the cross-process edit lease.
