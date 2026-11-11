@@ -471,11 +471,10 @@ impl Sessions {
             self.policy.instruction(room.as_str())
         ));
         let options = roomkit::SteerOptions {
-            room_id: Some(room),
             organization_id: current.organization.clone(),
             ..Default::default()
         };
-        if let Err(error) = self.kit.steer(update, agent, options).await {
+        if let Err(error) = self.kit.steer(&room, agent, update, options).await {
             let detail = serde_json::json!({ "error": error.to_string() });
             self.profiles
                 .diagnostics
