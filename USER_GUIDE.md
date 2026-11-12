@@ -301,9 +301,9 @@ their saved settings. A benchmark that pins them gives each run a fresh
 
 ## Terminal integrations
 
-Web addresses and Markdown link labels in replies are native terminal links.
-In iTerm2, Cmd-click opens them in the Mac's browser, including over SSH. Wrapped
-links retain their complete destination. Terminal preferences control opening;
+Web addresses, including those in code, and Markdown link labels in replies
+are native terminal links. In iTerm2, Cmd-click opens them in the Mac's browser,
+including over SSH. Wrapped links retain their complete destination. Terminal preferences control opening;
 `--native-selection` delegates all mouse handling to the terminal.
 
 Two independent integrations are enabled by default. Neither changes the tools,
