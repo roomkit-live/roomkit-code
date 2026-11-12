@@ -495,10 +495,12 @@ def left_running(root, model):
         assert code == 0, (code, err)
         results = [message["content"] for message in model.tool_results()]
         assert results and results[0].startswith("exit_code=0"), results
-        # Fifty more lines, written to its pipes after roomkit-code exited.
-        written = count_in(project / "count", 0)
+        # Release a burst only after roomkit-code exited. Its 50 flushed blocks
+        # exceed the pipe buffer, so the inherited output must still be drained.
+        assert count_in(project / "count", 0) == 0
+        (project / "continue").write_text("go")
         try:
-            count_in(project / "count", written + 50)
+            count_in(project / "count", 50)
         except AssertionError as error:
             raise AssertionError(f"{error}; processes: {[(pid, alive(pid)) for pid in pids]}; tool results: {results!r}") from error
         assert [alive(pid) for pid in pids] == [True, True], pids
@@ -541,16 +543,19 @@ scenario("SIGINT interrupts the turn", [call("shell", command="sleep 30", timeou
 scenario("SIGTERM interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], lambda root, model: interrupted(root, model, signal.SIGTERM))
 scenario("the engine's stored results are read", [call("read_stored_result", result_id="evicted_unknown"), ANSWER], stored_result)
 scenario("a shell command past two minutes", [call("shell", command="printf ran > long", timeout_ms=130000), ANSWER], long_shell)
-# Pace within one process: launching an external sleep for every line measures
-# the runner's process-start overhead rather than continued pipe delivery.
+# The parent releases this writer after the host exits. No timer cadence or
+# process-start rate is part of the continued-output contract.
 WRITER_SOURCE = """from pathlib import Path
 import time
-count = 0
-while True:
-    print('line', flush=True)
-    count += 1
-    Path('count').write_text(str(count))
+print('ready', flush=True)
+Path('count').write_text('0')
+while not Path('continue').exists():
     time.sleep(0.02)
+for _ in range(50):
+    print('line' * 8192, flush=True)
+Path('count').write_text('50')
+while True:
+    time.sleep(1)
 """
 WRITER = f"{shlex.quote(sys.executable)} -u -c {shlex.quote(WRITER_SOURCE)} & echo $! > job.pid"
 scenario("what the agent started runs on", [call("shell", command=WRITER), call("process_start", command="echo $$ > server.pid; exec sleep 60"), ANSWER], left_running)
