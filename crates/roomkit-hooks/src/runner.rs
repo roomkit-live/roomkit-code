@@ -94,6 +94,23 @@ mod unix {
     use std::process::Stdio;
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
+    fn failed(_stage: &str, _detail: impl std::fmt::Debug) -> RunStatus {
+        // Native tests retain the failing syscall/stage without logging hook
+        // commands, input or captured output during normal application use.
+        #[cfg(test)]
+        eprintln!("Hook process failure at {_stage}: {_detail:?}");
+        RunStatus::Failed
+    }
+
+    fn exit_status(result: std::io::Result<std::process::ExitStatus>) -> RunStatus {
+        match result {
+            Ok(status) => status
+                .code()
+                .map_or_else(|| failed("child signal", status), RunStatus::Exited),
+            Err(error) => failed("wait for child", error),
+        }
+    }
+
     struct Group(Option<Pid>);
     impl Group {
         fn stop(&mut self) -> bool {
@@ -102,7 +119,10 @@ mod unix {
                     self.0 = None;
                     true
                 }
-                _ => false,
+                error => {
+                    failed("stop process group", error);
+                    false
+                }
             }
         }
     }
@@ -121,7 +141,7 @@ mod unix {
             let n = pipe
                 .read(&mut buffer)
                 .await
-                .map_err(|_| RunStatus::Failed)?;
+                .map_err(|error| failed("read output pipe", error))?;
             if n == 0 {
                 return Ok(());
             }
@@ -151,7 +171,7 @@ mod unix {
             .spawn()
         {
             Ok(child) => child,
-            Err(_) => return (RunStatus::Failed, vec![], vec![]),
+            Err(error) => return (failed("spawn child", error), vec![], vec![]),
         };
         let Some(pid) = child
             .id()
@@ -175,7 +195,7 @@ mod unix {
                     if let Err(error) = stdin.write_all(input).await
                         && error.kind() != std::io::ErrorKind::BrokenPipe
                     {
-                        return Err(RunStatus::Failed);
+                        return Err(failed("write input pipe", error));
                     }
                     drop(stdin);
                     Ok(())
@@ -189,7 +209,7 @@ mod unix {
             tokio::pin!(deadline);
             let mut status = loop {
                 tokio::select! {
-                    result = child.wait() => break result.ok().and_then(|s| s.code()).map_or(RunStatus::Failed, RunStatus::Exited),
+                    result = child.wait() => break exit_status(result),
                     result = &mut io, if !io_done => match result {
                         Ok(()) => io_done = true,
                         Err(status) => { io_done = true; break status; },
@@ -201,8 +221,8 @@ mod unix {
                 status = RunStatus::Failed;
             }
             // Kill before waiting/draining, including descendants holding the pipes.
-            if child.wait().await.is_err() {
-                status = RunStatus::Failed;
+            if let Err(error) = child.wait().await {
+                status = failed("reap child after cleanup", error);
             }
             if !io_done {
                 match tokio::time::timeout(Duration::from_millis(OUTPUT_DRAIN_MILLIS), &mut io)
@@ -214,9 +234,9 @@ mod unix {
                             status = error;
                         }
                     }
-                    Err(_) => {
+                    Err(error) => {
                         if matches!(status, RunStatus::Exited(_)) {
-                            status = RunStatus::Failed;
+                            status = failed("drain output after cleanup", error);
                         }
                     }
                 }

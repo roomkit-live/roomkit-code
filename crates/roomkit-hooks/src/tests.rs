@@ -66,7 +66,7 @@ fn permission_output_never_silently_accepts_unsupported_rewrites() {
 async fn command_receives_literal_json_without_shell_interpolation() {
     let root = tempfile::tempdir().unwrap();
     let report = run(&hook("cat > received.json; printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Fixture refused\"}}'"), root.path(), &json!({"prompt":"$(touch injected); `touch another`", "hook_event_name":"PreToolUse"})).await;
-    assert_eq!(report.status, RunStatus::Exited(0));
+    assert_eq!(report.status, RunStatus::Exited(0), "{report:?}");
     let received: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.path().join("received.json")).unwrap()).unwrap();
     assert_eq!(received["prompt"], "$(touch injected); `touch another`");
@@ -114,7 +114,7 @@ async fn timeout_and_future_drop_stop_descendants_and_normal_exit_cleans_backgro
         &json!({}),
     )
     .await;
-    assert_eq!(report.status, RunStatus::Exited(0));
     tokio::time::sleep(Duration::from_millis(2200)).await;
-    assert!(!root.path().join("leaked").exists());
+    assert!(!root.path().join("leaked").exists(), "{report:?}");
+    assert_eq!(report.status, RunStatus::Exited(0), "{report:?}");
 }
