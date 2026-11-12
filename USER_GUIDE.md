@@ -204,6 +204,12 @@ unfinished draft. Commands typed during this launch are also recalled; old
 commands are not reconstructed because they are not saved as conversation
 messages.
 
+A long paste, three lines or more or over 500 characters, shows in the input
+as one block such as `[Pasted text #1 · 13 lines]`. The cursor moves over it,
+and Backspace or Delete remove it whole. The message sent carries the pasted
+text in its place. Up recalls a message sent during this launch with its
+blocks; after a restart or `/resume`, it holds the pasted text.
+
 ## Unattended runs
 
 `--prompt` (`-p`) sends one message without the terminal interface and exits

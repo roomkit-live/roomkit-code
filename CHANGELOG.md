@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A long paste shows in the input as one block, `[Pasted text #1 · 13 lines]`,
+  instead of every line; the message sent carries the pasted text.
 - Kimi K2.7 Code answers through OpenCode Go: tool schemas list their
   variants under `anyOf`, which Moonshot accepts behind a `$ref`.
 - A provider's refusal shows the provider's own words below the explanation,
