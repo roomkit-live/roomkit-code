@@ -286,7 +286,7 @@ check that follows the launch, such as a benchmark's verifier, can then reach a
 server the agent started. What they write after their command returned or the
 launch ended goes to a drainer that discards it, so their writes never fail. A
 command that times out or is cut still stops what it started. In the terminal,
-both stop with their command and with the application.
+both run on until the application closes, which stops them.
 
 In the terminal, a turn runs at most 50 rounds of tool calls before it stops
 unfinished, and a message continues it. Unattended, nobody can, so a turn runs
@@ -518,6 +518,10 @@ New agents initially select all 27 native tools:
 
 These reuse the native `roomkit-tools` implementations and their RoomKit adapters.
 `/agents` can restrict each participant's comma-separated selection.
+
+In the terminal, an agent is told when a job it started in the background
+ends (`process_start`, or `server &` in `shell`), in a turn of its own or the
+one it is running. A stopped job is not told.
 
 `docs_search`, `docs_read` and `docs_list` give agents this guide, for the
 installed version. The README is embedded in the binary, split into one document

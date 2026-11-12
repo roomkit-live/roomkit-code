@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- In the terminal, an agent is told when a background job it started ends: a
+  process from `process_start`, or what a `shell` command left running
+  (`server &`), which now runs on until the application closes instead of
+  stopping with its command. The agent reads the end in a turn of its own, or
+  in the turn it is running, without polling. A stop is not told.
 - Web addresses in code (inline or in a code block) open whole with
   Cmd-click or Ctrl-click, even when wrapped over several lines; only the
   first line opened before.

@@ -185,6 +185,7 @@ impl Profiles {
                 storage.database.parent().ok_or("Missing state directory")?,
                 &settings.state_dir,
                 &settings.inherit_env,
+                settings.unattended,
             )
             .await
             .map_err(|_| "Could not initialize workspace tools")?,

@@ -321,3 +321,114 @@ async fn monitor_pages_output_without_consuming_it_and_does_not_tick_when_closed
     drop(updates);
     app.close().await.unwrap();
 }
+
+/// The first request the model was sent that holds `text`, as JSON text,
+/// within five seconds.
+async fn asked_about(mock: &Mock, text: &str) -> String {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let found = mock
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .map(Value::to_string)
+                .find(|request| request.contains(text));
+            if let Some(request) = found {
+                return request;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("the model was never told {text:?}"))
+}
+
+/// The owner key the tools file the view's agent's jobs under.
+fn view_owner(app: &Application) -> String {
+    serde_json::to_string(&(app.view.room.as_str(), app.view.agent.as_str())).unwrap()
+}
+
+#[tokio::test]
+async fn an_agent_is_told_when_its_background_jobs_end() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let app = Application::open(
+        &settings(root.path(), state.path(), &mock.base_url),
+        String::new(),
+    )
+    .await
+    .unwrap();
+    let owner = view_owner(&app);
+    let cancel = CancellationToken::new();
+    let resources = &app.profiles.resources;
+    resources
+        .processes
+        .start(
+            Some(&owner),
+            ProcessStartInput::new("sleep 0.2; exit 3"),
+            &cancel,
+        )
+        .await
+        .unwrap();
+    asked_about(
+        &mock,
+        "Background process p1 (`sleep 0.2; exit 3`) exited with code 3 after",
+    )
+    .await;
+    // What a shell command leaves in the background is followed too.
+    let command = "sleep 0.3 >/dev/null 2>&1 &";
+    let input = roomkit_tools_process::ShellInput::new(command);
+    resources
+        .shell
+        .shell_owned(&owner, input, &cancel)
+        .await
+        .unwrap();
+    asked_about(
+        &mock,
+        &format!("The background jobs of the shell command `{command}` ended after"),
+    )
+    .await;
+    app.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn closing_the_application_stops_what_a_shell_command_left_running() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let app = Application::open(
+        &settings(root.path(), state.path(), &mock.base_url),
+        String::new(),
+    )
+    .await
+    .unwrap();
+    let input =
+        roomkit_tools_process::ShellInput::new("sleep 30 >/dev/null 2>&1 & echo $! > job.pid");
+    let result = app
+        .profiles
+        .resources
+        .shell
+        .shell_owned(&view_owner(&app), input, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(result.data.exit_code, Some(0), "{}", result.text);
+    let pid = std::fs::read_to_string(root.path().join("job.pid")).unwrap();
+    let running = || {
+        std::process::Command::new("kill")
+            .args(["-0", pid.trim()])
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(running(), "the job outlives its command");
+    app.close().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while running() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("closing the application did not stop the job"));
+}

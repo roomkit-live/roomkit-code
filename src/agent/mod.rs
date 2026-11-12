@@ -16,7 +16,7 @@ use roomkit_tools_plans::{
     PlanCreateTool, PlanDeleteTool, PlanListTool, PlanReadTool, PlanUpdateTool,
 };
 use roomkit_tools_process::{
-    CommandEnv, OutputLimits, OutputStore, ProcessLimits, ProcessSession, ShellLimits, ShellTool,
+    OutputLimits, OutputStore, ProcessLimits, ProcessSession, ShellLimits, ShellTool,
 };
 use roomkit_tools_roomkit::{
     CodeOutline, Diff, Edit, Glob, Grep, List, OutputForget, OutputRead, Patch, ProcessRead,
@@ -76,8 +76,10 @@ pub(crate) struct Resources {
     pub docs: Arc<dyn DocsBackend>,
     pub mutations: Workspace,
     pub processes: ProcessSession,
-    /// The environment of every agent's shell, as of the processes.
-    pub command_env: CommandEnv,
+    /// Every agent's shell: one, which follows the background jobs its
+    /// commands leave until they end, and stops them when the application
+    /// closes.
+    pub shell: ShellTool,
     pub outputs: OutputStore,
     pub search: WebSearchTool,
     pub fetch: WebFetchTool,
@@ -96,6 +98,7 @@ impl Resources {
         state: &Path,
         global: &Path,
         inherit_env: &[String],
+        unattended: bool,
     ) -> Result<Self> {
         let command_env = crate::command_env::command_env(inherit_env);
         let mutations = Workspace::new(root).await?;
@@ -111,6 +114,11 @@ impl Resources {
             .with_limits(process_limits())?
             .with_env(command_env.clone())?
             .with_output_store(outputs.clone())?;
+        let shell = ShellTool::new(root)
+            .await?
+            .with_limits(shell_limits(unattended))?
+            .with_env(command_env)?
+            .with_output_store(outputs.clone());
         let search_limits = SearchLimits {
             max_output_bytes: 48 * 1024,
             ..SearchLimits::default()
@@ -137,7 +145,7 @@ impl Resources {
             docs: crate::docs::guide(global)?,
             mutations,
             processes,
-            command_env,
+            shell,
             outputs,
             search: WebSearchTool::new(Arc::new(ExaSearch::new(SearchHttpConfig::default())?))
                 .with_limits(search_limits)?,
@@ -153,13 +161,24 @@ impl Resources {
     /// it started must still answer the check that follows.
     pub async fn close(&self, leave_processes: bool) -> bool {
         let plans = self.plans.close().await;
-        let processes = if leave_processes {
-            self.processes.detach().await
+        let (processes, shell) = if leave_processes {
+            (self.processes.detach().await, self.shell.detach().await)
         } else {
-            self.processes.close().await
+            (self.processes.close().await, self.shell.close().await)
         };
         let outputs = self.outputs.close().await;
-        plans && processes && outputs
+        plans && processes && shell && outputs
+    }
+
+    /// Tell each agent when a background job it started ends, a process or
+    /// what a shell command left running, from now until the resources
+    /// close: the agent reads it in a turn of its own, or in the turn it is
+    /// running.
+    pub fn follow_job_ends(&self, kit: &roomkit::RoomKit<roomkit_sqlite::SqliteStore>) {
+        for ends in [self.processes.ends(), self.shell.ends()] {
+            let kit = kit.clone();
+            tokio::spawn(async move { roomkit_tools_roomkit::notify_job_ends(&kit, ends).await });
+        }
     }
 }
 
@@ -221,10 +240,13 @@ pub(crate) async fn create(
 ) -> Result<(CodeAgent, Inventory)> {
     profile.validate()?;
     let unattended = extensions.unattended;
-    let shell = shell_limits(unattended);
-    let shell_maximum = shell.max_timeout_ms;
+    // An unattended launch's agent is told nothing of its jobs' end.
+    let shell = preamble::ShellFacts {
+        maximum_ms: shell_limits(unattended).max_timeout_ms,
+        told_ends: !unattended,
+    };
     let policy = extensions.policy.clone();
-    let tools = native_tools(root, resources, policy, shell).await?;
+    let tools = native_tools(root, resources, policy).await?;
     let tools = selected(profile, tools, (unattended, extensions.planning));
     let native: Vec<AiTool> = tools
         .iter()
@@ -255,7 +277,7 @@ pub(crate) async fn create(
             intent_required,
             engine_tools(delegation, human_input.as_ref()),
         ),
-        shell_maximum,
+        shell,
     );
     let mut entries: Vec<ToolEntry> = tools
         .into_iter()
@@ -440,33 +462,30 @@ fn intent_tools(mcp: &[crate::profiles::McpTools]) -> Vec<String> {
 }
 
 /// The shell's limits. Each stream keeps its latest 16 KiB, where a command
-/// reports how it ended. An unattended launch's command may run an hour, and
-/// what it leaves in the background runs on: a server the check that follows
-/// the launch needs, for one.
+/// reports how it ended. An unattended launch's command may run an hour.
+/// What a command leaves in the background runs on, followed until it ends:
+/// a server the agent then queries, for one. Closing the application stops
+/// it, unless the launch is unattended: a check that follows the launch may
+/// need it.
 pub(crate) fn shell_limits(unattended: bool) -> ShellLimits {
     ShellLimits {
         max_output_bytes: 16 * 1024,
         max_timeout_ms: crate::timeouts::shell_max_seconds(unattended) * 1000,
-        keep_background_jobs: unattended,
+        keep_background_jobs: true,
         ..ShellLimits::default()
     }
 }
 
 /// Every tool the application can give an agent, in inventory order, each
 /// scoped to the instructions of what it reads and tracked for the files it
-/// changes; its shell runs within `shell`.
+/// changes; its shell is the application's.
 async fn native_tools(
     root: &Path,
     resources: &Resources,
     policy: crate::permissions::Policy,
-    shell: ShellLimits,
 ) -> Result<Vec<Arc<dyn Tool>>> {
     let mutations = resources.mutations.clone();
-    let shell = ShellTool::new(root)
-        .await?
-        .with_limits(shell)?
-        .with_env(resources.command_env.clone())?
-        .with_output_store(resources.outputs.clone());
+    let shell = resources.shell.clone();
     let processes = &resources.processes;
     let plans = &resources.plans;
     let docs = &resources.docs;
@@ -514,12 +533,12 @@ mod shell_tests {
     use super::shell_limits;
 
     #[test]
-    fn an_unattended_shell_keeps_its_background_jobs_and_both_keep_their_end() {
+    fn both_shells_keep_their_background_jobs_and_their_end() {
         let terminal = shell_limits(false);
         let unattended = shell_limits(true);
         assert_eq!(terminal.max_output_bytes, 16 * 1024);
         assert_eq!(unattended.max_output_bytes, 16 * 1024);
-        assert!(!terminal.keep_background_jobs);
+        assert!(terminal.keep_background_jobs);
         assert!(unattended.keep_background_jobs);
         assert_eq!(terminal.max_timeout_ms, 120_000);
         assert_eq!(unattended.max_timeout_ms, 3_600_000);

@@ -184,6 +184,9 @@ async fn setup(
     model_results::install(kit)?;
     if !settings.unattended {
         crate::sessions::follow_modes(kit, policy);
+        // Nobody reads an unattended launch past its answer: its agent is
+        // told nothing a turn of its own would answer.
+        profiles.resources.follow_job_ends(kit);
     }
     let view = first_view(
         settings, kit, profiles, services, policy, &channel, agent_id,
