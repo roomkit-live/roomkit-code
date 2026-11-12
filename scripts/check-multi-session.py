@@ -83,6 +83,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-multi-session-") as directory:
         first = App(project, state)
         apps.append(first)
         first.wait("Ask about this project")
+        first.wait("Tab commands")
         database = next(state.glob("projects/*/history.sqlite3"))
 
         def rooms():
@@ -93,6 +94,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-multi-session-") as directory:
         second = App(project, state)
         apps.append(second)
         second.wait("Ask about this project")
+        second.wait("Tab commands")
         second_room, = rooms() - {first_room}
         assert first_room != second_room, "Another process claimed the occupied empty draft"
         first.shell("FIRST_SESSION_MARKER")

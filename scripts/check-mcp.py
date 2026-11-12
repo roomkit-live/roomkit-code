@@ -94,6 +94,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
 
     try:
         wait_for(b"RoomKit Code")
+        wait_for(b"Tab commands")
         command("/mcp add", b"save to connect and enable tools")
         args = json.dumps([str(script), "normal", str(pidfile), str(trace)])
         for index, value in enumerate(["demo", "python3", args, "{}", "5"]):

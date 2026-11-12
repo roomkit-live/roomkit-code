@@ -49,6 +49,7 @@ def scenario(project, state, resume=False):
 
     try:
         wait_for(b"RoomKit Code")
+        wait_for(b"Tab commands")
         if resume:
             wait_for(b"User shell command")
             wait_for(b"Interrupted")

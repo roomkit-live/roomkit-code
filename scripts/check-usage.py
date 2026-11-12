@@ -150,12 +150,13 @@ def turn(tokens_in, tokens_out):
     return f"turn {tokens_in} in / {tokens_out} out"
 
 
-def until_asked(count):
+def until_asked(app, count):
     """The server was asked `count` times: what follows the last step started."""
     deadline = time.monotonic() + 15
     while script.requests < count:
-        assert time.monotonic() < deadline, f"{script.requests} requests, {count} expected"
-        time.sleep(0.01)
+        assert time.monotonic() < deadline, f"{script.requests} requests, {count} expected: {app.output[-3000:]!r}"
+        if select.select([app.master], [], [], 0.01)[0]:
+            app.output.extend(os.read(app.master, 65536))
 
 
 class Run:
@@ -187,7 +188,8 @@ class Run:
                 time.sleep(0.2)
             deadline = time.monotonic() + 5
             while self.app.process.poll() is None and time.monotonic() < deadline:
-                time.sleep(0.05)
+                if select.select([self.app.master], [], [], 0.05)[0]:
+                    self.app.output.extend(os.read(self.app.master, 65536))
             if self.app.process.poll() is None:
                 self.app.process.kill()
                 self.app.process.wait(timeout=5)
@@ -218,7 +220,7 @@ def scenario(steps, ask, *, stop_at, after_esc, expect_total, in_flight=False, b
             shown = app.screen(offset)
             assert "(last report)" not in shown[shown.rindex(context(tokens + 10)):], "A measure of this turn is no report of the last"
             offset = len(app.output)
-        until_asked(first + stop_at + (1 if in_flight else 0))
+        until_asked(app, first + stop_at + (1 if in_flight else 0))
         if holds_after_text:
             script.gates[first + stop_at].set()
             app.wait(steps[stop_at][0], offset)

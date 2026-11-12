@@ -78,6 +78,7 @@ with tempfile.TemporaryDirectory() as directory:
 
     try:
         wait_for(b"RoomKit Code")
+        wait_for(b"Tab commands")
         os.write(master, b"/skills\r")
         wait_for(b"project-review")
         wait_for(b"disabled")

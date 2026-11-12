@@ -152,8 +152,9 @@ try:
             app.wait("Compacting the conversation…", offset)
             deadline = time.monotonic() + 15
             while not summaries():
-                assert time.monotonic() < deadline, "No summary was asked"
-                time.sleep(0.02)
+                assert time.monotonic() < deadline, f"No summary was asked: {app.output[-6000:]!r}"
+                if select.select([app.master], [], [], 0.02)[0]:
+                    app.output.extend(os.read(app.master, 65536))
             assert len(streamed()) == 3, "No message was needed"
             summaries_free.set()
             app.wait("● roomkit-code", offset)
@@ -168,9 +169,11 @@ try:
             turns_free.clear()
             offset = app.send("Fourth question\r")
             deadline = time.monotonic() + 15
+            # A pending redraw must finish before the app can read Enter.
             while len(streamed()) < 4:
-                assert time.monotonic() < deadline, "The fourth turn sent nothing"
-                time.sleep(0.02)
+                assert time.monotonic() < deadline, f"The fourth turn sent nothing: {app.output[-6000:]!r}"
+                if select.select([app.master], [], [], 0.02)[0]:
+                    app.output.extend(os.read(app.master, 65536))
             app.wait("Working", offset)
             app.send("/compact\r")
             app.wait("Compaction queued: it runs when the agent's turn ends", offset)
