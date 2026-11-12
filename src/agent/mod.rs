@@ -114,8 +114,10 @@ impl Resources {
             .with_limits(process_limits())?
             .with_env(command_env.clone())?
             .with_output_store(outputs.clone())?;
+        // Its background commands are processes: listed, read and told.
         let shell = ShellTool::new(root)
             .await?
+            .with_processes(processes.clone())
             .with_limits(shell_limits(unattended))?
             .with_env(command_env)?
             .with_output_store(outputs.clone());
@@ -241,8 +243,10 @@ pub(crate) async fn create(
     profile.validate()?;
     let unattended = extensions.unattended;
     // An unattended launch's agent is told nothing of its jobs' end.
+    let limits = shell_limits(unattended);
     let shell = preamble::ShellFacts {
-        maximum_ms: shell_limits(unattended).max_timeout_ms,
+        maximum_ms: limits.max_timeout_ms,
+        moves_on_timeout: limits.background_on_timeout,
         told_ends: !unattended,
     };
     let policy = extensions.policy.clone();
@@ -466,12 +470,15 @@ fn intent_tools(mcp: &[crate::profiles::McpTools]) -> Vec<String> {
 /// What a command leaves in the background runs on, followed until it ends:
 /// a server the agent then queries, for one. Closing the application stops
 /// it, unless the launch is unattended: a check that follows the launch may
-/// need it.
+/// need it. In the terminal, a command still running at its timeout, a build
+/// whose length nobody can foresee, moves to the background as a process,
+/// whose end the agent is told; an unattended launch, told nothing, stops it.
 pub(crate) fn shell_limits(unattended: bool) -> ShellLimits {
     ShellLimits {
         max_output_bytes: 16 * 1024,
         max_timeout_ms: crate::timeouts::shell_max_seconds(unattended) * 1000,
         keep_background_jobs: true,
+        background_on_timeout: !unattended,
         ..ShellLimits::default()
     }
 }
@@ -542,6 +549,9 @@ mod shell_tests {
         assert!(unattended.keep_background_jobs);
         assert_eq!(terminal.max_timeout_ms, 120_000);
         assert_eq!(unattended.max_timeout_ms, 3_600_000);
+        // Only an agent told of its jobs' end has a timed-out command moved.
+        assert!(terminal.background_on_timeout);
+        assert!(!unattended.background_on_timeout);
     }
 }
 

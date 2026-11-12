@@ -394,6 +394,66 @@ async fn an_agent_is_told_when_its_background_jobs_end() {
 }
 
 #[tokio::test]
+async fn a_shell_command_in_the_background_is_a_listed_process_of_its_agent() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let app = Application::open(
+        &settings(root.path(), state.path(), &mock.base_url),
+        String::new(),
+    )
+    .await
+    .unwrap();
+    let owner = view_owner(&app);
+    let cancel = CancellationToken::new();
+    let resources = &app.profiles.resources;
+    // Started there at once.
+    let server = roomkit_tools_process::ShellInput {
+        run_in_background: true,
+        ..roomkit_tools_process::ShellInput::new("sleep 0.3; echo served")
+    };
+    let started = resources
+        .shell
+        .shell_owned(&owner, server, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(started.data.process_id.as_deref(), Some("p1"));
+    // Moved there, still running at its timeout, rather than stopped.
+    let build = roomkit_tools_process::ShellInput {
+        timeout_ms: std::num::NonZeroU64::new(100),
+        ..roomkit_tools_process::ShellInput::new("echo compiling; sleep 0.5; echo built")
+    };
+    let moved = resources
+        .shell
+        .shell_owned(&owner, build, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(moved.data.process_id.as_deref(), Some("p2"));
+    assert_eq!(moved.data.stdout.text, "compiling\n");
+    // Listed with the agent's own processes, as /processes shows them.
+    let listed = resources.processes.observe().await;
+    let commands: Vec<_> = listed.iter().map(|job| job.command.as_str()).collect();
+    assert_eq!(
+        commands,
+        [
+            "sleep 0.3; echo served",
+            "echo compiling; sleep 0.5; echo built"
+        ]
+    );
+    assert!(
+        listed
+            .iter()
+            .all(|job| job.owner.as_deref() == Some(owner.as_str()))
+    );
+    asked_about(
+        &mock,
+        "Background process p2 (`echo compiling; sleep 0.5; echo built`) exited with code 0 after",
+    )
+    .await;
+    app.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn closing_the_application_stops_what_a_shell_command_left_running() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- A `shell` command can run in the background as one of the agent's
+  processes: with `run_in_background` it starts there and returns its
+  `process_id` at once, listed in `/processes` and read with `process_read`.
+  In the terminal, a command still running at its timeout moves there instead
+  of being stopped, so a build whose length nobody can foresee runs to its end
+  and the agent is told when it does; an unattended launch still stops it. The
+  system prompt says which applies, and steers servers and long jobs to
+  `run_in_background` rather than `&`.
 - In the terminal, an agent is told when a background job it started ends: a
   process from `process_start`, or what a `shell` command left running
   (`server &`), which now runs on until the application closes instead of

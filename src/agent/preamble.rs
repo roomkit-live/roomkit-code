@@ -144,7 +144,18 @@ pub(super) struct ShellFacts {
     pub maximum_ms: u64,
     /// Whether the agent is told when its background jobs end.
     pub told_ends: bool,
+    /// Whether a command still running at its timeout moves to the
+    /// background as a process instead of being stopped.
+    pub moves_on_timeout: bool,
 }
+
+/// What the agent reads of a command that reaches its timeout and is stopped.
+const STOPPED_AT_TIMEOUT: &str =
+    "A command is stopped after 10 seconds unless timeout_ms asks for more.";
+
+/// What the agent reads of a command that reaches its timeout and moves to
+/// the background.
+const MOVED_AT_TIMEOUT: &str = "A command still running after 10 seconds, or the timeout_ms it asks for, is not stopped: it moves to the background as a process, and its result gives the process_id.";
 
 /// What the agent reads of a shell command's background jobs, when it is
 /// told of their end.
@@ -255,6 +266,15 @@ fn instructions(tools: &[AiTool], hidden: bool, shell: ShellFacts) -> String {
         .collect::<Vec<_>>()
         .join("\n\n")
         .replacen("{permissions}", &crate::permissions::summary(served), 1)
+        .replacen(
+            "{shell_timeout}",
+            if shell.moves_on_timeout {
+                MOVED_AT_TIMEOUT
+            } else {
+                STOPPED_AT_TIMEOUT
+            },
+            1,
+        )
         .replacen("{shell_maximum}", &shell.maximum_ms.to_string(), 1)
         .replacen(
             "{shell_job_ends}",
@@ -401,6 +421,7 @@ mod tests {
         );
         let unattended = ShellFacts {
             told_ends: false,
+            moves_on_timeout: false,
             ..facts(3_600_000)
         };
         let silent = instructions(&processes, false, unattended);
@@ -410,11 +431,36 @@ mod tests {
         assert!(shell_only.contains(SHELL_JOB_ENDS) && !shell_only.contains(PROCESS_ENDS));
     }
 
+    /// A command reaching its timeout moves to the background in the
+    /// terminal, and is stopped in an unattended launch.
+    #[test]
+    fn the_prompt_says_what_a_command_at_its_timeout_becomes() {
+        assert_eq!(INSTRUCTIONS.matches("{shell_timeout}").count(), 1);
+        let shell = [AiTool {
+            name: "shell".into(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            tags: Vec::new(),
+            changes_state: false,
+            defer_loading: false,
+        }];
+        let terminal = instructions(&shell, false, facts(120_000));
+        assert!(terminal.contains(MOVED_AT_TIMEOUT) && !terminal.contains(STOPPED_AT_TIMEOUT));
+        let unattended = ShellFacts {
+            moves_on_timeout: false,
+            ..facts(3_600_000)
+        };
+        let stopped = instructions(&shell, false, unattended);
+        assert!(stopped.contains(STOPPED_AT_TIMEOUT) && !stopped.contains(MOVED_AT_TIMEOUT));
+        assert!(!stopped.contains("{shell_timeout}"));
+    }
+
     /// What a terminal agent is told of a shell running at most `maximum_ms`.
     fn facts(maximum_ms: u64) -> ShellFacts {
         ShellFacts {
             maximum_ms,
             told_ends: true,
+            moves_on_timeout: true,
         }
     }
 
@@ -482,8 +528,11 @@ mod tests {
     fn the_prompt_states_the_shell_default_the_tool_applies() {
         for unattended in [false, true] {
             let seconds = crate::agent::shell_limits(unattended).default_timeout_ms / 1000;
-            let stated = format!("stopped after {seconds} seconds unless timeout_ms asks for more");
-            assert!(INSTRUCTIONS.contains(&stated), "{stated}");
+            let stopped =
+                format!("stopped after {seconds} seconds unless timeout_ms asks for more");
+            assert!(STOPPED_AT_TIMEOUT.contains(&stopped), "{stopped}");
+            let moved = format!("still running after {seconds} seconds, or the timeout_ms");
+            assert!(MOVED_AT_TIMEOUT.contains(&moved), "{moved}");
         }
     }
 

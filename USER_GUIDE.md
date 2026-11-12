@@ -276,7 +276,10 @@ A shell command may run up to an hour (`timeout_ms` up to 3600000) instead of
 the terminal's two minutes, and the system prompt states that maximum: nobody
 waits for its answer, and a long build or test run need not move to a process
 the agent polls. A command still stops after 10 seconds unless its call asks for
-longer.
+longer. In the terminal, a command still running at its timeout moves to the
+background instead, as one of the agent's processes listed in `/processes`,
+whose end the agent is told; in both, `shell` with `run_in_background` starts a
+command there at once.
 
 What the agent starts runs on past the launch: a job a command puts in the
 background (`server &`) outlives the command, and a process started with
@@ -521,8 +524,8 @@ These reuse the native `roomkit-tools` implementations and their RoomKit adapter
 `/agents` can restrict each participant's comma-separated selection.
 
 In the terminal, an agent is told when a job it started in the background
-ends (`process_start`, or `server &` in `shell`), in a turn of its own or the
-one it is running. A stopped job is not told.
+ends (a process, or `server &` in `shell`), in a turn of its own or the one it
+is running. A stopped job is not told.
 
 `docs_search`, `docs_read` and `docs_list` give agents this guide, for the
 installed version. The README is embedded in the binary, split into one document
