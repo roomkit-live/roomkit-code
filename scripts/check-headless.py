@@ -312,10 +312,6 @@ class Screen:
         self.master, self.slave = pty.openpty()
         self.seen = ""
 
-    def launched(self):
-        """Once the launch holds the terminal, this end must not keep it open."""
-        os.close(self.slave)
-
     def read(self, timeout):
         """What came next; False once the launch closed the terminal."""
         ready, _, _ = select.select([self.master], [], [], timeout)
@@ -335,18 +331,24 @@ class Screen:
             assert self.read(0.1), (text, self.seen)
 
     def rest(self):
-        """All the launch wrote; what it left running cannot hold this up."""
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline and self.read(0.1):
-            pass
-        os.close(self.master)
-        return self.seen
+        """Read buffered output after exit, before closing the last slave."""
+        try:
+            # Darwin flushes unread output when the last slave closes. Keep
+            # ours open until collection, and do not wait for an inherited FD.
+            deadline = time.monotonic() + 10
+            while select.select([self.master], [], [], 0)[0]:
+                assert time.monotonic() < deadline, self.seen
+                if not self.read(0):
+                    break
+            return self.seen
+        finally:
+            os.close(self.master)
+            os.close(self.slave)
 
 
 def watched(root, model):
     screen = Screen()
     process = launch(root, model, "--mode", "yolo", "--prompt", "Wait for a while.", stderr=screen.slave)
-    screen.launched()
     # The call shows while it runs, not when the launch ends.
     screen.wait("Run sleep 3")
     assert process.poll() is None, screen.seen
@@ -367,7 +369,6 @@ def watched_refusal(root, model):
     # Whoever watches an Ask launch learns before the first refusal.
     screen = Screen()
     process = launch(root, model, "--prompt", "Create the file.", stderr=screen.slave)
-    screen.launched()
     out = process.stdout.read()
     process.wait(timeout=60)
     lines = screen.rest().split("\n")
@@ -380,7 +381,6 @@ def watched_json(root, model):
     # Events are for a program, whatever standard error is: nothing is added.
     screen = Screen()
     process = launch(root, model, "--mode", "yolo", "--json", "--prompt", "Write the note.", stderr=screen.slave)
-    screen.launched()
     process.stdout.read()
     process.wait(timeout=60)
     seen = screen.rest()
@@ -396,7 +396,6 @@ def watched_messages(root, model):
     assert "Looking around first." not in err, err
     screen = Screen()
     process = launch(root, model, "--mode", "yolo", "--prompt", "Look around.", stderr=screen.slave)
-    screen.launched()
     out = process.stdout.read()
     process.wait(timeout=60)
     lines = screen.rest().split("\n")

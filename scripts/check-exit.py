@@ -14,17 +14,16 @@ import tempfile
 import termios
 import threading
 import time
-import uuid
 
 from fixture_http import LoopbackHTTPServer
 
 metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True))
 binary = Path(metadata["target_directory"]) / "debug" / "roomkit-code"
-marker = f"roomkit-exit-{uuid.uuid4().hex}"
+SERVER = "echo $$ > server.pid; exec sleep 300"
 requests = []
 # One model reply per request: the first turn starts a process, then answers.
 replies = [
-    ("process_start", {"command": f"sleep 300 # {marker}", "_roomkit_intent": "I start the server"}),
+    ("process_start", {"command": SERVER, "_roomkit_intent": "I start the server"}),
     "Exit fixture first.",
     "Exit fixture second.",
 ]
@@ -113,8 +112,25 @@ def after(lines, heading):
     return lines[lines.index(heading) + 1].strip()
 
 
-def alive():
-    return subprocess.run(["pgrep", "-f", marker], capture_output=True).returncode == 0
+def process_pid(app, project):
+    """Identify the child even when the shell replaces itself with sleep."""
+    path = project / "server.pid"
+    deadline = time.monotonic() + 15
+    while True:
+        value = path.read_text().strip() if path.exists() else ""
+        if value.isdigit():
+            return int(value)
+        assert time.monotonic() < deadline, f"No server PID: {app.output[-6000:]!r}"
+        if select.select([app.master], [], [], 0.02)[0]:
+            app.output.extend(os.read(app.master, 65536))
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
 
 
 server = LoopbackHTTPServer(("127.0.0.1", 0), Model)
@@ -132,26 +148,27 @@ try:
         app.wait("[Yolo]")
         offset = app.send("Start the server\r")
         app.wait("Exit fixture first.", offset)
-        assert alive(), "The fixture process must run before exit"
+        pid = process_pid(app, project)
+        assert alive(pid), "The fixture process must run before exit"
         # The badge follows the exit warning: once it shows, Ctrl+D must ask first.
         app.wait("Processes: 1 running")
         # With a running process, the first Ctrl+D only states what exiting stops.
         offset = app.send("\x04")
         app.wait("Press Ctrl+D again to exit · 1 running process will be stopped", offset)
-        assert app.process.poll() is None and alive(), "The first Ctrl+D must only warn"
+        assert app.process.poll() is None and alive(pid), "The first Ctrl+D must only warn"
         # F6 disarms the exit and opens the Processes panel, which states the warning too.
         offset = app.send("\x1b[17~")
         app.wait("Background processes", offset)
         offset = app.send("\x04")
         app.wait("Press Ctrl+D again to exit · 1 running process will be stopped", offset)
-        assert app.process.poll() is None and alive(), "Ctrl+D over a panel must only warn"
+        assert app.process.poll() is None and alive(pid), "Ctrl+D over a panel must only warn"
         lines = app.quit()
         session = next(line for line in lines if line.startswith("Session: "))[len("Session: "):]
         command = shlex.split(after(lines, "To continue this session, run:"))
         assert command[0] == "roomkit-code" and command[command.index("--session") + 1] == session, lines
         assert "Token usage: total=250 input=200 (+ 300 cached) output=50 · 1 turn" in lines, lines
-        assert after(lines, "Stopped 1 background process:").split(" · ")[1].startswith("sleep 300"), lines
-        assert not alive(), "Closing must stop the background process"
+        assert after(lines, "Stopped 1 background process:").split(" · ")[1] == SERVER, lines
+        assert not alive(pid), "Closing must stop the background process"
 
         # The printed command reopens the same conversation; usage spans both launches.
         app = App([str(binary)] + command[1:], storage)
