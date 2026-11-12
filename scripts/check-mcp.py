@@ -1,6 +1,6 @@
 """Exercise stdio and HTTP MCP configuration, approvals and cleanup in a PTY."""
 import fcntl
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
@@ -15,6 +15,8 @@ import threading
 import time
 
 from pty_checks import wait_for_exit
+
+from fixture_http import LoopbackHTTPServer
 
 metadata = json.loads(subprocess.check_output(
     ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True
@@ -55,7 +57,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
     script = project / "server.py"
     script.write_text(Path("src/application/tests/mcp_server.py").read_text())
     pidfile, trace = project / "server.pid", project / "calls.txt"
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
+    server = LoopbackHTTPServer(("127.0.0.1", 0), Model)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 140, 0, 0))
@@ -88,8 +90,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
         wait_for(marker, send(text + "\r"))
 
     def dismiss():
-        send(b"\x1b")
-        time.sleep(0.1)
+        wait_for(b"Tab commands", send(b"\x1b"))
 
     try:
         wait_for(b"RoomKit Code")

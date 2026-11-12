@@ -1,6 +1,6 @@
 """Exercise skill discovery, per-agent opt-in and invocation in an isolated PTY."""
 import fcntl
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
@@ -15,6 +15,8 @@ import threading
 import time
 
 from pty_checks import wait_for_exit
+
+from fixture_http import LoopbackHTTPServer
 
 metadata = json.loads(subprocess.check_output(
     ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True
@@ -53,7 +55,7 @@ with tempfile.TemporaryDirectory() as directory:
     skill = project / ".agents/skills/project-review"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text("---\nname: project-review\ndescription: Review fixture project\n---\nBODY-ONLY-ON-ACTIVATION\n")
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
+    server = LoopbackHTTPServer(("127.0.0.1", 0), Model)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 38, 130, 0, 0))
@@ -79,8 +81,11 @@ with tempfile.TemporaryDirectory() as directory:
         os.write(master, b"/skills\r")
         wait_for(b"project-review")
         wait_for(b"disabled")
+        # Do not queue the next slash while Escape is still unread: together
+        # they become an Alt key sequence instead of closing the menu.
+        offset = len(captured)
         os.write(master, b"\x1b")
-        time.sleep(0.1)
+        wait_for(b"Tab commands", offset)
         os.write(master, b"/skills project-review\r")
         wait_for(b"Enable for this agent")
         assert not requests
@@ -100,8 +105,9 @@ with tempfile.TemporaryDirectory() as directory:
         wait_for(b"Enable for this agent", offset)
         agents = next((base / "state/projects").glob("*/agents.json"))
         assert json.loads(agents.read_text())["agents"]["code"]["skills"] == []
+        offset = len(captured)
         os.write(master, b"\x1b")
-        time.sleep(0.1)
+        wait_for(b"Tab commands", offset)
         os.write(master, b"\x04")
         wait_for_exit(process, master, captured)
         assert process.returncode == 0

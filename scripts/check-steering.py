@@ -12,7 +12,7 @@ read a file, open while the person types:
 """
 
 import fcntl
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
@@ -25,6 +25,8 @@ import tempfile
 import termios
 import threading
 import time
+
+from fixture_http import LoopbackHTTPServer
 
 metadata = json.loads(subprocess.check_output(
     ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True
@@ -220,7 +222,7 @@ def sent_now(key):
     return scenario
 
 
-server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
+server = LoopbackHTTPServer(("127.0.0.1", 0), Model)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 try:

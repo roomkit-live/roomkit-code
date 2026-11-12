@@ -4,7 +4,7 @@ Requires Xvfb and xclip. Never accesses the developer's desktop clipboard.
 """
 import base64
 import fcntl
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
@@ -21,6 +21,8 @@ import time
 import zlib
 
 from pty_checks import wait_for_exit
+
+from fixture_http import LoopbackHTTPServer
 
 for command in ("Xvfb", "xclip"):
     if not shutil.which(command):
@@ -55,7 +57,7 @@ read_fd, write_fd = os.pipe()
 xvfb = subprocess.Popen(["Xvfb", "-displayfd", str(write_fd), "-screen", "0", "640x480x24", "-nolisten", "tcp"], pass_fds=(write_fd,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 os.close(write_fd)
 owner = process = None
-server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
+server = LoopbackHTTPServer(("127.0.0.1", 0), Model)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 master = slave = None

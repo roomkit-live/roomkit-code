@@ -1,6 +1,6 @@
 """Exercise the context breakdown in the sidebar of a real terminal."""
 import fcntl
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
@@ -16,6 +16,8 @@ import time
 import unicodedata
 
 from pty_checks import wait_for_exit
+
+from fixture_http import LoopbackHTTPServer
 
 metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True))
 binary = Path(metadata["target_directory"]) / "debug" / "roomkit-code"
@@ -135,7 +137,7 @@ class App:
             os.close(self.slave)
 
 
-server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
+server = LoopbackHTTPServer(("127.0.0.1", 0), Model)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 try:

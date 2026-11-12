@@ -100,8 +100,8 @@ with tempfile.TemporaryDirectory(prefix="roomkit-multi-session-") as directory:
         # The picker identifies occupied sessions; attempting to open one keeps this view.
         offset = second.send("/resume\r")
         second.wait("Open in another instance", offset)
-        second.send("\x1b")
-        time.sleep(0.1)
+        offset = second.send("\x1b")
+        second.wait("Tab commands", offset)
         offset = second.send(f"/resume {first_room}\r")
         second.wait("This conversation is open in another", offset)
         second.shell("SECOND_STILL_USABLE")

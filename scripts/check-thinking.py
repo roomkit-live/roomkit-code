@@ -7,7 +7,7 @@ opens every detail.
 """
 
 import fcntl
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
@@ -20,6 +20,8 @@ import tempfile
 import termios
 import threading
 import time
+
+from fixture_http import LoopbackHTTPServer
 
 ROWS, COLS = 40, 120
 REASONING = b"Weighing the record first."
@@ -65,7 +67,7 @@ class Model(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
+server = LoopbackHTTPServer(("127.0.0.1", 0), Model)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 with tempfile.TemporaryDirectory() as directory:
     project, state = Path(directory) / "project", Path(directory) / "state"

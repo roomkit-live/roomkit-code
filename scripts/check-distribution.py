@@ -118,7 +118,8 @@ else: shutil.copyfile(source,out)
         wait(f'v{version}')
         offset=len(output); os.write(master,b'/update rollback\r')
         wait('Could not complete this operation',offset)
-        os.write(master,b'\x1b'); time.sleep(0.15)
+        offset=len(output); os.write(master,b'\x1b')
+        wait('Tab commands', offset)
         os.write(master,b'\x04')
         deadline=time.monotonic()+10
         while process.poll() is None and time.monotonic()<deadline:

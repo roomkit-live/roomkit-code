@@ -2,7 +2,7 @@
 
 With an argument, only the scenarios whose name holds it run.
 """
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
@@ -16,6 +16,8 @@ import sys
 import tempfile
 import threading
 import time
+
+from fixture_http import LoopbackHTTPServer
 
 metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True))
 binary = Path(metadata["target_directory"]) / "debug" / "roomkit-code"
@@ -63,7 +65,7 @@ class Model:
                 self.end_headers()
                 self.wfile.write(body)
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server = LoopbackHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.url = f"http://127.0.0.1:{self.server.server_port}/v1"
 

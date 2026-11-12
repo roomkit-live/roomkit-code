@@ -26,6 +26,7 @@ package-check:
 	python3 scripts/check-package.py
 
 terminal-check:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_fixture_http.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_pty_checks.py'
 	cargo build --locked
 	python3 scripts/check-terminal.py

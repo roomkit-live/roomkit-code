@@ -1,7 +1,7 @@
 """Exercise live process controls while a provider is busy, in a real POSIX PTY."""
 
 import fcntl
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
@@ -15,6 +15,8 @@ import termios
 import threading
 import time
 import unicodedata
+
+from fixture_http import LoopbackHTTPServer
 
 metadata = json.loads(subprocess.check_output(
     ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True
@@ -206,7 +208,7 @@ def scenario(project, state, url):
         os.close(slave)
 
 
-server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
+server = LoopbackHTTPServer(("127.0.0.1", 0), Model)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 try:
     with tempfile.TemporaryDirectory() as directory:
