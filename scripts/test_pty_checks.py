@@ -11,16 +11,21 @@ from pty_checks import wait_for_exit
 
 
 class PtyWaitTests(unittest.TestCase):
-    def start(self, source):
+    def start(self, source, *, keep_slave=True):
         master, slave = pty.openpty()
         self.addCleanup(os.close, master)
+        if keep_slave:
+            # Match application fixtures: retain the slave until all output is
+            # collected. macOS flushes unread output when its last slave closes.
+            self.addCleanup(os.close, slave)
         try:
             process = subprocess.Popen(
                 [sys.executable, "-c", source], stdin=subprocess.DEVNULL,
                 stdout=slave, stderr=slave,
             )
         finally:
-            os.close(slave)
+            if not keep_slave:
+                os.close(slave)
         self.addCleanup(self.stop, process)
         return process, master
 
@@ -47,13 +52,15 @@ class PtyWaitTests(unittest.TestCase):
 
     def test_closed_terminal_still_waits_for_the_child(self):
         process, master = self.start(
-            "import os, time; os.close(1); os.close(2); time.sleep(0.1); os._exit(9)"
+            "import os, time; os.close(1); os.close(2); time.sleep(0.1); os._exit(9)",
+            keep_slave=False,
         )
         self.assertEqual(wait_for_exit(process, master, bytearray()), 9)
 
     def test_a_closed_terminal_does_not_hide_a_hung_child(self):
         process, master = self.start(
-            "import os, time; os.close(1); os.close(2); time.sleep(30)"
+            "import os, time; os.close(1); os.close(2); time.sleep(30)",
+            keep_slave=False,
         )
         started = time.monotonic()
         with self.assertRaises(subprocess.TimeoutExpired):
