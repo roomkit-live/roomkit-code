@@ -16,6 +16,8 @@ event per source. Dropping execution kills its process group. Normal exit and
 timeout also clean up background members of that group. Commands inherit the
 host's environment and user permissions; this is not a filesystem/network sandbox.
 Processes deliberately escaping their process group are outside this cleanup.
+After exit or timeout, remaining output and process cleanup share a 250 ms
+budget. A cleanup that cannot be confirmed is reported as a process error.
 
 The first contract supports `SessionStart`, `SessionEnd`, `UserPromptSubmit`,
 `TurnStart`, `TurnEnd`, `PreToolUse`, `PostToolUse`, and `PostToolUseFailure`.

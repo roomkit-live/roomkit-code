@@ -14,7 +14,7 @@ pub use runner::{OUTPUT_DRAIN_MILLIS, Report, RunStatus, run};
 
 /// The longest one event's handlers from one source can take, in
 /// milliseconds: the whole budget spent by the most handlers it allows, each
-/// followed by its output drain. Killing a handler takes a little longer.
+/// followed by its bounded output drain and process cleanup.
 pub const SOURCE_DEADLINE_MILLIS: u64 = SOURCE_BUDGET_SECONDS * 1000
     + SOURCE_BUDGET_SECONDS / MIN_HANDLER_SECONDS * OUTPUT_DRAIN_MILLIS;
 

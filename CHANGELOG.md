@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Stop hook descendants created during process-group cleanup on macOS, while
+  keeping the leader PID reserved until signals finish and preserving the
+  existing output deadline and permission failures. Bound reaping by the same
+  cleanup deadline when a child refuses to stop.
+
 ## [0.1.3]
 
 Initial public binary release for Linux x86-64/ARM64 and macOS Intel/Apple Silicon.

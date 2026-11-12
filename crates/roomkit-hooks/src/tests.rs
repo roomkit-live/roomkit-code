@@ -129,6 +129,7 @@ async fn normal_exit_stops_background_jobs_without_holding_output_pipes() {
                 .args(["-axo", "pid=,ppid=,pgid=,stat=,comm="])
                 .output()
                 .unwrap();
+            assert!(processes.status.success(), "{processes:?}");
             let text = String::from_utf8_lossy(&processes.stdout);
             let members: Vec<_> = text
                 .lines()
