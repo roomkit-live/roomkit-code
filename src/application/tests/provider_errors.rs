@@ -207,6 +207,50 @@ async fn anthropic_errors_reach_the_view_and_log_then_the_session_recovers() {
     }
 }
 
+/// OpenCode Go refuses a model its organization's region setting excludes
+/// (2026-11-12). The person reads Go's own words, which say where to change
+/// it, below the explanation; the diagnostics log keeps the code alone.
+#[tokio::test]
+async fn a_provider_s_refusal_reaches_the_view_in_its_own_words() {
+    const WORDS: &str = "This OpenCode Go model is hosted outside Europe and the United States. \
+        Select Global at https://opencode.ai/console/org_01ABC/settings/privacy#regions to use it.";
+    let router = Router::new().route(
+        "/v1/chat/completions",
+        post(|| async {
+            (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({"error": {"type": "invalid_request_error", "message": WORDS}})),
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let root = tempfile::tempdir().unwrap();
+    let storage = tempfile::tempdir().unwrap();
+    let settings = settings(root.path(), storage.path(), &base);
+    let app = Application::open(&settings, SECRET.into()).await.unwrap();
+    let events = submit(&app, "refused-turn").await;
+    let notices: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Notice { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    let told = format!(
+        "Provider rejected the request format or parameters. Check model and tool-calling \
+         support.\nProvider says: {WORDS}"
+    );
+    assert!(notices.contains(&told.as_str()), "{notices:?}");
+    app.close().await.unwrap();
+    server.abort();
+    let log =
+        std::fs::read_to_string(app._storage.database.with_file_name("diagnostics.jsonl")).unwrap();
+    assert!(log.contains("provider_request_rejected"), "{log}");
+    assert!(!log.contains("hosted outside"), "{log}");
+}
+
 fn empty_response() -> ([(&'static str, &'static str); 1], String) {
     let events = [
         json!({"type":"message_start", "message":{"model":"claude-fable-5-2", "usage":{"input_tokens":20, "output_tokens":1}}}),

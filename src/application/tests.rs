@@ -1276,10 +1276,15 @@ async fn provider_timeouts_and_refusals_have_actionable_private_diagnostics() {
                 break;
             }
         }
-        assert!(session.notice().contains(expected), "{}", session.notice());
-        assert!(
-            !session.notice().contains("secret-key")
-                && !session.notice().contains("private server")
+        let notice = session.notice();
+        assert!(notice.contains(expected), "{notice}");
+        // A refusal (4xx) shows the provider's words, never the API key,
+        // which the adapter removes; a timeout shows none.
+        assert!(!notice.contains("secret-key"), "{notice}");
+        assert_eq!(
+            notice.contains("\nProvider says: ") && notice.contains(" and private server details"),
+            status.is_client_error(),
+            "{notice}"
         );
         assert!(session.context().is_none());
         // ON_ERROR runs asynchronously; engine close drains its observers.

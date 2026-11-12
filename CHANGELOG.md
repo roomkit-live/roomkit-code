@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Kimi K2.7 Code answers through OpenCode Go: tool schemas list their
+  variants under `anyOf`, which Moonshot accepts behind a `$ref`.
+- A provider's refusal shows the provider's own words below the explanation,
+  such as OpenCode Go's "hosted outside Europe and the United States, select
+  Global" and its console link, where it read only "rejected the request
+  format or parameters".
 - Stop hook descendants created during process-group cleanup on macOS, while
   keeping the leader PID reserved until signals finish and preserving the
   existing output deadline and permission failures. Bound reaping by the same
