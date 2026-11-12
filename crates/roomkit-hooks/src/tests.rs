@@ -97,7 +97,7 @@ async fn captures_both_streams_without_deadlock_and_enforces_bounds() {
 }
 
 #[tokio::test]
-async fn timeout_and_future_drop_stop_descendants_and_normal_exit_cleans_background_jobs() {
+async fn timeout_and_future_drop_stop_descendants() {
     let root = tempfile::tempdir().unwrap();
     let command = "cat >/dev/null; (sleep 2; touch leaked) & wait";
     let report = run(&hook(command), root.path(), &json!({})).await;
@@ -108,13 +108,40 @@ async fn timeout_and_future_drop_stop_descendants_and_normal_exit_cleans_backgro
     )
     .await;
     assert!(cancelled.is_err());
-    let report = run(
-        &hook("(sleep 2; touch leaked) & exit 0"),
-        root.path(),
-        &json!({}),
-    )
-    .await;
     tokio::time::sleep(Duration::from_millis(2200)).await;
-    assert!(!root.path().join("leaked").exists(), "{report:?}");
-    assert_eq!(report.status, RunStatus::Exited(0), "{report:?}");
+    assert!(!root.path().join("leaked").exists());
+}
+
+#[tokio::test]
+async fn normal_exit_stops_background_jobs_without_holding_output_pipes() {
+    let root = tempfile::tempdir().unwrap();
+    let mut failures = Vec::new();
+    for attempt in 0..32 {
+        let report = run(
+            &hook("echo $$ > leader.pid; (sleep 2; touch leaked) & exit 0"),
+            root.path(),
+            &json!({}),
+        )
+        .await;
+        if report.status != RunStatus::Exited(0) {
+            let pid = std::fs::read_to_string(root.path().join("leader.pid")).unwrap();
+            let processes = std::process::Command::new("ps")
+                .args(["-axo", "pid=,ppid=,pgid=,stat=,comm="])
+                .output()
+                .unwrap();
+            let text = String::from_utf8_lossy(&processes.stdout);
+            let members: Vec<_> = text
+                .lines()
+                .filter(|line| line.split_whitespace().nth(2) == Some(pid.trim()))
+                .collect();
+            eprintln!(
+                "Attempt {attempt}, group {} after {report:?}: {members:?}",
+                pid.trim()
+            );
+            failures.push(report);
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(2200)).await;
+    assert!(!root.path().join("leaked").exists(), "{failures:?}");
+    assert!(failures.is_empty(), "{failures:?}");
 }
