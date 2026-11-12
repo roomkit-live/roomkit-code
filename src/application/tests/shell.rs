@@ -257,7 +257,12 @@ async fn repeated_manual_commands_reclaim_completed_slots_and_bound_output() {
         client
             .try_send(command(&app, &format!("repeat-{index}"), "printf ok"))
             .unwrap();
-        assert_eq!(finish(&client).await.1, RunOutcome::Completed);
+        let (events, outcome) = finish(&client).await;
+        assert_eq!(
+            outcome,
+            RunOutcome::Completed,
+            "repeat {index}: {events:#?}"
+        );
     }
     client
         .try_send(command(
@@ -267,7 +272,7 @@ async fn repeated_manual_commands_reclaim_completed_slots_and_bound_output() {
         ))
         .unwrap();
     let (events, outcome) = finish(&client).await;
-    assert_eq!(outcome, RunOutcome::Completed);
+    assert_eq!(outcome, RunOutcome::Completed, "{events:#?}");
     assert!(body(&events).contains("Output shortened"));
     assert!(body(&events).len() < 5000);
     drop(client);
