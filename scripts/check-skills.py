@@ -14,6 +14,8 @@ import termios
 import threading
 import time
 
+from pty_checks import wait_for_exit
+
 metadata = json.loads(subprocess.check_output(
     ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True
 ))
@@ -101,7 +103,7 @@ with tempfile.TemporaryDirectory() as directory:
         os.write(master, b"\x1b")
         time.sleep(0.1)
         os.write(master, b"\x04")
-        process.wait(timeout=10)
+        wait_for_exit(process, master, captured)
         assert process.returncode == 0
         assert termios.tcgetattr(slave) == original
     finally:

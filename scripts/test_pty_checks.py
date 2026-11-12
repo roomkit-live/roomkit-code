@@ -1,0 +1,74 @@
+"""Exercise terminal shutdown with real child processes and finite PTY buffers."""
+
+import os
+import pty
+import subprocess
+import sys
+import time
+import unittest
+
+from pty_checks import wait_for_exit
+
+
+class PtyWaitTests(unittest.TestCase):
+    def start(self, source):
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        try:
+            process = subprocess.Popen(
+                [sys.executable, "-c", source], stdin=subprocess.DEVNULL,
+                stdout=slave, stderr=slave,
+            )
+        finally:
+            os.close(slave)
+        self.addCleanup(self.stop, process)
+        return process, master
+
+    @staticmethod
+    def stop(process):
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=5)
+
+    def test_large_output_is_drained_and_failure_status_is_preserved(self):
+        process, master = self.start(
+            "import sys; sys.stdout.buffer.write(b'x' * 262144 + b'end'); sys.exit(7)"
+        )
+        output = bytearray(b"previous")
+        self.assertEqual(wait_for_exit(process, master, output), 7)
+        self.assertEqual(output, b"previous" + b"x" * 262144 + b"end")
+
+    def test_output_is_collected_after_the_child_has_exited(self):
+        process, master = self.start("import sys; sys.stdout.write('restored')")
+        process.wait(timeout=5)
+        output = bytearray()
+        self.assertEqual(wait_for_exit(process, master, output), 0)
+        self.assertEqual(output, b"restored")
+
+    def test_closed_terminal_still_waits_for_the_child(self):
+        process, master = self.start(
+            "import os, time; os.close(1); os.close(2); time.sleep(0.1); os._exit(9)"
+        )
+        self.assertEqual(wait_for_exit(process, master, bytearray()), 9)
+
+    def test_a_closed_terminal_does_not_hide_a_hung_child(self):
+        process, master = self.start(
+            "import os, time; os.close(1); os.close(2); time.sleep(30)"
+        )
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            wait_for_exit(process, master, bytearray(), timeout=0.2)
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertIsNone(process.poll())
+
+    def test_continuous_output_does_not_extend_the_deadline(self):
+        process, master = self.start("import os\nwhile True: os.write(1, b'x' * 65536)")
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            wait_for_exit(process, master, bytearray(), timeout=0.2)
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertIsNone(process.poll())
+
+
+if __name__ == "__main__":
+    unittest.main()

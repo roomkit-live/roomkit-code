@@ -15,6 +15,8 @@ import termios
 import threading
 import time
 
+from pty_checks import wait_for_exit
+
 metadata = json.loads(subprocess.check_output(
     ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True
 ))
@@ -245,9 +247,7 @@ def scenario(project, state, base_url, resume=False, color="never"):
             os.write(master, b"\x03")
         else:
             os.write(master, b"\x04")
-        code = process.wait(timeout=10)
-        while select.select([master], [], [], 0)[0]:
-            captured.extend(os.read(master, 65536))
+        code = wait_for_exit(process, master, captured)
         assert code == 0, bytes(captured[-3000:])
         assert termios.tcgetattr(slave) == original, "Terminal modes not restored"
         assert b"\x1b[?1049l" in captured, "Alternate screen not restored"

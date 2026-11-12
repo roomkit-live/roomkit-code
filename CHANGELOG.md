@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## [0.1.2]
+## [0.1.3]
 
 Initial public binary release for Linux x86-64/ARM64 and macOS Intel/Apple Silicon.
 
@@ -27,11 +27,17 @@ Initial public binary release for Linux x86-64/ARM64 and macOS Intel/Apple Silic
 Linux requires glibc 2.35 or newer. macOS requires version 12 or newer; binaries
 are ad-hoc signed, without Apple Developer ID signing or notarization.
 
+## [0.1.2]
+
+Unpublished release attempt. Native macOS checks exposed a terminal test that
+stopped draining output while waiting for shutdown. The tag is retained;
+version 0.1.3 fixes the test and includes the initial public release features above.
+
 ## [0.1.1]
 
 Unpublished release attempt. Native checks found a macOS-only test compilation
 failure and unreliable shell file detection on Linux. The tag is retained;
-version 0.1.2 includes the fixes and the initial public release features above.
+version 0.1.3 includes the fixes and the initial public release features above.
 
 ## Development history
 

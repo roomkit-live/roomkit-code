@@ -17,6 +17,8 @@ import termios
 import threading
 import time
 
+from pty_checks import wait_for_exit
+
 metadata = json.loads(subprocess.check_output(
     ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True
 ))
@@ -120,7 +122,7 @@ def scenario(project, state, url):
         read = " ".join(tool_results(3))
         assert "closed the question without answering" in read, read
         os.write(master, b"\x04")
-        assert process.wait(timeout=10) == 0
+        assert wait_for_exit(process, master, captured) == 0
     finally:
         if process.poll() is None:
             process.kill()

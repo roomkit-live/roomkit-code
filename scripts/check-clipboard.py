@@ -20,6 +20,8 @@ import threading
 import time
 import zlib
 
+from pty_checks import wait_for_exit
+
 for command in ("Xvfb", "xclip"):
     if not shutil.which(command):
         raise SystemExit(f"Install {command} for the optional isolated clipboard check")
@@ -120,7 +122,7 @@ try:
         files = list(state.glob("projects/*/attachments/*/*.png"))
         assert len(files) == 1 and files[0].stat().st_mode & 0o777 == 0o600
         os.write(master, b"\x04")
-        assert process.wait(timeout=10) == 0
+        assert wait_for_exit(process, master, captured) == 0
         assert termios.tcgetattr(slave) == original
 finally:
     for child in (process, owner, xvfb):

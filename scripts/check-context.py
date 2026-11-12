@@ -15,6 +15,8 @@ import threading
 import time
 import unicodedata
 
+from pty_checks import wait_for_exit
+
 metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True))
 binary = Path(metadata["target_directory"]) / "debug" / "roomkit-code"
 requests = []
@@ -123,7 +125,7 @@ class App:
     def close(self):
         try:
             self.send("\x04")
-            assert self.process.wait(timeout=10) == 0, "Clean shutdown failed"
+            assert wait_for_exit(self.process, self.master, self.output) == 0, "Clean shutdown failed"
             assert termios.tcgetattr(self.slave) == self.original
         finally:
             if self.process.poll() is None:

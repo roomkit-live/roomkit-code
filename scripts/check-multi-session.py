@@ -13,6 +13,8 @@ import tempfile
 import termios
 import time
 
+from pty_checks import wait_for_exit
+
 metadata = json.loads(subprocess.check_output(
     ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True
 ))
@@ -60,7 +62,7 @@ class App:
 
     def finish(self):
         self.send("\x04")
-        self.process.wait(timeout=10)
+        wait_for_exit(self.process, self.master, self.output)
         assert self.process.returncode == 0
         assert termios.tcgetattr(self.slave) == self.original
 

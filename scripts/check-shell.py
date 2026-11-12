@@ -12,6 +12,8 @@ import tempfile
 import termios
 import time
 
+from pty_checks import wait_for_exit
+
 metadata = json.loads(subprocess.check_output(
     ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True
 ))
@@ -87,9 +89,7 @@ def scenario(project, state, resume=False):
             wait_for(b"Execution Interrupted", offset)
             assert not (project / "late.txt").exists()
         os.write(master, b"\x04")
-        assert process.wait(timeout=10) == 0, bytes(captured[-4000:])
-        while select.select([master], [], [], 0)[0]:
-            captured.extend(os.read(master, 65536))
+        assert wait_for_exit(process, master, captured) == 0, bytes(captured[-4000:])
         assert termios.tcgetattr(slave) == original
         assert b"\x1b[?1049l" in captured
         assert b"\x1b[?2004l" in captured

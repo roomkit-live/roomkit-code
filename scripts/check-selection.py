@@ -22,6 +22,8 @@ import termios
 import threading
 import time
 
+from pty_checks import wait_for_exit
+
 ROWS, COLS = 30, 120
 PARAGRAPHS = 40
 FIRST = b"Paragraph 01 of the long reply."
@@ -147,7 +149,7 @@ with tempfile.TemporaryDirectory() as directory:
         assert paragraphs == PARAGRAPHS, f"The copy holds {paragraphs} paragraphs: {text!r}"
         assert len(text.splitlines()) > ROWS, "The copy should span more lines than the screen"
         os.write(master, b"\x04")
-        assert process.wait(timeout=10) == 0
+        assert wait_for_exit(process, master, captured) == 0
         assert termios.tcgetattr(slave) == original
     finally:
         if process.poll() is None:

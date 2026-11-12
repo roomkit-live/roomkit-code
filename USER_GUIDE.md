@@ -1606,7 +1606,7 @@ sh /tmp/roomkit-code-install/install.sh
 ```
 
 For a public release, the installer can also download anonymously with curl.
-A specific stable version can be selected with `sh install.sh 0.1.2`. The
+A specific stable version can be selected with `sh install.sh 0.1.3`. The
 installer uses `sha256sum` on Linux or `shasum` on macOS, verifies the binary's
 SHA-256 and version, and installs in `~/.local/bin`. Override this with
 `ROOMKIT_CODE_BIN_DIR=/your/bin`. It never invokes sudo or edits shell profiles;

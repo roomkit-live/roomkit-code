@@ -17,6 +17,8 @@ import threading
 import time
 import unicodedata
 
+from pty_checks import wait_for_exit
+
 if os.environ.get("ROOMKIT_TEST_BINARY"):
     binary = Path(os.environ["ROOMKIT_TEST_BINARY"])
 else:
@@ -328,7 +330,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         offset = send(b"\x1b")
         wait_for(b"Enter send", offset)
         send(b"\x04")
-        process.wait(timeout=10)
+        wait_for_exit(process, master, captured)
         assert process.returncode == 0
         assert termios.tcgetattr(slave) == original
     finally:

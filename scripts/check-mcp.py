@@ -14,6 +14,8 @@ import termios
 import threading
 import time
 
+from pty_checks import wait_for_exit
+
 metadata = json.loads(subprocess.check_output(
     ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True
 ))
@@ -187,7 +189,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-mcp-pty-") as directory:
         assert http_trace.read_text() == "read\ndelete\ndelete\n"
         assert b"fixture-secret-token" not in captured
         send(b"\x04")
-        assert process.wait(timeout=10) == 0
+        assert wait_for_exit(process, master, captured) == 0
         assert termios.tcgetattr(slave) == original
     finally:
         if process.poll() is None:
