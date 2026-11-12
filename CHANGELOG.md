@@ -10,6 +10,10 @@
 - Web addresses in code (inline or in a code block) open whole with
   Cmd-click or Ctrl-click, even when wrapped over several lines; only the
   first line opened before.
+- A web address in an error below the activity line, such as OpenCode Go's
+  console link, opens whole with Cmd-click or Ctrl-click from any of its
+  lines, even where `…` cuts it. Copying the error with the mouse no longer
+  replaces it with "Copy requested".
 - A long paste shows in the input as one block, `[Pasted text #1 · 13 lines]`,
   instead of every line; the message sent carries the pasted text.
 - Kimi K2.7 Code answers through OpenCode Go: tool schemas list their
