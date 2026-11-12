@@ -471,7 +471,7 @@ def count_in(path, at_least):
         if text.isdigit() and int(text) >= at_least:
             return int(text)
         time.sleep(0.01)
-    raise AssertionError(f"{path} stopped short of {at_least}")
+    raise AssertionError(f"{path} stopped short of {at_least}; last value: {text!r}")
 
 
 def pid_in(path):
@@ -493,9 +493,14 @@ def left_running(root, model):
     pids = [pid_in(project / "job.pid"), pid_in(project / "server.pid")]
     try:
         assert code == 0, (code, err)
+        results = [message["content"] for message in model.tool_results()]
+        assert results and results[0].startswith("exit_code=0"), results
         # Fifty more lines, written to its pipes after roomkit-code exited.
         written = count_in(project / "count", 0)
-        count_in(project / "count", written + 50)
+        try:
+            count_in(project / "count", written + 50)
+        except AssertionError as error:
+            raise AssertionError(f"{error}; processes: {[(pid, alive(pid)) for pid in pids]}; tool results: {results!r}") from error
         assert [alive(pid) for pid in pids] == [True, True], pids
         assert "Left 1 background process running:" in err, err
     finally:
@@ -536,7 +541,18 @@ scenario("SIGINT interrupts the turn", [call("shell", command="sleep 30", timeou
 scenario("SIGTERM interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], lambda root, model: interrupted(root, model, signal.SIGTERM))
 scenario("the engine's stored results are read", [call("read_stored_result", result_id="evicted_unknown"), ANSWER], stored_result)
 scenario("a shell command past two minutes", [call("shell", command="printf ran > long", timeout_ms=130000), ANSWER], long_shell)
-WRITER = "(i=0; while :; do echo line; i=$((i+1)); echo $i > count; sleep 0.02; done) & echo $! > job.pid"
+# Pace within one process: launching an external sleep for every line measures
+# the runner's process-start overhead rather than continued pipe delivery.
+WRITER_SOURCE = """from pathlib import Path
+import time
+count = 0
+while True:
+    print('line', flush=True)
+    count += 1
+    Path('count').write_text(str(count))
+    time.sleep(0.02)
+"""
+WRITER = f"{shlex.quote(sys.executable)} -u -c {shlex.quote(WRITER_SOURCE)} & echo $! > job.pid"
 scenario("what the agent started runs on", [call("shell", command=WRITER), call("process_start", command="echo $$ > server.pid; exec sleep 60"), ANSWER], left_running)
 scenario("invalid launches", [ANSWER], refused_without_agent)
 scenario("watched from a terminal", [call("shell", command="sleep 3"), ANSWER], watched)
