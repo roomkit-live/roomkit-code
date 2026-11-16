@@ -187,6 +187,64 @@ async fn skills_are_opt_in_progressive_and_resume_for_the_same_agent() {
     app.close().await.unwrap();
 }
 
+/// A skill whose frontmatter adds `extra` lines, in the project's root.
+fn install_declaring(root: &std::path::Path, name: &str, extra: &str) {
+    let skill = root.join(".agents/skills").join(name);
+    std::fs::create_dir_all(&skill).unwrap();
+    std::fs::write(
+        skill.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: Fixture skill\n{extra}\n---\nBODY-OF-{name}\n"),
+    )
+    .unwrap();
+}
+
+fn declares(request: &Value, tool: &str) -> bool {
+    request["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t["function"]["name"] == tool)
+}
+
+/// The engine reads `allowed_tools` and `requires`: a skill gating `write`
+/// keeps it from the model until it is activated, and one requiring a tool
+/// the agent lacks cannot be activated.
+#[tokio::test]
+async fn a_skill_s_allowed_tools_open_on_activation_and_requires_refuses_a_missing_tool() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    install_declaring(root.path(), "guarded-writer", "allowed_tools: [write]");
+    install_declaring(root.path(), "needs-browser", "requires: [browser_open]");
+    let mock = Mock::start(vec![
+        ("activate_skill", json!({"name":"needs-browser"})),
+        ("activate_skill", json!({"name":"guarded-writer"})),
+    ])
+    .await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let listing = format!("{:?}", command(&app, "list").await.unwrap());
+    assert!(listing.contains("guarded-writer · disabled"), "{listing}");
+    assert!(listing.contains("needs-browser · disabled"), "{listing}");
+    command(&app, "enable guarded-writer").await.unwrap();
+    command(&app, "enable needs-browser").await.unwrap();
+    turn_operation(&app, "gated").await;
+    let requests = mock.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 3);
+    assert!(!declares(&requests[0], "write"));
+    let refusal = requests[1]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rfind(|m| m["role"] == "tool")
+        .unwrap()["content"]
+        .to_string();
+    assert!(refusal.contains("browser_open"), "{refusal}");
+    assert!(!refusal.contains("BODY-OF-needs-browser"), "{refusal}");
+    assert!(!declares(&requests[1], "write"));
+    assert!(declares(&requests[2], "write"));
+    app.close().await.unwrap();
+}
+
 #[tokio::test]
 async fn reload_updates_instructions_and_missing_or_disabled_skills_leave_the_catalogue() {
     let root = tempfile::tempdir().unwrap();

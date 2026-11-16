@@ -1,7 +1,7 @@
 //! Application discovery roots and per-agent selection; parsing and activation
 //! belong to roomkit-ai. No skill is made available without a host selection.
 use super::*;
-use roomkit_ai::SkillRegistry;
+use roomkit_ai::{CopyOptions, SkillRegistry};
 use roomkit_tui::protocol::{Choice, Event, PanelSpec};
 use roomkit_tui_engine::CommandResult;
 use std::path::{Path, PathBuf};
@@ -122,7 +122,10 @@ impl Catalogue {
         }
     }
 
-    pub fn selected(&self, names: &[String]) -> SkillRegistry {
+    /// The registry of the valid skills among `names`. The engine refuses a
+    /// copy whose manifest passes its bound; the catalogue's own registry
+    /// already stays within it, so a selection from it does too.
+    pub fn selected(&self, names: &[String]) -> Result<SkillRegistry, String> {
         let names = names
             .iter()
             .filter(|name| {
@@ -132,7 +135,9 @@ impl Catalogue {
             })
             .cloned()
             .collect::<Vec<_>>();
-        self.registry.copy(Some(&names))
+        self.registry
+            .copy(Some(&names), CopyOptions::default())
+            .map_err(|error| format!("Cannot select the agent's skills: {error}"))
     }
 
     fn detail(
@@ -283,7 +288,7 @@ impl Profiles {
                     .read()
                     .await
                     .selected(&[name.into()])
-                    .has_entries()
+                    .is_ok_and(|selected| selected.has_entries())
             {
                 return Err("Enable this skill for the current agent with /skills first".into());
             }
@@ -411,6 +416,7 @@ mod tests {
         assert_eq!(
             catalogue
                 .selected(&["review".into()])
+                .unwrap()
                 .get_skill("review")
                 .unwrap()
                 .instructions,
@@ -420,6 +426,7 @@ mod tests {
         assert_eq!(
             catalogue
                 .selected(&["valid".into(), "broken".into()])
+                .unwrap()
                 .skill_count(),
             1
         );
@@ -432,7 +439,12 @@ mod tests {
         let catalogue = Catalogue::load(workspace.path().into(), state.path().into())
             .await
             .unwrap();
-        assert!(!catalogue.selected(&["review".into()]).has_entries());
+        assert!(
+            !catalogue
+                .selected(&["review".into()])
+                .unwrap()
+                .has_entries()
+        );
     }
     #[cfg(unix)]
     #[tokio::test]
@@ -465,6 +477,7 @@ mod tests {
         assert!(
             !catalogue
                 .selected(&["linked".into(), "policy".into()])
+                .unwrap()
                 .has_entries()
         );
     }

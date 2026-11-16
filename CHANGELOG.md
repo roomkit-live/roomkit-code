@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A skill may declare `allowed_tools`, the tools it keeps from the agent until
+  it is activated, and `requires`, the tools its activation needs; such a
+  skill was refused before. Follows roomkit-rs f110fcc.
 - A `shell` command can run in the background as one of the agent's
   processes: with `run_in_background` it starts there and returns its
   `process_id` at once, listed in `/processes` and read with `process_read`.

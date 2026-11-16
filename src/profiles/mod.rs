@@ -331,7 +331,7 @@ impl Profiles {
         let (skills, skill_roots) = {
             let catalogue = self.skill_catalogue.read().await;
             (
-                catalogue.selected(&profile.skills),
+                catalogue.selected(&profile.skills)?,
                 catalogue.roots().to_vec(),
             )
         };

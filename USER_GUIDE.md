@@ -1183,15 +1183,23 @@ by hyphens, at most 64 characters) and `description` to what the skill does and
 when to use it (at most 1024 characters), then write Markdown instructions.
 `license` and `compatibility` are optional.
 
+Two optional fields tie a skill to tools, each a list of tool names:
+
+- `allowed_tools` names the tools the skill gates. The agent does not see
+  them until it activates the skill. `*` and `?` match any characters or one
+  character, as in `allowed_tools: [write, web_*]`.
+- `requires` names the tools the skill needs. Activating the skill is
+  refused, with the missing names, while the agent lacks one of them.
+
 Put supplementary text directly in `references/<filename>`:
 `read_skill_reference` takes the skill name and that plain filename. Not
-supported here: nested references, tool-grant fields (`allowed_tools`,
-`allowed-tools`, `requires`), other assistants' invocation fields
-(`disable-model-invocation`, `user-invocable`, `context`, `agent`) and
-`agents/openai.yaml` sidecars. Adapting an existing skill must not silently drop
-its restrictions. Bundled scripts are not run automatically: an agent runs them
-only with an available tool and the host's permission, from the skill package
-directory.
+supported here: nested references, the hyphenated `allowed-tools` of other
+assistants (kept as plain metadata, it grants and gates nothing), other
+assistants' invocation fields (`disable-model-invocation`, `user-invocable`,
+`context`, `agent`) and `agents/openai.yaml` sidecars. Adapting an existing
+skill must not silently drop its restrictions. Bundled scripts are not run
+automatically: an agent runs them only with an available tool and the host's
+permission, from the skill package directory.
 
 A plain `skills/` directory at the workspace root and other assistants'
 directories such as `~/.claude/skills` are not scanned; never guess another
