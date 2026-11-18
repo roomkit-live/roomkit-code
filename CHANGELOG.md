@@ -6,6 +6,8 @@
   delegated task runs: it reports working until the task's result is said,
   and notifies once. Running processes label the idle state, as
   `idle · 1 process`, shown where Herdr's agent rows include `state_text`.
+  The user guide's new Herdr section, an embedded document of its own,
+  gives that layout.
 - Follows roomkit-rs cbacf85. A delegated task's result reaches the agent
   that asked with its `[Background task from …]` header again: the engine now
   keeps that header only where the text opens, and the application's

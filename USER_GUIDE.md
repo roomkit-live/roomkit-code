@@ -323,23 +323,31 @@ Completion/failure stays visible until the next user interaction; exit clears it
 No status is emitted for redirected output or `TERM=dumb`. This integration
 does not need Herdr environment variables or execute `hc`.
 
-The Herdr TUI adapter activates only with `HERDR_ENV=1` and nonempty
-`HERDR_BIN_PATH`, `HERDR_SOCKET_PATH` and `HERDR_PANE_ID`. It uses that executable
-and socket without a shell. Reports use the stable source/agent `roomkit-code`;
-the separate `roomkit-code-title` metadata source is scoped to that agent.
-Only the latest observed state is retained, duplicate reports are skipped, and
-each command has a 500 ms deadline. Failures retry without blocking the UI;
-private diagnostics contain an integration error code, never raw command output.
-Exit freezes reporting, completes application cleanup, clears the title and
-releases the agent.
+Herdr's own integration has the next section.
 
-Herdr sees the whole application working while a delegated task runs, in any
-conversation, and for two seconds after the last one ends, until the turn its
-result starts shows: it notifies once, when the agent is done. Running
-processes keep no agent working, since a server runs until the application
-closes; they label the idle and done states instead, as `idle · 1 process`.
+## Herdr
+
+In a Herdr pane, RoomKit Code tells Herdr what it is doing, the title of the
+conversation and the command that reopens it. `--no-herdr` or
+`[integrations] herdr = false` turns it off.
+
+### What Herdr shows
+
+- **working** while a turn of the displayed conversation runs, and while a
+  delegated task runs, in any conversation. The last task's end keeps it
+  working for two seconds, until the turn its result starts shows: Herdr
+  notifies once, when the agent is done with it.
+- **blocked** while an approval or a question waits, a delegated task's
+  included: it asks in the view you are in.
+- **idle** otherwise, which Herdr shows as done until you look at the pane.
+
+Running processes, in any conversation, keep no agent working, since a
+server runs until the application closes. They label the idle and done states
+instead: `idle · 1 process`, `done · 2 processes`.
+
 Herdr shows that label where an agent row has `state_text`, which its default
-layout omits:
+layout omits. On a row of its own, the sidebar's width does not cut it. Add
+this to Herdr's configuration, then run `herdr server reload-config`:
 
 ```toml
 # ~/.config/herdr/config.toml
@@ -350,6 +358,11 @@ rows = [
   ["state_text"],
 ]
 ```
+
+The agent row then reads `roomkit-code`, and below it `working`,
+`idle · 1 process` or `blocked`.
+
+### Session resume
 
 Herdr's published resume command uses `roomkit-code` from `PATH`. Install it there
 before relying on pane restoration. The command preserves the absolute workspace,
@@ -364,6 +377,18 @@ apostrophes or control characters. Non-UTF-8 paths or arguments outside these
 limits disable resume while retaining status and title reporting. The adapter
 clears any previous resume command in that case. App/Core receives terminal
 status only; this TUI resume integration does not call the Core API.
+
+### How it reports
+
+The Herdr TUI adapter activates only with `HERDR_ENV=1` and nonempty
+`HERDR_BIN_PATH`, `HERDR_SOCKET_PATH` and `HERDR_PANE_ID`. It uses that executable
+and socket without a shell. Reports use the stable source/agent `roomkit-code`;
+the separate `roomkit-code-title` metadata source is scoped to that agent.
+Only the latest observed state is retained, duplicate reports are skipped, and
+each command has a 500 ms deadline. Failures retry without blocking the UI;
+private diagnostics contain an integration error code, never raw command output.
+Exit freezes reporting, completes application cleanup, clears the title and
+releases the agent.
 
 Sequence counters and exclusive reporter locks live under
 `integrations/herdr` in the default user state directory, independently of
