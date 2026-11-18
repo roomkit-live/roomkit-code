@@ -161,7 +161,8 @@ impl Anthropic {
                     thinking.add(&delta);
                 }
                 StreamEvent::ToolCall(call) => response.tool_calls.push(call.into()),
-                StreamEvent::ToolCallDelta(_) => {}
+                // The done event carries the whole usage.
+                StreamEvent::ToolCallDelta(_) | StreamEvent::Usage(_) => {}
                 StreamEvent::Done(done) => {
                     for (key, value) in done.usage {
                         if let Some(count) = value.as_u64() {

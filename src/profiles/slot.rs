@@ -128,7 +128,8 @@ impl AgentSlot {
     /// how the agent's previous turn ended when not with an answer and
     /// whether the application restarted since, then what the application
     /// tells it (`told`), then the project's instructions unless the agent's
-    /// history still holds them as they are.
+    /// history still holds them as they are. What the engine tells it comes
+    /// first ([`engine_first`]).
     async fn instruction(
         &self,
         event: &RoomEvent,
@@ -145,7 +146,9 @@ impl AgentSlot {
         self.instructions.begin(room, agent, earlier).await;
         let project = self.instructions.load(vec![], true).await.render();
         self.compactions.tell_snapshot(room, agent, &project);
-        let mut parts = vec![self.policy.instruction(room).to_owned()];
+        let (engine, told) = engine_first(event, told);
+        let mut parts: Vec<String> = engine.into_iter().collect();
+        parts.push(self.policy.instruction(room).to_owned());
         parts.extend(worker.map(str::to_owned));
         // A task's agent hands nothing on (`delegation::nesting_refusal`).
         if worker.is_none() {
@@ -224,6 +227,22 @@ impl AgentSlot {
             }
             _ => event,
         }
+    }
+}
+/// `told`, as what opens the turn's text when the engine wrote `event`
+/// (only it sets the runtime record), else as what follows the application's
+/// own parts. The engine keeps the header of a task's result it hands back
+/// only where the text opens, and replaces a copy of it anywhere else
+/// (roomkit-rs 03a1082, RMK-645).
+fn engine_first(event: &RoomEvent, told: Option<String>) -> (Option<String>, Option<String>) {
+    let written_by_engine = event
+        .metadata
+        .get(roomkit_core::rules::transcript::RUNTIME_RECORD)
+        .is_some_and(serde_json::Value::is_string);
+    if written_by_engine {
+        (told, None)
+    } else {
+        (None, told)
     }
 }
 impl Channel for AgentSlot {
@@ -322,8 +341,9 @@ impl Channel for AgentSlot {
     /// Records what the shell calls the kit's close cut changed, while the
     /// kit's store is still open: it closes the store after its channels.
     /// The agents share one file tracker, which waits for them once. Then
-    /// closes the current agent's provider; the host closes what serves its
-    /// tools.
+    /// closes the agents, which leave their providers open since roomkit-rs
+    /// 93b5fa1 (RMK-1635): those hold nothing to release. The host closes
+    /// what serves their tools.
     async fn close(&self) {
         self.files.settle(crate::timeouts::SETTLE).await;
         for agent in self.configurations() {

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Follows roomkit-rs cbacf85. A delegated task's result reaches the agent
+  that asked with its `[Background task from …]` header again: the engine now
+  keeps that header only where the text opens, and the application's
+  instruction came first, so the agent read a placeholder in its place. An
+  Anthropic request is still retried as before, with a larger budget when
+  reasoning spent its output or repaired when the API refuses its replayed
+  reasoning, now that the engine tells a request's input as it starts; a turn
+  stopped before its end counts that input in its usage.
 - A skill may declare `allowed_tools`, the tools it keeps from the agent until
   it is activated, and `requires`, the tools its activation needs; such a
   skill was refused before. Follows roomkit-rs f110fcc.

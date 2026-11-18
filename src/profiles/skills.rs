@@ -160,10 +160,10 @@ impl Catalogue {
         let mut actions = Vec::new();
         if let Some(error) = &entry.error {
             body.push_str(&format!("Unavailable: {error}\n"));
-        } else if let Some(skill) = self.registry.get_skill(name) {
+        } else if let Ok(Some(skill)) = self.registry.get_skill(name) {
             body.push_str("Instructions (preview):\n\n");
-            body.extend(skill.instructions.chars().take(12_000));
-            if skill.instructions.chars().count() > 12_000 {
+            body.extend(skill.instructions().chars().take(12_000));
+            if skill.instructions().chars().count() > 12_000 {
                 body.push_str("\n… Preview truncated; activation loads the complete instructions.");
             }
             if enabled {
@@ -419,7 +419,8 @@ mod tests {
                 .unwrap()
                 .get_skill("review")
                 .unwrap()
-                .instructions,
+                .unwrap()
+                .instructions(),
             "Native version"
         );
         assert!(catalogue.entries["broken"].error.is_some());

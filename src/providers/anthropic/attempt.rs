@@ -23,6 +23,9 @@ impl Attempt {
                 self.error = Some(error);
                 return Vec::new();
             }
+            // What the request used so far, told as its message starts, is
+            // no output: it passes on and leaves the attempt retryable.
+            Ok(usage @ StreamEvent::Usage(_)) => return vec![usage],
             Ok(event) => event,
         };
         if let StreamEvent::ThinkingDelta(delta) = &event {
@@ -93,7 +96,24 @@ impl Attempt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use roomkit_ai::StreamThinkingDelta;
+    use roomkit_ai::{StreamThinkingDelta, StreamUsage};
+
+    #[test]
+    fn usage_told_at_the_start_passes_on_without_committing() {
+        let mut attempt = Attempt::default();
+        let usage = StreamEvent::Usage(StreamUsage {
+            usage: [("input_tokens".to_owned(), 12.into())]
+                .into_iter()
+                .collect(),
+        });
+        assert_eq!(attempt.accept(Ok(usage.clone())), vec![usage]);
+        assert!(!attempt.committed);
+        attempt.accept(Ok(StreamEvent::Done(StreamDone {
+            finish_reason: Some("max_tokens".into()),
+            ..StreamDone::default()
+        })));
+        assert!(attempt.exhausted());
+    }
 
     #[test]
     fn fragmented_reasoning_does_not_disable_the_budget_retry() {

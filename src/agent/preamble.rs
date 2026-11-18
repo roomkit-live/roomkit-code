@@ -351,12 +351,13 @@ fn skill_context(skills: &SkillRegistry, roots: &[PathBuf]) -> String {
         let locations = skills
             .skill_names()
             .into_iter()
-            .filter_map(|name| skills.get_skill(name))
+            // A local skill's lookup never fails; only a served one's can.
+            .filter_map(|name| skills.get_skill(&name).ok().flatten())
             .map(|skill| {
                 format!(
                     "- {}: {}",
                     skill.name(),
-                    serde_json::json!(skill.path.to_string_lossy())
+                    serde_json::json!(skill.path().to_string_lossy())
                 )
             })
             .collect::<Vec<_>>()

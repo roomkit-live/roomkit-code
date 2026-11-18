@@ -1,5 +1,7 @@
 //! Private project configuration. Credentials are resolved only at connection time.
-use roomkit_mcp::{FromCommandOptions, FromUrlOptions, McpToolProvider};
+use roomkit_mcp::{
+    FromCommandOptions, FromUrlOptions, McpEnvironment, McpHeaders, McpToolProvider,
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, time::Duration};
 
@@ -125,7 +127,7 @@ impl Transport {
 /// none for a URL or a header it refuses.
 fn endpoint(url: &str, headers: BTreeMap<String, String>) -> Option<McpToolProvider> {
     let options = FromUrlOptions {
-        headers,
+        headers: Some(McpHeaders::new(headers)),
         ..FromUrlOptions::default()
     };
     McpToolProvider::from_url(url, options).ok()
@@ -182,7 +184,7 @@ impl Server {
                 }
                 let options = FromCommandOptions {
                     args: args.iter().map(Into::into).collect(),
-                    env,
+                    env: Some(McpEnvironment::new(env)),
                     cwd: Some(workspace.to_path_buf()),
                     label,
                     connect_timeout,
@@ -216,7 +218,7 @@ impl Server {
                     sent.insert("authorization".into(), format!("Bearer {token}"));
                 }
                 let options = FromUrlOptions {
-                    headers: sent,
+                    headers: Some(McpHeaders::new(sent)),
                     label,
                     connect_timeout,
                     ..FromUrlOptions::default()

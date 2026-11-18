@@ -4,6 +4,9 @@ ignore = [
     # Inherited from the TUI: Syntect loads only its embedded syntax grammars.
     # Revisit when the upstream highlighter replaces bincode 1.3.3.
     { id = "RUSTSEC-2025-0141", reason = "Syntect only loads trusted bundled grammars; no external bincode input" },
+    # chrono is unmaintained, not vulnerable, and has no safe upgrade. It comes
+    # through rmcp (roomkit-mcp); revisit when rmcp drops it.
+    { id = "RUSTSEC-2026-0543", reason = "chrono through rmcp; unmaintained, no known vulnerability" },
 ]
 
 [licenses]
@@ -21,6 +24,7 @@ multiple-versions = "deny"
 wildcards = "deny"
 skip = [
     { crate = "base64@0.23", reason = "jsonwebtoken 11 (roomkit-auth) still uses 0.22" },
+    { crate = "fancy-regex@0.20", reason = "syntect 5.3 (roomkit-tui) still uses 0.16" },
     { crate = "foldhash@0.2", reason = "hashbrown 0.15, through petgraph, still uses 0.1" },
     { crate = "getrandom@0.4", reason = "ring 0.17 and jsonwebtoken 11 still use 0.2" },
     { crate = "hashbrown@0.17", reason = "petgraph (wl-clipboard-rs, through arboard) still uses 0.15" },
@@ -31,6 +35,7 @@ skip = [
 ]
 deny = [
     { crate = "base64@0.22", wrappers = ["jsonwebtoken"] },
+    { crate = "fancy-regex@0.16", wrappers = ["syntect"] },
     { crate = "foldhash@0.1", wrappers = ["hashbrown"] },
     { crate = "getrandom@0.2", wrappers = ["ring", "jsonwebtoken"] },
     { crate = "hashbrown@0.15", wrappers = ["petgraph"] },

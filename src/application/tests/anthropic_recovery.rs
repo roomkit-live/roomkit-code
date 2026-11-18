@@ -375,6 +375,9 @@ async fn dropping_the_stream_before_the_retry_prevents_another_request() {
         ..AiContext::default()
     };
     let mut stream = provider.generate_structured_stream(&context);
+    // The first request tells its input as it starts, then reports its end.
+    let told = std::future::poll_fn(|cx| stream.as_mut().poll_next(cx)).await;
+    assert!(matches!(told, Some(Ok(StreamEvent::Usage(_)))));
     let first = std::future::poll_fn(|cx| stream.as_mut().poll_next(cx)).await;
     assert!(matches!(first, Some(Ok(StreamEvent::Done(_)))));
     drop(stream);
