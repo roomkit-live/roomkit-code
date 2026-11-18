@@ -92,6 +92,8 @@ pub(crate) struct Compactions {
     dir: PathBuf,
     /// The conversations read so far, by room.
     rooms: Mutex<HashMap<String, Record>>,
+    /// Held while a room's file is written: one write at a time ([`Self::save`]).
+    saving: Mutex<()>,
     /// The agents whose memory compacts, by ID: those with a known window.
     bounded: Mutex<HashSet<String>>,
     /// Whether an agent's memory compacts where it runs with a configuration
@@ -138,6 +140,7 @@ impl Compactions {
         Self {
             dir: dir.into(),
             rooms: Mutex::default(),
+            saving: Mutex::default(),
             bounded: Mutex::default(),
             fitted: Mutex::default(),
             forced: Mutex::default(),
@@ -249,17 +252,12 @@ impl Compactions {
             return;
         };
         let from = compacted.from;
-        // Written outside the lock: another conversation's turn need not
-        // wait for this one's file.
-        let record = {
-            let mut rooms = crate::sync::lock(&self.rooms);
-            let record = rooms.entry(room.into()).or_insert_with(|| self.read(room));
-            record.agents.insert(agent.into(), compacted);
-            Record {
-                agents: record.agents.clone(),
-            }
-        };
-        let unsaved = self.write(room, &record).is_err();
+        crate::sync::lock(&self.rooms)
+            .entry(room.into())
+            .or_insert_with(|| self.read(room))
+            .agents
+            .insert(agent.into(), compacted);
+        let unsaved = self.save(room).is_err();
         let told = line::Told {
             room,
             agent,
@@ -483,6 +481,20 @@ impl Compactions {
             Ok(serde_json::from_reader(std::io::BufReader::new(file))?)
         };
         read().unwrap_or_default()
+    }
+
+    /// Writes `room`'s record as it then stands, outside the rooms' lock:
+    /// another conversation's turn need not wait for this one's file. One
+    /// write at a time, each taking the record as it starts: a copy taken
+    /// before another change never lands after that change's own write.
+    fn save(&self, room: &str) -> std::io::Result<()> {
+        let _saving = crate::sync::lock(&self.saving);
+        let record = crate::sync::lock(&self.rooms)
+            .get(room)
+            .map(|record| Record {
+                agents: record.agents.clone(),
+            });
+        record.map_or(Ok(()), |record| self.write(room, &record))
     }
 
     /// Replaces `room`'s file with `record`, readable by its owner alone.

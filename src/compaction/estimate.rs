@@ -19,7 +19,7 @@ use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::{ContextUsage, Event};
 use serde::{Deserialize, Serialize};
 
-use super::{Compactions, Record};
+use super::Compactions;
 
 /// How many of the agent's latest rows are read for a turn's record, which
 /// its last row holds.
@@ -111,24 +111,21 @@ impl Compactions {
     /// Forgets `estimate` of `agent`'s conversation in `room`, on disk too.
     /// A compaction made meanwhile keeps its own.
     fn forget(&self, room: &str, agent: &str, estimate: &Estimate) {
-        let record = {
+        {
             let mut rooms = crate::sync::lock(&self.rooms);
-            let Some(record) = rooms.get_mut(room) else {
-                return;
-            };
-            match record.agents.get_mut(agent) {
+            let compacted = rooms
+                .get_mut(room)
+                .and_then(|record| record.agents.get_mut(agent));
+            match compacted {
                 Some(compacted) if compacted.estimate.as_ref() == Some(estimate) => {
                     compacted.estimate = None;
                 }
                 _ => return,
             }
-            Record {
-                agents: record.agents.clone(),
-            }
-        };
+        }
         // Forgotten for this launch if not on disk: the next one reads the
         // agent's rows again.
-        let _ = self.write(room, &record);
+        let _ = self.save(room);
     }
 }
 
@@ -159,6 +156,7 @@ mod tests {
     #![allow(clippy::unwrap_used, reason = "A broken fixture fails the test")]
     use super::super::Compacted;
     use super::*;
+    use std::sync::Arc;
     use std::time::Duration;
 
     fn compacted(tokens: u64) -> Compacted {
@@ -201,6 +199,51 @@ mod tests {
         let kept = Compactions::new(dir.path()).get("room", "code").unwrap();
         assert_eq!(kept.estimate, None);
         assert_eq!(kept.summary, second.summary);
+    }
+
+    /// An older estimate forgotten while a compaction is recorded: whichever
+    /// write lands last, the file holds the conversation as it stands. A copy
+    /// taken before the compaction once landed after it, and the next launch
+    /// read the older summary.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_file_ends_with_the_latest_compaction_whatever_the_writes_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let compactions = Arc::new(Compactions::new(dir.path()));
+        let told = ((1, 1), Duration::ZERO, false);
+        let made = |k: u64| Compacted {
+            from: k,
+            summary: format!("Summary {k}"),
+            ..compacted(1_000 + k)
+        };
+        compactions
+            .record(("room", "code"), (made(0), 2), told)
+            .await;
+        let until = |done: &dyn Fn() -> bool| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !done() {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        // Both changes are made while the file is held; both writes wait.
+        let saving = crate::sync::lock(&compactions.saving);
+        let (forgetting, older) = (compactions.clone(), made(0).estimate.unwrap());
+        let forget = std::thread::spawn(move || forgetting.forget("room", "code", &older));
+        until(&|| compactions.get("room", "code").unwrap().estimate.is_none());
+        let recording = compactions.clone();
+        let record = tokio::spawn(async move {
+            recording.record(("room", "code"), (made(1), 2), told).await;
+        });
+        until(&|| compactions.get("room", "code").unwrap().summary == "Summary 1");
+        drop(saving);
+        forget.join().unwrap();
+        record.await.unwrap();
+        let on_disk = Compactions::new(dir.path()).get("room", "code");
+        assert_eq!(on_disk.map(|c| c.summary), Some("Summary 1".into()));
+        assert_eq!(
+            Compactions::new(dir.path()).get("room", "code"),
+            compactions.get("room", "code")
+        );
     }
 
     /// A record written before compactions kept an estimate is read as one
