@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Copying with the mouse works on macOS whatever the terminal: a copy also
+  writes the Mac's own clipboard, beside OSC 52, which Terminal ignores and
+  iTerm2 refuses by default; it read "Copy requested" while nothing was
+  copied. Over SSH the terminal alone copies, as before. Follows roomkit-tui
+  c1c1586.
+
 ## [0.2.0]
 
 Second public binary release for Linux x86-64/ARM64 and macOS Intel/Apple

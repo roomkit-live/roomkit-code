@@ -96,7 +96,9 @@ shutdown. After a crash, the operating system releases ownership automatically.
 saved profiles, contacting a provider or creating state. `--help` lists all options. Terminal controls
 are provided by `roomkit-tui`: F2 expands tool details, clicking a tool's
 disclosure does the same, and dragging text requests clipboard copying through
-OSC 52 when supported by the terminal. `--native-selection` delegates selection
+OSC 52 when supported by the terminal. On macOS, outside SSH, it also writes
+the Mac's own clipboard, so copying works in Terminal, which ignores OSC 52,
+and in iTerm2, which refuses it by default. `--native-selection` delegates selection
 to the terminal and disables application mouse interactions. Ctrl+D detaches;
 this local application then closes its owned engine. While processes run, the
 first Ctrl+D does not exit: press it again within two seconds. The exit hint
