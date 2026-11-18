@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Builds on RoomKit Rust 0.2.0: follows roomkit-rs at its `v0.2.0` tag, with
+  roomkit-tools 878feb5 and roomkit-tui 26c67c8, which follow it too.
 - Choosing a model, with `/model`, **Change model** or for a new agent, takes
   the context capacity its server reports for it, or clears it when it reports
   none: the agent compacts under that model's window, no longer the one it
