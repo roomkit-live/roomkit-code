@@ -60,6 +60,9 @@ pub(crate) struct Profiles {
     pub(crate) images: Arc<crate::images::Images>,
     skill_catalogue: tokio::sync::RwLock<skills::Catalogue>,
     pub(crate) mcp_runtime: mcp::Runtime,
+    /// The context capacity each connection's server reported for its
+    /// models in its latest listing, by connection and model.
+    reported: std::sync::Mutex<std::collections::HashMap<(String, String), u64>>,
     state: Mutex<State>,
 }
 
@@ -221,6 +224,7 @@ impl Profiles {
             processes: crate::processes::Processes::new(resources.processes.clone()),
             resources,
             mcp_runtime: mcp::Runtime::default(),
+            reported: std::sync::Mutex::default(),
             state: Mutex::new(State {
                 instructions,
                 compactions,

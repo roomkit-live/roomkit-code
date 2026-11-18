@@ -362,7 +362,7 @@ impl Profiles {
                             None,
                             &state,
                             uuid::Uuid::new_v4().to_string(),
-                            Some((id, model)),
+                            Some((id, model, self.reported(id, model))),
                         )?;
                         Ok(open_form(&mut state, &current, form, Target::Agent(None)))
                     }
@@ -374,7 +374,7 @@ impl Profiles {
                         if !listable(model) {
                             return Err("Invalid agent/model selection".into());
                         }
-                        agent.model = model.into();
+                        self.switch(&mut agent, model);
                         let target = Target::Agent(Some(agent.id.clone()));
                         let id = uuid::Uuid::new_v4().to_string();
                         let form = agent_form(Some(&agent), &state, id, None)?;
@@ -769,7 +769,7 @@ fn agent_form(
     existing: Option<&Agent>,
     state: &State,
     id: String,
-    preset: Option<(&str, &str)>,
+    preset: Option<(&str, &str, Option<u64>)>,
 ) -> Result<FormSpec, String> {
     if state.providers.value.profiles.is_empty() {
         return Err("Add a connection with /providers first".into());
@@ -791,7 +791,7 @@ fn agent_form(
         vision: false,
         skills: Vec::new(),
         mcp: BTreeMap::new(),
-        context_window: None,
+        context_window: preset.and_then(|p| p.2),
         max_output_tokens: None,
         instructions: String::new(),
         tools: TOOLS.iter().map(|s| (*s).into()).collect(),

@@ -40,7 +40,7 @@ impl Profiles {
                 })
                 .collect());
         }
-        Ok(discover(provider)
+        let served: Vec<Served> = discover(provider)
             .await?
             .into_iter()
             .map(|(id, capacity)| Served {
@@ -48,7 +48,31 @@ impl Profiles {
                 id,
                 capacity,
             })
-            .collect())
+            .collect();
+        let mut reported = crate::sync::lock(&self.reported);
+        reported.retain(|(connection, _), _| *connection != provider.id);
+        for model in &served {
+            if let Some(capacity) = model.capacity {
+                reported.insert((provider.id.clone(), model.id.clone()), capacity);
+            }
+        }
+        Ok(served)
+    }
+
+    /// The context capacity `connection`'s server reported for `model` in
+    /// its latest listing.
+    pub(super) fn reported(&self, connection: &str, model: &str) -> Option<u64> {
+        let key = (connection.to_owned(), model.to_owned());
+        crate::sync::lock(&self.reported).get(&key).copied()
+    }
+
+    /// `agent` on `model`, with the capacity its server reported for it: the
+    /// compaction's ceiling is that model's, not the one it replaces.
+    pub(super) fn switch(&self, agent: &mut Agent, model: &str) {
+        if let Some(capacity) = self.reported(&agent.provider, model) {
+            agent.context_window = Some(capacity);
+        }
+        agent.model = model.into();
     }
 
     /// The models `provider` serves, each opening the form of a new agent

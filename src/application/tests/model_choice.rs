@@ -343,14 +343,23 @@ async fn adding_an_agent_lists_its_connections_models_before_its_form() {
         )
         .await,
     );
+    // The capacity its server reported comes with the model.
     assert_eq!(
-        (&form["provider"][..], &form["model"][..]),
-        (local.as_str(), "discovered-model")
+        (
+            &form["provider"][..],
+            &form["model"][..],
+            &form["context"][..]
+        ),
+        (local.as_str(), "discovered-model", "32768")
     );
     let form = opened(&invoke(&app, "providers", &format!("typed:{local}")).await);
     assert_eq!(
-        (&form["provider"][..], &form["model"][..]),
-        (local.as_str(), "")
+        (
+            &form["provider"][..],
+            &form["model"][..],
+            &form["context"][..]
+        ),
+        (local.as_str(), "", "")
     );
 
     // Several: it asks for the connection first; one without a list leaves
@@ -424,15 +433,20 @@ async fn an_agent_changes_its_model_from_its_connections_list_in_its_form() {
     // The agent's own form opens with that model, its other settings kept.
     let mut form = opened(&invoke(&app, "agents", "use-model:code:discovered-model").await);
     let mut edited = opened(&invoke(&app, "agents", "edit:code").await);
+    // The capacity its server reported comes with the model: the agent
+    // compacts under that model's window, not the one it replaces.
     assert_eq!(
-        (&form["id"][..], &form["model"][..]),
-        ("code", "discovered-model")
+        (&form["id"][..], &form["model"][..], &form["context"][..]),
+        ("code", "discovered-model", "32768")
     );
-    form.remove("model");
-    edited.remove("model");
+    for changed in ["model", "context"] {
+        form.remove(changed);
+        edited.remove(changed);
+    }
     assert_eq!(form, edited);
     edit_profile(&mut app, "agents", "use-model:code:discovered-model", &[]).await;
     assert_eq!(app.view.model.as_ref().unwrap().model, "discovered-model");
+    assert_eq!(app.view.context_capacity, Some(32_768));
     turn_operation(&app, "after-change").await;
     assert_eq!(
         mock.requests.lock().unwrap().last().unwrap()["model"],
