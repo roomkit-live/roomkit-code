@@ -175,15 +175,11 @@ impl<P: AiProvider> TieredMemory<P> {
             .drain(..cut)
             .filter(|event| event.r#type == EventType::Message)
             .count();
-        let mut made = Compacted {
-            from: events.first().map_or(0, |event| event.index),
-            summary: written,
-            snapshot: self.compactions.snapshot(room, agent),
-            summarized: compacted.map_or(0, |c| c.summarized) + summarized,
-            at: newest,
-            recorded: self.compactions.recorded(room, agent).await,
-            estimate: None,
-        };
+        let kept = events.first().map_or(0, |event| event.index);
+        let mut made = self
+            .made((room, agent), compacted, (written, kept, newest), measured)
+            .await;
+        made.summarized += summarized;
         let sizes = (measured.now(compacted), measured.total(Some(&made), cut));
         // The size after it, which its line tells, is the views' to show
         // until a turn measures the conversation again.
@@ -197,6 +193,36 @@ impl<P: AiProvider> TieredMemory<P> {
             .record((room, agent), (made.clone(), summarized), told)
             .await;
         Some(made)
+    }
+
+    /// The compaction `written` makes of `agent`'s history in `room` since
+    /// `compacted`, keeping whole the events from the index `kept` on, as of
+    /// the newest event, `newest`: what it carries beside the summary, and
+    /// the messages `compacted` summarized. It estimates nothing yet.
+    async fn made(
+        &self,
+        (room, agent): (&str, &str),
+        compacted: Option<&Compacted>,
+        (written, kept, newest): (String, u64, u64),
+        measured: &Measured,
+    ) -> Compacted {
+        Compacted {
+            from: kept,
+            summary: written,
+            // After a relaunch, until a turn tells the project's snapshot,
+            // the previous compaction's stands for it.
+            snapshot: self
+                .compactions
+                .snapshot(room, agent)
+                .or_else(|| compacted.and_then(|c| c.snapshot.clone())),
+            summarized: compacted.map_or(0, |c| c.summarized),
+            at: newest,
+            recorded: self.compactions.recorded(room, agent).await,
+            estimate: None,
+            fixed: u64::try_from(measured.fixed)
+                .ok()
+                .filter(|fixed| *fixed > 0),
+        }
     }
 
     /// How many of `events`, `agent`'s history up to the room's row
@@ -248,9 +274,20 @@ impl<P: AiProvider> Compactor for TieredMemory<P> {
             let after = compacted.map_or(0, |c| c.at);
             let mut footprint = TurnFootprint::new(0, 0);
             footprint.replayed = replayed;
+            // This launch's latest turn measured it, else the latest request
+            // since the compaction, else the compaction counted it.
             let known = crate::sync::lock(&self.fixed).get(room).copied();
+            let carried = compacted
+                .and_then(|c| c.fixed)
+                .and_then(|fixed| usize::try_from(fixed).ok());
             footprint.input_tokens = known.unwrap_or_else(|| {
-                measure(&events, (agent, after), &footprint).fixed_measured(compacted)
+                let measured =
+                    measure(&events, (agent, after), &footprint).fixed_measured(compacted);
+                if measured > 0 {
+                    measured
+                } else {
+                    carried.unwrap_or(0)
+                }
             });
             let measured = measure(&events, (agent, after), &footprint);
             let newest = events.last().map_or(0, |event| event.index);
@@ -445,5 +482,57 @@ mod tests {
         );
         assert_eq!(read.events.first().map(|e| e.index), Some(compacted.from));
         assert_eq!(read.messages.len(), 1, "the summary stands for the rest");
+    }
+
+    /// `agent`'s history of `count` turns, from index 1: a message, then
+    /// the agent's answer, which ends its turn.
+    fn turns(count: u64) -> Vec<RoomEvent> {
+        (1..=count * 2)
+            .map(|index| {
+                let own = index % 2 == 0;
+                let mut event = said(index, if own { "code" } else { "terminal" }, None);
+                if own {
+                    let ended = serde_json::json!("complete");
+                    event.metadata.insert("loop_end_reason".into(), ended);
+                }
+                event
+            })
+            .collect()
+    }
+
+    /// After a relaunch no turn told the project's snapshot, nor measured
+    /// what a request takes besides its history: `/compact` then wrote a
+    /// summary without the snapshot and told a size short of the system
+    /// prompt and the tools. It now carries the previous compaction's.
+    #[tokio::test]
+    async fn a_compaction_after_a_relaunch_carries_the_previous_snapshot_and_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let previous = Compacted {
+            from: 0,
+            summary: "Earlier.".into(),
+            snapshot: Some("PROJECT RULES".into()),
+            summarized: 1,
+            at: 0,
+            recorded: None,
+            estimate: None,
+            fixed: Some(30_000),
+        };
+        let told = ((1, 1), std::time::Duration::ZERO, false);
+        Compactions::new(dir.path())
+            .record(("room", "code"), (previous, 1), told)
+            .await;
+        let relaunched = Arc::new(Compactions::new(dir.path()));
+        let provider = ScriptedProvider::new([ScriptedRound::answering("They talked.")]);
+        let memory = TieredMemory::new(provider, (100_000, "code"), relaunched.clone());
+        let history = History {
+            events: turns(6),
+            replayed: Vec::new(),
+        };
+        memory.compact_now("room", history).await;
+        let made = relaunched.get("room", "code").unwrap();
+        assert_ne!(made.summary, "Earlier.", "it compacted");
+        assert_eq!(made.snapshot.as_deref(), Some("PROJECT RULES"));
+        assert!(made.estimate.unwrap().tokens > 30_000);
+        assert_eq!(made.fixed, Some(30_000));
     }
 }

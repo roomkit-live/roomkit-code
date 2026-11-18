@@ -78,6 +78,11 @@ pub(crate) struct Compacted {
     /// or for a compaction made before it was kept.
     #[serde(default)]
     pub estimate: Option<Estimate>,
+    /// What the agent's requests took besides their history when it was
+    /// made, the system prompt and the tools: a compaction after a relaunch,
+    /// which no turn measured yet, counts it. None when unknown.
+    #[serde(default)]
+    pub fixed: Option<u64>,
 }
 
 /// One conversation's file: each agent's compaction.
@@ -531,6 +536,7 @@ mod tests {
             at: from + 9,
             recorded: Some("Recorded by the application: a plan.".into()),
             estimate: None,
+            fixed: None,
         }
     }
 

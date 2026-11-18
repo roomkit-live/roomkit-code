@@ -173,6 +173,7 @@ mod tests {
                 model: "fixture-model".into(),
                 after: 9,
             }),
+            fixed: None,
         }
     }
 

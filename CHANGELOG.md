@@ -8,7 +8,10 @@
   a large window. The conversation now compacts past 1,600 rows too, and keeps
   whole no more than 600. A compaction's file on disk is also written as the
   conversation then stands: a write started before a newer compaction could
-  land after it, and the next launch read the older summary.
+  land after it, and the next launch read the older summary. After a
+  relaunch, `/compact` before any turn carries the previous compaction's
+  `AGENTS.md` snapshot, and counts the system prompt and the tools in the size
+  it tells.
 - Herdr no longer reports the application idle, and the agent done, while a
   delegated task runs: it reports working until the task's result is said,
   and notifies once. Running processes label the idle state, as
