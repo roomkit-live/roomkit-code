@@ -1,29 +1,17 @@
 //! Human controls for app-owned background processes; never model tool calls.
-use std::{collections::BTreeMap, num::NonZeroUsize, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use roomkit::model::{Access, ChannelId, RoomId};
 use roomkit::{GetRoomOptions, ListBindingsOptions, RoomKit};
 use roomkit_sqlite::SqliteStore;
-use roomkit_tools_process::{
-    ObservedProcess, ProcessChunk, ProcessReadInput, ProcessSession, ProcessState, ProcessStopInput,
-};
-use roomkit_tui::protocol::{
-    Choice, Event, PanelSpec, SidebarContent, SidebarEntry, SidebarSection, SidebarTone,
-};
-use roomkit_tui_engine::{CommandResult, SessionConfig};
+use roomkit_tools_process::{ObservedProcess, ProcessSession, ProcessState};
+use roomkit_tui::protocol::{Event, SidebarContent, SidebarEntry, SidebarSection, SidebarTone};
+use roomkit_tui_engine::SessionConfig;
 use tokio::sync::watch;
-use tokio_util::sync::CancellationToken;
 
-const PAGE: u64 = 4096;
+mod panel;
 
-#[derive(Clone)]
-struct Panel {
-    id: String,
-    room: String,
-    agent: String,
-    selected: Option<String>,
-    offsets: Option<(u64, u64)>, // None follows the tail; Some reads fixed pages.
-}
+use panel::Panel;
 
 pub(crate) struct Processes {
     manager: ProcessSession,
@@ -112,9 +100,10 @@ impl Processes {
         let mut task_changes = tasks.subscribe();
         tokio::spawn(async move {
             loop {
-                let panel = panel_changes.borrow_and_update().clone().filter(|p| {
-                    p.room == current.room.as_str() && p.agent == current.agent.as_str()
-                });
+                let panel = panel_changes
+                    .borrow_and_update()
+                    .clone()
+                    .filter(|p| p.belongs_to(&current));
                 let jobs = this.jobs(&kit, &viewer, &current).await;
                 let running = running(&jobs);
                 let mut events = Vec::from(this.background(&current, running, &tasks).await);
@@ -190,257 +179,6 @@ impl Processes {
         }
         jobs
     }
-
-    pub async fn handle(
-        &self,
-        kit: &RoomKit<SqliteStore>,
-        viewer: &ChannelId,
-        current: &SessionConfig,
-        arguments: &str,
-    ) -> Result<CommandResult, String> {
-        let jobs = self.jobs(kit, viewer, current).await;
-        let mut panel = if !arguments.contains(':') {
-            let selected = if arguments.is_empty() {
-                None
-            } else {
-                if !jobs
-                    .iter()
-                    .any(|job| job.process.status.process_id == arguments)
-                {
-                    return Err("Process is no longer available to this view".into());
-                }
-                Some(arguments.into())
-            };
-            Panel {
-                id: uuid::Uuid::new_v4().to_string(),
-                room: current.room.to_string(),
-                agent: current.agent.to_string(),
-                selected,
-                offsets: None,
-            }
-        } else {
-            let previous = self
-                .panel
-                .borrow()
-                .clone()
-                .ok_or("This process panel is no longer open")?;
-            let (id, action) = arguments.split_once(':').ok_or("Invalid process action")?;
-            if id != previous.id
-                || previous.room != current.room.as_str()
-                || previous.agent != current.agent.as_str()
-            {
-                return Err("This process action belongs to an older view".into());
-            }
-            if action == "dismiss" {
-                self.panel.send_replace(None);
-                return Ok(CommandResult::Events(Vec::new()));
-            }
-            let mut panel = previous;
-            if action == "list" {
-                panel.selected = None;
-                panel.offsets = None;
-            } else if let Some(id) = action.strip_prefix("open:") {
-                if !jobs.iter().any(|j| j.process.status.process_id == id) {
-                    return Err("Process is no longer available to this view".into());
-                }
-                panel.selected = Some(id.into());
-                panel.offsets = None;
-            } else {
-                let job = jobs
-                    .iter()
-                    .find(|j| Some(&j.process.status.process_id) == panel.selected.as_ref())
-                    .ok_or("Process is no longer available to this view")?;
-                match action {
-                    "stop" | "forget" => {
-                        if !job.writable {
-                            return Err("This conversation is read-only".into());
-                        }
-                        if action == "forget" && job.process.status.state != ProcessState::Finished
-                        {
-                            return Err("Stop the process before forgetting its record".into());
-                        }
-                        self.manager
-                            .stop(
-                                job.process.owner.as_deref(),
-                                ProcessStopInput {
-                                    process_id: job.process.status.process_id.clone(),
-                                    forget: action == "forget",
-                                },
-                                &CancellationToken::new(),
-                            )
-                            .await
-                            .map_err(|_| "Could not stop or forget this process")?;
-                        if action == "forget" {
-                            panel.selected = None;
-                            panel.offsets = None;
-                        }
-                    }
-                    "tail" => panel.offsets = None,
-                    "first" => {
-                        panel.offsets = Some((
-                            job.process.status.stdout_retained_from,
-                            job.process.status.stderr_retained_from,
-                        ))
-                    }
-                    "previous" | "next" => {
-                        let (out, err) = offsets(&panel, job);
-                        panel.offsets = Some(if action == "previous" {
-                            (
-                                out.saturating_sub(PAGE)
-                                    .max(job.process.status.stdout_retained_from),
-                                err.saturating_sub(PAGE)
-                                    .max(job.process.status.stderr_retained_from),
-                            )
-                        } else {
-                            (
-                                out.saturating_add(PAGE)
-                                    .min(job.process.status.stdout_bytes),
-                                err.saturating_add(PAGE)
-                                    .min(job.process.status.stderr_bytes),
-                            )
-                        });
-                    }
-                    _ => return Err("Unknown process action".into()),
-                }
-            }
-            panel
-        };
-        // Fresh identity for every navigation/action prevents late refreshes and
-        // double clicks from applying to another command or output page.
-        panel.id = uuid::Uuid::new_v4().to_string();
-        let jobs = self.jobs(kit, viewer, current).await;
-        let spec = self.render(&panel, &jobs).await;
-        self.panel.send_replace(Some(panel));
-        Ok(CommandResult::Events(vec![Event::Panel {
-            conversation: current.room.as_str().into(),
-            panel: spec,
-        }]))
-    }
-
-    async fn render(&self, panel: &Panel, jobs: &[Job]) -> PanelSpec {
-        let mut spec = PanelSpec::new(
-            panel.id.clone(),
-            "processes",
-            "Background processes · current application",
-            "",
-        )
-        .with_dismiss(format!("{}:dismiss", panel.id));
-        let action = |value: &str, label: &str, description: &str| {
-            Choice::new(format!("{}:{value}", panel.id), label).with_description(description)
-        };
-        if let Some(id) = &panel.selected {
-            spec.actions
-                .push(action("list", "Back to process list", ""));
-            let Some(job) = jobs.iter().find(|j| &j.process.status.process_id == id) else {
-                spec.body = "Process is no longer retained or accessible.".into();
-                return spec;
-            };
-            let p = &job.process;
-            spec.title = format!("Process {} · {}", id, state(job));
-            spec.body = format!(
-                "Command: {}\nOwner: {}\nConversation: {}\nDirectory: {}\nElapsed: {}s · Lifetime limit: {}s\nState: {} · Exit: {} · Signal: {}\n\n",
-                p.command,
-                job.agent,
-                job.room,
-                p.status.cwd,
-                p.elapsed.as_secs(),
-                p.status.timeout_ms / 1000,
-                state(job),
-                p.status
-                    .exit_code
-                    .map_or_else(|| "—".into(), |n| n.to_string()),
-                p.status
-                    .signal
-                    .map_or_else(|| "—".into(), |n| n.to_string())
-            );
-            if let Some(error) = &p.status.error {
-                spec.body.push_str(&format!("Capture/cleanup: {error}\n"));
-            }
-            let (stdout, stderr) = offsets(panel, job);
-            let read = self
-                .manager
-                .read(
-                    p.owner.as_deref(),
-                    ProcessReadInput {
-                        stdout_offset: stdout,
-                        stderr_offset: stderr,
-                        max_bytes: NonZeroUsize::new(PAGE as usize),
-                        ..ProcessReadInput::new(id.clone())
-                    },
-                    &CancellationToken::new(),
-                )
-                .await;
-            match read {
-                Ok(output) => {
-                    spec.body.push_str(if panel.offsets.is_none() {
-                        "Following latest output (bounded tail)\n"
-                    } else {
-                        "Fixed output page\n"
-                    });
-                    chunk(&mut spec.body, "stdout", &output.data.stdout);
-                    chunk(&mut spec.body, "stderr", &output.data.stderr);
-                }
-                Err(_) => spec.body.push_str("Output is no longer available.\n"),
-            }
-            if job.writable {
-                if p.status.state == ProcessState::Running {
-                    spec.actions.push(action(
-                        "stop",
-                        "Stop process",
-                        "Terminate this command and its process group",
-                    ));
-                } else {
-                    spec.actions.push(action(
-                        "forget",
-                        "Forget completed process",
-                        "Remove its retained process record",
-                    ));
-                }
-            }
-            for (value, label) in [
-                ("first", "First retained output"),
-                ("previous", "Previous output page"),
-                ("next", "Next output page"),
-                ("tail", "Follow latest output"),
-            ] {
-                spec.actions.push(action(value, label, ""));
-            }
-        } else {
-            spec.body = "Running processes across accessible conversations and owners.\nFinished processes leave this list automatically. Closing the application stops running processes.\n\n".into();
-            let running: Vec<_> = jobs
-                .iter()
-                .filter(|job| job.process.status.state == ProcessState::Running)
-                .collect();
-            if running.is_empty() {
-                spec.body.push_str("No running processes.\n");
-            }
-            for job in running {
-                let p = &job.process;
-                let command = p.command.split_whitespace().collect::<Vec<_>>().join(" ");
-                let command: String = command.chars().take(48).collect();
-                let description = format!(
-                    "{} · {}s · owner {} · conversation {}",
-                    state(job),
-                    p.elapsed.as_secs(),
-                    job.agent,
-                    job.room
-                )
-                .chars()
-                .take(120)
-                .collect::<String>();
-                spec.body.push_str(&format!(
-                    "{}  {command}\n  {description}\n",
-                    p.status.process_id
-                ));
-                spec.actions.push(action(
-                    &format!("open:{}", p.status.process_id),
-                    &format!("{}  {command}", p.status.process_id),
-                    &description,
-                ));
-            }
-        }
-        spec
-    }
 }
 
 async fn room_access(
@@ -486,68 +224,6 @@ fn running(jobs: &[Job]) -> usize {
     jobs.iter()
         .filter(|job| job.process.status.state == ProcessState::Running)
         .count()
-}
-
-fn offsets(panel: &Panel, job: &Job) -> (u64, u64) {
-    panel.offsets.unwrap_or_else(|| {
-        (
-            job.process
-                .status
-                .stdout_bytes
-                .saturating_sub(PAGE)
-                .max(job.process.status.stdout_retained_from),
-            job.process
-                .status
-                .stderr_bytes
-                .saturating_sub(PAGE)
-                .max(job.process.status.stderr_retained_from),
-        )
-    })
-}
-
-fn state(job: &Job) -> &'static str {
-    use roomkit_tools_process::ProcessEnd;
-    match (job.process.status.state, job.process.status.end) {
-        (ProcessState::Running, _) => "running",
-        (_, Some(ProcessEnd::Stopped)) => "stopped",
-        (_, Some(ProcessEnd::TimedOut)) => "timed out",
-        (_, Some(ProcessEnd::Failed)) => "failed",
-        _ if job.process.status.exit_code == Some(0) => "completed",
-        _ if job.process.status.exit_code.is_some_and(|code| code != 0)
-            || job.process.status.signal.is_some() =>
-        {
-            "failed"
-        }
-        _ => "finished",
-    }
-}
-
-fn chunk(body: &mut String, name: &str, chunk: &ProcessChunk) {
-    body.push_str(&format!(
-        "\n{name} · bytes {}–{} / {}{}\n",
-        chunk.offset,
-        chunk.next_offset,
-        chunk.total_bytes,
-        if chunk.has_more {
-            " · more available"
-        } else {
-            ""
-        }
-    ));
-    if chunk.omitted_bytes > 0 {
-        body.push_str(&format!(
-            "{} earlier bytes no longer retained\n",
-            chunk.omitted_bytes
-        ));
-    }
-    body.push_str(if chunk.text.is_empty() {
-        "(no output)"
-    } else {
-        &chunk.text
-    });
-    if !body.ends_with('\n') {
-        body.push('\n');
-    }
 }
 
 // Only running jobs already authorized by jobs() reach the sidebar. Commands

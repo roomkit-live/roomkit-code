@@ -293,9 +293,13 @@ async fn monitor_pages_output_without_consuming_it_and_does_not_tick_when_closed
     assert!(first.body.contains("\nFIRST") && first.body.contains("more available"));
     let next = panel(&app, &action(&first, ":next")).await.unwrap();
     assert!(next.body.contains("LAST"));
+    let previous = panel(&app, &action(&next, ":previous")).await.unwrap();
+    assert!(previous.body.contains("\nFIRST") && previous.body.contains("Fixed output page"));
+    let tail = panel(&app, &action(&previous, ":tail")).await.unwrap();
+    assert!(tail.body.contains("Following latest output") && tail.body.contains("LAST"));
     app.profiles
         .processes
-        .handle(&app.kit, app.channel.id(), &app.view, &next.dismiss)
+        .handle(&app.kit, app.channel.id(), &app.view, &tail.dismiss)
         .await
         .unwrap();
     // Wait until the observer acknowledges dismissal; thereafter no timer runs.
