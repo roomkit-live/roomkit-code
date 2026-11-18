@@ -333,6 +333,24 @@ private diagnostics contain an integration error code, never raw command output.
 Exit freezes reporting, completes application cleanup, clears the title and
 releases the agent.
 
+Herdr sees the whole application working while a delegated task runs, in any
+conversation, and for two seconds after the last one ends, until the turn its
+result starts shows: it notifies once, when the agent is done. Running
+processes keep no agent working, since a server runs until the application
+closes; they label the idle and done states instead, as `idle · 1 process`.
+Herdr shows that label where an agent row has `state_text`, which its default
+layout omits:
+
+```toml
+# ~/.config/herdr/config.toml
+[ui.sidebar.agents]
+rows = [
+  ["state_icon", "machine", "workspace", "tab"],
+  ["agent"],
+  ["state_text"],
+]
+```
+
 Herdr's published resume command uses `roomkit-code` from `PATH`. Install it there
 before relying on pane restoration. The command preserves the absolute workspace,
 state directory, explicit config file, appearance flags, currently displayed

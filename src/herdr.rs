@@ -80,6 +80,9 @@ pub(crate) struct Report {
     pub state: State,
     pub session: SessionRef,
     pub title: String,
+    /// What runs on while the agent waits for the person, such as
+    /// "1 process": Herdr shows it beside the idle and done states.
+    pub background: Option<String>,
 }
 
 pub(crate) fn valid_resume(args: &[String]) -> bool {
@@ -140,6 +143,15 @@ impl Reporter {
                     .filter(|c| !c.is_control())
                     .take(80)
                     .collect();
+                report.background = report
+                    .background
+                    .map(|text| {
+                        text.chars()
+                            .filter(|c| !c.is_control())
+                            .take(64)
+                            .collect::<String>()
+                    })
+                    .filter(|text| !text.is_empty());
                 if report
                     .session
                     .resume
@@ -177,7 +189,7 @@ impl Reporter {
             let _ = released.await;
             if attempted {
                 let cleanup = CancellationToken::new();
-                for args in [metadata_args(None), lifecycle_args("release-agent")] {
+                for args in [metadata_args(None, None), lifecycle_args("release-agent")] {
                     if let Err(code) = call(&endpoint, &mut sequence, args, &cleanup).await {
                         diagnostic(code);
                     }
@@ -213,7 +225,8 @@ impl Reporter {
 struct Sent {
     state: Option<State>,
     session: Option<SessionRef>,
-    title: Option<String>,
+    /// The title and the background, as Herdr last applied them.
+    metadata: Option<(String, Option<String>)>,
     resume_cleared: bool,
 }
 
@@ -222,7 +235,7 @@ enum Action {
     ClearResume,
     State,
     Session,
-    Title,
+    Metadata,
 }
 
 impl Sent {
@@ -235,8 +248,10 @@ impl Sent {
             Some(Action::State)
         } else if self.session.as_ref() != Some(&report.session) {
             Some(Action::Session)
-        } else if self.title.as_ref() != Some(&report.title) {
-            Some(Action::Title)
+        } else if self.metadata.as_ref().is_none_or(|(title, background)| {
+            *title != report.title || *background != report.background
+        }) {
+            Some(Action::Metadata)
         } else {
             None
         }
@@ -255,7 +270,9 @@ impl Sent {
                 self.session = Some(report.session.clone());
             }
             Action::Session => self.session = Some(report.session.clone()),
-            Action::Title => self.title = Some(report.title.clone()),
+            Action::Metadata => {
+                self.metadata = Some((report.title.clone(), report.background.clone()));
+            }
         }
         if report.session.resume.is_some() {
             self.resume_cleared = false;
@@ -267,7 +284,7 @@ impl Action {
     fn args(self, report: &Report) -> Vec<String> {
         match self {
             Self::ClearResume => lifecycle_args("release-agent"),
-            Self::Title => metadata_args(Some(&report.title)),
+            Self::Metadata => metadata_args(Some(&report.title), report.background.as_deref()),
             Self::State | Self::Session => {
                 let mut args = lifecycle_args(if matches!(self, Self::State) {
                     "report-agent"
@@ -294,7 +311,9 @@ fn lifecycle_args(command: &str) -> Vec<String> {
         .to_vec()
 }
 
-fn metadata_args(title: Option<&str>) -> Vec<String> {
+/// The display metadata: `title`, and `background` beside the states in
+/// which the agent waits for the person. None clears what this source set.
+fn metadata_args(title: Option<&str>, background: Option<&str>) -> Vec<String> {
     let mut args = [
         "pane",
         "report-metadata",
@@ -310,6 +329,17 @@ fn metadata_args(title: Option<&str>) -> Vec<String> {
     match title {
         Some(title) if !title.is_empty() => args.extend(["--title".into(), title.into()]),
         _ => args.push("--clear-title".into()),
+    }
+    match background {
+        Some(background) => {
+            for state in ["idle", "done"] {
+                args.extend([
+                    "--state-label".into(),
+                    format!("{state}={state} · {background}"),
+                ]);
+            }
+        }
+        None => args.push("--clear-state-labels".into()),
     }
     args
 }

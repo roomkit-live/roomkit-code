@@ -284,6 +284,7 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
         app.profiles.diagnostics.clone(),
         &observer,
         app.profiles.resources.tasks.clone(),
+        app.profiles.resources.processes.clone(),
     );
     let view = observer.clone();
     let terminal = tokio::task::spawn_blocking(move || {

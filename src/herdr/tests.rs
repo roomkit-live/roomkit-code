@@ -15,6 +15,7 @@ fn report(state: State) -> Report {
     Report {
         state,
         title: "Fixture title".into(),
+        background: None,
         session: SessionRef {
             id: "first".into(),
             resume: Some(
@@ -110,6 +111,39 @@ fn invalid_resume_commands_are_rejected_without_changing_state() {
     assert!(!Action::State.args(&invalid).iter().any(|arg| arg == "--"));
 }
 
+/// What runs on while the agent waits labels its idle and done states, in
+/// the title's call, and a change of it is reported; none clears the labels.
+#[test]
+fn the_background_labels_the_waiting_states_and_none_clears_them() {
+    let mut waiting = report(State::Idle);
+    waiting.background = Some("2 processes".into());
+    let args = Action::Metadata.args(&waiting);
+    for label in ["idle=idle · 2 processes", "done=done · 2 processes"] {
+        assert!(args.windows(2).any(|pair| pair == ["--state-label", label]));
+    }
+    assert!(
+        args.windows(2)
+            .any(|pair| pair == ["--title", "Fixture title"])
+    );
+    let mut sent = Sent::default();
+    for action in [Action::State, Action::Metadata] {
+        sent.applied(action, &waiting);
+    }
+    assert!(sent.next(&waiting).is_none());
+    let done = report(State::Idle);
+    assert!(matches!(sent.next(&done), Some(Action::Metadata)));
+    assert!(
+        Action::Metadata
+            .args(&done)
+            .iter()
+            .any(|arg| arg == "--clear-state-labels")
+    );
+    let release = metadata_args(None, None);
+    for flag in ["--clear-title", "--clear-state-labels"] {
+        assert!(release.iter().any(|arg| arg == flag));
+    }
+}
+
 #[cfg(unix)]
 mod worker {
     use super::*;
@@ -198,11 +232,9 @@ mod worker {
         assert_eq!(fixture.calls(), stable);
         reporter.close().await;
         let calls = fixture.calls();
-        assert!(
-            calls[calls.len() - 2]
-                .iter()
-                .any(|arg| arg == "--clear-title")
-        );
+        for flag in ["--clear-title", "--clear-state-labels"] {
+            assert!(calls[calls.len() - 2].iter().any(|arg| arg == flag));
+        }
         assert_eq!(calls.last().unwrap()[1], "release-agent");
         let sequences: Vec<u64> = calls
             .iter()

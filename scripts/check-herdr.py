@@ -56,6 +56,59 @@ class Model(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+# The worker's system prompt, which tells its requests apart, and its answer.
+WORKER = "which the person can open and write in"
+RESULT = "WORKER_RESULT_THE_DIFF_IS_FINE"
+release_worker = threading.Event()
+
+
+class Delegation(BaseHTTPRequestHandler):
+    """The agent hands a review to `review`, whose answer waits for
+    `release_worker`, then relays it; it starts a process that ends alone."""
+
+    def log_message(self, *args):
+        pass
+
+    def do_POST(self):
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        messages = request["messages"]
+        # What came since the agent last spoke, the application's own
+        # instructions included: they carry a handed-back result.
+        spoken = [i for i, m in enumerate(messages) if m["role"] == "assistant"]
+        said = json.dumps(messages[spoken[-1] + 1:] if spoken else messages)
+        # The agent's last words called a tool: this reads its result.
+        answered = bool(spoken) and bool(messages[spoken[-1]].get("tool_calls"))
+        if WORKER in json.dumps(request):
+            if not release_worker.wait(timeout=30):
+                self.send_error(504)
+                return
+            delta = {"content": RESULT}
+        elif answered:
+            delta = {"content": "Tool done."}
+        elif "Delegate the review" in said:
+            delta = call("delegate_task", {"agent": "review", "task": "Review the diff"})
+        elif "Start the server" in said:
+            delta = call("process_start", {"command": "sleep 4"})
+        elif RESULT in said:
+            delta = {"content": "RELAYED_THE_REVIEW"}
+        else:
+            delta = {"content": "Noted."}
+        reason = "tool_calls" if "tool_calls" in delta else "stop"
+        body = ("data: " + json.dumps({"choices": [{"index": 0, "delta": delta}]}) + "\n\n"
+                + "data: " + json.dumps({"choices": [{"index": 0, "delta": {}, "finish_reason": reason}]})
+                + "\n\ndata: [DONE]\n\n").encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def call(name, arguments):
+    return {"tool_calls": [{"index": 0, "id": f"call-{name}", "type": "function",
+                            "function": {"name": name, "arguments": json.dumps(arguments)}}]}
+
+
 def option(args, name):
     return args[args.index(name) + 1]
 
@@ -107,6 +160,9 @@ class App:
 
     def state(self, state, after=0):
         return self.report(lambda args: args[1] == "report-agent" and option(args, "--state") == state, after)
+
+    def states(self, after=0):
+        return [option(call["args"], "--state") for call in self.calls()[after:] if call["args"][1] == "report-agent"]
 
     def osc(self, state):
         marker = f"\x1b]7501;state={state}:app=roomkit-code\x1b\\".encode()
@@ -235,6 +291,62 @@ if mode == "fail": sys.exit(1)
         finally:
             app.close()
 
+        # Delegated work keeps the application working; processes label its
+        # wait (HITL 7db45de3). The review agent copies the launch's agent.
+        delegation = LoopbackHTTPServer(("127.0.0.1", 0), Delegation)
+        threading.Thread(target=delegation.serve_forever, daemon=True).start()
+        try:
+            delegating_state = root / "delegation state"
+            delegating = [str(binary), str(project), "--state-dir", str(delegating_state), "--config", str(config),
+                          "--base-url", f"http://127.0.0.1:{delegation.server_port}/v1", "--model", "fixture-model",
+                          "--mode", "yolo", "--color", "never", "--no-animations", "--no-logo"]
+            app = App(delegating, env, log)
+            try:
+                app.text("fixture-model")
+                app.finish()
+            finally:
+                app.close()
+            agents = next(delegating_state.glob("projects/*/agents.json"))
+            document = json.loads(agents.read_text())
+            document["agents"]["review"] = dict(document["agents"]["code"], id="review", label="Review")
+            agents.write_text(json.dumps(document))
+            app = App(delegating, env, log)
+            try:
+                app.text("fixture-model")
+                app.state("idle")
+                offset, shown = len(app.calls()), len(app.output)
+                app.send("Delegate the review\r")
+                app.text("Tool done.", shown)
+                app.text("Execution Completed", shown)
+                # Longer than the hold after a task's end: the running task
+                # alone keeps the application working.
+                time.sleep(3)
+                assert app.states(offset)[-1:] == ["working"] and "idle" not in app.states(offset), app.states(offset)
+                release_worker.set()
+                app.text("RELAYED_THE_REVIEW", shown)
+                app.state("idle", offset)
+                # Herdr tells the person it finished once, after the relay.
+                assert app.states(offset).count("idle") == 1 and app.states(offset)[-1] == "idle", app.states(offset)
+                offset = len(app.calls())
+                app.send("Start the server\r")
+                label = ["--state-label", "idle=idle · 1 process", "--state-label", "done=done · 1 process"]
+                app.report(lambda a: a[1] == "report-metadata" and any(a[i:i + 4] == label for i in range(len(a))), offset)
+                # A quick turn may coalesce to idle: no state changes.
+                assert app.states()[-1] == "idle", app.states()
+                offset = len(app.calls())
+                # The process ends alone; its agent is told in a turn of its own.
+                app.report(lambda a: a[1] == "report-metadata" and "--clear-state-labels" in a, offset)
+                app.text("Noted.")
+                app.wait(lambda: app.states()[-1] == "idle")
+                app.finish()
+                assert "--clear-state-labels" in app.calls()[-2]["args"]
+            finally:
+                release_worker.set()
+                app.close()
+        finally:
+            delegation.shutdown()
+            delegation.server_close()
+
         # All four compositions, plus an incomplete environment and TERM=dumb.
         for flags, herdr, osc_enabled, extra_env in [
             (["--no-herdr", "--no-terminal-status"], False, False, {}),
@@ -286,4 +398,4 @@ finally:
     server.server_close()
     thread.join(timeout=5)
 
-print("Herdr checks passed: independent outputs, permissions, mode/session changes, persisted resume, failures, monotonic reports and cleanup.")
+print("Herdr checks passed: independent outputs, permissions, mode/session changes, persisted resume, delegated work and labelled processes, failures, monotonic reports and cleanup.")

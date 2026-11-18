@@ -1,48 +1,62 @@
 //! Assemble optional consumers from CLI facts; product paths and policy stay here.
 
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+use std::time::{Duration, Instant};
+
 use crate::{
     config::Settings,
     herdr::{self, Report, SessionRef, State},
 };
+use roomkit_tools_process::{ProcessSession, ProcessState};
 use roomkit_tui::{SessionObservation, SessionObserver};
+use tokio::task::JoinHandle;
+
+/// How long the end of the last delegated task keeps the application
+/// working. roomkit-rs records a task's end before its result starts the
+/// turn that reads it (`kit/tasks.rs`); the view shows that turn within it.
+const HAND_BACK: Duration = Duration::from_secs(2);
 
 pub(super) struct Integration {
     reporter: Option<herdr::Reporter>,
+    processes: Option<JoinHandle<()>>,
 }
 
 impl Integration {
-    /// Report the observed view to Herdr when its endpoint is detected.
+    /// Report the observed view to Herdr when its endpoint is detected,
+    /// with what runs in the background of the whole application: its
+    /// delegated `tasks` and the `processes` closing it stops.
     pub fn start(
         settings: &Settings,
-        diagnostics: std::sync::Arc<crate::diagnostics::Diagnostics>,
+        diagnostics: Arc<crate::diagnostics::Diagnostics>,
         observer: &SessionObserver,
-        tasks: std::sync::Arc<crate::delegation::Tasks>,
+        tasks: Arc<crate::delegation::Tasks>,
+        processes: ProcessSession,
     ) -> Self {
         let endpoint = settings
             .herdr
             .then(|| herdr::Endpoint::detect(crate::config::default_state_dir()))
             .flatten();
         let Some(endpoint) = endpoint else {
-            return Self { reporter: None };
+            return Self {
+                reporter: None,
+                processes: None,
+            };
         };
-        let source = observer.clone();
-        let resume = Resume::new(settings);
+        let running = Arc::new(AtomicUsize::new(0));
+        let counter = tokio::spawn(count_running(processes, running.clone()));
         let reporter = herdr::Reporter::start(
             endpoint,
-            move || {
-                source.latest().map(|mut state| {
-                    // A view can be in a task's room: the session is its
-                    // conversation, the one a resume command reopens.
-                    state.conversation = tasks.root_of(state.conversation.as_str()).into();
-                    resume.report(state)
-                })
-            },
+            observed(observer.clone(), Resume::new(settings), tasks, running),
             move |code| {
                 diagnostics.record("herdr_integration", serde_json::json!({"code":code}), None)
             },
         );
         Self {
             reporter: Some(reporter),
+            processes: Some(counter),
         }
     }
 
@@ -55,6 +69,92 @@ impl Integration {
         if let Some(reporter) = self.reporter {
             reporter.close().await;
         }
+        if let Some(counter) = self.processes {
+            counter.abort();
+        }
+    }
+}
+
+/// The report of the view `source` observes, with what runs in the
+/// background: `tasks` and the `running` processes.
+fn observed(
+    source: SessionObserver,
+    resume: Resume,
+    tasks: Arc<crate::delegation::Tasks>,
+    running: Arc<AtomicUsize>,
+) -> impl FnMut() -> Option<Report> + Send + 'static {
+    let mut delegated = Delegated::default();
+    move || {
+        source.latest().map(|mut state| {
+            // A view can be in a task's room: the session is its
+            // conversation, the one a resume command reopens.
+            state.conversation = tasks.root_of(state.conversation.as_str()).into();
+            let background = Background {
+                delegated: delegated.working(tasks.running(), Instant::now()),
+                processes: running.load(Ordering::Relaxed),
+            };
+            resume.report(state, background)
+        })
+    }
+}
+
+/// Keeps `running` at the number of `manager`'s running processes, every
+/// owner's: the ones closing the application stops.
+async fn count_running(manager: ProcessSession, running: Arc<AtomicUsize>) {
+    let mut lifecycle = manager.subscribe();
+    loop {
+        let count = manager
+            .observe()
+            .await
+            .iter()
+            .filter(|process| process.status.state == ProcessState::Running)
+            .count();
+        running.store(count, Ordering::Relaxed);
+        if lifecycle.changed().await.is_err() {
+            return;
+        }
+    }
+}
+
+/// What runs beside the view's turns, in the whole application.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct Background {
+    /// Whether delegated work keeps the application working ([`Delegated`]).
+    pub delegated: bool,
+    /// Running processes.
+    pub processes: usize,
+}
+
+impl Background {
+    /// What Herdr shows beside the idle and done states: the processes that
+    /// run on. They keep no agent working: a server runs until closing.
+    fn label(self) -> Option<String> {
+        match self.processes {
+            0 => None,
+            1 => Some("1 process".into()),
+            n => Some(format!("{n} processes")),
+        }
+    }
+}
+
+/// Follows the delegated tasks: a running task keeps the application
+/// working, since its result starts a turn of its own, and so does the end
+/// of the last one for [`HAND_BACK`].
+#[derive(Debug, Default)]
+pub(super) struct Delegated {
+    /// When a task was last seen running.
+    seen: Option<Instant>,
+}
+
+impl Delegated {
+    /// Whether delegated work keeps the application working at `now`, with
+    /// `running` tasks.
+    pub(super) fn working(&mut self, running: usize, now: Instant) -> bool {
+        if running > 0 {
+            self.seen = Some(now);
+        }
+        self.seen
+            .is_some_and(|seen| now.saturating_duration_since(seen) < HAND_BACK)
     }
 }
 
@@ -113,7 +213,7 @@ impl Resume {
         herdr::valid_resume(&args).then_some(args)
     }
 
-    fn report(&self, observation: SessionObservation) -> Report {
+    fn report(&self, observation: SessionObservation, background: Background) -> Report {
         let resume = observation.mode.as_ref().and_then(|mode| {
             self.command(observation.conversation.as_str(), mode.selected.as_str())
         });
@@ -127,6 +227,7 @@ impl Resume {
                 .run
                 .as_ref()
                 .is_some_and(|run| run.outcome.is_none())
+            || background.delegated
         {
             State::Working
         } else {
@@ -134,6 +235,7 @@ impl Resume {
         };
         Report {
             state,
+            background: background.label(),
             title: observation.title,
             session: SessionRef {
                 id: observation.conversation.into_inner(),

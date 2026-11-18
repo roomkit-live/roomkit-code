@@ -46,7 +46,7 @@ fn setup() -> (tempfile::TempDir, Resume, Session) {
 #[test]
 fn resume_follows_the_displayed_session_and_confirmed_mode_with_explicit_options() {
     let (root, resume, mut session) = setup();
-    let initial = resume.report(session.observation().unwrap());
+    let initial = resume.report(session.observation().unwrap(), Background::default());
     let args = initial.session.resume.unwrap();
     assert_eq!(
         &args[..8],
@@ -85,7 +85,9 @@ fn resume_follows_the_displayed_session_and_confirmed_mode_with_explicit_options
         operation: "op".into(),
     });
     assert_eq!(
-        resume.report(session.observation().unwrap()).state,
+        resume
+            .report(session.observation().unwrap(), Background::default())
+            .state,
         State::Working
     );
     let mut mode = session.snapshot().unwrap().mode.clone().unwrap();
@@ -96,7 +98,7 @@ fn resume_follows_the_displayed_session_and_confirmed_mode_with_explicit_options
     });
     assert!(
         resume
-            .report(session.observation().unwrap())
+            .report(session.observation().unwrap(), Background::default())
             .session
             .resume
             .unwrap()
@@ -107,7 +109,7 @@ fn resume_follows_the_displayed_session_and_confirmed_mode_with_explicit_options
         conversation: "first".into(),
         mode,
     });
-    let changed = resume.report(session.observation().unwrap());
+    let changed = resume.report(session.observation().unwrap(), Background::default());
     assert_eq!(changed.state, State::Working);
     assert!(
         changed
@@ -126,7 +128,7 @@ fn resume_follows_the_displayed_session_and_confirmed_mode_with_explicit_options
         conversation: "first".into(),
         permission: Permission::new("approval", "coder", "run", "Change?", "Private"),
     });
-    let blocked = resume.report(session.observation().unwrap());
+    let blocked = resume.report(session.observation().unwrap(), Background::default());
     assert_eq!(blocked.state, State::Blocked);
     assert!(!format!("{blocked:?}").contains("Private"));
     let mut restored = session.snapshot().cloned().unwrap();
@@ -134,7 +136,7 @@ fn resume_follows_the_displayed_session_and_confirmed_mode_with_explicit_options
     restored.active_run = None;
     restored.permissions.clear();
     session.apply(Event::Snapshot(restored));
-    let switched = resume.report(session.observation().unwrap());
+    let switched = resume.report(session.observation().unwrap(), Background::default());
     assert_eq!(switched.session.id, "second");
     assert_eq!(switched.state, State::Idle);
     assert!(
@@ -151,13 +153,13 @@ fn resume_follows_the_displayed_session_and_confirmed_mode_with_explicit_options
 fn unrepresentable_paths_disable_only_resume() {
     let (_root, mut resume, session) = setup();
     resume.prefix.as_mut().unwrap()[1] = "/tmp/owner's project".into();
-    let report = resume.report(session.observation().unwrap());
+    let report = resume.report(session.observation().unwrap(), Background::default());
     assert!(report.session.resume.is_none());
     assert_eq!(report.state, State::Idle);
     resume.prefix = None;
     assert!(
         resume
-            .report(session.observation().unwrap())
+            .report(session.observation().unwrap(), Background::default())
             .session
             .resume
             .is_none()
@@ -214,7 +216,9 @@ fn a_question_waiting_for_the_person_blocks_like_an_approval() {
         question: Question::new("question", "coder", "run", items),
     });
     assert_eq!(
-        resume.report(session.observation().unwrap()).state,
+        resume
+            .report(session.observation().unwrap(), Background::default())
+            .state,
         State::Blocked
     );
     session.apply(Event::QuestionResolved {
@@ -222,7 +226,65 @@ fn a_question_waiting_for_the_person_blocks_like_an_approval() {
         question: "question".into(),
     });
     assert_eq!(
-        resume.report(session.observation().unwrap()).state,
+        resume
+            .report(session.observation().unwrap(), Background::default())
+            .state,
         State::Working
     );
+}
+
+/// A delegated task's result starts a turn of its own: while one runs the
+/// application is working for Herdr, after its delegating agent's turn
+/// ended. Processes keep no agent working, a server running until closing:
+/// they label the idle state. An open decision still blocks.
+#[test]
+fn delegated_work_keeps_the_application_working_and_processes_label_its_wait() {
+    let (_root, resume, mut session) = setup();
+    let delegated = Background {
+        delegated: true,
+        processes: 0,
+    };
+    let report = resume.report(session.observation().unwrap(), delegated);
+    assert_eq!((report.state, report.background), (State::Working, None));
+    let processes = |processes| Background {
+        delegated: false,
+        processes,
+    };
+    let report = resume.report(session.observation().unwrap(), processes(1));
+    assert_eq!(report.state, State::Idle);
+    assert_eq!(report.background.as_deref(), Some("1 process"));
+    let report = resume.report(session.observation().unwrap(), processes(3));
+    assert_eq!(report.background.as_deref(), Some("3 processes"));
+    session.apply(Event::RunStarted {
+        conversation: "first".into(),
+        run: "run".into(),
+        answers: None,
+    });
+    session.apply(Event::PermissionRequested {
+        conversation: "first".into(),
+        permission: Permission::new("approval", "coder", "run", "Change?", "Private"),
+    });
+    assert_eq!(
+        resume
+            .report(session.observation().unwrap(), delegated)
+            .state,
+        State::Blocked
+    );
+}
+
+/// roomkit-rs records a task's end before its result starts the turn that
+/// reads it: the last end keeps the application working for `HAND_BACK`,
+/// so Herdr does not tell the person it finished in between.
+#[test]
+fn the_last_task_s_end_keeps_the_application_working_until_its_result_is_read() {
+    let start = Instant::now();
+    let at = |ms| start + Duration::from_millis(ms);
+    let mut delegated = Delegated::default();
+    assert!(!delegated.working(0, at(0)));
+    assert!(delegated.working(2, at(100)));
+    assert!(delegated.working(1, at(5_000)));
+    assert!(delegated.working(0, at(6_000)));
+    assert!(delegated.working(0, at(6_999)));
+    assert!(!delegated.working(0, at(7_000)));
+    assert!(delegated.working(1, at(9_000)));
 }
