@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.2.0]
+
+Second public binary release for Linux x86-64/ARM64 and macOS Intel/Apple
+Silicon, built on RoomKit Rust 0.2.0.
+
+Linux requires glibc 2.35 or newer. macOS requires version 12 or newer; binaries
+are ad-hoc signed, without Apple Developer ID signing or notarization. No
+application data is migrated: rolling back to 0.1.3 from the application keeps
+conversations and settings readable.
+
 - Builds on RoomKit Rust 0.2.0: follows roomkit-rs at its `v0.2.0` tag, with
   roomkit-tools 878feb5 and roomkit-tui 26c67c8, which follow it too.
 - Choosing a model, with `/model`, **Change model** or for a new agent, takes
