@@ -18,6 +18,7 @@ pub(super) fn own(agent: &Agent) -> Running {
     Running {
         model: agent.model.clone(),
         effort: agent.reasoning_effort.clone(),
+        context: None,
     }
 }
 
@@ -27,6 +28,9 @@ impl State {
     pub(super) fn running_agent(&self, room: &str, id: &str) -> Option<Agent> {
         let mut agent = self.agent(id)?;
         if let Some(running) = self.running.get(&(room.to_owned(), id.to_owned())) {
+            if running.model != agent.model {
+                agent.context_window = running.context;
+            }
             agent.model.clone_from(&running.model);
             agent.reasoning_effort.clone_from(&running.effort);
         }
@@ -130,6 +134,9 @@ impl Profiles {
             slot.unfit(room);
             return;
         };
+        if running.model != profile.model {
+            profile.context_window = running.context;
+        }
         profile.model.clone_from(&running.model);
         profile.reasoning_effort = running.effort;
         let assembled = match state.providers.value.profiles.get(&profile.provider) {
@@ -224,7 +231,12 @@ impl Profiles {
             .ok_or("Configure an agent with /agents first")?;
         change(&mut agent);
         agent.validate()?;
-        let (key, running) = ((room.to_owned(), id.to_owned()), own(&agent));
+        let mut running = own(&agent);
+        // Another model than the agent's own runs with its own capacity.
+        if state.agent(id).is_some_and(|own| own.model != agent.model) {
+            running.context = agent.context_window;
+        }
+        let key = (room.to_owned(), id.to_owned());
         let before = state.running.insert(key.clone(), running.clone());
         self.fit(state, room, id).await;
         // A model or an effort the agent cannot run with, or that cannot be

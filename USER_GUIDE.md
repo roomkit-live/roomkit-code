@@ -941,7 +941,11 @@ that its requests stay within the window and the provider's prompt cache keeps
 them. The window is the agent's **Context capacity** in `/agents`, or the window
 the engine's catalogue lists for its model; when the catalogue says the model's
 price rises past a number of input tokens (272,000 for `gpt-6-astra`), that
-number is the ceiling instead.
+number is the ceiling instead. A capacity is its model's: choosing a model from
+its connection's list, with `/model`, **Change model** or for a new agent, takes
+the capacity its server reports, and clears it when the server reports none, the
+catalogue then deciding. A conversation on another model than its agent's keeps
+that model's capacity; back on the agent's own model, it runs with the agent's.
 
 While a request stays under 80 % of the ceiling, the conversation is read as it
 is, every earlier round of tool calls whole. The request is estimated at four

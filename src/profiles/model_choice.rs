@@ -66,11 +66,13 @@ impl Profiles {
         crate::sync::lock(&self.reported).get(&key).copied()
     }
 
-    /// `agent` on `model`, with the capacity its server reported for it: the
-    /// compaction's ceiling is that model's, not the one it replaces.
+    /// `agent` on `model`, with the capacity its server reported for it, or
+    /// none, the kit's catalogue then deciding: a capacity is its model's
+    /// (HITL d430b32a), and the compaction takes it as its ceiling. The
+    /// same model keeps its capacity.
     pub(super) fn switch(&self, agent: &mut Agent, model: &str) {
-        if let Some(capacity) = self.reported(&agent.provider, model) {
-            agent.context_window = Some(capacity);
+        if agent.model != model {
+            agent.context_window = self.reported(&agent.provider, model);
         }
         agent.model = model.into();
     }
@@ -207,7 +209,7 @@ impl Profiles {
     ) -> Result<CommandResult, String> {
         if !id.is_empty() {
             return self
-                .change_current(kit, &mut state, current, |agent| agent.model = id.into())
+                .change_current(kit, &mut state, current, |agent| self.switch(agent, id))
                 .await;
         }
         let agent = state

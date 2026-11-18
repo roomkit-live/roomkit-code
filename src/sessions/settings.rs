@@ -32,6 +32,12 @@ pub(crate) struct Running {
     /// The provider's default when none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// The context capacity of a model other than the agent's own: the one
+    /// its server reported as the conversation chose it, none when it
+    /// reported none, the kit's catalogue then deciding (HITL d430b32a).
+    /// The agent's own model runs with the agent's capacity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<u64>,
 }
 
 /// One conversation's settings.

@@ -121,9 +121,12 @@ async fn model_lists_the_current_connections_models_and_switches_the_agent() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let mock = Mock::start(vec![]).await;
-    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let mut settings = settings(root.path(), state.path(), &mock.base_url);
+    settings.context_window = Some(64_000);
     let mut app = Application::open(&settings, String::new()).await.unwrap();
     let room = app.view.room.clone();
+    let own = app.view.model.as_ref().unwrap().model.clone();
+    assert_eq!(app.view.context_capacity, Some(64_000));
 
     let listed = model(&app, "").await;
     let (command, choices) = offered(&listed);
@@ -131,19 +134,29 @@ async fn model_lists_the_current_connections_models_and_switches_the_agent() {
     assert_eq!(choices[0].value, "discovered-model");
     assert_eq!(choices[0].description, "Reported capacity: 32768 tokens");
 
-    // A listed model, then one the server serves unlisted, colons included.
-    for chosen in ["discovered-model", "llama3:8b"] {
+    // A listed model, then one the server serves unlisted, colons included:
+    // each with the capacity its server reported, none for the unlisted one
+    // (HITL d430b32a); the agent's own model with the agent's own.
+    for (step, (chosen, capacity)) in [
+        ("discovered-model", Some(32_768)),
+        ("llama3:8b", None),
+        (own.as_str(), Some(64_000)),
+        ("discovered-model", Some(32_768)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let CommandResult::Switch(view) = model(&app, chosen).await else {
             panic!("Expected refreshed view")
         };
         app.view = *view;
         assert_eq!(app.view.room, room);
         assert_eq!(app.view.model.as_ref().unwrap().model, chosen);
-        turn_operation(&app, chosen).await;
-        assert_eq!(
-            mock.requests.lock().unwrap().last().unwrap()["model"],
-            chosen
-        );
+        assert_eq!(app.view.context_capacity, capacity, "{chosen}");
+        // An operation's ID is sent once: each step's is its own.
+        turn_operation(&app, &format!("{chosen}-{step}")).await;
+        let sent = mock.requests.lock().unwrap().last().unwrap()["model"].clone();
+        assert_eq!(sent, chosen, "step {step}");
     }
     let CommandResult::Switch(view) = model(&app, "discovered-model").await else {
         panic!("Expected refreshed view")
@@ -157,6 +170,7 @@ async fn model_lists_the_current_connections_models_and_switches_the_agent() {
     drop(app);
     let app = Application::open(&settings, String::new()).await.unwrap();
     assert_eq!(app.view.model.as_ref().unwrap().model, "discovered-model");
+    assert_eq!(app.view.context_capacity, Some(32_768));
     app.close().await.unwrap();
 }
 

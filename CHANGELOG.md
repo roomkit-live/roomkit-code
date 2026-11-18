@@ -2,10 +2,12 @@
 
 ## Unreleased
 
-- Choosing a model from its server's list, for a new agent or with **Change
-  model**, takes the context capacity the server reports for it: the agent
-  compacts under that model's window, no longer the one it replaces, which a
-  1M capacity kept on a 128k model let the provider refuse.
+- Choosing a model, with `/model`, **Change model** or for a new agent, takes
+  the context capacity its server reports for it, or clears it when it reports
+  none: the agent compacts under that model's window, no longer the one it
+  replaces, which a 1M capacity kept on a 128k model let the provider refuse.
+  A conversation on another model than its agent's keeps that model's
+  capacity.
 - A long conversation of short messages no longer loses its oldest ones: a
   turn reads its latest 2,000 rows, and messages past them left what the agent
   reads with no summary standing for them, the tokens never reaching 80 % of
