@@ -331,8 +331,8 @@ if mode == "fail": sys.exit(1)
                 app.send("Start the server\r")
                 label = ["--state-label", "idle=idle · 1 process", "--state-label", "done=done · 1 process"]
                 app.report(lambda a: a[1] == "report-metadata" and any(a[i:i + 4] == label for i in range(len(a))), offset)
-                # A quick turn may coalesce to idle: no state changes.
-                assert app.states()[-1] == "idle", app.states()
+                # The label comes as the process starts, maybe before its turn ends.
+                app.wait(lambda: app.states()[-1] == "idle")
                 offset = len(app.calls())
                 # The process ends alone; its agent is told in a turn of its own.
                 app.report(lambda a: a[1] == "report-metadata" and "--clear-state-labels" in a, offset)
