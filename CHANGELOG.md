@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A long conversation of short messages no longer loses its oldest ones: a
+  turn reads its latest 2,000 rows, and messages past them left what the agent
+  reads with no summary standing for them, the tokens never reaching 80 % of
+  a large window. The conversation now compacts past 1,600 rows too, and keeps
+  whole no more than 600. A compaction's file on disk is also written as the
+  conversation then stands: a write started before a newer compaction could
+  land after it, and the next launch read the older summary.
 - Herdr no longer reports the application idle, and the agent done, while a
   delegated task runs: it reports working until the task's result is said,
   and notifies once. Running processes label the idle state, as

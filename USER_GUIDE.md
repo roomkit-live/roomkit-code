@@ -950,7 +950,11 @@ plus what came since, when that says more. Past it, the agent's own model writes
 carrying over the previous summary, and the latest messages are kept whole within
 30 % of the ceiling, whole turns only. The summary, followed by the project's
 `AGENTS.md` snapshot, then opens every request, and the history grows again from
-there, unchanged, up to the next tier: one cache loss per compaction. While the
+there, unchanged, up to the next tier: one cache loss per compaction. A turn
+reads the conversation's latest 2,000 rows, tool calls included, so the rows tier
+it too: past 1,600 rows since the summary it compacts whatever its tokens, and
+keeps whole no more than 600, before the oldest messages could leave what the
+agent reads with no summary standing for them. While the
 summary is written, the status line says `Compacting the conversation… 4 s`; then
 a line stays in the conversation, for instance `Conversation compacted · 42
 messages summarized · ≈180k → ≈40k tokens · 12 s`. It is shown to you only, never

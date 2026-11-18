@@ -4,7 +4,11 @@
 //! A history stays as it is, and its prompt's prefix with it, while it fits
 //! under `TRIGGER` of its ceiling. Past it, a summary stands for its oldest
 //! messages and the latest are kept whole within `KEPT` of the ceiling: the
-//! history grows again from there, as it is, up to the next tier.
+//! history grows again from there, as it is, up to the next tier. The rows of
+//! its room a turn's context holds ([`WINDOW`]) tier it the same way: short
+//! messages fill them long before their tokens fill the ceiling.
+
+use super::WINDOW;
 
 /// The share of the ceiling past which a history compacts.
 pub(crate) const TRIGGER: f64 = 0.8;
@@ -56,6 +60,23 @@ pub(crate) fn kept_budget(ceiling: u64) -> usize {
     share(ceiling, KEPT)
 }
 
+/// The rows of its room a turn's context holds.
+fn window() -> u64 {
+    u64::try_from(WINDOW).unwrap_or(u64::MAX)
+}
+
+/// Whether a history that spans `rows` of its room passes the tier of the
+/// rows a turn's context holds: past them, its oldest would leave the
+/// agent's history with no summary standing for them.
+pub(crate) fn rows_due(rows: u64) -> bool {
+    rows > u64::try_from(share(window(), TRIGGER)).unwrap_or(u64::MAX)
+}
+
+/// The most rows of its room the events a compaction keeps whole span.
+pub(crate) fn kept_rows() -> u64 {
+    u64::try_from(share(window(), KEPT)).unwrap_or(u64::MAX)
+}
+
 /// What each event of `events`, `(index, tokens)` oldest first, costs with
 /// what the turn replays of its agent's earlier turns, `replayed`: each piece
 /// at its index (roomkit-ai's `TurnFootprint::replayed`), charged to the
@@ -97,15 +118,15 @@ pub(crate) fn measured(last: Option<usize>, since: &[usize]) -> Option<usize> {
 }
 
 /// Where a compaction cuts a history whose events cost `costs`, oldest
-/// first: the first of the latest events kept whole within `budget`,
-/// `MIN_KEPT` of them at least, moved to the next event that `starts` a turn
-/// ([`turn_starts`]), so that a turn is kept or summarized whole. 0 when
-/// nothing would be summarized.
-pub(crate) fn cut(costs: &[usize], starts: &[bool], budget: usize) -> usize {
+/// first: the first of the latest events kept whole within `budget`, and
+/// from `first` on, `MIN_KEPT` of them at least, moved to the next event
+/// that `starts` a turn ([`turn_starts`]), so that a turn is kept or
+/// summarized whole. 0 when nothing would be summarized.
+pub(crate) fn cut(costs: &[usize], starts: &[bool], (budget, first): (usize, usize)) -> usize {
     let mut running = 0;
     let mut cut = 0;
     for (at, cost) in costs.iter().enumerate().rev() {
-        if running + cost > budget && costs.len() - at > MIN_KEPT {
+        if (running + cost > budget || at < first) && costs.len() - at > MIN_KEPT {
             cut = at + 1;
             break;
         }
@@ -179,22 +200,31 @@ mod tests {
         let costs = [10; 10];
         let every = [true; 10];
         // 40 tokens keep the last four.
-        assert_eq!(cut(&costs, &every, 40), 6);
+        assert_eq!(cut(&costs, &every, (40, 0)), 6);
         // Never fewer than MIN_KEPT, nothing to summarize when all fit.
-        assert_eq!(cut(&costs, &every, 5), 6);
-        assert_eq!(cut(&costs, &every, 100), 0);
+        assert_eq!(cut(&costs, &every, (5, 0)), 6);
+        assert_eq!(cut(&costs, &every, (100, 0)), 0);
         // The cut moves on to the next event that starts a turn...
         let turns = [
             true, false, true, false, true, false, true, false, true, false,
         ];
-        assert_eq!(cut(&costs, &turns, 50), 6);
-        assert_eq!(cut(&costs, &turns, 40), 6);
-        assert_eq!(cut(&costs, &turns, 30), 6);
+        assert_eq!(cut(&costs, &turns, (50, 0)), 6);
+        assert_eq!(cut(&costs, &turns, (40, 0)), 6);
+        assert_eq!(cut(&costs, &turns, (30, 0)), 6);
         // ...or back to the one before when none follows.
         let late = [
             true, false, false, true, false, false, false, false, false, false,
         ];
-        assert_eq!(cut(&costs, &late, 40), 3);
-        assert_eq!(cut(&costs, &[false; 10], 40), 0);
+        assert_eq!(cut(&costs, &late, (40, 0)), 3);
+        assert_eq!(cut(&costs, &[false; 10], (40, 0)), 0);
+        // Nothing before `first` is kept whole, whatever the budget allows.
+        assert_eq!(cut(&costs, &every, (100, 7)), 6);
+        assert_eq!(cut(&costs, &turns, (100, 5)), 6);
+    }
+
+    #[test]
+    fn the_rows_a_context_holds_tier_a_history_too() {
+        assert!(!rows_due(1_600) && rows_due(1_601));
+        assert_eq!(kept_rows(), 600);
     }
 }
