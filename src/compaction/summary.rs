@@ -9,6 +9,7 @@ use roomkit_tui::protocol::{ToolCall, ToolState};
 use serde_json::Value;
 
 use super::Compacted;
+use super::parts::parts;
 
 /// The most characters of one message a summary is asked about.
 const LINE_CHARS: usize = 2_000;
@@ -47,14 +48,15 @@ pub(super) struct Written {
 pub(super) type Read<'a> = (&'a [RoomEvent], &'a [(u64, String)], &'a str);
 
 /// The summary `provider` writes of `prior`, an earlier one, and of what
-/// `read` holds, each request within `chars` characters, but for one line
-/// at least. What one request cannot read, the next does, after the summary
-/// of what came before it: every line reaches a summary, oldest first, and
-/// the last one written stands for them all, cut when any of them was. A
-/// summary that read only the newest lines that fit lost the others, which
-/// the compaction then removed from the history. None when the model fails
-/// or answers nothing: nothing is compacted then, and the next turn tries
-/// again.
+/// `read` holds, each request within `chars` characters as far as [`room`]
+/// allows. What one request cannot read, the next does, after the summary
+/// of what came before it: every line reaches a summary, oldest first, in
+/// [`MOST`](super::parts::MOST) requests at most, its lines cut shorter past
+/// them ([`parts`]); the last summary written stands for them all, cut when
+/// any of them was. A summary that read only the newest lines that fit lost
+/// the others, which the compaction then removed from the history. None
+/// when the model fails or answers nothing: nothing is compacted then, and
+/// the next turn tries again.
 ///
 /// The request states no output budget: the provider's policy sizes it, as
 /// for the agent's turns. A model that reasons spends its budget on its
@@ -66,22 +68,39 @@ pub(super) async fn summarize<P: AiProvider>(
     read: Read<'_>,
     chars: usize,
 ) -> Option<Written> {
-    let mut lines = lines(read);
     let mut prior = prior.map(str::to_owned);
     let mut cut = false;
-    loop {
+    let mut parts = parts(lines(read), room(chars)).into_iter().peekable();
+    while let Some(part) = parts.next() {
         let mut ask = ask(prior.as_deref());
-        let room = chars.saturating_sub(ask.len() + fence("conversation", "").len());
-        let rest = lines.split_off(fitting(&lines, room));
-        ask.push_str(&fence("conversation", &lines.join("\n")));
+        ask.push_str(&fence("conversation", &part.join("\n")));
         let summary = write(provider, ask).await?;
         cut |= summary.cut;
-        if rest.is_empty() {
+        if parts.peek().is_none() {
             return Some(Written { cut, ..summary });
         }
         prior = Some(summary.text);
-        lines = rest;
     }
+    None
+}
+
+/// The bytes of lines one request reads within `chars`: the rest of it
+/// asks, and carries over an earlier summary, as long as one is kept. Half
+/// of `chars` at least: under a ceiling too small for both, a request reads
+/// that much beside its earlier summary, not one line at a time.
+fn room(chars: usize) -> usize {
+    chars.saturating_sub(asked()).max(chars / 2)
+}
+
+/// The most bytes a summary's request takes besides its lines: what it
+/// asks, the longest earlier summary kept, and the fences around both.
+fn asked() -> usize {
+    let prior = SUMMARY_BYTES + "\n\n".len() + CUT.len();
+    ask(None).len()
+        + fence("earlier_summary", "").len()
+        + prior
+        + "\n\n".len()
+        + fence("conversation", "").len()
 }
 
 /// What a summary's request asks before the conversation it reads: the
@@ -139,20 +158,6 @@ pub(super) fn lines((events, calls, agent): Read<'_>) -> Vec<String> {
     // Stable: lines of one index keep the order they came in.
     all.sort_by_key(|(index, _)| *index);
     all.into_iter().map(|(_, line)| line).collect()
-}
-
-/// How many of `lines`, oldest first, one request reads within `room`
-/// characters: one at least, so that each request moves on.
-fn fitting(lines: &[String], room: usize) -> usize {
-    let mut used = 0;
-    let fit = lines
-        .iter()
-        .take_while(|line| {
-            used += line.len() + 1;
-            used <= room
-        })
-        .count();
-    fit.max(1).min(lines.len())
 }
 
 fn line(event: &RoomEvent, agent: &str) -> Option<String> {
@@ -314,16 +319,15 @@ mod tests {
         assert!(lines((&long, &[], "code"))[0].ends_with("é […]"));
     }
 
-    /// A request reads the oldest lines that fit; the next request reads
-    /// the rest. One reads a line at least, however long, so that each
-    /// moves on.
+    /// A request's lines take what the rest of it leaves, the longest
+    /// earlier summary counted, and half the budget at least.
     #[test]
-    fn a_request_reads_the_oldest_lines_that_fit_and_one_at_least() {
-        let lines = ["user: First question.", "assistant: First answer."].map(String::from);
-        assert_eq!(fitting(&lines, 1_000), 2);
-        assert_eq!(fitting(&lines, 30), 1);
-        assert_eq!(fitting(&lines, 0), 1);
-        assert_eq!(fitting(&[], 1_000), 0);
+    fn a_request_s_lines_take_what_the_rest_leaves_and_half_at_least() {
+        let longest = format!("{}\n\n{CUT}", "p".repeat(SUMMARY_BYTES));
+        let whole = ask(Some(&longest)).len() + fence("conversation", "").len();
+        assert_eq!(asked(), whole);
+        assert_eq!(room(asked() + 50_000), 50_000);
+        assert_eq!(room(16_000), 8_000);
     }
 
     /// A turn made of calls and one answer left a summary its question and
@@ -434,18 +438,64 @@ mod tests {
             ScriptedRound::answering("The user asked for").with_finish_reason("length"),
             ScriptedRound::answering("They fixed the test."),
         ]);
-        let events = [
-            said("terminal", &"a".repeat(1_500)),
-            said("code", &"b".repeat(1_500)),
-        ];
-        // Room for one of the two lines per request.
-        let chars = ask(None).len() + fence("conversation", "").len() + 1_600;
+        let events: Vec<RoomEvent> = (0..20)
+            .map(|_| said("terminal", &"a".repeat(1_500)))
+            .collect();
+        // Room for 13 of the 20 lines per request.
+        let chars = asked() + 20_000;
         let written = summarize(&provider, None, (&events, &[], "code"), chars)
             .await
             .unwrap();
         assert_eq!(provider.requests().len(), 2);
         assert_eq!(written.text, "They fixed the test.");
         assert!(written.cut, "the first part was cut");
+    }
+
+    /// Review follow-up: nothing bounded the requests a summary was written
+    /// in. A history far past the budget, after `/model` moved it to a small
+    /// window, took one request per budget's worth of lines; under a ceiling
+    /// its earlier summary nearly filled, one per line. A summary now takes
+    /// a few requests at most, every line cut shorter to fit them.
+    #[tokio::test]
+    async fn a_summary_takes_a_few_requests_at_most_its_lines_cut_shorter() {
+        use super::super::parts::MOST;
+        use roomkit_ai::testing::{ScriptedProvider, ScriptedRound};
+        let events: Vec<RoomEvent> = (0..200)
+            .map(|at| said("terminal", &format!("Message {at}: {}", "x".repeat(1_000))))
+            .collect();
+        // Under a ceiling the earlier summary nearly fills, fewer lines: cut
+        // to their shortest, 200 would still take more requests.
+        let cases = [
+            (None, 40_000, 200),
+            (Some("p".repeat(SUMMARY_BYTES)), 16_000, 40),
+        ];
+        for (prior, chars, count) in cases {
+            let events = &events[..count];
+            let answers = (1..=50).map(|n| ScriptedRound::answering(format!("Summary {n}.")));
+            let provider = ScriptedProvider::new(answers);
+            let read = (events, &[][..], "code");
+            let written = summarize(&provider, prior.as_deref(), read, chars)
+                .await
+                .unwrap();
+            let requests: Vec<String> = provider
+                .requests()
+                .iter()
+                .map(|request| match &request.messages[0].content {
+                    roomkit_ai::AiMessageContent::Text(text) => text.clone(),
+                    _ => String::new(),
+                })
+                .collect();
+            assert!(requests.len() <= MOST, "{chars}: {}", requests.len());
+            assert_eq!(written.text, format!("Summary {}.", requests.len()));
+            for at in 0..count {
+                let message = format!("user: Message {at}: x");
+                assert!(
+                    requests.iter().any(|asked| asked.contains(&message)),
+                    "{at}"
+                );
+            }
+            assert!(requests.iter().any(|asked| asked.contains("x […]")));
+        }
     }
 
     #[test]

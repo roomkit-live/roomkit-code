@@ -12,6 +12,7 @@ mod history;
 mod line;
 pub(crate) use line::tokens;
 mod memory;
+mod parts;
 mod recorded;
 mod runs;
 mod summary;

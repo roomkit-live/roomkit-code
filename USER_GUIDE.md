@@ -980,10 +980,14 @@ tool calls pass the window falls back on the engine's own compaction.
 
 The summary reads the messages and, for each tool call of the turns it stands
 for, one line saying what the call was and how it ended, such as
-`tool: Run cargo test → exit_code=0`; never a call's result. Its request
-reads half the ceiling at most: lines past it are summarized in parts, oldest
-first, each part carrying over the summary of the ones before, so that every
-message reaches the summary. Beside what the model wrote, the
+`tool: Run cargo test → exit_code=0`; never a call's result. Each of its
+requests reads half the ceiling at most, a little more under a ceiling below
+16k tokens: lines past it are summarized in parts, oldest first, each part
+carrying over the summary of the ones before, so that every message reaches
+the summary. Past four parts, such as after `/model` moved a long
+conversation to a much smaller window, the longer lines are cut shorter to
+fit them, to 200 bytes at the shortest; lines that still do not fit take
+more parts. Beside what the model wrote, the
 summary carries what the application recorded when it was written: the agent's
 plans in the conversation, with their progress, and the files the conversation
 changed, 40 named at most: those its file tools changed first, then, on a line

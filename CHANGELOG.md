@@ -8,7 +8,9 @@
   reads: a constraint the user set early could vanish, for instance after
   `/model` moved a long conversation to a model with a smaller window. Lines
   past one request are now summarized in parts, oldest first, each part
-  carrying over the summary of the ones before.
+  carrying over the summary of the ones before. Past four parts the longer
+  lines are cut shorter to fit them, to 200 bytes at the shortest, and the
+  summary says it was cut when any part was.
 - A shell command that rewrites a file with as many bytes and sets its
   modification time back is listed as changing it: the file's inode change
   time, which a command cannot set back, now counts beside its size and

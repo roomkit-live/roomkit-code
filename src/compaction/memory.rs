@@ -556,9 +556,9 @@ mod tests {
         let compactions = Arc::new(Compactions::new(dir.path()));
         let answers = (1..=10).map(|n| ScriptedRound::answering(format!("Summary {n}.")));
         let provider = ScriptedProvider::new(answers);
-        let ceiling = 2_000;
+        let ceiling = 16_000;
         let memory = TieredMemory::new(provider, (ceiling, "code"), compactions.clone());
-        let mut events = turns(6);
+        let mut events = turns(30);
         for event in &mut events {
             let said = format!("Message {}: {}", event.index, "x".repeat(1_000));
             event.content = TextContent::new(said).into();
