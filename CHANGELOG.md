@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A shell command that rewrites a file with as many bytes and sets its
+  modification time back is listed as changing it: the file's inode change
+  time, which a command cannot set back, now counts beside its size and
+  modification time, and `/files` and the sidebar no longer say "No files
+  changed" after a real change.
+
 ## [0.2.1]
 
 Corrective release for Linux x86-64/ARM64 and macOS Intel/Apple Silicon.

@@ -11,7 +11,7 @@ use super::Change;
 /// rather than reporting a partial difference as complete.
 const LIMIT: usize = 50_000;
 
-/// Files up to this size are compared by content when only their time changed,
+/// Files up to this size are compared by content when only their times changed,
 /// so a command rewriting identical bytes (`sed -i`, `touch`) changes nothing.
 const DIGESTED: u64 = 1024 * 1024;
 
@@ -31,17 +31,20 @@ const RULES: [&str; 2] = [".gitignore", ".ignore"];
 /// after, and listed it as deleted.
 const STAGED: &str = ".roomkit-write-";
 
+/// What a file's content is compared by when its digest is not.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Stat {
     len: u64,
     modified: Option<SystemTime>,
+    /// The inode change time, which a command cannot set back the way it can
+    /// the modification time. Compared between snapshots, never against the
+    /// wall clock.
+    changed: Option<SystemTime>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct File {
     stat: Stat,
-    /// Compared between snapshots, never against the wall clock.
-    changed: Option<SystemTime>,
     digest: Option<[u8; 32]>,
 }
 
@@ -51,8 +54,8 @@ impl File {
             stat: Stat {
                 len: metadata.len(),
                 modified: metadata.modified().ok(),
+                changed: changed(metadata),
             },
-            changed: changed(metadata),
             digest: None,
         }
     }
@@ -106,7 +109,7 @@ fn inventory(root: &Path, limit: usize) -> Option<HashMap<String, File>> {
     Some(paths)
 }
 
-/// Content digests from earlier snapshots, reused while a file's size and time
+/// Content digests from earlier snapshots, reused while a file's size and times
 /// are unchanged: only the first snapshot reads every small file.
 #[derive(Default)]
 pub(super) struct Digests(HashMap<String, (Stat, [u8; 32])>);
@@ -192,7 +195,7 @@ fn rules_changed(before: &Snapshot, after: &Snapshot) -> bool {
             |path| match (before.files.get(path), after.files.get(path)) {
                 (Some(then), Some(now)) => match (then.digest, now.digest) {
                     (Some(then), Some(now)) => then != now,
-                    _ => then.stat != now.stat || then.changed != now.changed,
+                    _ => then.stat != now.stat,
                 },
                 _ => true,
             },
@@ -246,10 +249,10 @@ fn revealed(known: Option<&File>, now: &File) -> Option<Change> {
     let Some(known) = known else {
         return Some(Change::Created);
     };
-    (known.stat != now.stat || known.changed != now.changed).then_some(Change::Modified)
+    (known.stat != now.stat).then_some(Change::Modified)
 }
 
-/// Compare known content first, falling back to the file's size and time.
+/// Compare known content first, falling back to the file's size and times.
 fn modified(then: &File, now: &File) -> bool {
     match (then.digest, now.digest) {
         (Some(then), Some(now)) => then != now,
