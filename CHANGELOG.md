@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A compaction no longer loses the oldest messages it stands for. Its summary
+  read the newest lines that fit half the ceiling and said how many older ones
+  it left out, and the compaction then removed them all from what the agent
+  reads: a constraint the user set early could vanish, for instance after
+  `/model` moved a long conversation to a model with a smaller window. Lines
+  past one request are now summarized in parts, oldest first, each part
+  carrying over the summary of the ones before.
 - A shell command that rewrites a file with as many bytes and sets its
   modification time back is listed as changing it: the file's inode change
   time, which a command cannot set back, now counts beside its size and

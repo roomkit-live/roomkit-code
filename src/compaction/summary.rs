@@ -47,9 +47,13 @@ pub(super) struct Written {
 pub(super) type Read<'a> = (&'a [RoomEvent], &'a [(u64, String)], &'a str);
 
 /// The summary `provider` writes of `prior`, an earlier one, and of what
-/// `read` holds, within `chars` characters, the newest first kept. None when
-/// the model fails or answers nothing: nothing is compacted then, and the
-/// next turn tries again.
+/// `read` holds, each request within `chars` characters. What one request
+/// cannot read, the next does, after the summary of what came before it:
+/// every line reaches a summary, oldest first, and the last one written
+/// stands for them all. A summary that read only the newest lines that fit
+/// lost the others, which the compaction then removed from the history.
+/// None when the model fails or answers nothing: nothing is compacted then,
+/// and the next turn tries again.
 ///
 /// The request states no output budget: the provider's policy sizes it, as
 /// for the agent's turns. A model that reasons spends its budget on its
@@ -61,14 +65,36 @@ pub(super) async fn summarize<P: AiProvider>(
     read: Read<'_>,
     chars: usize,
 ) -> Option<Written> {
+    let mut lines = lines(read);
+    let mut prior = prior.map(str::to_owned);
+    loop {
+        let mut ask = ask(prior.as_deref());
+        let room = chars.saturating_sub(ask.len() + fence("conversation", "").len());
+        let rest = lines.split_off(fitting(&lines, room));
+        ask.push_str(&fence("conversation", &lines.join("\n")));
+        let summary = write(provider, ask).await?;
+        if rest.is_empty() {
+            return Some(summary);
+        }
+        prior = Some(summary.text);
+        lines = rest;
+    }
+}
+
+/// What a summary's request asks before the conversation it reads: the
+/// earlier summary it carries over, when there is one.
+fn ask(prior: Option<&str>) -> String {
     let mut ask = ASK.to_owned();
     if let Some(prior) = prior {
         ask.push_str("\n\n");
         ask.push_str(&fence("earlier_summary", prior));
     }
     ask.push_str("\n\n");
-    let room = chars.saturating_sub(ask.len());
-    ask.push_str(&fence("conversation", &lines(read, room)));
+    ask
+}
+
+/// The summary `provider` answers `ask` with.
+async fn write<P: AiProvider>(provider: &P, ask: String) -> Option<Written> {
     let context = AiContext {
         messages: vec![AiMessage::new(AiRole::User, ask)],
         system_prompt: Some(SUMMARIZER.into()),
@@ -100,10 +126,8 @@ fn written(content: &str, finish_reason: Option<&str>) -> Option<Written> {
 }
 
 /// What a summary reads, one line each, in timeline order: who then the
-/// text of a message, cut to `LINE_CHARS`, and the line of a tool call. The
-/// newest that fit in `chars`, a line saying how many older ones were left
-/// out.
-pub(super) fn lines((events, calls, agent): Read<'_>, chars: usize) -> String {
+/// text of a message, cut to `LINE_CHARS`, and the line of a tool call.
+pub(super) fn lines((events, calls, agent): Read<'_>) -> Vec<String> {
     let mut all: Vec<(u64, String)> = events
         .iter()
         .filter_map(|event| Some((event.index, line(event, agent)?)))
@@ -111,22 +135,21 @@ pub(super) fn lines((events, calls, agent): Read<'_>, chars: usize) -> String {
     all.extend(calls.iter().cloned());
     // Stable: lines of one index keep the order they came in.
     all.sort_by_key(|(index, _)| *index);
+    all.into_iter().map(|(_, line)| line).collect()
+}
+
+/// How many of `lines`, oldest first, one request reads within `room`
+/// characters: one at least, so that each request moves on.
+fn fitting(lines: &[String], room: usize) -> usize {
     let mut used = 0;
-    let kept = all
+    let fit = lines
         .iter()
-        .rev()
-        .take_while(|(_, line)| {
+        .take_while(|line| {
             used += line.len() + 1;
-            used <= chars
+            used <= room
         })
         .count();
-    let left = all.len() - kept;
-    let mut lines: Vec<String> = Vec::with_capacity(kept + 1);
-    if left > 0 {
-        lines.push(format!("[{left} earlier lines are left out.]"));
-    }
-    lines.extend(all.into_iter().skip(left).map(|(_, line)| line));
-    lines.join("\n")
+    fit.max(1).min(lines.len())
 }
 
 fn line(event: &RoomEvent, agent: &str) -> Option<String> {
@@ -269,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn a_summary_reads_the_newest_messages_that_fit() {
+    fn a_summary_reads_each_message_on_its_line() {
         let events = [
             said("terminal", "First question."),
             said("code", "First answer."),
@@ -277,15 +300,27 @@ mod tests {
             said("terminal", "Second question."),
         ];
         assert_eq!(
-            lines((&events, &[], "code"), 1_000),
-            "user: First question.\nassistant: First answer.\nuser: Second question."
-        );
-        assert_eq!(
-            lines((&events, &[], "code"), 50),
-            "[1 earlier lines are left out.]\nassistant: First answer.\nuser: Second question."
+            lines((&events, &[], "code")),
+            [
+                "user: First question.",
+                "assistant: First answer.",
+                "user: Second question."
+            ]
         );
         let long = [said("terminal", &"é".repeat(LINE_CHARS + 5))];
-        assert!(lines((&long, &[], "code"), 100_000).ends_with("é […]"));
+        assert!(lines((&long, &[], "code"))[0].ends_with("é […]"));
+    }
+
+    /// A request reads the oldest lines that fit; the next request reads
+    /// the rest. One reads a line at least, however long, so that each
+    /// moves on.
+    #[test]
+    fn a_request_reads_the_oldest_lines_that_fit_and_one_at_least() {
+        let lines = ["user: First question.", "assistant: First answer."].map(String::from);
+        assert_eq!(fitting(&lines, 1_000), 2);
+        assert_eq!(fitting(&lines, 30), 1);
+        assert_eq!(fitting(&lines, 0), 1);
+        assert_eq!(fitting(&[], 1_000), 0);
     }
 
     /// A turn made of calls and one answer left a summary its question and
@@ -302,13 +337,8 @@ mod tests {
             (3, "tool: Edit src/lib.rs → ok".to_owned()),
         ];
         assert_eq!(
-            lines((&events, &calls, "code"), 1_000),
+            lines((&events, &calls, "code")).join("\n"),
             "user: Fix the test.\ntool: Edit src/lib.rs → ok\ntool: Run cargo test → exit_code=0\nassistant: Fixed.\nuser: Thanks."
-        );
-        // The oldest lines go first, a message's or a call's.
-        assert_eq!(
-            lines((&events, &calls, "code"), 70),
-            "[2 earlier lines are left out.]\ntool: Run cargo test → exit_code=0\nassistant: Fixed.\nuser: Thanks."
         );
     }
 

@@ -535,4 +535,63 @@ mod tests {
         assert!(made.estimate.unwrap().tokens > 30_000);
         assert_eq!(made.fixed, Some(30_000));
     }
+
+    /// The text of the request a summary was asked with.
+    fn asked(request: &roomkit_ai::AiContext) -> String {
+        match &request.messages[0].content {
+            roomkit_ai::AiMessageContent::Text(text) => text.clone(),
+            _ => String::new(),
+        }
+    }
+
+    /// Review finding: a summary read the newest lines that fit its request
+    /// and said how many older ones it left out, and the compaction dropped
+    /// them all from the history: the user's first constraint reached no
+    /// summary and no request again. Each line now reaches a summary: what
+    /// does not fit one request is summarized in the next, after the summary
+    /// of what came before.
+    #[tokio::test]
+    async fn a_history_longer_than_a_summary_reads_is_summarized_in_parts() {
+        let dir = tempfile::tempdir().unwrap();
+        let compactions = Arc::new(Compactions::new(dir.path()));
+        let answers = (1..=10).map(|n| ScriptedRound::answering(format!("Summary {n}.")));
+        let provider = ScriptedProvider::new(answers);
+        let ceiling = 2_000;
+        let memory = TieredMemory::new(provider, (ceiling, "code"), compactions.clone());
+        let mut events = turns(6);
+        for event in &mut events {
+            let said = format!("Message {}: {}", event.index, "x".repeat(1_000));
+            event.content = TextContent::new(said).into();
+        }
+        events[0].content = TextContent::new("CONSTRAINT: never touch main.rs.").into();
+        let history = History {
+            events,
+            replayed: Vec::new(),
+        };
+        memory.compact_now("room", history).await;
+        let made = compactions.get("room", "code").unwrap();
+        let requests: Vec<String> = memory.provider.requests().iter().map(asked).collect();
+        assert!(requests.len() > 1, "{requests:#?}");
+        assert!(requests[0].contains("CONSTRAINT: never touch main.rs."));
+        // Every message summarized reached a request, within what one reads.
+        for index in 2..made.from {
+            let message = format!("Message {index}: ");
+            assert!(
+                requests.iter().any(|asked| asked.contains(&message)),
+                "{index}"
+            );
+        }
+        for (at, asked) in requests.iter().enumerate() {
+            assert!(!asked.contains("left out"), "{asked}");
+            assert!(
+                asked.len() <= tiers::summary_chars(ceiling),
+                "{}",
+                asked.len()
+            );
+            if at > 0 {
+                assert!(asked.contains(&format!("Summary {at}.")), "{asked}");
+            }
+        }
+        assert_eq!(made.summary, format!("Summary {}.", requests.len()));
+    }
 }
