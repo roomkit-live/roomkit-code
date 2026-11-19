@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [0.2.1]
+
+Corrective release for Linux x86-64/ARM64 and macOS Intel/Apple Silicon.
+
+Linux requires glibc 2.35 or newer. macOS requires version 12 or newer; binaries
+are ad-hoc signed, without Apple Developer ID signing or notarization. No
+application data changes: rolling back to 0.2.0 or 0.1.3 from the application
+keeps conversations and settings readable.
+
 - Copying with the mouse works on macOS whatever the terminal: a copy also
   writes the Mac's own clipboard, beside OSC 52, which Terminal ignores and
   iTerm2 refuses by default; it read "Copy requested" while nothing was
