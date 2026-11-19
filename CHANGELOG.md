@@ -13,7 +13,8 @@
   modification time back is listed as changing it: the file's inode change
   time, which a command cannot set back, now counts beside its size and
   modification time, and `/files` and the sidebar no longer say "No files
-  changed" after a real change.
+  changed" after a real change. A file over 1 MiB, compared by these alone,
+  is also listed when only its mode or links change.
 
 ## [0.2.1]
 

@@ -37,8 +37,8 @@ struct Stat {
     len: u64,
     modified: Option<SystemTime>,
     /// The inode change time, which a command cannot set back the way it can
-    /// the modification time. Compared between snapshots, never against the
-    /// wall clock.
+    /// the modification time (the creation time outside Unix). Compared
+    /// between snapshots, never against the wall clock.
     changed: Option<SystemTime>,
 }
 

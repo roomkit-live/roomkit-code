@@ -116,6 +116,9 @@ fn a_rewrite_restoring_size_and_modification_time_is_still_a_change() {
     let before = take(root, &mut digests).unwrap();
     assert!(before.files["small"].digest.is_some());
     assert!(before.files["large"].digest.is_none());
+    // A kernel without fine-grained timestamps moves the change time once a
+    // tick, up to 4 ms: the rewrite comes in a later one.
+    std::thread::sleep(std::time::Duration::from_millis(20));
     for (name, content) in [("small", b"after!".to_vec()), ("large", vec![b'b'; large])] {
         let path = root.join(name);
         let original = std::fs::metadata(&path).unwrap().modified().unwrap();
