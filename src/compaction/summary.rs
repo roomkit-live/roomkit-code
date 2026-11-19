@@ -47,13 +47,14 @@ pub(super) struct Written {
 pub(super) type Read<'a> = (&'a [RoomEvent], &'a [(u64, String)], &'a str);
 
 /// The summary `provider` writes of `prior`, an earlier one, and of what
-/// `read` holds, each request within `chars` characters. What one request
-/// cannot read, the next does, after the summary of what came before it:
-/// every line reaches a summary, oldest first, and the last one written
-/// stands for them all. A summary that read only the newest lines that fit
-/// lost the others, which the compaction then removed from the history.
-/// None when the model fails or answers nothing: nothing is compacted then,
-/// and the next turn tries again.
+/// `read` holds, each request within `chars` characters, but for one line
+/// at least. What one request cannot read, the next does, after the summary
+/// of what came before it: every line reaches a summary, oldest first, and
+/// the last one written stands for them all, cut when any of them was. A
+/// summary that read only the newest lines that fit lost the others, which
+/// the compaction then removed from the history. None when the model fails
+/// or answers nothing: nothing is compacted then, and the next turn tries
+/// again.
 ///
 /// The request states no output budget: the provider's policy sizes it, as
 /// for the agent's turns. A model that reasons spends its budget on its
@@ -67,14 +68,16 @@ pub(super) async fn summarize<P: AiProvider>(
 ) -> Option<Written> {
     let mut lines = lines(read);
     let mut prior = prior.map(str::to_owned);
+    let mut cut = false;
     loop {
         let mut ask = ask(prior.as_deref());
         let room = chars.saturating_sub(ask.len() + fence("conversation", "").len());
         let rest = lines.split_off(fitting(&lines, room));
         ask.push_str(&fence("conversation", &lines.join("\n")));
         let summary = write(provider, ask).await?;
+        cut |= summary.cut;
         if rest.is_empty() {
-            return Some(summary);
+            return Some(Written { cut, ..summary });
         }
         prior = Some(summary.text);
         lines = rest;
@@ -420,6 +423,29 @@ mod tests {
         let long = written(&"é".repeat(SUMMARY_BYTES), None).unwrap();
         assert!(long.cut && long.text.ends_with(CUT));
         assert!(long.text.len() <= SUMMARY_BYTES + CUT.len() + 2);
+    }
+
+    /// A part's summary cut short is carried over without its end: the
+    /// summary that stands for them all says so, whichever part was cut.
+    #[tokio::test]
+    async fn a_summary_in_parts_says_so_when_any_part_was_cut() {
+        use roomkit_ai::testing::{ScriptedProvider, ScriptedRound};
+        let provider = ScriptedProvider::new([
+            ScriptedRound::answering("The user asked for").with_finish_reason("length"),
+            ScriptedRound::answering("They fixed the test."),
+        ]);
+        let events = [
+            said("terminal", &"a".repeat(1_500)),
+            said("code", &"b".repeat(1_500)),
+        ];
+        // Room for one of the two lines per request.
+        let chars = ask(None).len() + fence("conversation", "").len() + 1_600;
+        let written = summarize(&provider, None, (&events, &[], "code"), chars)
+            .await
+            .unwrap();
+        assert_eq!(provider.requests().len(), 2);
+        assert_eq!(written.text, "They fixed the test.");
+        assert!(written.cut, "the first part was cut");
     }
 
     #[test]
