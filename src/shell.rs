@@ -2,8 +2,7 @@
 //! never invoke a model or pass through model tool permissions.
 
 use std::{
-    collections::VecDeque,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -16,7 +15,7 @@ use roomkit::{
 };
 use roomkit_sqlite::SqliteStore;
 use roomkit_tools_process::{
-    ObservedProcess, ProcessChunk, ProcessEnd, ProcessReadInput, ProcessReadResult, ProcessSession,
+    ProcessChunk, ProcessEnd, ProcessReadInput, ProcessReadResult, ProcessSession,
     ProcessStartInput, ProcessState, ProcessStopInput, ProcessWriteInput,
 };
 use roomkit_tui::protocol::{Command, Event, Item, Message, Request, RunOutcome};
@@ -34,9 +33,6 @@ pub(crate) struct Shell {
     diagnostics: Arc<Diagnostics>,
     shutdown: CancellationToken,
     slot: Arc<Semaphore>,
-    /// Manual commands' process IDs, oldest first: the first finished one is
-    /// reclaimed when a conversation keeps too many.
-    started: Mutex<VecDeque<String>>,
 }
 
 impl Shell {
@@ -46,7 +42,6 @@ impl Shell {
             diagnostics,
             shutdown: CancellationToken::new(),
             slot: Arc::new(Semaphore::new(1)),
-            started: Mutex::new(VecDeque::new()),
         })
     }
 
@@ -233,24 +228,6 @@ impl Shell {
         Ok(outcome)
     }
 
-    /// The finished manual command `owner` started first. The processes'
-    /// elapsed time is their runtime, frozen at the end, not their age, so
-    /// the order is the one this shell started them in.
-    fn oldest_finished<'a>(
-        &self,
-        jobs: &'a [ObservedProcess],
-        owner: &str,
-    ) -> Option<&'a ObservedProcess> {
-        let started = crate::sync::lock(&self.started);
-        started.iter().find_map(|id| {
-            jobs.iter().find(|job| {
-                job.status.process_id == *id
-                    && job.owner.as_deref() == Some(owner)
-                    && job.status.state == ProcessState::Finished
-            })
-        })
-    }
-
     async fn run(
         &self,
         owner: &str,
@@ -259,35 +236,11 @@ impl Shell {
         context: &mut ExecutionContext,
     ) -> Result<ProcessReadResult, &'static str> {
         let cleanup = CancellationToken::new();
-        // Reclaim only old completed manual commands in this conversation. Model
-        // jobs and live processes remain under their owner's explicit control.
-        let jobs = self.manager.observe().await;
-        // Forget the IDs of processes the manager no longer keeps.
-        crate::sync::lock(&self.started)
-            .retain(|id| jobs.iter().any(|job| job.status.process_id == *id));
-        if jobs
-            .iter()
-            .filter(|job| job.owner.as_deref() == Some(owner))
-            .count()
-            >= 8
-            && let Some(oldest) = self.oldest_finished(&jobs, owner)
-        {
-            let _ = self
-                .manager
-                .stop(
-                    Some(owner),
-                    ProcessStopInput {
-                        process_id: oldest.status.process_id.clone(),
-                        forget: true,
-                    },
-                    &cleanup,
-                )
-                .await;
-        }
+        // At the conversation's quota of kept commands, the manager releases
+        // the one that finished first: live ones stay under the person's control.
         let process = self.manager.start(Some(owner), ProcessStartInput::new(command), &self.shutdown).await
             .map_err(|_| "Could not start command. Inspect /processes for retained jobs or /diagnostics for application failures.")?.data;
         let id = process.process_id;
-        crate::sync::lock(&self.started).push_back(id.clone());
         // These are noninteractive commands. EOF avoids programs waiting forever
         // for input; terminal applications and prompts need a separate PTY.
         let _ = self
