@@ -17,7 +17,7 @@ include = ["build.rs", "src/**", "Cargo.toml", "Cargo.lock", "README.md", "USER_
 roomkit-hooks = { path = "crates/roomkit-hooks", version = "0.1.0" }
 roomkit-auth = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-auth", rev = "f29f07e5c6885aa3dab22f4b9624104267b4e81c" }
 # Keep the engine source identical to the CLI and tools adapters.
-roomkit = { version = "0.2.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "4f271c660c0531aff760e6f2a60c8d58093153aa" }
+roomkit = { version = "0.2.0", features = ["redis"], git = "https://github.com/roomkit-live/roomkit-rs", rev = "4f271c660c0531aff760e6f2a60c8d58093153aa" }
 # An event's plain text and the transcript's image references, which roomkit
 # no longer re-exports.
 roomkit-core = { version = "0.2.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "4f271c660c0531aff760e6f2a60c8d58093153aa" }

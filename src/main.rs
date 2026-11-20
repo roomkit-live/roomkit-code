@@ -26,6 +26,7 @@ mod plans;
 mod processes;
 mod profiles;
 mod providers;
+mod remote;
 mod services;
 mod sessions;
 mod shell;
@@ -63,6 +64,10 @@ async fn launch() -> Result<ExitCode> {
     let settings = config::Settings::load(&cli)?;
     if cli.check_config {
         println!("Launch configuration valid. Provider and agent profiles are loaded at startup.");
+        return Ok(ExitCode::SUCCESS);
+    }
+    if let Some(group) = &cli.serve_worker {
+        remote::serve(settings, group).await?;
         return Ok(ExitCode::SUCCESS);
     }
     if let Some(prompt) = application::headless::Prompt::from_cli(&cli)? {

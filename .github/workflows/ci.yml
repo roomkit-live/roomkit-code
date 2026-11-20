@@ -35,6 +35,9 @@ jobs:
       - name: Install pinned Rust toolchain
         run: rustup show active-toolchain
       - run: make check
+      - name: Exercise the remote Linux worker
+        if: runner.os == 'Linux'
+        run: python3 scripts/check-remote-worker.py
       - name: Install minimum supported Rust
         run: rustup toolchain install 1.94.0 --profile minimal
       - run: make msrv

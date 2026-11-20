@@ -56,3 +56,8 @@ allow = ["BSL-1.0"]
 [[licenses.exceptions]]
 name = "error-code"
 allow = ["BSL-1.0"]
+
+# RoomKit's Redis transport uses this XXH3 implementation.
+[[licenses.exceptions]]
+crate = "xxhash-rust@=0.8.21"
+allow = ["BSL-1.0"]

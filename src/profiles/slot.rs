@@ -15,6 +15,7 @@ type Fitted = Result<Arc<CodeAgent>, String>;
 
 #[derive(Clone)]
 pub(super) struct AgentSlot {
+    remote: bool,
     instructions: Arc<crate::instructions::Instructions>,
     files: Arc<crate::files::Files>,
     compactions: Arc<crate::compaction::Compactions>,
@@ -45,6 +46,7 @@ impl AgentSlot {
         roster: Arc<crate::delegation::Roster>,
     ) -> Self {
         Self {
+            remote: false,
             instructions,
             files,
             compactions,
@@ -62,6 +64,12 @@ impl AgentSlot {
     /// the application's other agents do.
     pub fn with_turn_ends(mut self, turn_ends: Arc<crate::turn_ends::TurnEnds>) -> Self {
         self.turn_ends = turn_ends;
+        self
+    }
+
+    /// Route tool permissions for this slot to the room owner.
+    pub(super) fn on_remote_executor(mut self) -> Self {
+        self.remote = true;
         self
     }
 
@@ -148,7 +156,12 @@ impl AgentSlot {
         self.compactions.tell_snapshot(room, agent, &project);
         let (engine, told) = engine_first(event, told);
         let mut parts: Vec<String> = engine.into_iter().collect();
-        parts.push(self.policy.instruction(room).to_owned());
+        let permission = if self.remote {
+            "You are running on the remote Linux executor in its own workspace. The parent conversation controls permissions for each tool call. Describe file paths as relative to this worker."
+        } else {
+            self.policy.instruction(room)
+        };
+        parts.push(permission.to_owned());
         parts.extend(worker.map(str::to_owned));
         // A task's agent hands nothing on (`delegation::nesting_refusal`).
         if worker.is_none() {

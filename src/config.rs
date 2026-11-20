@@ -31,6 +31,12 @@ pub(crate) struct Cli {
     /// Disable automatic update checks (manual /update remains available).
     #[arg(long, env = "ROOMKIT_NO_UPDATE_CHECK")]
     pub no_update_check: bool,
+    /// Offer the remote-linux delegation target in this Redis group.
+    #[arg(long, conflicts_with_all = ["serve_worker", "prompt"], value_parser = crate::remote::group)]
+    pub remote_worker: Option<String>,
+    /// Serve the remote-linux agent for this Redis group from this workspace.
+    #[arg(long, conflicts_with_all = ["prompt", "session"], value_parser = crate::remote::group)]
+    pub serve_worker: Option<String>,
     /// Project directory used by the coding tools.
     #[arg(default_value = ".")]
     pub workspace: PathBuf,
@@ -309,6 +315,7 @@ impl Default for Appearance {
 }
 
 pub(crate) struct Settings {
+    pub remote_worker: Option<String>,
     pub update_check: bool,
     pub require_tool_intent: bool,
     pub herdr: bool,
@@ -536,6 +543,7 @@ impl Settings {
             herdr: file.integrations.herdr && !cli.no_herdr,
             inherit_env: inherit_env(cli, file.shell)?,
             resume_options: resume_options(cli)?,
+            remote_worker: cli.remote_worker.clone(),
             workspace,
             debug: cli.debug,
             state_dir,
@@ -641,6 +649,9 @@ fn choose_inherit_env(
 /// options are deliberately absent. Persisted profiles restore agent/model.
 fn resume_options(cli: &Cli) -> Result<Option<Vec<String>>> {
     let mut args = vec![];
+    if let Some(group) = &cli.remote_worker {
+        args.extend(["--remote-worker".into(), group.clone()]);
+    }
     if !cli.inherit_env.is_empty() {
         args.extend(["--inherit-env".into(), cli.inherit_env.join(",")]);
     }

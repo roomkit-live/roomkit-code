@@ -17,6 +17,7 @@ mod subscription_form;
 mod subscriptions;
 mod targets;
 mod ui;
+mod worker;
 
 use roomkit::model::{Access, ChannelId};
 use roomkit::{ListBindingsOptions, RoomKit};
@@ -67,6 +68,7 @@ pub(crate) struct Profiles {
 }
 
 struct State {
+    remote_worker: bool,
     instructions: Arc<crate::instructions::Instructions>,
     compactions: Arc<crate::compaction::Compactions>,
     /// The files the agents' tools change, which a slot settles as it closes.
@@ -226,6 +228,7 @@ impl Profiles {
             mcp_runtime: mcp::Runtime::default(),
             reported: std::sync::Mutex::default(),
             state: Mutex::new(State {
+                remote_worker: settings.remote_worker.is_some(),
                 instructions,
                 compactions,
                 files,
@@ -270,6 +273,7 @@ impl Profiles {
         // A launch nobody watches ends with its turn, before a task it handed
         // over could end: no agent is served the delegation tools then.
         if !self.unattended {
+            state.register_remote(kit)?;
             state.delegation = Some(crate::delegation::handler(kit));
             state.refresh_roster();
         }
@@ -536,7 +540,9 @@ impl State {
         let key = (view.room.to_string(), view.agent.to_string());
         view.submission_error = if let Some(reason) = self.unfitted.get(&key) {
             Some(reason.clone())
-        } else if self.tools.contains_key(view.agent.as_str()) {
+        } else if self.is_remote(view.agent.as_str())
+            || self.tools.contains_key(view.agent.as_str())
+        {
             None
         } else {
             Some(self.setup_error.clone().unwrap_or_else(|| "Configure a connection with /providers, then create or select an agent with /agents".into()))

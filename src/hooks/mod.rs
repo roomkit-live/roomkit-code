@@ -225,13 +225,13 @@ impl Hooks {
         kit: &roomkit::RoomKit<roomkit_sqlite::SqliteStore>,
     ) -> crate::Result<()> {
         let hooks = self.clone();
-        let options = roomkit::HookOptions {
+        let options = roomkit::turns::HookOptions {
             execution: roomkit::HookExecution::Async,
             name: "code-command-hook-outcomes".into(),
             timeout: crate::timeouts::HOOKS,
-            ..roomkit::HookOptions::default()
+            ..roomkit::turns::HookOptions::default()
         };
-        kit.hook(
+        kit.turn_executor().hook(
             roomkit::HookTrigger::OnToolCall,
             move |event: ToolCallEvent, _| {
                 // The engine calls this observer on a task of its own after it

@@ -164,7 +164,7 @@ impl Diagnostics {
             observer("code-diagnostics-errors"),
         )?;
         let log = self.clone();
-        kit.hook(
+        kit.turn_executor().hook(
             HookTrigger::OnToolCall,
             move |event: roomkit::ToolCallEvent, _| {
                 let log = log.clone();
@@ -189,7 +189,11 @@ impl Diagnostics {
                     );
                 }
             },
-            observer("code-diagnostics-tools"),
+            roomkit::turns::HookOptions {
+                name: "code-diagnostics-tools".into(),
+                execution: HookExecution::Async,
+                ..Default::default()
+            },
         )?;
         let mut types = vec![
             "delivery_failed",

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- An experimental Linux worker can run a delegated coding task in its own
+  workspace over Redis. Start the worker with `--serve-worker GROUP` and
+  the interactive owner with `--remote-worker GROUP`.
+
 - Follows roomkit-tools 1f41758, whose tools give the model their text alone
   and the views their data; the hook that did so here is gone. A result's
   nested project instructions are still a `project_instructions` field beside

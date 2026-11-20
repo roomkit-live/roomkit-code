@@ -544,6 +544,56 @@ it lacks something: a task with no price or in another currency, one stopped
 before its usage was whole, one a crash left unfinished, or at exit one still
 running.
 
+## Experimental Linux executor
+
+A session started with `--remote-worker GROUP` offers one additional delegation
+target, `remote-linux`. Its model and workspace tools run in the worker
+process. Ask the conversation agent to delegate a task to that ID. Open
+the child room with `/tasks next`, use Esc to stop its running task and
+`/back` to return. The parent receives the result. Keep both processes running.
+
+**Try it without a model account.** From this branch on Linux, with Python 3
+and Docker available, run:
+
+```sh
+cargo build --locked
+python3 scripts/check-remote-worker.py --interactive
+```
+
+The demo starts a private loopback Redis, two temporary workspaces and a local
+HTTP server simulating both models. Send `Check the remote workspace`, refuse
+the first write with Esc and allow the second once with Ctrl+Y. Then send
+`Start the second task`, open its room with `/tasks next`, cancel it with Esc
+and return with `/back`. Omit `--interactive` to run the checks automatically,
+including Plan mode and a worker disconnect.
+
+**With your own workspaces and models.** Give both processes access to the
+same trusted Redis server and choose a group unique to this workspace and
+session. For example, on each host set `ROOMKIT_EXECUTOR_REDIS_URL` to
+`redis://127.0.0.1:6379` when Redis is local or forwarded there. A group
+isolates key names only. Anyone with write access to the broker can act as
+a room owner or worker. Across machines use a private authenticated Redis
+over TLS or an SSH tunnel. Supply credentials through the environment.
+
+```sh
+# On the Linux worker, from its own checkout.
+roomkit-code . --serve-worker project-demo
+
+# On the developer's workstation, from the project.
+roomkit-code . --remote-worker project-demo
+```
+
+Each process uses its own saved model connection. For a fresh workspace
+supply `--model` and `--base-url` on that host. The worker takes its selected
+profile's model, instructions and selected file tools (list, glob, grep,
+read, code outline, diff, edit, write and patch). It can also page a stored tool
+result. Each call requires a live permission decision from the owner. The
+owner runs its pre-tool hooks. Post-tool hooks currently cover local outcomes.
+
+Use one worker per group. Supply a checkout containing the files it needs.
+Edits stay in that checkout. Shell jobs, skills, MCP, automatic checkout and
+placement by resource or OS are outside this POC.
+
 ## Tools and persistence
 
 Use **/tools** to browse the capabilities actually registered by the application,

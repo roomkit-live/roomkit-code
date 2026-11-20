@@ -5,7 +5,8 @@
 use std::sync::Arc;
 
 use roomkit::model::RoomContext;
-use roomkit::{HookOptions, HookTrigger, RoomKit, ToolCallEvent, WeakRoomKit};
+use roomkit::turns::HookOptions;
+use roomkit::{HookTrigger, RoomKit, ToolCallEvent, WeakRoomKit};
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui_engine::ConversationChannel;
 use serde_json::Value;
@@ -13,6 +14,9 @@ use serde_json::Value;
 use crate::delegation::{DELEGATE, SHARE_CHANNELS};
 use crate::permissions::{Policy, Verdict, block};
 use crate::{Result, hooks::Hooks, plans::Plans, profiles::Profiles};
+
+mod remote;
+pub(super) use remote::install as install_remote;
 
 /// What the gate decides with.
 #[derive(Clone)]
@@ -29,7 +33,7 @@ pub(super) struct Gate {
 }
 
 pub(super) fn install(kit: &RoomKit<SqliteStore>, gate: Gate) -> Result<()> {
-    kit.hook(
+    kit.turn_executor().hook(
         HookTrigger::BeforeToolUse,
         move |event: ToolCallEvent, context: RoomContext| {
             let gate = gate.clone();
