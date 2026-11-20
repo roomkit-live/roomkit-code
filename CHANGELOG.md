@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.3.0]
+
+Release for Linux x86-64/ARM64 and macOS Intel/Apple Silicon, built on RoomKit
+Rust 0.2.0 with roomkit-tools 0.2.0 and roomkit-tui 0.3.0.
+
+Linux requires glibc 2.35 or newer. macOS requires version 12 or newer; binaries
+are ad-hoc signed, without Apple Developer ID signing or notarization. No
+application data changes: rolling back to 0.2.1, 0.2.0 or 0.1.3 from the
+application keeps conversations and settings readable.
+
 - Follows roomkit-tui c1860af: its 0.3.0 and the notice for a conversation
   left. What you meet differently:
   - Web addresses are links wherever an agent or the application writes
