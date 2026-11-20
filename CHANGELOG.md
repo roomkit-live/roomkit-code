@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- Follows roomkit-tui c1860af: its 0.3.0 and the notice for a conversation
+  left. What you meet differently:
+  - Web addresses are links wherever an agent or the application writes
+    them: a question and its options, an approval's detail, the notices under
+    a card, a form or a panel, a model's reasoning, a tool's arguments and the
+    sidebar, also in quotes such as “…” or before `。`. An address a hidden
+    control character cuts links as it shows, never to its first part.
+  - A question asked while you are in a task's room leaves a notice there,
+    `An agent of a conversation you left asks you a question: /resume it to
+    answer`, where nothing showed; the card waits in the conversation.
+  - On a question card, a long option wraps under its number, your own words
+    wrap on up to three rows with the cursor where you type, a single-choice
+    answer is the option or your words, never both, and a paste past the
+    answer's 4 KiB says so.
+  - A provider's refusal the activity row's controls would cut wraps below
+    them, and a narrow footer drops whole figures and ends in `…` instead of
+    cutting one (`≈ $1` for $133.32).
+  - A decision for a turn you did not start, a task's or another channel's, is
+    saved at once; a message sent during a turn that fails in a turn of its
+    own shows the failure once; the conversation's cost counts its own
+    agent's turns, live as after a relaunch; a run that ends takes its
+    questions with it, and a blank paste is not sent.
 - Follows roomkit-tools 1f41758, whose tools give the model their text alone
   and the views their data; the hook that did so here is gone. A result's
   nested project instructions are still a `project_instructions` field beside
