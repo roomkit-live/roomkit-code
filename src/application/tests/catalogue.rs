@@ -1,5 +1,5 @@
 use super::*;
-use roomkit_ai::{Tool, ToolResult};
+use roomkit_ai::Tool;
 use roomkit_tools_roomkit::{
     OutputForget, OutputRead, ProcessRead, ProcessStart, ProcessStatus, ProcessStop,
 };
@@ -15,11 +15,9 @@ async fn call(
     crate::testing::call(tool, room, agent, name, args).await
 }
 
-fn data(output: ToolResult) -> Value {
-    let ToolResult::Json(value) = output else {
-        panic!("Expected structured output")
-    };
-    value["data"].clone()
+/// The data `tool` gives the host for that call, which it serves.
+async fn data(tool: &Arc<dyn Tool>, (room, agent): (&str, &str), name: &str, args: Value) -> Value {
+    crate::testing::data(tool, room, agent, name, args).await
 }
 
 fn tool_result(session: &Session, name: &str) -> Value {
@@ -186,8 +184,7 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
     .await;
     let observer: Arc<dyn Tool> =
         Arc::new(ProcessStatus::new(app.profiles.resources.processes.clone()));
-    let status = call(&observer, ("main", "observer"), "process_status", json!({}));
-    let status = data(status.await.unwrap());
+    let status = data(&observer, ("main", "observer"), "process_status", json!({})).await;
     assert!(status["processes"].as_array().unwrap().is_empty());
     let roomkit_tui_engine::CommandResult::Switch(view) = profile_command(
         &app,
@@ -227,11 +224,7 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
     let completed = tokio::time::timeout(Duration::from_secs(3), async {
         loop {
             let read = json!({"process_id":"p1"});
-            let result = data(
-                call(&processes, ("main", "code"), "process_read", read)
-                    .await
-                    .unwrap(),
-            );
+            let result = data(&processes, ("main", "code"), "process_read", read).await;
             if result["status"]["state"] == "finished" {
                 break result;
             }
@@ -244,13 +237,9 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
     assert_eq!(completed["status"]["exit_code"], 0);
     let code = ("main", "code");
     let forget: Arc<dyn Tool> = Arc::new(OutputForget::new(app.profiles.resources.outputs.clone()));
-    let forgotten = call(
-        &forget,
-        code,
-        "output_forget",
-        json!({"archive_id":archive}),
-    );
-    assert_eq!(data(forgotten.await.unwrap())["forgotten"], true);
+    let forgetting = json!({"archive_id":archive});
+    let forgotten = data(&forget, code, "output_forget", forgetting).await;
+    assert_eq!(forgotten["forgotten"], true);
     let read = json!({"archive_id":archive});
     assert!(call(&outputs, code, "output_read", read).await.is_err());
     // Leave another live process for the application's shutdown path to reap.
@@ -260,7 +249,7 @@ async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_wit
     let cat = || json!({"command":"cat"});
     call(&start, code, "process_start", cat()).await.unwrap();
     let stopping = json!({"process_id":"p2","forget":true});
-    let stopped = data(call(&stop, code, "process_stop", stopping).await.unwrap());
+    let stopped = data(&stop, code, "process_stop", stopping).await;
     assert_eq!(stopped["forgotten"], true);
     call(&start, code, "process_start", cat()).await.unwrap();
     let state_path = app._storage.database.parent().unwrap().to_owned();
@@ -322,10 +311,12 @@ async fn the_engine_s_stored_results_are_read_without_an_approval() {
     app.close().await.unwrap();
 }
 
-/// A `timeout_ms` above the host maximum the prompt states is refused with
-/// that maximum, so the model can correct it, instead of being capped.
+/// A `timeout_ms` above the host maximum the prompt states names that
+/// maximum, so the model can correct it. The terminal's shell, which moves a
+/// command still running at its limit to the background, runs the command
+/// with the maximum and says so; a process is refused.
 #[tokio::test]
-async fn a_timeout_above_the_host_maximum_is_refused_with_the_maximum() {
+async fn a_timeout_above_the_host_maximum_names_the_maximum() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let shell = crate::timeouts::shell_max_seconds(false) * 1000;
@@ -343,7 +334,15 @@ async fn a_timeout_above_the_host_maximum_is_refused_with_the_maximum() {
     let app = Application::open(&settings, String::new()).await.unwrap();
     let session = turn(&app).await;
     let snapshot = session.snapshot().unwrap();
-    for (name, maximum) in [("shell", shell), ("process_start", process)] {
+    let capped = format!(
+        "timeout_ms {} capped to the host maximum of {shell} ms",
+        shell + 1
+    );
+    let refused = format!("timeout_ms exceeds the host maximum of {process} ms");
+    for (name, state, message) in [
+        ("shell", ToolState::Succeeded, capped),
+        ("process_start", ToolState::Denied, refused),
+    ] {
         let call = snapshot
             .items
             .iter()
@@ -352,8 +351,7 @@ async fn a_timeout_above_the_host_maximum_is_refused_with_the_maximum() {
                 _ => None,
             })
             .unwrap();
-        assert_eq!(call.state, ToolState::Denied, "{name}: {}", call.text);
-        let message = format!("timeout_ms exceeds the host maximum of {maximum} ms");
+        assert_eq!(call.state, state, "{name}: {}", call.text);
         assert!(call.text.contains(&message), "{name}: {}", call.text);
     }
     assert!(app.profiles.resources.processes.observe().await.is_empty());

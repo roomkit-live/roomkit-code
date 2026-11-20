@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- Follows roomkit-tools 1f41758, whose tools give the model their text alone
+  and the views their data; the hook that did so here is gone. A result's
+  nested project instructions are still a `project_instructions` field beside
+  its text, and a command hook's `tool_response` still holds the data, the
+  text and those rules. What an agent meets differently:
+  - A shell `timeout_ms` above the terminal's two minutes is capped and the
+    result says so, where the call was refused: the command runs to the
+    maximum, then moves to the background. An unattended launch and
+    `process_start` still refuse one above their maximum.
+  - A finished process makes room at the quota of eight per agent: after
+    eight builds moved to the background, the ninth long command was killed
+    and `process_start` refused until a `process_stop` with `forget`. A
+    start is refused only when every job still runs.
+  - A process started or moved to the background says how long it may run,
+    and that `process_read` reads it from offset 0.
+  - Shorter texts: `code_outline` gives one line per symbol, `plan_create`
+    the IDs and statuses of the plan it created, `docs_list` and
+    `docs_search` no revision, the task tools lines instead of JSON.
+  - `grep`, `glob` and `patch` return what they found or previewed at a host
+    bound, naming it, where they failed.
 - A compaction no longer loses the oldest messages it stands for. Its summary
   read the newest lines that fit half the ceiling and said how many older ones
   it left out, and the compaction then removed them all from what the agent

@@ -634,7 +634,9 @@ hour), with eight retained jobs per session/agent and 32 total. Read stdout and
 stderr with independent byte cursors (4 KiB pages per stream); `process_write` sends exact stdin text,
 including any explicitly supplied newline, and can deliver EOF. Inspect partial
 writes before deciding what to do next. Stop unneeded jobs and set `forget` to
-release their retained records. The application closes remaining processes on exit,
+release their retained records; at a quota, a new job takes the place of the one
+that finished first, and is refused only when every job still runs. The
+application closes remaining processes on exit,
 but for an unattended launch (`--prompt`), which leaves them running.
 
 **/processes**, **F6**, or the clickable **Processes** status open the live process

@@ -15,7 +15,6 @@ use crate::{Result, config::Settings, profiles::Profiles, services::Services, st
 mod gate;
 pub(crate) mod headless;
 mod integrations;
-mod model_results;
 
 /// The channel of the application's views, the terminal's: what a row the
 /// application writes for its views alone comes from.
@@ -181,7 +180,6 @@ async fn setup(
     };
     gate::install(kit, gate)?;
     crate::ask_user::install(kit, channel.clone(), policy.clone())?;
-    model_results::install(kit)?;
     if !settings.unattended {
         crate::sessions::follow_modes(kit, policy);
         // Nobody reads an unattended launch past its answer: its agent is

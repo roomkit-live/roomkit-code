@@ -17,16 +17,21 @@ use roomkit::{
 use roomkit_ai::testing::{ScriptedProvider, ScriptedRound};
 use roomkit_ai::{
     AiChannel, AiChannelOptions, AiTool, Tool, ToolEntry, ToolError, ToolFuture, ToolResult,
+    current_tool_call,
 };
 use serde_json::Value;
 
 /// What a tool's handler answered.
 pub(crate) type Answer = Result<ToolResult, ToolError>;
 
-/// `tool`, keeping a copy of what its handler answers.
+/// What a call left: its handler's answer and the data of the structured
+/// copy it gave the host, if it gave one.
+type Left = (Answer, Option<Value>);
+
+/// `tool`, keeping a copy of what its handler leaves.
 struct Recording {
     tool: Arc<dyn Tool>,
-    answer: Arc<Mutex<Option<Answer>>>,
+    left: Arc<Mutex<Option<Left>>>,
 }
 
 impl Tool for Recording {
@@ -35,11 +40,15 @@ impl Tool for Recording {
     }
 
     fn handler(&self, name: String, arguments: Metadata) -> ToolFuture {
+        let copy = current_tool_call().map(|call| call.structured_content);
         let call = self.tool.handler(name, arguments);
-        let answer = Arc::clone(&self.answer);
+        let left = Arc::clone(&self.left);
         Box::pin(async move {
             let answered = call.await;
-            *answer.lock().unwrap_or_else(PoisonError::into_inner) = Some(answered.clone());
+            let data = copy
+                .and_then(|copy| copy.get())
+                .and_then(|copy| copy.get("data"));
+            *left.lock().unwrap_or_else(PoisonError::into_inner) = Some((answered.clone(), data));
             answered
         })
     }
@@ -54,16 +63,29 @@ pub(crate) async fn call(
     name: &str,
     arguments: Value,
 ) -> Answer {
-    turn(
-        tool,
-        room,
-        agent,
-        name,
-        arguments,
-        AiChannelOptions::default(),
-    )
-    .await
-    .expect("RoomKit handed the call to the tool")
+    let options = AiChannelOptions::default();
+    let (answer, _) = run(tool, room, agent, name, arguments, options)
+        .await
+        .expect("RoomKit handed the call to the tool");
+    answer
+}
+
+/// The data `tool` gave the host when it served the call of `name` with
+/// `arguments`, made by the agent `agent` in the room `room`: the model
+/// reads the call's text, the views this.
+pub(crate) async fn data(
+    tool: &Arc<dyn Tool>,
+    room: &str,
+    agent: &str,
+    name: &str,
+    arguments: Value,
+) -> Value {
+    let options = AiChannelOptions::default();
+    let (answer, data) = run(tool, room, agent, name, arguments, options)
+        .await
+        .expect("RoomKit handed the call to the tool");
+    answer.expect("the tool served the call");
+    data.expect("a served call gives the host its data")
 }
 
 /// The call of `name` with `arguments`, made by the agent `agent` in the
@@ -78,10 +100,23 @@ pub(crate) async fn turn(
     arguments: Value,
     options: AiChannelOptions,
 ) -> Option<Answer> {
-    let answer = Arc::new(Mutex::new(None));
+    let left = run(tool, room, agent, name, arguments, options).await;
+    left.map(|(answer, _)| answer)
+}
+
+/// [`turn`], with the data the call gave the host.
+async fn run(
+    tool: &Arc<dyn Tool>,
+    room: &str,
+    agent: &str,
+    name: &str,
+    arguments: Value,
+    options: AiChannelOptions,
+) -> Option<Left> {
+    let left = Arc::new(Mutex::new(None));
     let recording = Recording {
         tool: Arc::clone(tool),
-        answer: Arc::clone(&answer),
+        left: Arc::clone(&left),
     };
     let arguments = arguments.to_string();
     let model = ScriptedProvider::new([
@@ -98,7 +133,7 @@ pub(crate) async fn turn(
     kit.register_channel(channel).expect("agent registers");
     ask(&kit, &RoomId::new(room).expect("valid room id"), &agent).await;
     kit.close().await.expect("kit closes");
-    answer.lock().unwrap_or_else(PoisonError::into_inner).take()
+    left.lock().unwrap_or_else(PoisonError::into_inner).take()
 }
 
 /// Sends one message into `room`, where the registered agent `agent`

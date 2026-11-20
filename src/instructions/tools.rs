@@ -2,7 +2,8 @@ use super::*;
 use roomkit::model::Metadata;
 use roomkit_ai::{AiTool, Tool, ToolFuture, ToolResult, current_tool_call};
 
-/// Preserve existing tool schemas/results while supplying their scoped rules.
+/// Preserve existing tool schemas while supplying their scoped rules with
+/// their results.
 pub(crate) struct Scoped {
     inner: Arc<dyn Tool>,
     /// The tool `inner` serves: a call to another passes on unchanged.
@@ -84,15 +85,20 @@ impl Tool for Scoped {
             // Kept before the result is: a record ahead of the history only
             // takes back rules once more than it needs to.
             instructions.keep(&room, &agent).await;
-            let guidance = report.scoped();
-            match result {
-                ToolResult::Json(serde_json::Value::Object(mut object)) => {
-                    object.insert("project_instructions".into(), guidance.into());
-                    Ok(ToolResult::Json(object.into()))
-                }
-                ToolResult::Text(text) => Ok(ToolResult::Text(format!("{text}\n\n{guidance}"))),
-                other => Ok(other),
-            }
+            Ok(ruled(result, report.scoped()))
         })
+    }
+}
+
+/// `result`, the text the model reads of an exploration, with the nested
+/// `rules` that apply there. The rules are a field of their own, that a
+/// file's content cannot imitate as it could lines after its text, and lead:
+/// the preview of an evicted result keeps the start of its one line.
+fn ruled(result: ToolResult, rules: String) -> ToolResult {
+    match result {
+        ToolResult::Text(text) => {
+            ToolResult::Json(serde_json::json!({ "project_instructions": rules, "text": text }))
+        }
+        other => other,
     }
 }

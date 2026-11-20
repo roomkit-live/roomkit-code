@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use roomkit::model::Metadata;
-use roomkit_ai::{AiTool, Tool, ToolFuture, ToolResult, current_tool_call};
+use roomkit_ai::{AiTool, Tool, ToolFuture, current_tool_call};
 use roomkit_tools_fs::{PatchOperation, PatchResult};
 use serde_json::Value;
 
@@ -34,11 +34,12 @@ impl Tool for Tracked {
     }
 
     fn handler(&self, name: String, arguments: Metadata) -> ToolFuture {
-        let room = current_tool_call().and_then(|call| call.room_id);
-        let Some(room) = room.filter(|_| name == self.name) else {
+        let call = current_tool_call().filter(|_| name == self.name);
+        let Some((room, copy)) =
+            call.and_then(|call| Some((call.room_id?.to_string(), call.structured_content)))
+        else {
             return self.inner.handler(name, arguments);
         };
-        let room = room.to_string();
         let files = self.files.clone();
         if name == "shell" {
             let call = self.inner.handler(name, arguments);
@@ -57,8 +58,11 @@ impl Tool for Tracked {
         let call = self.inner.handler(name.clone(), arguments);
         Box::pin(async move {
             let result = call.await;
-            if let Ok(ToolResult::Json(output)) = &result {
-                let (effects, read) = reported(&name, &output["data"]);
+            // A served tool answers the text the model reads and leaves its
+            // data as the call's structured copy.
+            let data = copy.get().and_then(|copy| copy.get("data"));
+            if let (Ok(_), Some(data)) = (&result, data) {
+                let (effects, read) = reported(&name, &data);
                 if !effects.is_empty() || read.is_some() {
                     files.observed(&room, effects, read).await;
                 }

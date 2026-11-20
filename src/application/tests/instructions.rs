@@ -204,6 +204,41 @@ async fn instructions_deleted_scope_is_explicit_on_next_exploration() {
     app.close().await.unwrap();
 }
 
+/// A command hook reads a call's data, its text and the nested rules given
+/// with it as one JSON text, though the model reads the rules and the text
+/// alone and the data goes to the views.
+#[tokio::test]
+async fn a_command_hook_reads_the_data_the_text_and_the_rules_of_a_read() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    write(root.path(), "src/AGENTS.md", "NESTED_FIXTURE");
+    write(root.path(), "src/file", "contents");
+    write(root.path(), "plain", "contents");
+    super::hooks::configure(root.path(), &["PostToolUse"], "", false);
+    let mock = Mock::start(vec![
+        ("read", json!({"path":"src/file"})),
+        ("read", json!({"path":"plain"})),
+    ])
+    .await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    super::hooks::enable_all(&app);
+    turn(&app).await;
+    let read: Vec<Value> = super::hooks::records(root.path())
+        .iter()
+        .map(|entry| serde_json::from_str(entry["tool_response"].as_str().unwrap()).unwrap())
+        .collect();
+    assert_eq!(read.len(), 2, "{read:?}");
+    assert_eq!(read[0]["data"]["path"], "src/file");
+    assert!(read[0]["text"].as_str().unwrap().contains("1: contents"));
+    let rules = read[0]["project_instructions"].as_str().unwrap();
+    assert!(rules.contains("NESTED_FIXTURE"), "{rules}");
+    assert_eq!(read[1]["data"]["path"], "plain");
+    assert!(read[1]["text"].as_str().unwrap().contains("1: contents"));
+    assert!(read[1].get("project_instructions").is_none(), "{}", read[1]);
+    app.close().await.unwrap();
+}
+
 /// Exploring a directory without rules came with an empty snapshot, whose
 /// field makes the model read the file's text as a JSON string: at every
 /// turn, then at every launch of a resumed conversation, whose history might
