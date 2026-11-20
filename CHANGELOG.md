@@ -14,12 +14,12 @@
   - A finished process makes room at the quota of eight per agent: after
     eight builds moved to the background, the ninth long command was killed
     and `process_start` refused until a `process_stop` with `forget`. A
-    start is refused only when every job still runs.
-  - A process started or moved to the background says how long it may run,
-    and that `process_read` reads it from offset 0.
+    start is still refused while the agent's eight jobs all run.
+  - A process started or moved to the background says how long it may run;
+    a moved command also says that `process_read` reads it from offset 0.
   - Shorter texts: `code_outline` gives one line per symbol, `plan_create`
     the IDs and statuses of the plan it created, `docs_list` and
-    `docs_search` no revision, the task tools lines instead of JSON.
+    `docs_search` no revision.
   - `grep`, `glob` and `patch` return what they found or previewed at a host
     bound, naming it, where they failed.
 - A compaction no longer loses the oldest messages it stands for. Its summary

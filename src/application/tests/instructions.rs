@@ -224,18 +224,24 @@ async fn a_command_hook_reads_the_data_the_text_and_the_rules_of_a_read() {
     let app = Application::open(&settings, String::new()).await.unwrap();
     super::hooks::enable_all(&app);
     turn(&app).await;
-    let read: Vec<Value> = super::hooks::records(root.path())
-        .iter()
-        .map(|entry| serde_json::from_str(entry["tool_response"].as_str().unwrap()).unwrap())
-        .collect();
-    assert_eq!(read.len(), 2, "{read:?}");
-    assert_eq!(read[0]["data"]["path"], "src/file");
-    assert!(read[0]["text"].as_str().unwrap().contains("1: contents"));
-    let rules = read[0]["project_instructions"].as_str().unwrap();
+    let records = super::hooks::records(root.path());
+    assert_eq!(records.len(), 2, "{records:?}");
+    // The two hooks run on tasks of their own: either may write first.
+    let read = |path: &str| -> Value {
+        let entry = records
+            .iter()
+            .find(|entry| entry["tool_input"]["path"] == path)
+            .unwrap();
+        serde_json::from_str(entry["tool_response"].as_str().unwrap()).unwrap()
+    };
+    let (ruled, plain) = (read("src/file"), read("plain"));
+    assert_eq!(ruled["data"]["path"], "src/file");
+    assert!(ruled["text"].as_str().unwrap().contains("1: contents"));
+    let rules = ruled["project_instructions"].as_str().unwrap();
     assert!(rules.contains("NESTED_FIXTURE"), "{rules}");
-    assert_eq!(read[1]["data"]["path"], "plain");
-    assert!(read[1]["text"].as_str().unwrap().contains("1: contents"));
-    assert!(read[1].get("project_instructions").is_none(), "{}", read[1]);
+    assert_eq!(plain["data"]["path"], "plain");
+    assert!(plain["text"].as_str().unwrap().contains("1: contents"));
+    assert!(plain.get("project_instructions").is_none(), "{plain}");
     app.close().await.unwrap();
 }
 
