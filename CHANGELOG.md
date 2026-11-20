@@ -24,7 +24,7 @@
     own shows the failure once; the conversation's cost counts its own
     agent's turns, live as after a relaunch; a run that ends takes its
     questions with it, and a blank paste is not sent.
-- Follows roomkit-tools 1f41758, whose tools give the model their text alone
+- Follows roomkit-tools 0.2.0, whose tools give the model their text alone
   and the views their data; the hook that did so here is gone. A result's
   nested project instructions are still a `project_instructions` field beside
   its text, and a command hook's `tool_response` still holds the data, the
