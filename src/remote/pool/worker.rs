@@ -85,11 +85,12 @@ pub(crate) fn declare(executor: &roomkit::TurnExecutor) -> Result<()> {
     Ok(())
 }
 pub(crate) async fn advertise(
-    group: &str,
+    inventory: &super::Inventory,
     args: &WorkerArgs,
+    model: String,
     executor: &roomkit::TurnExecutor,
 ) -> Result<Presence> {
-    let registry = Registry::new(group)?;
+    let registry = inventory.0.clone();
     let mut sampler = Sampler::default();
     let labels: BTreeMap<_, _> = args.worker_label.iter().cloned().collect();
     if labels.len() != args.worker_label.len() || labels.len() > 32 {
@@ -100,6 +101,7 @@ pub(crate) async fn advertise(
         instance: executor.executor_id().into(),
         os: std::env::consts::OS.into(),
         arch: std::env::consts::ARCH.into(),
+        model: Some(model),
         host_os: args.worker_host_os.clone(),
         labels,
         slots: args.worker_slots.unwrap_or(1),

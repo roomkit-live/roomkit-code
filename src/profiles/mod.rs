@@ -41,6 +41,7 @@ use slot::AgentSlot;
 use store::Document;
 
 pub(crate) struct Profiles {
+    pub(crate) executor_inventory: Option<crate::remote::pool::Inventory>,
     pub(crate) pool: Option<Arc<crate::remote::pool::Scheduler>>,
     pub(crate) policy: crate::permissions::Policy,
     pub(crate) plans: Arc<crate::plans::PlanView>,
@@ -211,13 +212,14 @@ impl Profiles {
             .transpose()
             .map_err(|error| error.to_string())?;
         let requests = asking.as_ref().map(|asking| asking.handler().clone());
+        let (pool, executor_inventory) = crate::remote::pool::connect(
+            settings.executor_pool.as_deref(),
+            settings.serve_pool.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
         Ok(Arc::new(Self {
-            pool: settings
-                .executor_pool
-                .as_deref()
-                .map(crate::remote::pool::Scheduler::new)
-                .transpose()
-                .map_err(|e| e.to_string())?,
+            pool,
+            executor_inventory,
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),
             require_tool_intent: settings.require_tool_intent,
@@ -352,6 +354,7 @@ impl Profiles {
             )
         };
         let extensions = crate::agent::Extensions {
+            executor_inventory: self.executor_inventory.clone(),
             skills,
             skill_roots,
             mcp: self.mcp_runtime.selected(profile).await?,

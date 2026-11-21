@@ -5,6 +5,8 @@
 - An experimental executor pool routes remote file tasks by execution OS, labels,
   available memory, load and free slots. Use `--executor-pool GROUP` on the
   owner, `--serve-pool GROUP` on each worker and `/executors` to inspect placement.
+  The owner and pool workers can call `list_executors` to read the same live
+  machine inventory, including the model each worker advertises.
 
 - An experimental Linux worker can run a delegated coding task in its own
   workspace over Redis. Start the worker with `--serve-worker GROUP` and

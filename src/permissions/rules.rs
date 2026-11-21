@@ -67,6 +67,7 @@ const RULES: &[(&str, Rule)] = &[
     ("read_skill_reference", READ),
     ("find_tools", READ),
     ("list_tools", READ),
+    (crate::remote::pool::LIST_EXECUTORS, READ),
     ("list", READ),
     ("glob", READ),
     ("grep", READ),

@@ -1,4 +1,6 @@
 //! Resource-based placement for the experimental Redis executor pool.
+mod inventory;
+pub(crate) use inventory::{Inventory, LIST_EXECUTORS};
 mod metrics;
 mod panel;
 pub(crate) use panel::panel;
@@ -66,15 +68,33 @@ pub(crate) struct Scheduler {
     queue: Arc<queue::Queue>,
     closed: tokio_util::sync::CancellationToken,
 }
-impl Scheduler {
-    pub(crate) fn new(group: &str) -> crate::Result<Arc<Self>> {
-        Ok(Arc::new(Self {
+/// Owners place work and inspect the pool. Workers only need its inventory here.
+pub(crate) fn connect(
+    owner_group: Option<&str>,
+    worker_group: Option<&str>,
+) -> crate::Result<(Option<Arc<Scheduler>>, Option<Inventory>)> {
+    let Some(group) = owner_group.or(worker_group) else {
+        return Ok((None, None));
+    };
+    let inventory = Inventory::new(group)?;
+    let scheduler = if owner_group.is_some() {
+        Some(Arc::new(Scheduler {
             redis: super::backend(&format!("pool:{group}"))?,
-            registry: Registry::new(group)?,
+            registry: inventory.0.clone(),
             queue: Arc::default(),
             closed: Default::default(),
         }))
+    } else {
+        None
+    };
+    Ok((scheduler, Some(inventory)))
+}
+
+impl Scheduler {
+    pub(crate) fn inventory(&self) -> Inventory {
+        Inventory(self.registry.clone())
     }
+
     pub(crate) fn handle(self: &Arc<Self>) -> TurnBackendHandle {
         TurnBackendHandle::new(self.clone())
     }

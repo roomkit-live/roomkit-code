@@ -19,6 +19,7 @@ from executor_fixture import StreamingModel, child, redis, tool
 from fixture_http import LoopbackHTTPServer
 
 TASKS = {
+    "inspect-pool-from-worker": {"labels": {"role": "review"}},
     "bootstrap-task": {"labels": {"role": "general"}},
     "review-one": {"labels": {"role": "review"}, "os": "linux", "min_ram_mib": 1},
     "review-two": {"labels": {"role": "review"}},
@@ -31,10 +32,29 @@ TASKS = {
 }
 
 
+INVENTORY_QUESTION = "Which executor machines are in the pool?"
+
+
+def inventory_call(request):
+    names = {entry["function"]["name"] for entry in request["tools"]}
+    if "list_executors" in names:
+        return tool("list_executors", "inventory")
+    return {"content": "No executor inventory tool is available."}
+
+
 class Model(StreamingModel):
     def reply(self, request):
         last = request["messages"][-1]
         content = str(last.get("content", ""))
+        if last.get("tool_call_id") == "inventory":
+            if "No workers registered" in content:
+                return {"content": "Live inventory is empty."}
+            if all(value in content for value in ("macbook [online]", "host macos", "model macbook", "role=review",
+                                                   "linux [online]", "model linux", "role=general")):
+                if request["model"] != "owner":
+                    self.server.worker_saw_inventory.set()
+                return {"content": "Live inventory includes the MacBook and Linux workstation."}
+            return {"content": "Incomplete pool inventory."}
         if request["model"] == "owner":
             if last["role"] == "tool":
                 if "Invalid executor requirements" in content:
@@ -46,7 +66,9 @@ class Model(StreamingModel):
             if "[Background task from remote-linux " in content:
                 return {"content": "Background report received."}
             content = next((str(m.get("content", "")) for m in reversed(request["messages"])
-                            if m["role"] == "user" and m.get("content") in (*TASKS, "cancel-waiting")), "")
+                            if m["role"] == "user" and m.get("content") in (*TASKS, "cancel-waiting", INVENTORY_QUESTION)), "")
+            if content == INVENTORY_QUESTION:
+                return inventory_call(request)
             if "cancel-waiting" in content:
                 self.server.submitting = "cancel-waiting"
                 return tool("cancel_task", "cancel", task_id=self.server.ids["waiting-task"])
@@ -59,6 +81,8 @@ class Model(StreamingModel):
 
         transcript = json.dumps(request["messages"])
         name = next((key for key in TASKS if key in transcript), "unknown")
+        if "inspect-pool-from-worker" in transcript:
+            return inventory_call(request)
         if last["role"] != "tool":
             self.server.started[name] = request["model"]
             if name == "review-one":
@@ -95,6 +119,8 @@ class Terminal:
     def send(self, message, expect):
         offset = len(self.output)
         os.write(self.master, message.encode() + b"\r")
+        if message == "/executors":
+            self.wait("PgUp/PgDn output", offset)
         self.wait(expect, offset)
         if message == "/executors":
             os.write(self.master, b"\x1b")
@@ -144,6 +170,7 @@ def model_server(stack):
     server = stack.enter_context(LoopbackHTTPServer(("127.0.0.1", 0), Model))
     server.started, server.finished, server.ids = {}, {}, {}
     server.release = threading.Event()
+    server.worker_saw_inventory = threading.Event()
     server.markers = {name: uuid.uuid4().hex for name in ("macbook", "linux", "spare")}
     threading.Thread(target=server.serve_forever, daemon=True).start()
     stack.callback(server.shutdown)
@@ -174,12 +201,14 @@ def main():
         def worker(name, label):
             command = args(name, "--serve-pool") + ["--worker-name", name, "--worker-label",
                                                     "role=" + label, "--worker-slots", "1"]
+            command.extend(["--worker-host-os", "macos" if name == "macbook" else "linux"])
             (root / name / "marker.txt").write_text(server.markers[name])
             proc = stack.enter_context(child(command, env, stdout=subprocess.PIPE, text=True))
             if not select.select([proc.stdout], [], [], 20)[0] or not proc.stdout.readline().startswith("Serving"):
                 raise RuntimeError("Worker failed to register: " + name)
 
         term = Terminal(stack, args("owner", "--executor-pool"), env)
+        term.send(INVENTORY_QUESTION, "Live inventory is empty.")
         term.send("bootstrap-task", "Submitted bootstrap-task.")
         term.send("/executors", "no online worker matches")
         worker("linux", "general")
@@ -187,6 +216,10 @@ def main():
                    "Task submitted to an empty pool did not wake")
         print("PASS  A task submitted before the first worker joined completed.", flush=True)
         worker("macbook", "review")
+        term.send(INVENTORY_QUESTION, "Live inventory includes the MacBook and Linux workstation.")
+        term.send("inspect-pool-from-worker", "Submitted inspect-pool-from-worker.")
+        assert server.worker_saw_inventory.wait(15), "Pool worker could not read the inventory"
+        print("PASS  Owner and delegated worker can inspect the same live pool as /executors.", flush=True)
         scenario(term, server, lambda: worker("spare", "spare"))
 
 

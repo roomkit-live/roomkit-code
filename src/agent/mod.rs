@@ -198,6 +198,7 @@ pub(crate) fn process_limits() -> ProcessLimits {
 
 /// What an agent receives beyond the application's own tools.
 pub(crate) struct Extensions {
+    pub executor_inventory: Option<crate::remote::pool::Inventory>,
     pub skills: SkillRegistry,
     pub skill_roots: Vec<std::path::PathBuf>,
     pub mcp: Vec<crate::profiles::McpTools>,
@@ -251,7 +252,10 @@ pub(crate) async fn create(
     };
     let policy = extensions.policy.clone();
     let tools = native_tools(root, resources, policy).await?;
-    let tools = selected(profile, tools, (unattended, extensions.planning));
+    let mut tools = selected(profile, tools, (unattended, extensions.planning));
+    if let Some(inventory) = extensions.executor_inventory {
+        tools.push((inventory.definition(), Arc::new(inventory)));
+    }
     let native: Vec<AiTool> = tools
         .iter()
         .map(|(definition, _)| definition.clone())

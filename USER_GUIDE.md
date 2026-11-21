@@ -607,8 +607,12 @@ roomkit-code . --executor-pool project-demo
 ```
 
 Open `/executors` to see the execution OS and architecture, declared physical
-host OS, CPU count and utilization, one-minute load average, available RAM,
-labels and free slots. Linux containers report Linux as the execution OS.
+host OS, configured model, CPU count and utilization, one-minute load average,
+available RAM, labels and free slots. Ask “Which executor machines are in this
+pool?” in the parent or a worker conversation. The agent can use `list_executors`
+to read the same live inventory. The `remote-linux` delegation target can use
+several machines. Linux containers on a Mac report Linux as their execution OS
+and macOS as their host OS when the worker declares it.
 CPU utilization and load describe the Linux kernel (the VM when virtualized).
 Available RAM is capped by the worker's cgroup v2 memory limit when visible.
 

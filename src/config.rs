@@ -323,6 +323,7 @@ impl Default for Appearance {
 }
 
 pub(crate) struct Settings {
+    pub serve_pool: Option<String>,
     pub executor_pool: Option<String>,
     pub remote_worker: Option<String>,
     pub update_check: bool,
@@ -552,6 +553,7 @@ impl Settings {
             herdr: file.integrations.herdr && !cli.no_herdr,
             inherit_env: inherit_env(cli, file.shell)?,
             resume_options: resume_options(cli)?,
+            serve_pool: cli.serve_pool.clone(),
             executor_pool: cli.executor_pool.clone(),
             remote_worker: cli.remote_worker.clone(),
             workspace,

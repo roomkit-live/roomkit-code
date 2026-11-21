@@ -31,7 +31,9 @@ impl State {
 
 impl Profiles {
     /// The provider, instructions and workspace come from the worker machine.
-    pub(crate) async fn worker(&self) -> Result<impl roomkit::Channel + Clone + use<>, String> {
+    pub(crate) async fn worker(
+        &self,
+    ) -> Result<(impl roomkit::Channel + Clone + use<>, String), String> {
         let state = self.state.lock().await;
         let mut profile = state.selected().and_then(|id| state.agent(&id)).ok_or(
             "Configure a model on the worker with --model and --base-url or a saved profile",
@@ -59,6 +61,6 @@ impl Profiles {
             state.compactions.clone(),
             state.roster.clone(),
         );
-        Ok(slot.on_remote_executor())
+        Ok((slot.on_remote_executor(), profile.model))
     }
 }

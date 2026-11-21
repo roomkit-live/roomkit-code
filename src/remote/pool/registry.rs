@@ -61,6 +61,8 @@ pub(super) struct Worker {
     pub instance: String,
     pub os: String,
     pub host_os: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
     pub arch: String,
     pub labels: BTreeMap<String, String>,
     pub slots: u16,

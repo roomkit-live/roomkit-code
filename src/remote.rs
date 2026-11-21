@@ -100,7 +100,8 @@ async fn run(
     group: &str,
     args: Option<&pool::WorkerArgs>,
 ) -> Result<()> {
-    let agent = profiles.worker().await?;
+    let (agent, model) = profiles.worker().await?;
+    let pooled = args.is_some();
     let executor = TurnExecutor::new(
         move |id| std::future::ready(Ok((id.as_str() == AGENT).then(|| agent.clone()))),
         TurnExecutorOptions {
@@ -111,7 +112,7 @@ async fn run(
     )?;
     executor.hook(
         roomkit::HookTrigger::BeforeToolUse,
-        |event: roomkit::ToolCallEvent, _| async move { authorize(event).await },
+        move |event: roomkit::ToolCallEvent, _| async move { authorize(event, pooled).await },
         roomkit::turns::HookOptions {
             name: "remote-workspace-permissions".into(),
             fail_closed: true,
@@ -125,7 +126,13 @@ async fn run(
     }
     backend.serve(executor.clone()).await?;
     let mut presence = match args {
-        Some(args) => Some(pool::advertise(group, args, &executor).await?),
+        Some(args) => {
+            let inventory = profiles
+                .executor_inventory
+                .as_ref()
+                .ok_or("Missing executor pool inventory")?;
+            Some(pool::advertise(inventory, args, model, &executor).await?)
+        }
         None => None,
     };
     println!(
@@ -145,9 +152,13 @@ async fn run(
     Ok(stopped?)
 }
 
-async fn authorize(event: roomkit::ToolCallEvent) -> crate::permissions::Verdict {
+pub(crate) fn permits(tool: &str, pooled: bool) -> bool {
+    TOOLS.contains(&tool) || (pooled && tool == pool::LIST_EXECUTORS)
+}
+
+async fn authorize(event: roomkit::ToolCallEvent, pooled: bool) -> crate::permissions::Verdict {
     use crate::permissions::{allow, block};
-    if !TOOLS.contains(&event.name.as_str()) {
+    if !permits(&event.name, pooled) {
         return block("This tool is unavailable on the remote worker");
     }
     let Some(host) = roomkit::current_turn_host() else {
