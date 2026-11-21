@@ -307,8 +307,10 @@ their saved settings. A benchmark that pins them gives each run a fresh
 ## Terminal integrations
 
 Web addresses, including those in code, and Markdown link labels in replies
-are native terminal links, as are web addresses in an error below the activity
-line. In iTerm2, Cmd-click opens them in the Mac's browser,
+are native terminal links, as are web addresses wherever an agent or the
+application writes them: a question and its options, an approval's detail, a
+notice, a model's reasoning, a tool's arguments and the sidebar. In iTerm2,
+Cmd-click opens them in the Mac's browser,
 including over SSH. Wrapped links retain their complete destination. Terminal preferences control opening;
 `--native-selection` delegates all mouse handling to the terminal.
 
@@ -1176,11 +1178,12 @@ another one, including when RoomKit Code runs over SSH. In a compatible terminal
 Cmd-click the link on macOS or Ctrl-click on Linux to open your local browser.
 The complete URL remains available to copy.
 
-After consent, copy the complete return URL from the browser's address bar,
-paste it into the field, and press Ctrl+S. If the browser shows a connection
-error at `127.0.0.1`, copy that address anyway. A browser on the same computer
-can also complete sign-in automatically. Esc cancels the attempt; it expires
-after ten minutes. No port forwarding or copying of access tokens is needed.
+A browser on the computer that runs RoomKit Code completes sign-in by itself.
+On another computer, the browser ends on a connection error at `127.0.0.1`
+after consent: this is expected. Copy the whole address from its address bar, starting with
+`http` and not only what follows the `?`, paste it into the field and press
+Enter. Esc cancels the attempt; it expires after ten minutes. No port
+forwarding or copying of access tokens is needed.
 Choose a model offered by the connected account, save the agent, and use
 `/agents` to switch interlocutors.
 
@@ -1200,8 +1203,9 @@ directory, separate from project profiles. These files are **unencrypted**, with
 owner-only permissions and atomic writes. They must not be committed or shared.
 Provider profiles contain only an opaque account reference. If remote revocation
 cannot be confirmed, sign-out clears local tokens and reports that distinction.
-The OAuth callback uses a local browser on the same machine; remote browser
-forwarding and device-code sign-in are not implemented in this first version.
+Sign-in by a one-time code typed in the browser is not implemented: the
+sign-in OpenAI documents for this kind of application returns to an address on
+`127.0.0.1`.
 
 ### Reasoning effort and diagnostics
 
