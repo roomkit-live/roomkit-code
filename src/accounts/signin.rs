@@ -114,11 +114,11 @@ fn form(url: &url::Url) -> FormSpec {
     let id = format!("{CALLBACK_FORM}{}", uuid::Uuid::new_v4());
     FormSpec::new(&id, "providers", "Sign in with ChatGPT", vec![
         FormField::new("callback", "Paste the return URL", FieldKind::Secret).required().with_help(
-            "The whole address, starting with http, not only what follows the ?."
+            "The whole address the browser ends on, from http, even on a connection error."
         ),
     ])
     .with_markdown_description(format!(
-        "Cmd-click (macOS) or Ctrl-click (Linux), or copy this link:\n\n[Open sign-in page](<{url}>)\n\nA browser on this computer completes sign-in by itself. On another computer it ends on a connection error at `127.0.0.1`, which is expected: copy the whole address from its address bar, paste it below and press Enter. This attempt expires in ten minutes."
+        "Cmd-click (macOS) or Ctrl-click (Linux), or copy this link:\n\n[Open sign-in page](<{url}>)\n\nOn RoomKit Code's computer, sign-in completes by itself. On another, the browser ends on a connection error at `127.0.0.1`, which is expected: copy its whole address, paste it below and press Enter. Expires in ten minutes."
     ))
     .with_dismiss(format!("chatgpt:dismiss:{id}"))
     .with_async_completion()

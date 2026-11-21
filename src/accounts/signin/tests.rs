@@ -26,7 +26,11 @@ fn sign_in_displays_the_link_and_private_return_field_together() {
     // `?` and pressed a key that did nothing.
     assert!(form.description.contains("which is expected"));
     assert!(form.description.contains("press Enter"));
-    assert!(form.fields[0].help.contains("not only what follows the ?"));
+    // The line beside the field stays in view on a short terminal, where the
+    // instructions scroll: it says what to paste by itself.
+    let help = &form.fields[0].help;
+    assert!(help.contains("whole address") && help.contains("from http"));
+    assert!(help.contains("connection error") && help.chars().count() <= 78);
     assert!(!form.description.contains("SSH"));
     assert_eq!(form.dismiss, format!("chatgpt:dismiss:{}", form.id));
     assert_eq!(form.fields.len(), 1);

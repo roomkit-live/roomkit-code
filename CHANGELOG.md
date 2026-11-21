@@ -5,11 +5,12 @@
 - Signing in with ChatGPT from another computer no longer ends on a key that
   does nothing. Enter sends the pasted return address: the form holds one
   field, and Enter only moved to a next field it does not have (roomkit-tui
-  fdb8899; Ctrl+S sends it as before). The form now says that the browser's
+  a7da9e2; Ctrl+S sends it as before). The form now says that the browser's
   connection error at `127.0.0.1` is the expected end from another computer,
-  and that the whole address is pasted, not only what follows the `?`. An
-  address that is not this attempt's is refused with a line saying so, as
-  before.
+  and the line beside the field that the whole address is pasted, from
+  `http`. An address that is not this attempt's is refused with a line saying
+  so, as before; pasting again then replaces the first paste, which the
+  masked field kept and joined to the second.
 
 ## [0.3.0]
 

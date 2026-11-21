@@ -1080,9 +1080,9 @@ another one, including when RoomKit Code runs over SSH. In a compatible terminal
 Cmd-click the link on macOS or Ctrl-click on Linux to open your local browser.
 The complete URL remains available to copy.
 
-A browser on the same computer completes sign-in by itself. On another
-computer, the browser ends on a connection error at `127.0.0.1` after consent:
-this is expected. Copy the whole address from its address bar, starting with
+A browser on the computer that runs RoomKit Code completes sign-in by itself.
+On another computer, the browser ends on a connection error at `127.0.0.1`
+after consent: this is expected. Copy the whole address from its address bar, starting with
 `http` and not only what follows the `?`, paste it into the field and press
 Enter. Esc cancels the attempt; it expires after ten minutes. No port
 forwarding or copying of access tokens is needed.
@@ -1105,8 +1105,9 @@ directory, separate from project profiles. These files are **unencrypted**, with
 owner-only permissions and atomic writes. They must not be committed or shared.
 Provider profiles contain only an opaque account reference. If remote revocation
 cannot be confirmed, sign-out clears local tokens and reports that distinction.
-Sign-in by a one-time code typed in the browser is not available: OpenAI's
-sign-in for this kind of application returns to a `127.0.0.1` address only.
+Sign-in by a one-time code typed in the browser is not implemented: the
+sign-in OpenAI documents for this kind of application returns to an address on
+`127.0.0.1`.
 
 ### Reasoning effort and diagnostics
 
