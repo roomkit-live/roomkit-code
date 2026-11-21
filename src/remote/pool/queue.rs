@@ -41,7 +41,13 @@ impl Entry {
             Some(w) => format!("assigned to {w}"),
             None => format!("queued · {}", self.reason),
         };
-        format!("{} · {placement} · {}", self.task, self.title)
+        let profile = self
+            .req
+            .profile
+            .as_deref()
+            .map(|id| format!(" · profile {id}"))
+            .unwrap_or_default();
+        format!("{} · {placement}{profile} · {}", self.task, self.title)
     }
 }
 pub(super) struct Ticket {
@@ -140,7 +146,7 @@ impl Ticket {
             } else if matched {
                 "insufficient available RAM"
             } else {
-                "no online worker matches OS, labels or workspace"
+                "no online worker matches OS, profile, labels or workspace"
             }
             .into();
         }

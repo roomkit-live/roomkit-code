@@ -136,7 +136,7 @@ impl Roster {
             listed.join(", ")
         );
         if self.1.load(std::sync::atomic::Ordering::Relaxed) {
-            text.push_str(r#" The remote-linux agent can run on multiple executor machines. For questions about which machines are available, call list_executors for the live inventory. When handing a task to remote-linux, set the executor field of context for required OS, labels and available RAM. Example context: {"executor":{"os":"linux","labels":{"role":"review"},"min_ram_mib":512}}. Omit constraints the task does not require."#);
+            text.push_str(r#" The remote-linux agent can run on multiple executor machines. For questions about which machines are available, call list_executors for the live inventory. When handing a task to remote-linux, set the executor field of context for required OS, local agent profile ID, labels and available RAM. Look up the exposed profile IDs, models and tools with list_executors. To use a particular agent on the worker, set context.executor.profile to its exact ID. Example context: {"executor":{"os":"linux","labels":{"role":"review"},"min_ram_mib":512}}. Omit constraints the task does not require."#);
         }
         Some(text)
     }

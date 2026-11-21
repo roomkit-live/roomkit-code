@@ -8,6 +8,9 @@
   The owner and pool workers can call `list_executors` to read the same live
   machine inventory, including the model each worker advertises. Pool workers
   can run natively on macOS and accept tasks requiring `os=macos`.
+  Repeat `--worker-profile ID` to serve several local agents on one worker.
+  The inventory shows each exposed profile's model and tools. Target a profile
+  with `context.executor.profile`; profiles share the worker's slot limit.
 
 - An experimental Linux worker can run a delegated coding task in its own
   workspace over Redis. Start the worker with `--serve-worker GROUP` and

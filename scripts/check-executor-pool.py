@@ -9,6 +9,7 @@ import re
 import select
 import struct
 import subprocess
+import sys
 import tempfile
 import termios
 import threading
@@ -21,12 +22,14 @@ from fixture_http import LoopbackHTTPServer
 TASKS = {
     "inspect-pool-from-worker": {"labels": {"role": "review"}},
     "bootstrap-task": {"labels": {"role": "general"}},
-    "review-one": {"labels": {"role": "review"}, "os": "linux", "min_ram_mib": 1},
-    "review-two": {"labels": {"role": "review"}},
+    "review-one": {"labels": {"role": "review"}, "os": "macos" if sys.platform == "darwin" else "linux",
+                   "profile": "code", "min_ram_mib": 1},
+    "review-two": {"profile": "reviewer"},
     "ordinary-read": {},
     "new-worker-task": {"labels": {"role": "spare"}},
     "waiting-task": {"labels": {"role": "spare"}},
     "invalid-task": {"min_ram_mb": 1},
+    "unpublished-task": {"profile": "private-agent"},
     "windows-task": {"os": "windows"},
     "large-task": {"min_ram_mib": 2**48},
 }
@@ -49,9 +52,10 @@ class Model(StreamingModel):
         if last.get("tool_call_id") == "inventory":
             if "No workers registered" in content:
                 return {"content": "Live inventory is empty."}
-            if all(value in content for value in ("macbook [online]", "host macos", "model macbook", "role=review",
+            if all(value in content for value in ("profile code (default)", "profile reviewer", "model review-model",
+                                                  "macbook [online]", "host macos", "model macbook", "role=review",
                                                    "linux [online]", "model linux", "role=general")):
-                if request["model"] != "owner":
+                if request["model"] == "macbook":
                     self.server.worker_saw_inventory.set()
                 return {"content": "Live inventory includes the MacBook and Linux workstation."}
             return {"content": "Incomplete pool inventory."}
@@ -85,6 +89,8 @@ class Model(StreamingModel):
             return inventory_call(request)
         if last["role"] != "tool":
             self.server.started[name] = request["model"]
+            if name in ("review-one", "review-two"):
+                self.server.calls[name] = (self.path, {t["function"]["name"] for t in request["tools"]}, transcript)
             if name == "review-one":
                 self.server.release.wait(90)
             return tool("read", "marker", path="marker.txt")
@@ -139,6 +145,7 @@ def eventually(predicate, message):
 
 def scenario(term, server, spare):
     term.send("/executors", "role=review")
+    term.send("/executors", "profile reviewer")
     term.send("review-one", "Submitted review-one.")
     eventually(lambda: server.started.get("review-one") == "macbook", "First review misplaced")
     term.send("review-two", "Submitted review-two.")
@@ -150,7 +157,14 @@ def scenario(term, server, spare):
     server.release.set()
     eventually(lambda: all(server.finished.get(t) == "macbook" for t in ("review-one", "review-two")),
                "Both reviews must read the Mac worker workspace")
-    print("PASS  Both reviews read the Mac marker, in order, with one slot.", flush=True)
+    assert server.started["review-two"] == "review-model", server.started
+    primary, review = server.calls["review-one"], server.calls["review-two"]
+    assert primary[0] == "/v1/chat/completions" and "write" in primary[1]
+    assert review[0] == "/review/v1/chat/completions" and "read" in review[1]
+    assert "write" not in review[1] and "shell" not in review[1] and "review-fixture-instruction" in review[2]
+    print("PASS  Two exposed profiles shared one slot and workspace, with distinct connections, models and tools.", flush=True)
+    term.send("unpublished-task", "Submitted unpublished-task.")
+    term.send("/executors", "no online worker matches")
     term.send("invalid-task", "Requirements rejected.")
     term.send("windows-task", "Submitted windows-task.")
     term.send("/executors", "no online worker matches")
@@ -162,13 +176,13 @@ def scenario(term, server, spare):
     spare()
     eventually(lambda: server.finished.get("new-worker-task") == "spare",
                "A queued task did not wake when a compatible worker joined")
-    assert all(name not in server.started for name in ("windows-task", "invalid-task", "waiting-task", "large-task")), server.started
+    assert all(name not in server.started for name in ("windows-task", "unpublished-task", "invalid-task", "waiting-task", "large-task")), server.started
     print("PASS  OS/RAM and invalid constraints enforced. New worker ran only the pending task.", flush=True)
 
 
 def model_server(stack):
     server = stack.enter_context(LoopbackHTTPServer(("127.0.0.1", 0), Model))
-    server.started, server.finished, server.ids = {}, {}, {}
+    server.started, server.finished, server.ids, server.calls = {}, {}, {}, {}
     server.release = threading.Event()
     server.worker_saw_inventory = threading.Event()
     server.markers = {name: uuid.uuid4().hex for name in ("macbook", "linux", "spare")}
@@ -176,6 +190,32 @@ def model_server(stack):
     stack.callback(server.shutdown)
     stack.callback(server.release.set)
     return server
+
+
+def configure_profiles(command, env, state):
+    # Bootstrap through the CLI. An unknown export must fail before registering.
+    probe = subprocess.run(command + ["--worker-profile", "missing"], env=env,
+                           capture_output=True, text=True, timeout=12)
+    assert probe.returncode and "Unknown worker profile missing" in probe.stderr, probe.stderr
+    agents_file = next(state.glob("projects/*/agents.json"))
+    agents = json.loads(agents_file.read_text())
+    original = agents["agents"]["code"]
+    connections_file = state / "connections.json"
+    connections = json.loads(connections_file.read_text())
+    primary = connections["profiles"][original["provider"]]
+    connections["profiles"]["review"] = dict(primary, id="review", label="Review endpoint",
+                                              base_url=primary["base_url"].removesuffix("/v1") + "/review/v1")
+    connections_file.write_text(json.dumps(connections))
+    reviewer = dict(original, id="reviewer", label="Reviewer", provider="review", model="review-model",
+                    tools=["read", "shell"], instructions="review-fixture-instruction")
+    agents["agents"]["reviewer"] = reviewer
+    agents["agents"]["private-agent"] = dict(original, id="private-agent", model="private-model")
+    agents["selected"] = "private-agent"
+    agents_file.write_text(json.dumps(agents))
+    duplicate = subprocess.run(command + ["--worker-profile", "code", "--worker-profile", "code"],
+                               env=env, capture_output=True, text=True, timeout=12)
+    assert duplicate.returncode and "Duplicate worker profile code" in duplicate.stderr, duplicate.stderr
+    return ["--worker-profile", "code", "--worker-profile", "reviewer"]
 
 
 def main():
@@ -202,6 +242,8 @@ def main():
             command = args(name, "--serve-pool") + ["--worker-name", name, "--worker-label",
                                                     "role=" + label, "--worker-slots", "1"]
             command.extend(["--worker-host-os", "macos" if name == "macbook" else "linux"])
+            if name == "macbook":
+                command.extend(configure_profiles(command, env, root / "macbook-state"))
             (root / name / "marker.txt").write_text(server.markers[name])
             proc = stack.enter_context(child(command, env, stdout=subprocess.PIPE, text=True))
             if not select.select([proc.stdout], [], [], 20)[0] or not proc.stdout.readline().startswith("Serving"):

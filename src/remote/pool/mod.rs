@@ -9,6 +9,7 @@ mod registry;
 mod transport;
 mod worker;
 
+pub(crate) use registry::WorkerProfile;
 use registry::{Registry, Worker};
 use roomkit::turns::TurnBackendHandle;
 use std::{collections::BTreeMap, sync::Arc};
@@ -35,6 +36,7 @@ fn route(instance: &str) -> String {
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct Requirements {
     os: Option<String>,
+    pub(crate) profile: Option<String>,
     labels: BTreeMap<String, String>,
     min_ram_mib: u64,
 }
@@ -45,6 +47,9 @@ impl Requirements {
         };
         let req: Self = serde_json::from_value(value.clone())
             .map_err(|e| format!("Invalid executor requirements: {e}"))?;
+        if let Some(profile) = &req.profile {
+            crate::profiles::profile_id(profile)?;
+        }
         if let Some(os) = &req.os {
             identifier(os)?;
         }
@@ -59,6 +64,10 @@ impl Requirements {
     }
     fn matches(&self, w: &Worker) -> bool {
         self.os.as_ref().is_none_or(|os| os == &w.os)
+            && self
+                .profile
+                .as_ref()
+                .is_none_or(|id| w.profiles.iter().any(|p| &p.id == id))
             && self.labels.iter().all(|(k, v)| w.labels.get(k) == Some(v))
     }
 }

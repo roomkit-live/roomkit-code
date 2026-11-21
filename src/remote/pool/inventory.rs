@@ -18,7 +18,21 @@ impl Inventory {
         if rows.is_empty() {
             return Ok(vec!["No workers registered.".into()]);
         }
-        Ok(rows.iter().map(describe).collect())
+        let mut lines = Vec::new();
+        for row in rows {
+            lines.push(describe(&row));
+            for (i, p) in row.worker.profiles.iter().enumerate() {
+                let default = if i == 0 { " (default)" } else { "" };
+                lines.push(format!(
+                    "  profile {}{default} · {} · model {} · tools {}",
+                    p.id,
+                    p.label,
+                    p.model,
+                    p.tools.join(", ")
+                ));
+            }
+        }
+        Ok(lines)
     }
 }
 
@@ -27,7 +41,7 @@ impl Tool for Inventory {
         AiTool {
             name: LIST_EXECUTORS.into(),
             description: "List the worker machines registered in this executor pool, including \
-                their online status, execution and host OS, configured model, resources, labels \
+                their online status, execution and host OS, exposed profile IDs, models, tools, resources, labels \
                 and free slots. Use this to answer questions about available executors."
                 .into(),
             parameters: serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),

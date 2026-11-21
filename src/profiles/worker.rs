@@ -1,7 +1,8 @@
 //! The owner's declaration and the workspace-local agent that fulfills it.
 
 use super::*;
-use crate::remote::{AGENT, LABEL, TOOLS as WORKER_TOOLS};
+use crate::remote::pool::WorkerProfile;
+use crate::remote::{AGENT, TOOLS as WORKER_TOOLS};
 
 impl State {
     pub(super) fn is_remote(&self, id: &str) -> bool {
@@ -29,38 +30,119 @@ impl State {
     }
 }
 
+/// A profile ID accepted by both the CLI and task placement.
+pub(crate) fn profile_id(id: &str) -> Result<String, String> {
+    model::valid_id(id)
+        .then(|| id.to_owned())
+        .ok_or_else(|| "Invalid worker profile ID".into())
+}
+
+/// All runtimes belong to the same transport channel. Each turn selects its
+/// runtime from its task context, including follow-up turns in that room.
+pub(super) struct WorkerAgents {
+    pooled: bool,
+    default: String,
+    agents: BTreeMap<String, Arc<CodeAgent>>,
+}
+
+impl WorkerAgents {
+    pub(super) fn select(
+        &self,
+        context: &roomkit::model::RoomContext,
+    ) -> Result<(&str, Arc<CodeAgent>), String> {
+        let requested = if self.pooled {
+            crate::remote::pool::Requirements::parse(context.room.metadata.get("task_context"))?
+                .profile
+        } else {
+            None
+        };
+        let id = requested.as_ref().unwrap_or(&self.default);
+        self.agents
+            .get_key_value(id)
+            .map(|(id, a)| (id.as_str(), a.clone()))
+            .ok_or_else(|| format!("Worker does not serve profile {id}"))
+    }
+
+    pub(super) fn runtimes(&self) -> Vec<Arc<CodeAgent>> {
+        self.agents.values().cloned().collect()
+    }
+}
+
 impl Profiles {
-    /// The provider, instructions and workspace come from the worker machine.
     pub(crate) async fn worker(
         &self,
-    ) -> Result<(impl roomkit::Channel + Clone + use<>, String), String> {
+        requested: &[String],
+    ) -> Result<(impl roomkit::Channel + Clone + use<>, Vec<WorkerProfile>), String> {
         let state = self.state.lock().await;
-        let mut profile = state.selected().and_then(|id| state.agent(&id)).ok_or(
-            "Configure a model on the worker with --model and --base-url or a saved profile",
-        )?;
-        let provider = state
-            .providers
-            .value
-            .profiles
-            .get(&profile.provider)
-            .ok_or("The worker profile references an unknown connection")?;
-        profile.id = AGENT.into();
-        profile.label = LABEL.into();
-        profile
-            .tools
-            .retain(|name| WORKER_TOOLS.contains(&name.as_str()));
-        profile.mcp.clear();
-        profile.skills.clear();
-        let (agent, _) = self.assemble(&profile, provider).await?;
+        let ids = if requested.is_empty() {
+            vec![state.selected().ok_or(
+                "Configure a model on the worker with --model and --base-url or a saved profile",
+            )?]
+        } else {
+            requested.to_vec()
+        };
+        let mut agents = BTreeMap::new();
+        let mut offered = Vec::new();
+        for id in &ids {
+            if agents.contains_key(id) {
+                return Err(format!("Duplicate worker profile {id}"));
+            }
+            let (agent, info) = self.build_worker_profile(&state, id).await?;
+            agents.insert(id.clone(), Arc::new(agent));
+            offered.push(info);
+        }
         let slot = AgentSlot::new(
             ChannelId::new(AGENT).map_err(|e| e.to_string())?,
-            Some(agent),
+            None,
             self.policy.clone(),
             state.instructions.clone(),
             state.files.clone(),
             state.compactions.clone(),
             state.roster.clone(),
         );
-        Ok((slot.on_remote_executor(), profile.model))
+        Ok((
+            slot.on_remote_executor(WorkerAgents {
+                pooled: self.executor_inventory.is_some(),
+                default: ids[0].clone(),
+                agents,
+            }),
+            offered,
+        ))
+    }
+    async fn build_worker_profile(
+        &self,
+        state: &State,
+        id: &str,
+    ) -> Result<(CodeAgent, WorkerProfile), String> {
+        let mut profile = state
+            .agent(id)
+            .ok_or_else(|| format!("Unknown worker profile {id}"))?;
+        let provider = state
+            .providers
+            .value
+            .profiles
+            .get(&profile.provider)
+            .ok_or("The worker profile references an unknown connection")?;
+        profile
+            .tools
+            .retain(|name| WORKER_TOOLS.contains(&name.as_str()));
+        profile.mcp.clear();
+        profile.skills.clear();
+        let (agent, inventory) = self
+            .assemble_channel(&profile, provider, None, AGENT)
+            .await
+            .map_err(|e| format!("Worker profile {id}: {e}"))?;
+        let mut tools: Vec<_> = inventory.tools.into_iter().map(|tool| tool.name).collect();
+        // The engine adds this tool to every AI channel after assembly.
+        tools.push("read_stored_result".into());
+        tools.sort();
+        tools.dedup();
+        let info = WorkerProfile {
+            id: profile.id,
+            label: profile.label,
+            model: profile.model,
+            tools,
+        };
+        Ok((agent, info))
     }
 }

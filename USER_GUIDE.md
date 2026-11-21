@@ -632,7 +632,25 @@ requirements, e.g. “Use a macOS worker labelled role=review with at least
 {"os":"macos","labels":{"role":"review"},"min_ram_mib":512}
 ```
 
-Every field is optional. The scheduler filters online workers by execution OS,
+To expose several agents, configure them with `/providers` and `/agents` in
+the worker's workspace and state directory. Start one process with their IDs:
+
+```sh
+roomkit-code . --serve-pool project-demo --worker-name laptop --worker-slots 1 \
+  --worker-profile coder --worker-profile reviewer
+```
+
+The first listed profile handles requests without a profile constraint. With
+no flags, the worker serves its selected profile. All exposed profiles share
+the checkout and slot limit. Each uses its own connection, instructions and
+allowed file tools. Restart the worker to apply profile changes. Unknown or
+duplicate profile IDs prevent registration. Inspect the IDs, models and tools
+with `/executors` or `list_executors`. For example, ask the owner to have
+the `reviewer` profile read a file on macOS. The delegation context is
+`{"executor":{"profile":"reviewer","os":"macos"}}`. If no online worker
+exposes that profile, the task waits for one.
+
+Every field is optional. The scheduler filters online workers by execution OS, profile,
 exact label values, available memory and free slots, then chooses the lowest
 load per CPU. A worker accepting general tasks can have labels of its own.
 A task waits until a matching slot opens. Other eligible tasks can run in

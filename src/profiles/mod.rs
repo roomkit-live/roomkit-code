@@ -39,6 +39,7 @@ pub(crate) use mcp::McpTools;
 use model::{Agent, Authentication, PROJECT_SCHEMA, Project, Provider, Providers, TOOLS};
 use slot::AgentSlot;
 use store::Document;
+pub(crate) use worker::profile_id;
 
 pub(crate) struct Profiles {
     pub(crate) executor_inventory: Option<crate::remote::pool::Inventory>,
@@ -343,6 +344,17 @@ impl Profiles {
         provider: &Provider,
         conversation: Option<&str>,
     ) -> Result<(CodeAgent, Inventory), String> {
+        self.assemble_channel(profile, provider, conversation, &profile.id)
+            .await
+    }
+
+    async fn assemble_channel(
+        &self,
+        profile: &Agent,
+        provider: &Provider,
+        conversation: Option<&str>,
+        channel: &str,
+    ) -> Result<(CodeAgent, Inventory), String> {
         profile.validate()?;
         provider.validate()?;
         let provider_instance = self.generation_provider(profile, provider)?;
@@ -371,6 +383,7 @@ impl Profiles {
         };
         let created = crate::agent::create(
             &self.workspace,
+            channel,
             &self.resources,
             profile,
             provider_instance,

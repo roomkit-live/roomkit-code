@@ -15,7 +15,7 @@ type Fitted = Result<Arc<CodeAgent>, String>;
 
 #[derive(Clone)]
 pub(super) struct AgentSlot {
-    remote: bool,
+    remote: Option<Arc<super::worker::WorkerAgents>>,
     instructions: Arc<crate::instructions::Instructions>,
     files: Arc<crate::files::Files>,
     compactions: Arc<crate::compaction::Compactions>,
@@ -46,7 +46,7 @@ impl AgentSlot {
         roster: Arc<crate::delegation::Roster>,
     ) -> Self {
         Self {
-            remote: false,
+            remote: None,
             instructions,
             files,
             compactions,
@@ -68,8 +68,8 @@ impl AgentSlot {
     }
 
     /// Route tool permissions for this slot to the room owner.
-    pub(super) fn on_remote_executor(mut self) -> Self {
-        self.remote = true;
+    pub(super) fn on_remote_executor(mut self, agents: super::worker::WorkerAgents) -> Self {
+        self.remote = Some(Arc::new(agents));
         self
     }
 
@@ -126,6 +126,9 @@ impl AgentSlot {
     }
     /// Every configuration the slot holds.
     fn configurations(&self) -> Vec<Arc<CodeAgent>> {
+        if let Some(remote) = &self.remote {
+            return remote.runtimes();
+        }
         let own = crate::sync::read(&self.current).clone();
         let fitted = crate::sync::read(&self.fitted);
         let fitted = fitted.values().filter_map(|agent| agent.clone().ok());
@@ -144,6 +147,7 @@ impl AgentSlot {
         history: &[RoomEvent],
         told: Option<String>,
         worker: Option<&'static str>,
+        profile: &str,
     ) -> String {
         let (room, agent) = (event.room_id.as_str(), self.id.as_str());
         // Its answers and its rows of tool calls, whose results carry the
@@ -156,9 +160,9 @@ impl AgentSlot {
         self.compactions.tell_snapshot(room, agent, &project);
         let (engine, told) = engine_first(event, told);
         let mut parts: Vec<String> = engine.into_iter().collect();
-        let permission = if self.remote {
+        let permission = if self.remote.is_some() {
             format!(
-                "You are running on the remote {}/{} executor in its own workspace. The parent conversation controls permissions for each tool call. Describe file paths as relative to this worker.",
+                "You are running on the remote {}/{} executor as profile {profile} in its own workspace. The parent conversation controls permissions for each tool call. Describe file paths as relative to this worker.",
                 std::env::consts::OS,
                 std::env::consts::ARCH
             )
@@ -173,7 +177,7 @@ impl AgentSlot {
         }
         parts.extend(self.turn_ends.begin(&self.id, event, history));
         parts.extend(told);
-        if !self.still_read(&project, event, history) {
+        if !self.still_read(&project, event, history, profile) {
             parts.push(project);
         }
         parts.join("\n\n")
@@ -185,14 +189,20 @@ impl AgentSlot {
     /// and the kit's emergency compaction keeps whole only the turn's input,
     /// where the snapshot then rides. A standalone instruction reads no
     /// history.
-    fn still_read(&self, project: &str, event: &RoomEvent, history: &[RoomEvent]) -> bool {
-        let (room, agent) = (event.room_id.as_str(), self.id.as_str());
+    fn still_read(
+        &self,
+        project: &str,
+        event: &RoomEvent,
+        history: &[RoomEvent],
+        profile: &str,
+    ) -> bool {
+        let room = event.room_id.as_str();
         if roomkit_core::rules::instructions::is_standalone(event)
-            || !self.compactions.bounded(room, agent)
+            || !self.compactions.bounded(room, profile)
         {
             return false;
         }
-        let compacted = self.compactions.get(room, agent);
+        let compacted = self.compactions.get(room, self.id.as_str());
         let view = crate::instructions::View {
             from: compacted.as_ref().map_or(0, |compacted| compacted.from),
             carried: compacted
@@ -209,7 +219,12 @@ impl AgentSlot {
     /// schemas: the kit keeps it as the agent's own row, which its later turns
     /// replay where it was read (roomkit-rs RMK-1407). The engine's transcript
     /// renderer distinguishes application instructions from participant text.
-    async fn turn_input(&self, event: RoomEvent, context: &mut RoomContext) -> RoomEvent {
+    async fn turn_input(
+        &self,
+        event: RoomEvent,
+        context: &mut RoomContext,
+        profile: &str,
+    ) -> RoomEvent {
         match event.r#type {
             EventType::Message => {
                 if !context.recent_events.iter().any(|past| past.id == event.id) {
@@ -217,7 +232,7 @@ impl AgentSlot {
                 }
                 let worker = crate::delegation::worker_note(&context.room);
                 let instruction = self
-                    .instruction(&event, &context.recent_events, None, worker)
+                    .instruction(&event, &context.recent_events, None, worker, profile)
                     .await;
                 let mut input = RoomEvent::new(
                     event.room_id.clone(),
@@ -236,7 +251,7 @@ impl AgentSlot {
                 let told = roomkit_core::rules::transcoding::text_of(&event.content);
                 let worker = crate::delegation::worker_note(&context.room);
                 let instruction = self
-                    .instruction(&event, &context.recent_events, Some(told), worker)
+                    .instruction(&event, &context.recent_events, Some(told), worker, profile)
                     .await;
                 let mut input = event;
                 input.content = TextContent::new(instruction).into();
@@ -349,10 +364,16 @@ impl Channel for AgentSlot {
         if !self.answers(&event, &context) {
             return Ok(ChannelOutput::default());
         }
-        let agent = self.configuration(context.room.id.as_str())?;
+        let (profile, agent) = match &self.remote {
+            Some(remote) => remote.select(&context)?,
+            None => (
+                self.id.as_str(),
+                self.configuration(context.room.id.as_str())?,
+            ),
+        };
         // A delegated task's room takes its conversation's mode.
         self.policy.adopt(&context.room);
-        let input = self.turn_input(event, &mut context).await;
+        let input = self.turn_input(event, &mut context, profile).await;
         agent.on_event(input, binding, context).await
     }
     /// Records what the shell calls the kit's close cut changed, while the

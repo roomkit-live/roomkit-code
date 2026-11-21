@@ -106,7 +106,10 @@ async fn run(
     group: &str,
     args: Option<&pool::WorkerArgs>,
 ) -> Result<()> {
-    let (agent, model) = profiles.worker().await?;
+    let requested = args
+        .map(|a| a.worker_profile.as_slice())
+        .unwrap_or_default();
+    let (agent, offered) = profiles.worker(requested).await?;
     let pooled = args.is_some();
     let executor = TurnExecutor::new(
         move |id| std::future::ready(Ok((id.as_str() == AGENT).then(|| agent.clone()))),
@@ -137,7 +140,7 @@ async fn run(
                 .executor_inventory
                 .as_ref()
                 .ok_or("Missing executor pool inventory")?;
-            Some(pool::advertise(inventory, args, model, &executor).await?)
+            Some(pool::advertise(inventory, args, offered, &executor).await?)
         }
         None => None,
     };

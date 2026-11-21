@@ -236,6 +236,7 @@ pub(crate) struct Extensions {
 
 pub(crate) async fn create(
     root: &std::path::Path,
+    channel: &str,
     resources: &Resources,
     profile: &Agent,
     provider: CodeProvider,
@@ -317,7 +318,7 @@ pub(crate) async fn create(
         retry_policy: Some(retry_policy()),
         reasoning_effort: profile.reasoning_effort.clone(),
         memory: memory(
-            (ceiling, &profile.id),
+            (ceiling, &profile.id, channel),
             &provider,
             (resources, conversation.as_deref()),
         ),
@@ -329,7 +330,7 @@ pub(crate) async fn create(
         tool_search_pinned: preamble.pinned,
         ..AiChannelOptions::default()
     };
-    let agent = AiChannel::new(ChannelId::new(&profile.id)?, provider, options)?;
+    let agent = AiChannel::new(ChannelId::new(channel)?, provider, options)?;
     Ok((agent, preamble.inventory))
 }
 
@@ -337,7 +338,7 @@ pub(crate) async fn create(
 /// summarized by its own model, which also compacts its conversations
 /// outside its turns; none keeps its window of `HISTORY` messages.
 fn memory(
-    (ceiling, agent): (Option<u64>, &str),
+    (ceiling, profile, channel): (Option<u64>, &str, &str),
     provider: &CodeProvider,
     (resources, conversation): (&Resources, Option<&str>),
 ) -> Option<Arc<dyn roomkit_ai::memory::MemoryProvider>> {
@@ -346,14 +347,14 @@ fn memory(
     let compactions = resources.compactions.clone();
     let memory = Arc::new(crate::compaction::TieredMemory::new(
         summarizer,
-        (ceiling, agent),
+        (ceiling, channel),
         compactions.clone(),
     ));
-    // In a conversation that keeps a model of its own, its summaries are
-    // that model's.
+    // Profile IDs identify the summarizer; history is authored by the transport
+    // channel, which all profiles of a remote worker share.
     match conversation {
-        Some(room) => compactions.register_in(room, agent, memory.clone()),
-        None => compactions.register(agent, memory.clone()),
+        Some(room) => compactions.register_in(room, profile, memory.clone()),
+        None => compactions.register(profile, memory.clone()),
     }
     Some(memory)
 }

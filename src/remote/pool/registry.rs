@@ -55,6 +55,15 @@ local now=tonumber(redis.call('TIME')[1])
 if tonumber(redis.call('ZSCORE',KEYS[1],ARGV[1]) or 0)<=now then return 0 end
 redis.call('ZADD',KEYS[1],now+20,ARGV[1]); redis.call('EXPIRE',KEYS[1],30); return 1"#;
 
+/// The public part of an exposed local profile. Connection details stay on the worker.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct WorkerProfile {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) model: String,
+    pub(crate) tools: Vec<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct Worker {
     pub name: String,
@@ -63,6 +72,8 @@ pub(super) struct Worker {
     pub host_os: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default)]
+    pub profiles: Vec<WorkerProfile>,
     pub arch: String,
     pub labels: BTreeMap<String, String>,
     pub slots: u16,

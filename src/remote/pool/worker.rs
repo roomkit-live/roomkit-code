@@ -9,6 +9,9 @@ use tokio::{task::JoinHandle, time::sleep};
 
 #[derive(clap::Args, Debug, Default, Clone)]
 pub(crate) struct WorkerArgs {
+    /// Local agent profile to serve. Repeat to expose more; the first is the default.
+    #[arg(long, requires = "serve_pool", value_parser = crate::profiles::profile_id)]
+    pub(crate) worker_profile: Vec<String>,
     /// Stable worker name (defaults to the hostname).
     #[arg(long, requires="serve_pool",value_parser=super::identifier)]
     worker_name: Option<String>,
@@ -87,7 +90,7 @@ pub(crate) fn declare(executor: &roomkit::TurnExecutor) -> Result<()> {
 pub(crate) async fn advertise(
     inventory: &super::Inventory,
     args: &WorkerArgs,
-    model: String,
+    profiles: Vec<super::WorkerProfile>,
     executor: &roomkit::TurnExecutor,
 ) -> Result<Presence> {
     let registry = inventory.0.clone();
@@ -101,7 +104,8 @@ pub(crate) async fn advertise(
         instance: executor.executor_id().into(),
         os: std::env::consts::OS.into(),
         arch: std::env::consts::ARCH.into(),
-        model: Some(model),
+        model: profiles.first().map(|p| p.model.clone()),
+        profiles,
         host_os: args.worker_host_os.clone(),
         labels,
         slots: args.worker_slots.unwrap_or(1),
