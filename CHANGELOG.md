@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [0.3.1]
+
+Corrective release for Linux x86-64/ARM64 and macOS Intel/Apple Silicon.
+
+Linux requires glibc 2.35 or newer. macOS requires version 12 or newer; binaries
+are ad-hoc signed, without Apple Developer ID signing or notarization. No
+application data changes: rolling back to 0.3.0, 0.2.1, 0.2.0 or 0.1.3 from the
+application keeps conversations and settings readable.
+
 - Signing in with ChatGPT from another computer no longer ends on a key that
   does nothing. Enter sends the pasted return address: the form holds one
   field, and Enter only moved to a next field it does not have (roomkit-tui
