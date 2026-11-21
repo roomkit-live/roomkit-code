@@ -601,7 +601,10 @@ Start these processes in their respective checkouts, with the same trusted
 broker configuration as above. Give each worker a unique, stable name.
 
 ```sh
-roomkit-code . --serve-pool project-demo --worker-name laptop --worker-label role=review --worker-slots 1 --worker-host-os macos
+# In a macOS terminal, using the native roomkit-code binary.
+roomkit-code . --serve-pool project-demo --worker-name laptop --worker-label role=review
+
+# On the Linux workstation.
 roomkit-code . --serve-pool project-demo --worker-name workstation --worker-label role=general
 roomkit-code . --executor-pool project-demo
 ```
@@ -611,18 +614,20 @@ host OS, configured model, CPU count and utilization, one-minute load average,
 available RAM, labels and free slots. Ask “Which executor machines are in this
 pool?” in the parent or a worker conversation. The agent can use `list_executors`
 to read the same live inventory. The `remote-linux` delegation target can use
-several machines. Linux containers on a Mac report Linux as their execution OS
-and macOS as their host OS when the worker declares it.
-CPU utilization and load describe the Linux kernel (the VM when virtualized).
-Available RAM is capped by the worker's cgroup v2 memory limit when visible.
+both Linux and macOS workers. A native Apple Silicon worker reports
+`macos/aarch64`. A Linux container on the same Mac reports Linux and can
+declare its physical host with `--worker-host-os macos`. Placement uses the
+execution OS. On macOS, the worker samples CPU utilization and load with
+`iostat` and estimates available RAM from free and inactive pages in
+`vm_stat`. Linux workers cap available RAM at their visible cgroup v2 limit.
 
 Ask the owner to delegate a file task to `remote-linux` and specify its
-requirements, e.g. “Use a Linux worker labelled role=review with at least
+requirements, e.g. “Use a macOS worker labelled role=review with at least
 512 MiB available to review this checkout.” The tool accepts
 `context.executor` as a JSON object:
 
 ```json
-{"os":"linux","labels":{"role":"review"},"min_ram_mib":512}
+{"os":"macos","labels":{"role":"review"},"min_ram_mib":512}
 ```
 
 Every field is optional. The scheduler filters online workers by execution OS,

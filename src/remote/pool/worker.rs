@@ -9,7 +9,7 @@ use tokio::{task::JoinHandle, time::sleep};
 
 #[derive(clap::Args, Debug, Default, Clone)]
 pub(crate) struct WorkerArgs {
-    /// Stable worker name (defaults to the Linux hostname).
+    /// Stable worker name (defaults to the hostname).
     #[arg(long, requires="serve_pool",value_parser=super::identifier)]
     worker_name: Option<String>,
     /// Placement label, for example role=review. Repeat for more labels.
@@ -36,7 +36,7 @@ impl WorkerArgs {
             return Ok(name.clone());
         }
         Ok(super::identifier(
-            std::fs::read_to_string("/proc/sys/kernel/hostname")?.trim(),
+            rustix::system::uname().nodename().to_str()?,
         )?)
     }
     pub(crate) fn instance(&self) -> Result<String> {
@@ -105,7 +105,7 @@ pub(crate) async fn advertise(
         host_os: args.worker_host_os.clone(),
         labels,
         slots: args.worker_slots.unwrap_or(1),
-        metrics: sampler.read(),
+        metrics: sampler.read().await,
     };
     if !registry.publish(&worker).await? {
         return Err(format!("Worker name {} is already online", worker.name).into());
@@ -116,7 +116,7 @@ pub(crate) async fn advertise(
     let heartbeat = tokio::spawn(async move {
         loop {
             sleep(Duration::from_secs(2)).await;
-            worker.metrics = sampler.read();
+            worker.metrics = sampler.read().await;
             if matches!(registry.publish(&worker).await, Ok(false)) {
                 return format!("Worker name {} was taken by another instance", worker.name);
             }

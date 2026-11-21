@@ -157,11 +157,15 @@ impl AgentSlot {
         let (engine, told) = engine_first(event, told);
         let mut parts: Vec<String> = engine.into_iter().collect();
         let permission = if self.remote {
-            "You are running on the remote Linux executor in its own workspace. The parent conversation controls permissions for each tool call. Describe file paths as relative to this worker."
+            format!(
+                "You are running on the remote {}/{} executor in its own workspace. The parent conversation controls permissions for each tool call. Describe file paths as relative to this worker.",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            )
         } else {
-            self.policy.instruction(room)
+            self.policy.instruction(room).to_owned()
         };
-        parts.push(permission.to_owned());
+        parts.push(permission);
         parts.extend(worker.map(str::to_owned));
         // A task's agent hands nothing on (`delegation::nesting_refusal`).
         if worker.is_none() {

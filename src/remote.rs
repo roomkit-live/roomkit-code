@@ -1,4 +1,4 @@
-//! A fixed Linux delegation target using RoomKit's Redis turn transport.
+//! Remote delegation using RoomKit's Redis turn transport.
 
 pub(crate) mod pool;
 
@@ -10,7 +10,7 @@ use roomkit::{RedisTurnBackend, RedisTurnBackendOptions, TurnExecutor, TurnExecu
 use crate::{Result, config::Settings, profiles::Profiles, storage::Storage};
 
 pub(crate) const AGENT: &str = "remote-linux";
-pub(crate) const LABEL: &str = "Remote Linux worker";
+pub(crate) const LABEL: &str = "Remote worker";
 pub(crate) const TOOLS: &[&str] = &[
     "list",
     "glob",
@@ -66,8 +66,14 @@ pub(crate) async fn serve(
     group: &str,
     args: Option<&pool::WorkerArgs>,
 ) -> Result<()> {
-    if !cfg!(target_os = "linux") {
-        return Err("The experimental executor runs on Linux".into());
+    match args {
+        Some(_) if !cfg!(any(target_os = "linux", target_os = "macos")) => {
+            return Err("Executor pool workers require Linux or macOS".into());
+        }
+        None if !cfg!(target_os = "linux") => {
+            return Err("The single-worker executor requires Linux".into());
+        }
+        _ => {}
     }
     let prefix = if args.is_some() {
         format!("pool:{group}")
