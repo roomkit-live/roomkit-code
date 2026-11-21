@@ -592,7 +592,46 @@ owner runs its pre-tool hooks. Post-tool hooks currently cover local outcomes.
 
 Use one worker per group. Supply a checkout containing the files it needs.
 Edits stay in that checkout. Shell jobs, skills, MCP, automatic checkout and
-placement by resource or OS are outside this POC.
+placement by resource or OS are outside the single-worker mode.
+
+## Experimental executor pool
+
+Use one Redis group for the owner and workers that may handle its tasks.
+Start these processes in their respective checkouts, with the same trusted
+broker configuration as above. Give each worker a unique, stable name.
+
+```sh
+roomkit-code . --serve-pool project-demo --worker-name laptop --worker-label role=review --worker-slots 1 --worker-host-os macos
+roomkit-code . --serve-pool project-demo --worker-name workstation --worker-label role=general
+roomkit-code . --executor-pool project-demo
+```
+
+Open `/executors` to see the execution OS and architecture, declared physical
+host OS, CPU count and utilization, one-minute load average, available RAM,
+labels and free slots. Linux containers report Linux as the execution OS.
+CPU utilization and load describe the Linux kernel (the VM when virtualized).
+Available RAM is capped by the worker's cgroup v2 memory limit when visible.
+
+Ask the owner to delegate a file task to `remote-linux` and specify its
+requirements, e.g. “Use a Linux worker labelled role=review with at least
+512 MiB available to review this checkout.” The tool accepts
+`context.executor` as a JSON object:
+
+```json
+{"os":"linux","labels":{"role":"review"},"min_ram_mib":512}
+```
+
+Every field is optional. The scheduler filters online workers by execution OS,
+exact label values, available memory and free slots, then chooses the lowest
+load per CPU. A worker accepting general tasks can have labels of its own.
+A task waits until a matching slot opens. Other eligible tasks can run in
+the meantime. `/executors` shows the reason for waiting and the assigned worker.
+The owner holds the queue in memory, so keep its session open. The pool shares
+the single-worker file tools and permissions. Each checkout belongs to its
+worker. A label describes a worker and does not install software or add tools.
+
+To exercise overlapping tasks locally with two workers and scripted models, run
+`python3 scripts/check-executor-pool.py` after `cargo build --locked`.
 
 ## Tools and persistence
 

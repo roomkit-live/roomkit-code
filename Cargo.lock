@@ -2225,6 +2225,7 @@ dependencies = [
  "fs2",
  "ignore",
  "png",
+ "redis",
  "reqwest",
  "roomkit",
  "roomkit-ai",

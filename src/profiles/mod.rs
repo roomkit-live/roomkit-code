@@ -41,6 +41,7 @@ use slot::AgentSlot;
 use store::Document;
 
 pub(crate) struct Profiles {
+    pub(crate) pool: Option<Arc<crate::remote::pool::Scheduler>>,
     pub(crate) policy: crate::permissions::Policy,
     pub(crate) plans: Arc<crate::plans::PlanView>,
     require_tool_intent: bool,
@@ -202,6 +203,7 @@ impl Profiles {
         let compactions = resources.compactions.clone();
         let files = resources.files.clone();
         let roster = resources.roster.clone();
+        roster.enable_pool(settings.executor_pool.is_some());
         let turn_ends = resources.turn_ends.clone();
         // Nobody can answer a question in a launch nobody watches.
         let asking = (!settings.unattended)
@@ -210,6 +212,12 @@ impl Profiles {
             .map_err(|error| error.to_string())?;
         let requests = asking.as_ref().map(|asking| asking.handler().clone());
         Ok(Arc::new(Self {
+            pool: settings
+                .executor_pool
+                .as_deref()
+                .map(crate::remote::pool::Scheduler::new)
+                .transpose()
+                .map_err(|e| e.to_string())?,
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),
             require_tool_intent: settings.require_tool_intent,
@@ -228,7 +236,7 @@ impl Profiles {
             mcp_runtime: mcp::Runtime::default(),
             reported: std::sync::Mutex::default(),
             state: Mutex::new(State {
-                remote_worker: settings.remote_worker.is_some(),
+                remote_worker: settings.remote_worker.is_some() || settings.executor_pool.is_some(),
                 instructions,
                 compactions,
                 files,

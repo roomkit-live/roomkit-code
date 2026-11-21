@@ -80,6 +80,11 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "[process-id]",
         ),
         (
+            "executors",
+            "Inspect worker resources and task placement",
+            "",
+        ),
+        (
             "tasks",
             "See the tasks agents handed to other agents, and stop them",
             "[task-id]",
@@ -233,6 +238,7 @@ impl CommandHandler for Sessions {
                 | "tools"
                 | "processes"
                 | "tasks"
+                | "executors"
                 | "back"
                 | "files"
                 | "diagnostics"
@@ -311,6 +317,9 @@ impl Sessions {
                     .processes
                     .handle(&self.kit, &self.channel, &current, arguments)
                     .await
+            }
+            "executors" => {
+                crate::remote::pool::panel(self.profiles.pool.as_deref(), &current, arguments).await
             }
             "tasks" => crate::delegation::panel::handle(self, &current, arguments).await,
             "back" => task_rooms::back(self, &current).await,

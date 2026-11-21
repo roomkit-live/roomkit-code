@@ -39,6 +39,7 @@ roomkit-tools-core = { version = "0.1.0-alpha.16", git = "https://github.com/roo
 roomkit-tools-agents = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "1f41758354078800b1c7fbccb7f75ae8c4e62559" }
 roomkit-tools-web = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "1f41758354078800b1c7fbccb7f75ae8c4e62559" }
 roomkit-tools-search = { version = "0.1.0-alpha.16", git = "https://github.com/roomkit-live/roomkit-tools", rev = "1f41758354078800b1c7fbccb7f75ae8c4e62559", default-features = false, features = ["exa"] }
+redis = { version = "1.8.2", default-features = false, features = ["connection-manager", "tokio-rustls-comp"] }
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
