@@ -21,6 +21,12 @@ fn sign_in_displays_the_link_and_private_return_field_together() {
     assert!(form.description_markdown);
     assert!(form.description.contains(url.as_str()));
     assert!(form.description.contains("connection error"));
+    // The error page is the expected end from another computer, and Enter
+    // sends the address: a person who read neither pasted what follows the
+    // `?` and pressed a key that did nothing.
+    assert!(form.description.contains("which is expected"));
+    assert!(form.description.contains("press Enter"));
+    assert!(form.fields[0].help.contains("not only what follows the ?"));
     assert!(!form.description.contains("SSH"));
     assert_eq!(form.dismiss, format!("chatgpt:dismiss:{}", form.id));
     assert_eq!(form.fields.len(), 1);
