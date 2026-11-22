@@ -67,7 +67,7 @@ ignore = "0.4.34"
 
 [dev-dependencies]
 axum = "0.8"
-tokio = { version = "1", features = ["net"] }
+tokio = { version = "1", features = ["net", "test-util"] }
 
 [lints.rust]
 unsafe_code = "forbid"

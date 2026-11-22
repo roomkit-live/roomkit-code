@@ -1,9 +1,5 @@
 //! Pin each accepted remote turn to the worker whose slot was reserved.
-use super::{
-    Requirements, Scheduler,
-    queue::Ticket,
-    registry::{Registry, Worker},
-};
+use super::{Requirements, Scheduler, lease::Lease};
 use roomkit::{
     RoomKitError,
     turns::{
@@ -12,8 +8,7 @@ use roomkit::{
     },
 };
 use std::{sync::Arc, time::Duration};
-use tokio::time::sleep;
-use tokio_util::sync::CancellationToken;
+use tokio::time::{Instant, sleep};
 
 type Result<T> = std::result::Result<T, RoomKitError>;
 impl Scheduler {
@@ -24,42 +19,53 @@ impl Scheduler {
     async fn schedule(&self, mut request: TurnRequest) -> Result<Arc<dyn TurnLink>> {
         let req = Requirements::parse(request.context.room.metadata.get("task_context"))
             .map_err(RoomKitError::Value)?;
-        let ram = req.min_ram_mib;
         let profile = req.profile.clone();
-        let ticket = self.queue.enter(&request, req);
-        let (worker, placement) = loop {
+        let ram = req.min_ram_mib;
+        let ticket = Arc::new(self.queue.enter(&request, req));
+        let (worker, claimed) = self
+            .reserve(&request.turn_id, ram, &ticket)
+            .await
+            .map_err(RoomKitError::Runtime)?;
+        let lease = Lease::start(
+            self.registry.clone(),
+            &worker.instance,
+            request.turn_id.clone(),
+            claimed,
+            ticket.clone(),
+        );
+        let placement = worker.placement(profile.as_deref());
+        request.room_hooks.push(super::route(&worker.instance));
+        let link = tokio::select! {
+            biased;
+            () = lease.lost.cancelled() => return Err(lost_slot()),
+            result = self.redis.submit(request) => result?,
+        };
+        ticket.assign(&placement);
+        self.announce(link.request(), &placement).await;
+        Ok(Arc::new(ScheduledLink { inner: link, lease }))
+    }
+
+    async fn reserve(
+        &self,
+        turn: &str,
+        ram: u64,
+        ticket: &super::queue::Ticket,
+    ) -> std::result::Result<(super::Worker, Instant), String> {
+        loop {
             let guard = self.queue.admission.lock().await;
-            let rows = self.registry.rows().await.map_err(RoomKitError::Runtime)?;
-            let mut found = None;
-            for w in ticket.candidates(&rows) {
-                if self
-                    .registry
-                    .claim(w, &request.turn_id, ram)
-                    .await
-                    .map_err(RoomKitError::Runtime)?
-                {
-                    let placement = w.placement(profile.as_deref());
-                    ticket.assign(&placement);
-                    found = Some((w.clone(), placement));
-                    break;
+            let rows = self.registry.rows().await?;
+            for worker in ticket.candidates(&rows) {
+                let sent = Instant::now();
+                if self.registry.claim(worker, turn, ram).await? {
+                    return Ok((worker.clone(), sent));
                 }
             }
             drop(guard);
-            if let Some(w) = found {
-                break w;
+            tokio::select! {
+                () = self.closed.cancelled() => return Err("Executor pool closed".into()),
+                () = sleep(Duration::from_millis(350)) => {}
             }
-            tokio::select! {()=self.closed.cancelled()=>return Err(RoomKitError::Runtime("Executor pool closed".into())),()=sleep(Duration::from_millis(350))=>{}}
-        };
-        let lease = Lease::start(
-            self.registry.clone(),
-            &worker,
-            request.turn_id.clone(),
-            ticket,
-        );
-        request.room_hooks.push(super::route(&worker.instance));
-        let link = self.redis.submit(request).await?;
-        self.announce(link.request(), &placement).await;
-        Ok(Arc::new(ScheduledLink { inner: link, lease }))
+        }
     }
 
     async fn announce(&self, request: &TurnRequest, placement: &str) {
@@ -125,39 +131,10 @@ impl TurnBackend for Scheduler {
     }
 }
 
-struct Lease {
-    stop: CancellationToken,
-    lost: CancellationToken,
+fn lost_slot() -> RoomKitError {
+    RoomKitError::Runtime("Lost the worker slot reservation".into())
 }
-impl Lease {
-    fn start(reg: Registry, w: &Worker, turn: String, ticket: Ticket) -> Self {
-        let stop = CancellationToken::new();
-        let lost = CancellationToken::new();
-        let done = stop.clone();
-        let expired = lost.clone();
-        let instance = w.instance.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {biased; ()=done.cancelled()=>break,()=sleep(Duration::from_secs(3))=>{}}
-                if !matches!(
-                    tokio::time::timeout(Duration::from_secs(6), reg.renew(&instance, &turn)).await,
-                    Ok(Ok(true))
-                ) {
-                    expired.cancel();
-                    break;
-                }
-            }
-            reg.release(&instance, &turn).await;
-            drop(ticket);
-        });
-        Self { stop, lost }
-    }
-}
-impl Drop for Lease {
-    fn drop(&mut self) {
-        self.stop.cancel();
-    }
-}
+
 struct ScheduledLink {
     inner: Arc<dyn TurnLink>,
     lease: Lease,
@@ -173,8 +150,11 @@ impl TurnLink for ScheduledLink {
         Box::pin(async {
             tokio::select! {
                 biased;
-                ()=self.lease.lost.cancelled()=>{self.inner.release();Err(RoomKitError::Runtime("Lost the worker slot reservation".into()))}
-                result=self.inner.receive()=>result
+                () = self.lease.lost.cancelled() => {
+                    self.inner.release();
+                    Err(lost_slot())
+                }
+                result = self.inner.receive() => result
             }
         })
     }

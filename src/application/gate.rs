@@ -41,6 +41,7 @@ pub(super) fn install(kit: &RoomKit<SqliteStore>, gate: Gate) -> Result<()> {
         },
         HookOptions {
             name: "code-permissions".into(),
+            fail_closed: true,
             timeout: crate::timeouts::PERMISSION_GATE,
             ..HookOptions::default()
         },

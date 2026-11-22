@@ -3,6 +3,7 @@ mod cargo_test;
 pub(crate) use cargo_test::{CARGO_TEST, CargoTest};
 mod inventory;
 pub(crate) use inventory::{Inventory, LIST_EXECUTORS};
+mod lease;
 mod metrics;
 mod panel;
 pub(crate) use panel::panel;

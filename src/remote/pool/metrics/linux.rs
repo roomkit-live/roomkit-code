@@ -50,16 +50,65 @@ fn available_mib() -> u64 {
             .parse::<u64>()
             .ok()
     });
-    let mut bytes = kb.unwrap_or(0).saturating_mul(1024);
-    let cgroup = |name| {
-        fs::read_to_string(format!("/sys/fs/cgroup/{name}"))
-            .ok()?
-            .trim()
-            .parse::<u64>()
-            .ok()
-    };
-    if let Some((limit, used)) = cgroup("memory.max").zip(cgroup("memory.current")) {
-        bytes = bytes.min(limit.saturating_sub(used));
+    let bytes = kb.unwrap_or(0).saturating_mul(1024);
+    let membership = fs::read_to_string("/proc/self/cgroup").unwrap_or_default();
+    capped_memory(bytes, std::path::Path::new("/sys/fs/cgroup"), &membership) / (1024 * 1024)
+}
+
+fn capped_memory(mut bytes: u64, mount: &std::path::Path, membership: &str) -> u64 {
+    use std::path::{Component, Path};
+    let relative = membership
+        .lines()
+        .find_map(|line| line.strip_prefix("0::/"))
+        .map(Path::new)
+        .filter(|path| {
+            path.components()
+                .all(|part| matches!(part, Component::Normal(_)))
+        })
+        .unwrap_or(Path::new(""));
+    // A service can have an unlimited leaf under a bounded systemd slice.
+    for directory in mount
+        .join(relative)
+        .ancestors()
+        .take_while(|dir| dir.starts_with(mount))
+    {
+        let read = |name| {
+            fs::read_to_string(directory.join(name))
+                .ok()?
+                .trim()
+                .parse::<u64>()
+                .ok()
+        };
+        if let Some((limit, used)) = read("memory.max").zip(read("memory.current")) {
+            bytes = bytes.min(limit.saturating_sub(used));
+        }
     }
-    bytes / (1024 * 1024)
+    bytes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn accounts_for_both_service_and_parent_limits() -> std::io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let slice = root.path().join("user.slice");
+        let service = slice.join("worker.service");
+        fs::create_dir_all(&service)?;
+        for (path, limit, used) in [(&slice, "900", "750"), (&service, "500", "100")] {
+            fs::write(path.join("memory.max"), limit)?;
+            fs::write(path.join("memory.current"), used)?;
+        }
+        assert_eq!(
+            capped_memory(4000, root.path(), "0::/user.slice/worker.service"),
+            150
+        );
+        fs::write(slice.join("memory.max"), "max")?;
+        assert_eq!(
+            capped_memory(4000, root.path(), "0::/user.slice/worker.service"),
+            400
+        );
+        assert_eq!(capped_memory(4000, root.path(), "0::/../outside"), 4000);
+        Ok(())
+    }
 }
