@@ -89,7 +89,7 @@ fn oauth_accounts_cannot_forward_credentials_to_a_custom_endpoint_or_static_key_
 
 #[tokio::test]
 async fn missing_account_credentials_fail_safely_without_anonymous_fallback() {
-    use roomkit_openai::TokenSource;
+    use roomkit_providers_openai::TokenSource;
     let directory = tempfile::tempdir().unwrap();
     let auth = roomkit_auth::ChatGpt::new(directory.path().join("auth"), "Fixture App").unwrap();
     let source = crate::accounts::Credential {
@@ -98,7 +98,7 @@ async fn missing_account_credentials_fail_safely_without_anonymous_fallback() {
     };
     assert_eq!(
         source.token().await.unwrap_err(),
-        roomkit_openai::TokenError::SignInRequired
+        roomkit_providers_openai::TokenError::SignInRequired
     );
 }
 

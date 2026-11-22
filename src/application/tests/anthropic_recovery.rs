@@ -352,7 +352,7 @@ async fn repeated_exhaustion_and_repeated_signature_rejection_stay_bounded() {
 #[tokio::test]
 async fn dropping_the_stream_before_the_retry_prevents_another_request() {
     use roomkit_ai::{AiContext, AiMessage, AiProvider, AiRole, StreamEvent};
-    use roomkit_anthropic::{AnthropicAiProvider, AnthropicConfig};
+    use roomkit_providers_anthropic::{Anthropic as AnthropicAiProvider, AnthropicConfig};
     let server = Server::start(|_, _| response(vec![thinking("cut")], "max_tokens", 32000)).await;
     let temp = tempfile::tempdir().unwrap();
     let diagnostics =

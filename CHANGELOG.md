@@ -16,6 +16,25 @@
   workspace over Redis. Start the worker with `--serve-worker GROUP` and
   the interactive owner with `--remote-worker GROUP`.
 
+- Built on RoomKit Rust 0.3.0, with roomkit-tui abfd525 (0.3.1 and two
+  commits) and roomkit-tools 884d470. That engine hands a running turn only
+  the next messages of whoever wrote the message it answers. Nothing
+  changes for what you write while an agent works: it still reaches the
+  running turn at its next step, a task's turn and the turns the application
+  opens (a background job's end, a task's result) included, because the
+  terminal now hands the message to the turn itself. A background job's end
+  still reaches the turn its agent is running. A turn that is interrupted,
+  fails or reaches its round limit before its next step does not read an end
+  it was handed, as before.
+
+- The OpenAI and Anthropic model providers now come from roomkit-providers
+  (edc7d5e), which is built on the same engine release; RoomKit Rust 0.3.0
+  holds no model provider of its own any more. Settings, sign-in and
+  conversations are unchanged, and so is what a failure reads as: with
+  roomkit-tui 0.3.1 an answer the provider cannot read is again "The provider
+  returned an invalid response", where it read "Engine execution failed" on
+  these providers.
+
 ## [0.3.1]
 
 Corrective release for Linux x86-64/ARM64 and macOS Intel/Apple Silicon.

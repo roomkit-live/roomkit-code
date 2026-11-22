@@ -4,7 +4,7 @@
 
 use super::*;
 use axum::{Router, routing::post};
-use roomkit_openai::{OpenAiApi, OpenAiConfig};
+use roomkit_providers_openai::{OpenAiApi, OpenAiConfig};
 use roomkit_tui_engine::Diagnostic;
 use serde_json::json;
 

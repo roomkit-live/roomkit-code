@@ -79,9 +79,9 @@ fn named<'a>(hooks: &'a [Value], name: &str) -> Vec<&'a Value> {
         .collect()
 }
 
-/// Tell `delivered` once the delivery of the message `text` is over: the turn
-/// under way took it, or RoomKit has it wait a turn of its own. The host says a
-/// message went to a turn as it is committed, before that.
+/// Tell `delivered` once the room delivered the message `text`, which a turn
+/// starts with. A message handed to the running turn is delivered to nobody:
+/// `MessageSteered` says the turn took it.
 fn tell_when_delivered(app: &Application, text: &'static str, delivered: Arc<Notify>) {
     let tell = move |event: RoomEvent, _| {
         if text_of(&event.content) == text {
@@ -118,8 +118,6 @@ async fn a_message_written_while_a_call_waits_reaches_the_running_turn() {
     let settings = settings(project.path(), state.path(), &mock.base_url);
     let app = Application::open(&settings, String::new()).await.unwrap();
     enable_all(&app);
-    let delivered = Arc::new(Notify::new());
-    tell_when_delivered(&app, "Mention the second ledger too.", delivered.clone());
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run(host));
     let Event::Snapshot(initial) = event(&client).await else {
@@ -136,7 +134,6 @@ async fn a_message_written_while_a_call_waits_reaches_the_running_turn() {
     // goes to that turn.
     submit(&client, 2, "Mention the second ledger too.");
     let events = until(&client, |e| matches!(e, Event::MessageSteered { .. })).await;
-    delivery_ended(&delivered).await;
     let decide = Command::Decide {
         permission: permission.id,
         decision: Decision::Allow,
@@ -169,6 +166,56 @@ async fn a_message_written_while_a_call_waits_reaches_the_running_turn() {
         .collect();
     assert_eq!(called, [Some("write"), Some("read")]);
     assert_eq!(named(&running, "PostToolUse").len(), 2);
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.close().await.unwrap();
+}
+
+/// A turn the application opens, as the one a background job's end gives an
+/// idle agent, takes what the person writes while it works like any turn.
+#[tokio::test]
+async fn a_message_written_during_a_turn_the_application_opened_reaches_that_turn() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    // The turn the notice gives writes a note, then answers.
+    let calls = vec![("write", json!({"path":"note.txt", "content":"first"}))];
+    let mock = Mock::start(calls).await;
+    let settings = settings(project.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+    let task = tokio::spawn(app.session().run(host));
+    let Event::Snapshot(_) = event(&client).await else {
+        panic!("Expected snapshot");
+    };
+    let owner = serde_json::to_string(&(app.view.room.as_str(), app.view.agent.as_str())).unwrap();
+    let input = roomkit_tools_process::ProcessStartInput::new("true");
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let processes = &app.profiles.resources.processes;
+    processes.start(Some(&owner), input, &cancel).await.unwrap();
+    // The notice's turn waits for the approval of its call.
+    let permission = approval(&client).await;
+    assert!(asked(&mock, 0).contains("Background process p1 (`true`)"));
+    submit(&client, 1, "Mention the second ledger too.");
+    until(&client, |e| matches!(e, Event::MessageSteered { .. })).await;
+    let decide = Command::Decide {
+        permission: permission.id,
+        decision: Decision::Allow,
+    };
+    command(&client, 2, "main", decide);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while mock.requests.lock().unwrap().len() < 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        asked(&mock, 1).contains("Mention the second ledger too."),
+        "The turn read the message at its next step"
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let requests = mock.requests.lock().unwrap().len();
+    assert_eq!(requests, 2, "The message took no turn of its own");
     drop(client);
     task.await.unwrap().unwrap();
     app.close().await.unwrap();
@@ -406,8 +453,6 @@ async fn a_cut_turn_s_message_is_answered_with_the_mode_and_the_hooks_of_a_turn(
     let settings = settings(project.path(), state.path(), &mock.base_url);
     let app = Application::open(&settings, String::new()).await.unwrap();
     enable_all(&app);
-    let delivered = Arc::new(Notify::new());
-    tell_when_delivered(&app, "Mention the second ledger too.", delivered.clone());
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run(host));
     event(&client).await;
@@ -417,7 +462,6 @@ async fn a_cut_turn_s_message_is_answered_with_the_mode_and_the_hooks_of_a_turn(
     assert!(asked(&mock, 0).contains("Project rule: keep it short."));
     submit(&client, 2, "Mention the second ledger too.");
     until(&client, |e| matches!(e, Event::MessageSteered { .. })).await;
-    delivery_ended(&delivered).await;
     let cut = Command::Interrupt {
         run: permission.run.clone(),
     };
@@ -505,7 +549,6 @@ async fn the_preamble_vouches_for_the_instruction_mark_only_a_user_message_can_h
     delivery_ended(&delivered).await;
     submit(&client, 2, COPY);
     until(&client, |e| matches!(e, Event::MessageSteered { .. })).await;
-    delivery_ended(&delivered).await;
     let decide = Command::Decide {
         permission: permission.id,
         decision: Decision::Allow,

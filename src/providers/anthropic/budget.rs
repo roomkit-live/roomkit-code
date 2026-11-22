@@ -1,6 +1,6 @@
 //! The coding agent's output policy; the library and explicit limits stay unchanged.
 use roomkit_ai::{AiContext, AiProvider, memory::estimate_context_tokens};
-use roomkit_anthropic::AnthropicAiProvider;
+use roomkit_providers_anthropic::Anthropic as AnthropicAiProvider;
 
 const AUTO: u32 = 32_000;
 const GROWN: &str = "roomkit_code_output_budget";
@@ -90,7 +90,7 @@ fn ceiling(model: &str) -> u32 {
         return AUTO;
     }
     // Unknown gateway aliases retain a usable default without an assumed higher cap.
-    if !roomkit_anthropic::AnthropicAiProvider::available_models()
+    if !roomkit_providers_anthropic::Anthropic::available_models()
         .iter()
         .any(|m| m.id == model)
         && !model.starts_with("claude-3-7-")

@@ -1,8 +1,8 @@
 //! Construct a provider without mixing its wire settings with agent assembly.
 use super::*;
 use crate::providers::{CodeProvider, ProviderKind};
-use roomkit_anthropic::{AnthropicAiProvider, AnthropicConfig};
-use roomkit_openai::OpenAiAiProvider;
+use roomkit_providers_anthropic::{Anthropic as AnthropicAiProvider, AnthropicConfig};
+use roomkit_providers_openai::OpenAi as OpenAiAiProvider;
 
 impl Profiles {
     pub(super) fn generation_provider(
@@ -43,15 +43,18 @@ impl Profiles {
         &self,
         profile: &Agent,
         provider: &Provider,
-    ) -> Result<roomkit_openai::OpenAiConfig, String> {
+    ) -> Result<roomkit_providers_openai::OpenAiConfig, String> {
         let config = match &provider.authentication {
-            Authentication::ChatGpt { account } => roomkit_openai::OpenAiConfig {
+            Authentication::ChatGpt { account } => roomkit_providers_openai::OpenAiConfig {
                 token_source: Some(self.accounts.token_source(account)?),
-                ..roomkit_openai::OpenAiConfig::new("", &profile.model)
+                ..roomkit_providers_openai::OpenAiConfig::new("", &profile.model)
             },
-            _ => roomkit_openai::OpenAiConfig {
+            _ => roomkit_providers_openai::OpenAiConfig {
                 base_url: Some(provider.base_url.clone()),
-                ..roomkit_openai::OpenAiConfig::new(provider.authentication.key()?, &profile.model)
+                ..roomkit_providers_openai::OpenAiConfig::new(
+                    provider.authentication.key()?,
+                    &profile.model,
+                )
             },
         };
         // An agent's requests share their prompt's start: one key routes them
@@ -61,7 +64,7 @@ impl Profiles {
             Some(subscription) => subscription.configure(config, &self.workspace, &profile.id),
             None => config,
         };
-        Ok(roomkit_openai::OpenAiConfig {
+        Ok(roomkit_providers_openai::OpenAiConfig {
             timeout: std::time::Duration::from_secs(provider.timeout_seconds),
             vision: profile.vision,
             reasoning_effort: profile.reasoning_effort.clone(),
