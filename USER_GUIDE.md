@@ -598,9 +598,13 @@ placement by resource or OS are outside the single-worker mode.
 
 ## Experimental executor pool
 
+**The remote executor pool is an opt-in beta.** An executor is a
+`roomkit-code` process that runs a delegated agent in its own workspace on
+Linux or macOS. The coordinator chooses a worker that meets the task’s
+requirements. File changes stay in that worker’s checkout.
+
 Open `/executors` and choose **Configure this workspace** on each machine.
-The pool is opt-in. Configure it in the same workspace and with the same
-`--state-dir` that the coordinator or worker will use.
+Use the same workspace and `--state-dir` that its coordinator or worker will use.
 
 1. On the coordinator, turn **Schedule remote tasks on launch** on, choose a
    group and enter the Redis URL. Save with Ctrl+S and reopen Code.
@@ -637,22 +641,30 @@ Open `/executors` to see the execution OS and architecture, declared physical
 host OS, configured model, CPU count and utilization, one-minute load average,
 available RAM, labels and free slots. Ask “Which executor machines are in this
 pool?” in the parent or a worker conversation. The agent can use `list_executors`
-to read the same live inventory. The `remote-linux` delegation target can use
-both Linux and macOS workers. A native Apple Silicon worker reports
+to read the same live inventory. If that tool is unavailable in the conversation,
+ask the user to check `/executors` on the coordinator. The `remote-linux`
+delegation target can use both Linux and macOS workers. A native Apple Silicon worker reports
 `macos/aarch64`. A Linux container on the same Mac reports Linux and can
 declare its physical host with `--worker-host-os macos`. Placement uses the
 execution OS. On macOS, the worker samples CPU utilization and load with
 `iostat` and estimates available RAM from free and inactive pages in
 `vm_stat`. Linux workers cap available RAM at their visible cgroup v2 limit.
 
-Ask the owner to delegate a file task to `remote-linux` and specify its
-requirements, e.g. “Use a macOS worker labelled role=review with at least
-512 MiB available to review this checkout.” The tool accepts
-`context.executor` as a JSON object:
+For a request such as “Review the changes on macOS with this model”, call
+`list_executors` to find an online worker that exposes the requested model
+and tools. Use its exact profile ID in `delegate_task`. For example, if the
+inventory lists a macOS profile named `reviewer`, delegate with these arguments.
 
 ```json
-{"os":"macos","labels":{"role":"review"},"min_ram_mib":512}
+{
+  "agent": "remote-linux",
+  "task": "Review the changes in this checkout.",
+  "context": {"executor": {"os": "macos", "profile": "reviewer"}}
+}
 ```
+
+If several workers expose the same profile ID with different models, use the
+execution OS or placement labels from the inventory to narrow the match.
 
 To expose several agents, configure them with `/providers` and `/agents` in
 the worker's workspace and state directory. Start one process with their IDs:
@@ -683,7 +695,9 @@ parent conversation, and Yolo runs it directly. A reviewer with file-reading
 tools can inspect the change after the tests. Each assignment records the
 machine, local profile and model in the parent conversation.
 
-Every field is optional. The scheduler filters online workers by execution OS, profile,
+Each placement constraint is optional. For example, add `"labels": {"role": "review"}`
+or `"min_ram_mib": 512` inside `context.executor` when the task requires it.
+The scheduler filters online workers by execution OS, profile,
 exact label values, available memory and free slots, then chooses the lowest
 load per CPU. A worker accepting general tasks can have labels of its own.
 A task waits until a matching slot opens. Other eligible tasks can run in
@@ -724,7 +738,7 @@ ends (a process, or `server &` in `shell`), in a turn of its own or the one it
 is running. A stopped job is not told.
 
 `docs_search`, `docs_read` and `docs_list` give agents this guide, for the
-installed version. The README is embedded in the binary, split into one document
+installed version. The user guide is embedded in the binary, split into one document
 per `##` section and written once per content revision under
 `<state-dir>/docs/<revision>/`; earlier revisions stay for other running
 versions. Search matches literal terms, all required, and returns one excerpt

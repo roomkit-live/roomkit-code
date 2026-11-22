@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The agent’s built-in guide now identifies the executor pool as an opt-in
+  beta and shows how to find the requested model and delegate to its worker profile.
+
 - Configure the executor pool from `/executors` on each machine. Scheduling is
   opt-in per workspace. Use `--executor` to start a worker with its saved group,
   connection, labels, capacity and local agent profiles, or `--local` to edit

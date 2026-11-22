@@ -89,9 +89,14 @@ async fn every_section_of_the_shipped_guide_is_found_first_by_its_title() {
     }
 }
 
-/// The system prompt sends an agent to this document by its id.
+/// The system prompt sends an agent to these topics by their published IDs.
 #[test]
-fn the_document_the_prompt_names_is_in_the_guide() {
-    assert!(names(&topics(GUIDE)).contains(&"skills.md"));
-    assert!(include_str!("../agent/coding-agent.txt").contains("document_id skills.md"));
+fn the_documents_the_prompt_names_are_in_the_guide() {
+    let shipped = topics(GUIDE);
+    let files = names(&shipped);
+    let prompt = include_str!("../agent/coding-agent.txt");
+    for id in ["skills.md", "experimental-executor-pool.md"] {
+        assert!(files.contains(&id), "{id}");
+        assert!(prompt.contains(&format!("document_id {id}")), "{id}");
+    }
 }

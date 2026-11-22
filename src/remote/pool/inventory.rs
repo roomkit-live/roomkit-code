@@ -42,7 +42,7 @@ impl Tool for Inventory {
     fn definition(&self) -> AiTool {
         AiTool {
             name: LIST_EXECUTORS.into(),
-            description: "List the worker machines registered in this executor pool, including \
+            description: "List the worker machines registered in this beta executor pool, including \
                 their online status, execution and host OS, exposed profile IDs, models, tools, resources, labels \
                 and free slots. Use this to answer questions about available executors."
                 .into(),
