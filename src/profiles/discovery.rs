@@ -2,7 +2,7 @@
 use super::model::Provider;
 use crate::providers::ProviderKind;
 use roomkit_ai::AiProvider;
-use roomkit_anthropic::{AnthropicAiProvider, AnthropicConfig};
+use roomkit_providers_anthropic::{Anthropic as AnthropicAiProvider, AnthropicConfig};
 use std::time::Duration;
 
 pub(super) async fn discover(provider: &Provider) -> Result<Vec<(String, Option<u64>)>, String> {

@@ -23,8 +23,9 @@ roomkit = { version = "0.2.0", git = "https://github.com/roomkit-live/roomkit-rs
 roomkit-core = { version = "0.2.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "4f271c660c0531aff760e6f2a60c8d58093153aa" }
 roomkit-mcp = { version = "0.2.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "4f271c660c0531aff760e6f2a60c8d58093153aa", features = ["http"] }
 roomkit-ai = { version = "0.2.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "4f271c660c0531aff760e6f2a60c8d58093153aa" }
-roomkit-openai = { version = "0.2.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "4f271c660c0531aff760e6f2a60c8d58093153aa" }
-roomkit-anthropic = { version = "0.2.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "4f271c660c0531aff760e6f2a60c8d58093153aa" }
+# The model providers, which are built on the same engine revision.
+roomkit-providers-openai = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "6b2ebaa377ade88204fa8411f11682de82a26f73" }
+roomkit-providers-anthropic = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "6b2ebaa377ade88204fa8411f11682de82a26f73" }
 roomkit-sqlite = { version = "0.2.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "4f271c660c0531aff760e6f2a60c8d58093153aa" }
 roomkit-tui-engine = { version = "0.3.0", git = "https://github.com/roomkit-live/roomkit-tui", rev = "a7da9e2eafa53784ae2323e40898f3da68a955ef" }
 roomkit-tui = { version = "0.3.0", git = "https://github.com/roomkit-live/roomkit-tui", rev = "a7da9e2eafa53784ae2323e40898f3da68a955ef" }

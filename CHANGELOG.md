@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The OpenAI and Anthropic model providers now come from roomkit-providers
+  (6b2ebaa), which is built on the same engine revision; the engine's own
+  provider crates are no longer linked. Settings, sign-in and conversations
+  are unchanged. One failure reads differently: an answer the provider
+  cannot read is shown as "Engine execution failed", no longer as "The
+  provider returned an invalid response".
+
 ## [0.3.1]
 
 Corrective release for Linux x86-64/ARM64 and macOS Intel/Apple Silicon.

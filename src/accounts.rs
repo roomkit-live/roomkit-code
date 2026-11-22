@@ -43,7 +43,7 @@ impl Accounts {
     pub fn token_source(
         &self,
         account: &str,
-    ) -> Result<Arc<dyn roomkit_openai::TokenSource>, String> {
+    ) -> Result<Arc<dyn roomkit_providers_openai::TokenSource>, String> {
         let saved = self
             .auth
             .accounts()
@@ -201,8 +201,8 @@ pub(crate) struct Credential {
     pub auth: ChatGpt,
     pub account: String,
 }
-impl roomkit_openai::TokenSource for Credential {
-    fn token(&self) -> roomkit_openai::TokenFuture<'_> {
+impl roomkit_providers_openai::TokenSource for Credential {
+    fn token(&self) -> roomkit_providers_openai::TokenFuture<'_> {
         Box::pin(async {
             self.auth
                 .access_token(&self.account)
@@ -210,12 +210,12 @@ impl roomkit_openai::TokenSource for Credential {
                 .map(|s| s.expose_secret().to_owned())
                 .map_err(|error| match error {
                     roomkit_auth::Error::SignInRequired | roomkit_auth::Error::Identity => {
-                        roomkit_openai::TokenError::SignInRequired
+                        roomkit_providers_openai::TokenError::SignInRequired
                     }
                     roomkit_auth::Error::PlanUsageRequired => {
-                        roomkit_openai::TokenError::PermissionRequired
+                        roomkit_providers_openai::TokenError::PermissionRequired
                     }
-                    _ => roomkit_openai::TokenError::Unavailable,
+                    _ => roomkit_providers_openai::TokenError::Unavailable,
                 })
         })
     }

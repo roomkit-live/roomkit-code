@@ -4,8 +4,8 @@ use roomkit_ai::{
 };
 mod anthropic;
 pub(crate) use anthropic::Anthropic;
-use roomkit_anthropic::AnthropicAiProvider;
-use roomkit_openai::OpenAiAiProvider;
+use roomkit_providers_anthropic::Anthropic as AnthropicAiProvider;
+use roomkit_providers_openai::OpenAi as OpenAiAiProvider;
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]

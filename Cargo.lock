@@ -2080,22 +2080,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "roomkit-anthropic"
-version = "0.2.0"
-source = "git+https://github.com/roomkit-live/roomkit-rs?rev=4f271c660c0531aff760e6f2a60c8d58093153aa#4f271c660c0531aff760e6f2a60c8d58093153aa"
-dependencies = [
- "futures-core",
- "jiff",
- "reqwest",
- "roomkit",
- "roomkit-ai",
- "roomkit-core",
- "roomkit-provider-http",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "roomkit-auth"
 version = "0.1.0"
 source = "git+https://github.com/roomkit-live/roomkit-auth?rev=f29f07e5c6885aa3dab22f4b9624104267b4e81c#f29f07e5c6885aa3dab22f4b9624104267b4e81c"
@@ -2132,12 +2116,12 @@ dependencies = [
  "reqwest",
  "roomkit",
  "roomkit-ai",
- "roomkit-anthropic",
  "roomkit-auth",
  "roomkit-core",
  "roomkit-hooks",
  "roomkit-mcp",
- "roomkit-openai",
+ "roomkit-providers-anthropic",
+ "roomkit-providers-openai",
  "roomkit-sqlite",
  "roomkit-tools-agents",
  "roomkit-tools-code",
@@ -2219,35 +2203,65 @@ dependencies = [
 ]
 
 [[package]]
-name = "roomkit-openai"
-version = "0.2.0"
-source = "git+https://github.com/roomkit-live/roomkit-rs?rev=4f271c660c0531aff760e6f2a60c8d58093153aa#4f271c660c0531aff760e6f2a60c8d58093153aa"
+name = "roomkit-providers-anthropic"
+version = "0.1.0-alpha.1"
+source = "git+https://github.com/roomkit-live/roomkit-providers?rev=6b2ebaa377ade88204fa8411f11682de82a26f73#6b2ebaa377ade88204fa8411f11682de82a26f73"
 dependencies = [
- "futures-core",
- "jiff",
  "reqwest",
  "roomkit",
  "roomkit-ai",
  "roomkit-core",
- "roomkit-provider-http",
+ "roomkit-providers-client",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "roomkit-providers-client"
+version = "0.1.0-alpha.1"
+source = "git+https://github.com/roomkit-live/roomkit-providers?rev=6b2ebaa377ade88204fa8411f11682de82a26f73#6b2ebaa377ade88204fa8411f11682de82a26f73"
+dependencies = [
+ "futures-core",
+ "jiff",
+ "reqwest",
+ "roomkit-ai",
+ "roomkit-core",
+ "roomkit-providers-http",
  "rustls",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
  "tracing",
+ "url",
+]
+
+[[package]]
+name = "roomkit-providers-http"
+version = "0.1.0-alpha.1"
+source = "git+https://github.com/roomkit-live/roomkit-providers?rev=6b2ebaa377ade88204fa8411f11682de82a26f73#6b2ebaa377ade88204fa8411f11682de82a26f73"
+dependencies = [
+ "openssl-probe",
+ "rustls",
+ "rustls-platform-verifier",
+ "thiserror",
+ "url",
  "webpki-roots",
 ]
 
 [[package]]
-name = "roomkit-provider-http"
-version = "0.2.0"
-source = "git+https://github.com/roomkit-live/roomkit-rs?rev=4f271c660c0531aff760e6f2a60c8d58093153aa#4f271c660c0531aff760e6f2a60c8d58093153aa"
+name = "roomkit-providers-openai"
+version = "0.1.0-alpha.1"
+source = "git+https://github.com/roomkit-live/roomkit-providers?rev=6b2ebaa377ade88204fa8411f11682de82a26f73#6b2ebaa377ade88204fa8411f11682de82a26f73"
 dependencies = [
  "reqwest",
- "rustls",
- "thiserror",
- "webpki-roots",
+ "roomkit",
+ "roomkit-ai",
+ "roomkit-core",
+ "roomkit-providers-client",
+ "serde",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]

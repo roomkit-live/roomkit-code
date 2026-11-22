@@ -4,7 +4,7 @@
 //! profiles code asks this registry instead of naming a service. A service
 //! signed in through roomkit-auth also needs that account's menus.
 use crate::providers::ProviderKind;
-use roomkit_openai::{OpenAiApi, OpenAiConfig};
+use roomkit_providers_openai::{OpenAiApi, OpenAiConfig};
 use std::{collections::BTreeMap, path::Path};
 
 /// Where a subscription's credential comes from.
@@ -403,7 +403,7 @@ mod tests {
         let ask = |config: OpenAiConfig| {
             let context = context.clone();
             async move {
-                let provider = roomkit_openai::OpenAiAiProvider::new(config).unwrap();
+                let provider = roomkit_providers_openai::OpenAi::new(config).unwrap();
                 provider.generate(&context).await
             }
         };

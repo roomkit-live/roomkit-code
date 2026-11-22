@@ -47,7 +47,7 @@ deny = [
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-git = ["https://github.com/roomkit-live/roomkit-rs", "https://github.com/roomkit-live/roomkit-tui", "https://github.com/roomkit-live/roomkit-tools", "https://github.com/roomkit-live/roomkit-auth"]
+allow-git = ["https://github.com/roomkit-live/roomkit-rs", "https://github.com/roomkit-live/roomkit-tui", "https://github.com/roomkit-live/roomkit-tools", "https://github.com/roomkit-live/roomkit-auth", "https://github.com/roomkit-live/roomkit-providers"]
 
 # arboard's optional Windows clipboard backend, inherited from roomkit-tui.
 [[licenses.exceptions]]

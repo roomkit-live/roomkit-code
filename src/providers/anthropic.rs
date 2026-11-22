@@ -9,7 +9,7 @@ use roomkit_ai::{
     AiContext, AiProvider, AiResponse, ProviderError, ProviderStream, StreamEvent, TextStream,
     ThinkingBlocks,
 };
-use roomkit_anthropic::AnthropicAiProvider;
+use roomkit_providers_anthropic::Anthropic as AnthropicAiProvider;
 use serde_json::json;
 use std::{future::poll_fn, sync::Arc};
 

@@ -25,7 +25,7 @@ impl Trace {
         budget: Value,
         channel: Option<&str>,
     ) -> Self {
-        let known_model = roomkit_anthropic::AnthropicAiProvider::available_models()
+        let known_model = roomkit_providers_anthropic::Anthropic::available_models()
             .iter()
             .any(|m| m.id == model);
         let fields = json!({

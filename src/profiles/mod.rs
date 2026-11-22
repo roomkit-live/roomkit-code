@@ -650,7 +650,7 @@ mod tests {
     #[test]
     fn a_model_is_priced_by_the_catalogue_else_the_configuration() {
         let catalogue =
-            <roomkit_openai::OpenAiAiProvider as roomkit_ai::AiProvider>::available_models()
+            <roomkit_providers_openai::OpenAi as roomkit_ai::AiProvider>::available_models()
                 .into_iter()
                 .find_map(|entry| Some((entry.id, entry.pricing?)))
                 .unwrap();
