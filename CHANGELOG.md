@@ -2,24 +2,45 @@
 
 ## Unreleased
 
-- Built on RoomKit Rust 0.3.0, with roomkit-tui abfd525 (0.3.1 and two
-  commits) and roomkit-tools 884d470. That engine hands a running turn only
-  the next messages of whoever wrote the message it answers. Nothing
-  changes for what you write while an agent works: it still reaches the
-  running turn at its next step, a task's turn and the turns the application
-  opens (a background job's end, a task's result) included, because the
-  terminal now hands the message to the turn itself. A background job's end
-  still reaches the turn its agent is running. A turn that is interrupted,
-  fails or reaches its round limit before its next step does not read an end
-  it was handed, as before.
+## [0.4.0]
 
-- The OpenAI and Anthropic model providers now come from roomkit-providers
-  (edc7d5e), which is built on the same engine release; RoomKit Rust 0.3.0
-  holds no model provider of its own any more. Settings, sign-in and
-  conversations are unchanged, and so is what a failure reads as: with
-  roomkit-tui 0.3.1 an answer the provider cannot read is again "The provider
-  returned an invalid response", where it read "Engine execution failed" on
-  these providers.
+Release for Linux x86-64/ARM64 and macOS Intel/Apple Silicon, built on RoomKit
+Rust 0.3.0 with roomkit-providers edc7d5e, roomkit-tools 884d470 (0.2.0 and
+three commits) and roomkit-tui abfd525 (0.3.1 and two commits).
+
+Linux requires glibc 2.35 or newer. macOS requires version 12 or newer; binaries
+are ad-hoc signed, without Apple Developer ID signing or notarization. No
+application data changes: rolling back to 0.3.1, 0.3.0, 0.2.1, 0.2.0 or 0.1.3
+from the application keeps conversations and settings readable.
+
+- The OpenAI and Anthropic model providers now come from roomkit-providers:
+  RoomKit Rust 0.3.0 holds no model provider of its own any more. Settings,
+  sign-in and conversations are unchanged.
+
+- A connection to a model server now trusts the certificates `SSL_CERT_FILE`
+  or `SSL_CERT_DIR` name, else the system's, where the application trusted
+  only the authorities built into it: a server behind a private authority
+  answers once `SSL_CERT_FILE` names that authority's certificate. A server
+  whose certificate is not trusted is told as "The provider request failed.
+  Retry the request", where it read "Cannot reach the model server": a retry
+  does not help, the certificate is to be trusted.
+
+- Proxy variables are followed as before. A SOCKS proxy named in `ALL_PROXY`
+  is refused as the connection is set up ("Cannot initialize the OpenAI
+  connection"), where the request failed with "Cannot reach the model
+  server".
+
+- RoomKit Rust 0.3.0 hands a running turn only the next messages of whoever
+  wrote the message it answers. Nothing changes for what you write while an
+  agent works: it still reaches the running turn at its next step, a task's
+  turn and the turns the application opens (a background job's end, a task's
+  result) included, because the terminal now hands the message to the turn
+  itself. A background job's end still reaches the turn its agent is running.
+  A turn that is interrupted, fails or reaches its round limit before its next
+  step does not read an end it was handed, as before.
+
+- `url` moves to 2.5.9, which no longer overflows the stack on a deeply nested
+  `blob:` address (RUSTSEC-2026-0592).
 
 ## [0.3.1]
 
