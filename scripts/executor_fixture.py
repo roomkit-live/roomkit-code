@@ -3,7 +3,9 @@
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler
 import json
+import socket
 import subprocess
+import time
 
 
 def tool(name, call_id, **arguments):
@@ -32,6 +34,22 @@ class StreamingModel(BaseHTTPRequestHandler):
             pass  # A cancelled worker drops its model request.
 
 
+def wait_for_redis(port):
+    """Docker can publish its port before Redis accepts commands through it."""
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1) as connection:
+                connection.sendall(b"PING\r\n")
+                with connection.makefile("rb") as response:
+                    if response.readline(32) == b"+PONG\r\n":
+                        return
+        except OSError:
+            pass
+        time.sleep(.1)
+    raise RuntimeError("The test Redis did not answer PING on its published port")
+
+
 @contextmanager
 def redis():
     container = subprocess.check_output(["docker", "run", "--rm", "-d", "-p",
@@ -39,6 +57,7 @@ def redis():
     try:
         port = subprocess.check_output(["docker", "port", container, "6379/tcp"],
                                        text=True).strip().rsplit(":", 1)[1]
+        wait_for_redis(int(port))
         yield f"redis://127.0.0.1:{port}"
     finally:
         subprocess.run(["docker", "stop", "-t", "1", container], check=True,
