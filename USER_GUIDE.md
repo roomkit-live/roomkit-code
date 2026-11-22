@@ -598,6 +598,28 @@ placement by resource or OS are outside the single-worker mode.
 
 ## Experimental executor pool
 
+Open `/executors` and choose **Configure this workspace** on each machine.
+The pool is opt-in. Configure it in the same workspace and with the same
+`--state-dir` that the coordinator or worker will use.
+
+1. On the coordinator, turn **Schedule remote tasks on launch** on, choose a
+   group and enter the Redis URL. Save with Ctrl+S and reopen Code.
+2. On each worker, configure its connections in `/providers` and its models
+   and tools in `/agents`. In `/executors configure`, enter the same group
+   and Redis connection, a unique worker name, labels such as `role=review`,
+   the number of slots and the local profile IDs to expose. The first profile
+   is the default. Leave scheduling off for a worker-only workspace.
+3. Start `roomkit-code . --executor` in that workspace. After editing a worker
+   configuration, restart its process. Look up its active profiles and slots
+   in the coordinator's `/executors` panel.
+
+The URL field is masked. A blank entry keeps a saved URL and a single `-`
+clears it. `ROOMKIT_EXECUTOR_REDIS_URL` overrides the saved URL. Pool settings
+are private to this machine and workspace. To change settings while the broker
+is unavailable, open `roomkit-code . --local`. Unattended `--prompt` launches
+use local agents. Existing service scripts can use explicit groups and worker
+flags as shown below. Explicit `--serve-pool` uses the CLI worker options.
+
 Use one Redis group for the owner and workers that may handle its tasks.
 Start these processes in their respective checkouts, with the same trusted
 broker configuration as above. Give each worker a unique, stable name.

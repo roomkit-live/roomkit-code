@@ -115,9 +115,8 @@ fn failed(_: redis::RedisError) -> String {
     "Cannot reach the executor pool in Redis".into()
 }
 impl Registry {
-    pub fn new(group: &str) -> crate::Result<Self> {
-        let client = redis::Client::open(super::super::address()?)
-            .map_err(|_| "Invalid Redis pool address")?;
+    pub fn new(group: &str, address: &str) -> crate::Result<Self> {
+        let client = redis::Client::open(address).map_err(|_| "Invalid Redis pool address")?;
         Ok(Self {
             client,
             connection: Arc::default(),

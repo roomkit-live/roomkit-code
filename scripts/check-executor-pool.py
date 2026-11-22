@@ -149,6 +149,23 @@ class Terminal:
         return offset
 
 
+def configure_pool(command, env, group, *, worker=None):
+    """Save through the form, then launch the returned command without pool flags."""
+    clean = {key: value for key, value in env.items() if key != "ROOMKIT_EXECUTOR_REDIS_URL"}
+    with ExitStack() as editor:
+        term = Terminal(editor, command + ["--local"], clean)
+        term.send("/executors configure", "Schedule remote tasks on launch")
+        url = env["ROOMKIT_EXECUTOR_REDIS_URL"]
+        fields = [b"" if worker else b"\x1b[C", group.encode(), url.encode()]
+        if worker:
+            fields += [worker.encode(), b"\x151", b"role=review", b"code,reviewer", b"macos"]
+        offset = len(term.output)
+        os.write(term.master, b"\t".join(fields) + b"\x13")
+        term.wait("Executor settings saved", offset)
+        assert url.encode() not in term.output, "Redis connection was visible in the terminal"
+    return (command + ["--executor"] if worker else command), clean
+
+
 def eventually(predicate, message):
     end = time.monotonic() + 25
     while time.monotonic() < end:
@@ -269,7 +286,7 @@ def configure_profiles(command, env, state):
     duplicate = subprocess.run(command + ["--worker-profile", "code", "--worker-profile", "code"],
                                env=env, capture_output=True, text=True, timeout=12)
     assert duplicate.returncode and "Duplicate worker profile code" in duplicate.stderr, duplicate.stderr
-    return ["--worker-profile", "code", "--worker-profile", "reviewer"]
+
 
 
 def main():
@@ -292,26 +309,30 @@ def main():
         env["PATH"] = str(binaries) + os.pathsep + env["PATH"]
         server = model_server(stack)
 
-        def args(role, flag):
+        def args(role):
             project = root / role
             project.mkdir()
-            return [binary, project, flag, group, "--state-dir", root / (role + "-state"),
+            return [binary, project, "--state-dir", root / (role + "-state"),
                     "--base-url", f"http://127.0.0.1:{server.server_port}/v1", "--model", role,
                     "--mode", "plan", "--no-herdr", "--no-animations"]
 
         def worker(name, label):
-            command = args(name, "--serve-pool") + ["--worker-name", name, "--worker-label",
-                                                    "role=" + label, "--worker-slots", "1"]
+            local = args(name)
+            command = local + ["--serve-pool", group, "--worker-name", name, "--worker-label",
+                               "role=" + label, "--worker-slots", "1"]
             command.extend(["--worker-host-os", "macos" if name == "macbook" else "linux"])
+            worker_env = env
             if name == "macbook":
-                command.extend(configure_profiles(command, env, root / "macbook-state"))
+                configure_profiles(command, env, root / "macbook-state")
+                # Reuse the bootstrap workspace and provider settings in the editor.
+                command, worker_env = configure_pool(local, env, group, worker=name)
             (root / name / "marker.txt").write_text(server.markers[name])
-            proc = stack.enter_context(child(command, env, stdout=subprocess.PIPE, text=True))
+            proc = stack.enter_context(child(command, worker_env, stdout=subprocess.PIPE, text=True))
             if not select.select([proc.stdout], [], [], 20)[0] or not proc.stdout.readline().startswith("Serving"):
                 raise RuntimeError("Worker failed to register: " + name)
 
-        owner_args = args("owner", "--executor-pool")
-        term = Terminal(stack, owner_args, env)
+        owner_args, owner_env = configure_pool(args("owner"), env, group)
+        term = Terminal(stack, owner_args, owner_env)
         term.send(INVENTORY_QUESTION, "Live inventory is empty.")
         term.send("bootstrap-task", "Submitted bootstrap-task.")
         term.send("/executors", "no online worker matches")
@@ -321,11 +342,12 @@ def main():
         print("PASS  A task submitted before the first worker joined completed.", flush=True)
         worker("macbook", "review")
         term.send(INVENTORY_QUESTION, "Live inventory includes the MacBook and Linux workstation.")
+        print("PASS  Coordinator and multi-profile worker launched from saved terminal settings.", flush=True)
         term.send("inspect-pool-from-worker", "Submitted inspect-pool-from-worker.")
         assert server.worker_saw_inventory.wait(15), "Pool worker could not read the inventory"
         print("PASS  Owner and delegated worker can inspect the same live pool as /executors.", flush=True)
         scenario(term, server, lambda: worker("spare", "spare"))
-        fresh = Terminal(stack, [*owner_args, "--session", "rust-tests"], env)
+        fresh = Terminal(stack, [*owner_args, "--session", "rust-tests"], owner_env)
         rust_scenario(fresh, server, root)
 
 

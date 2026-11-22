@@ -3,6 +3,7 @@ mod catalog;
 mod conversation;
 mod deletion;
 mod discovery;
+mod executors;
 mod mcp;
 pub(crate) mod model;
 mod model_choice;
@@ -28,6 +29,7 @@ use roomkit_tui_engine::SessionConfig;
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::sync::Mutex;
 
+use crate::storage::document::Document;
 use crate::{
     agent::{CodeAgent, Inventory},
     config::Settings,
@@ -38,7 +40,6 @@ pub(crate) use discovery::SUBSCRIPTION_SERVER;
 pub(crate) use mcp::McpTools;
 use model::{Agent, Authentication, PROJECT_SCHEMA, Project, Provider, Providers, TOOLS};
 use slot::AgentSlot;
-use store::Document;
 pub(crate) use worker::profile_id;
 
 pub(crate) struct Profiles {
@@ -79,6 +80,7 @@ struct State {
     policy: crate::permissions::Policy,
     mcp: Document<mcp::Servers>,
     pending_mcp: Option<mcp::Pending>,
+    executor_form: Option<executors::Pending>,
     providers: Document<Providers>,
     project: Document<Project>,
     /// Agents shared by every project, beside the shared connections.
@@ -216,6 +218,7 @@ impl Profiles {
         let (pool, executor_inventory) = crate::remote::pool::connect(
             settings.executor_pool.as_deref(),
             settings.serve_pool.as_deref(),
+            settings.executor_url.as_deref(),
             &resources.tasks,
         )
         .map_err(|e| e.to_string())?;
@@ -247,6 +250,7 @@ impl Profiles {
                 policy,
                 mcp,
                 pending_mcp: None,
+                executor_form: None,
                 providers,
                 project,
                 global,

@@ -81,8 +81,8 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         ),
         (
             "executors",
-            "Inspect worker resources and task placement",
-            "",
+            "Inspect workers and configure this workspace’s executor pool (beta)",
+            "[configure]",
         ),
         (
             "tasks",
@@ -274,6 +274,7 @@ impl Sessions {
             _ => return Err("Unsupported application request".into()),
         };
         match name {
+            "executors" => return self.profiles.executors(request, &current).await,
             "mcp" => {
                 let result = self.profiles.mcp(&self.kit, request, current).await;
                 self.services.sidebar_changes.send_replace(());
@@ -317,9 +318,6 @@ impl Sessions {
                     .processes
                     .handle(&self.kit, &self.channel, &current, arguments)
                     .await
-            }
-            "executors" => {
-                crate::remote::pool::panel(self.profiles.pool.as_deref(), &current, arguments).await
             }
             "tasks" => crate::delegation::panel::handle(self, &current, arguments).await,
             "back" => task_rooms::back(self, &current).await,

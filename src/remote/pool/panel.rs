@@ -14,19 +14,35 @@ pub(crate) async fn panel(
     let room = current.room.as_str();
     let body = match pool {
         Some(scheduler) => {
-            let mut lines = scheduler.inventory().lines().await?;
+            let mut lines = scheduler
+                .inventory()
+                .lines()
+                .await
+                .unwrap_or_else(|reason| {
+                    vec![format!(
+                        "Inventory unavailable. {reason}. Check the connection and refresh."
+                    )]
+                });
             lines.extend(scheduler.queue.report(room));
             lines.join("\n")
         }
-        None => "Start Code with --executor-pool GROUP to schedule tasks.".into(),
+        None => String::from(
+            "Scheduling is off for this session. Configure this workspace for the next launch.",
+        ),
     };
     let panel = PanelSpec::new(
         uuid::Uuid::new_v4().to_string(),
         "executors",
-        "Executor pool",
+        pool.map_or_else(
+            || "Executor pool · beta".to_owned(),
+            |p| format!("Executor pool · {} · beta", p.group),
+        ),
         body,
     )
-    .with_actions(vec![Choice::new("refresh", "Refresh")])
+    .with_actions(vec![
+        Choice::new("refresh", "Refresh"),
+        Choice::new("configure", "Configure this workspace"),
+    ])
     .with_dismiss("dismiss");
     Ok(CommandResult::Events(vec![Event::Panel {
         conversation: room.into(),

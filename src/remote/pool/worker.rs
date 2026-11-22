@@ -1,55 +1,12 @@
 //! Advertise the execution environment while this worker serves turns.
 use super::{
+    WorkerArgs,
     metrics::Sampler,
     registry::{Registry, Worker},
 };
 use crate::Result;
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 use tokio::{task::JoinHandle, time::sleep};
-
-#[derive(clap::Args, Debug, Default, Clone)]
-pub(crate) struct WorkerArgs {
-    /// Local agent profile to serve. Repeat to expose more; the first is the default.
-    #[arg(long, requires = "serve_pool", value_parser = crate::profiles::profile_id)]
-    pub(crate) worker_profile: Vec<String>,
-    /// Stable worker name (defaults to the hostname).
-    #[arg(long, requires="serve_pool",value_parser=super::identifier)]
-    worker_name: Option<String>,
-    /// Placement label, for example role=review. Repeat for more labels.
-    #[arg(long, requires="serve_pool", value_parser=label)]
-    worker_label: Vec<(String, String)>,
-    /// Maximum concurrent remote turns (defaults to one).
-    #[arg(long, requires="serve_pool",value_parser=clap::value_parser!(u16).range(1..=256))]
-    worker_slots: Option<u16>,
-    /// Physical host OS, when execution takes place inside a VM or container.
-    #[arg(long, requires="serve_pool",value_parser=super::identifier)]
-    worker_host_os: Option<String>,
-}
-
-fn label(raw: &str) -> std::result::Result<(String, String), String> {
-    let (key, value) = raw
-        .split_once('=')
-        .ok_or("Use KEY=VALUE for a worker label")?;
-    Ok((super::identifier(key)?, super::identifier(value)?))
-}
-
-impl WorkerArgs {
-    pub(super) fn name(&self) -> Result<String> {
-        if let Some(name) = &self.worker_name {
-            return Ok(name.clone());
-        }
-        Ok(super::identifier(
-            rustix::system::uname().nodename().to_str()?,
-        )?)
-    }
-    pub(crate) fn instance(&self) -> Result<String> {
-        Ok(format!(
-            "{}~{}",
-            self.name()?,
-            uuid::Uuid::new_v4().simple()
-        ))
-    }
-}
 
 pub(crate) struct Presence {
     heartbeat: JoinHandle<String>,
@@ -95,10 +52,6 @@ pub(crate) async fn advertise(
 ) -> Result<Presence> {
     let registry = inventory.0.clone();
     let mut sampler = Sampler::default();
-    let labels: BTreeMap<_, _> = args.worker_label.iter().cloned().collect();
-    if labels.len() != args.worker_label.len() || labels.len() > 32 {
-        return Err("Use up to 32 unique worker label keys".into());
-    }
     let mut worker = Worker {
         name: args.name()?,
         instance: executor.executor_id().into(),
@@ -106,9 +59,9 @@ pub(crate) async fn advertise(
         arch: std::env::consts::ARCH.into(),
         model: profiles.first().map(|p| p.model.clone()),
         profiles,
-        host_os: args.worker_host_os.clone(),
-        labels,
-        slots: args.worker_slots.unwrap_or(1),
+        host_os: args.host_os().map(str::to_owned),
+        labels: args.labels(),
+        slots: args.slots(),
         metrics: sampler.read().await,
     };
     if !registry.publish(&worker).await? {

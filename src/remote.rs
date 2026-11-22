@@ -37,19 +37,30 @@ pub(crate) fn group(value: &str) -> std::result::Result<String, String> {
     Ok(value.into())
 }
 
-fn address() -> Result<String> {
-    let address = std::env::var("ROOMKIT_EXECUTOR_REDIS_URL")
-        .map_err(|_| "Set ROOMKIT_EXECUTOR_REDIS_URL for this executor group")?;
-    let url = url::Url::parse(&address).map_err(|_| "Invalid executor Redis URL")?;
-    if !matches!(url.scheme(), "redis" | "rediss") || url.host().is_none() {
-        return Err("Use a redis:// or rediss:// executor URL with a host".into());
-    }
+fn address(saved: Option<&str>) -> Result<String> {
+    let address = match std::env::var("ROOMKIT_EXECUTOR_REDIS_URL") {
+        Ok(endpoint) => endpoint,
+        Err(std::env::VarError::NotPresent) => saved
+            .ok_or("Set ROOMKIT_EXECUTOR_REDIS_URL or configure a Redis connection in /executors")?
+            .to_owned(),
+        Err(_) => return Err("Invalid ROOMKIT_EXECUTOR_REDIS_URL".into()),
+    };
+    validate_address(&address)?;
     Ok(address)
 }
 
-fn backend(group: &str) -> Result<RedisTurnBackend> {
+fn validate_address(address: &str) -> std::result::Result<(), String> {
+    let url = url::Url::parse(address).map_err(|_| "Invalid executor Redis URL")?;
+    if !matches!(url.scheme(), "redis" | "rediss") || url.host().is_none() {
+        return Err("Use a redis:// or rediss:// executor URL with a host".into());
+    }
+    redis::Client::open(address).map_err(|_| "Invalid executor Redis URL")?;
+    Ok(())
+}
+
+fn backend(group: &str, address: &str) -> Result<RedisTurnBackend> {
     Ok(RedisTurnBackend::new(
-        Some(&address()?),
+        Some(address),
         RedisTurnBackendOptions {
             key_prefix: format!("roomkit:code:{group}"),
             ..Default::default()
@@ -58,7 +69,10 @@ fn backend(group: &str) -> Result<RedisTurnBackend> {
 }
 
 pub(crate) fn handle(group: &str) -> Result<TurnBackendHandle> {
-    Ok(TurnBackendHandle::new(Arc::new(backend(group)?)))
+    Ok(TurnBackendHandle::new(Arc::new(backend(
+        group,
+        &address(None)?,
+    )?)))
 }
 
 pub(crate) async fn serve(
@@ -80,7 +94,7 @@ pub(crate) async fn serve(
     } else {
         group.into()
     };
-    let backend = backend(&prefix)?;
+    let backend = backend(&prefix, &address(settings.executor_url.as_deref())?)?;
     // The worker serves no delegation or human-input tools of its own.
     settings.unattended = true;
     let storage = Storage::open(&settings.state_dir, &settings.workspace)?;

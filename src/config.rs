@@ -43,6 +43,12 @@ pub(crate) struct Cli {
     /// Serve scheduled tasks in this Redis group.
     #[arg(long, conflicts_with_all = ["prompt", "session"], value_parser = crate::remote::group)]
     pub serve_pool: Option<String>,
+    /// Serve this workspace with the worker settings saved in /executors.
+    #[arg(long, conflicts_with_all = ["serve_pool", "serve_worker", "executor_pool", "remote_worker", "prompt", "session", "local"])]
+    pub executor: bool,
+    /// Open this project without its saved executor pool (also works offline).
+    #[arg(long, conflicts_with_all = ["serve_pool", "serve_worker", "executor_pool", "remote_worker"])]
+    pub local: bool,
     #[command(flatten)]
     pub worker: crate::remote::pool::WorkerArgs,
     /// Project directory used by the coding tools.
@@ -323,6 +329,7 @@ impl Default for Appearance {
 }
 
 pub(crate) struct Settings {
+    pub executor_url: Option<String>,
     pub serve_pool: Option<String>,
     pub executor_pool: Option<String>,
     pub remote_worker: Option<String>,
@@ -553,6 +560,7 @@ impl Settings {
             herdr: file.integrations.herdr && !cli.no_herdr,
             inherit_env: inherit_env(cli, file.shell)?,
             resume_options: resume_options(cli)?,
+            executor_url: None,
             serve_pool: cli.serve_pool.clone(),
             executor_pool: cli.executor_pool.clone(),
             remote_worker: cli.remote_worker.clone(),
@@ -707,6 +715,7 @@ fn resume_options(cli: &Cli) -> Result<Option<Vec<String>>> {
         ]);
     }
     for (enabled, flag) in [
+        (cli.local, "--local"),
         (cli.no_animations, "--no-animations"),
         (cli.native_selection, "--native-selection"),
         (cli.no_logo, "--no-logo"),

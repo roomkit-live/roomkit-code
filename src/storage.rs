@@ -1,5 +1,7 @@
 //! Shared project persistence and exclusive ownership of open conversations.
 
+pub(crate) mod document;
+
 use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
@@ -67,10 +69,15 @@ impl Drop for FileLease {
     }
 }
 
+pub(crate) fn project_directory(state_dir: &Path, workspace: &Path) -> PathBuf {
+    state_dir.join("projects").join(crate::digest::sha256_hex(
+        workspace.as_os_str().as_encoded_bytes(),
+    ))
+}
+
 impl Storage {
     pub fn open(state_dir: &Path, workspace: &Path) -> Result<Self> {
-        let key = crate::digest::sha256_hex(workspace.as_os_str().as_encoded_bytes());
-        let directory = state_dir.join("projects").join(key);
+        let directory = project_directory(state_dir, workspace);
         let mut builder = std::fs::DirBuilder::new();
         builder.recursive(true);
         #[cfg(unix)]

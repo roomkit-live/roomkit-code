@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Configure the executor pool from `/executors` on each machine. Scheduling is
+  opt-in per workspace. Use `--executor` to start a worker with its saved group,
+  connection, labels, capacity and local agent profiles, or `--local` to edit
+  the configuration offline.
+
 - Short Redis interruptions can recover during slot renewal. Linux workers
   account for parent cgroup memory limits when advertising available RAM.
 

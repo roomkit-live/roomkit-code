@@ -9,14 +9,17 @@ mod panel;
 pub(crate) use panel::panel;
 mod queue;
 mod registry;
+pub(crate) mod settings;
 mod transport;
 mod worker;
+mod worker_options;
 
 pub(crate) use registry::WorkerProfile;
 use registry::{Registry, Worker};
 use roomkit::turns::TurnBackendHandle;
 use std::{collections::BTreeMap, sync::Arc};
-pub(crate) use worker::{WorkerArgs, advertise, declare, worker_failure};
+pub(crate) use worker::{advertise, declare, worker_failure};
+pub(crate) use worker_options::WorkerArgs;
 
 fn identifier(value: &str) -> Result<String, String> {
     if value.is_empty()
@@ -75,6 +78,7 @@ impl Requirements {
     }
 }
 pub(crate) struct Scheduler {
+    group: String,
     tasks: std::sync::Weak<crate::delegation::Tasks>,
     redis: roomkit::RedisTurnBackend,
     registry: Registry,
@@ -85,16 +89,19 @@ pub(crate) struct Scheduler {
 pub(crate) fn connect(
     owner_group: Option<&str>,
     worker_group: Option<&str>,
+    saved_url: Option<&str>,
     tasks: &Arc<crate::delegation::Tasks>,
 ) -> crate::Result<(Option<Arc<Scheduler>>, Option<Inventory>)> {
     let Some(group) = owner_group.or(worker_group) else {
         return Ok((None, None));
     };
-    let inventory = Inventory::new(group)?;
+    let address = super::address(saved_url)?;
+    let inventory = Inventory::new(group, &address)?;
     let scheduler = if owner_group.is_some() {
         Some(Arc::new(Scheduler {
+            group: group.into(),
             tasks: Arc::downgrade(tasks),
-            redis: super::backend(&format!("pool:{group}"))?,
+            redis: super::backend(&format!("pool:{group}"), &address)?,
             registry: inventory.0.clone(),
             queue: Arc::default(),
             closed: Default::default(),

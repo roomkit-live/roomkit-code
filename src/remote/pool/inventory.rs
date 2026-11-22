@@ -9,12 +9,14 @@ pub(crate) const LIST_EXECUTORS: &str = "list_executors";
 pub(crate) struct Inventory(pub(super) Registry);
 
 impl Inventory {
-    pub(crate) fn new(group: &str) -> crate::Result<Self> {
-        Ok(Self(Registry::new(group)?))
+    pub(crate) fn new(group: &str, address: &str) -> crate::Result<Self> {
+        Ok(Self(Registry::new(group, address)?))
     }
 
     pub(super) async fn lines(&self) -> Result<Vec<String>, String> {
-        let rows = self.0.rows().await?;
+        let rows = tokio::time::timeout(std::time::Duration::from_secs(3), self.0.rows())
+            .await
+            .map_err(|_| "Redis did not answer within three seconds")??;
         if rows.is_empty() {
             return Ok(vec!["No workers registered.".into()]);
         }
