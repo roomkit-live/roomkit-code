@@ -222,6 +222,11 @@ async fn first_view(
         "Run a shell command in this project",
     )];
     view.cycle_command = Some(crate::delegation::panel::COMMAND.to_owned());
+    // The engine hands a running turn only its own author's next messages,
+    // and the application opens turns here too: a task's, the one a
+    // background job's end or a task's result gives. One person writes in
+    // these rooms, so every view hands what they write to the running turn.
+    view.can_steer_any_turn = true;
     // A conversation someone watches opens in the mode it was left in,
     // unless the launch names one, and keeps the mode it is in. A launch
     // nobody watches keeps its own mode, and leaves the conversation's.

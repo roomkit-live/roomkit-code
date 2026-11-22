@@ -1,12 +1,54 @@
 //! Application discovery roots and per-agent selection; parsing and activation
 //! belong to roomkit-ai. No skill is made available without a host selection.
 use super::*;
-use roomkit_ai::{CopyOptions, SkillRegistry};
+use roomkit_ai::{CopyOptions, SkillMetadata, SkillRegistry};
 use roomkit_tui::protocol::{Choice, Event, PanelSpec};
 use roomkit_tui_engine::CommandResult;
 use std::path::{Path, PathBuf};
 
 const MAX_ENTRIES: usize = 256;
+
+/// Other assistants' fields saying who may start a skill. The engine keeps
+/// them as plain metadata and nothing here enforces them, so a skill
+/// declaring one is refused rather than loaded without its restriction.
+const INVOCATION_FIELDS: [&str; 4] = [
+    "disable-model-invocation",
+    "user-invocable",
+    "context",
+    "agent",
+];
+
+/// The description of the skill the engine registered from `path`, whose
+/// directory is named `directory`, or why the application does not take it.
+fn accepted(skill: SkillMetadata, path: &Path, directory: &str) -> Result<String, String> {
+    if skill.name != directory {
+        return Err(
+            "Skill name must match the directory entry; renamed aliases are not supported".into(),
+        );
+    }
+    let manifest = std::fs::read_to_string(path.join("SKILL.md"))
+        .map_err(|_| "The skill's manifest cannot be read again")?;
+    if let Some(field) = invocation_field(&manifest) {
+        return Err(format!(
+            "The frontmatter declares an invocation policy this application does not enforce: {field}"
+        ));
+    }
+    Ok(skill.description)
+}
+
+/// The first of [`INVOCATION_FIELDS`] the frontmatter of `manifest` declares,
+/// whatever its value: the engine's metadata leaves out a key with no value
+/// or with one it does not read whole.
+fn invocation_field(manifest: &str) -> Option<&'static str> {
+    let mut lines = manifest.lines().map(str::trim_end);
+    if lines.next() != Some("---") {
+        return None;
+    }
+    lines.take_while(|line| *line != "---").find_map(|line| {
+        let (key, _) = line.split_once(':')?;
+        INVOCATION_FIELDS.into_iter().find(|field| *field == key)
+    })
+}
 
 #[derive(Clone)]
 struct Entry {
@@ -95,10 +137,7 @@ impl Catalogue {
                 self.registry
                     .register(&path)
                     .map_err(|error| error.to_string())
-                    .and_then(|skill| {
-                        if skill.name == name { Ok(skill.description) }
-                        else { Err("Skill name must match the directory entry; renamed aliases are not supported".into()) }
-                    })
+                    .and_then(|skill| accepted(skill, &path, &name))
             } else {
                 Err("Skill directory escapes its discovery root".into())
             };
@@ -481,5 +520,53 @@ mod tests {
                 .unwrap()
                 .has_entries()
         );
+    }
+
+    /// Another assistant's invocation field restricts who starts the skill,
+    /// and nothing here enforces it: the skill is listed with the field as
+    /// its loading error and reaches no agent, where loading it would drop
+    /// the restriction without a word. The field refuses whatever its value,
+    /// one the engine's metadata leaves out included.
+    #[tokio::test]
+    async fn a_skill_declaring_another_assistant_s_invocation_field_is_refused() {
+        let workspace = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let root = workspace.path().join(".agents/skills");
+        let declared = [
+            ("manual", "disable-model-invocation", " true"),
+            ("hidden", "user-invocable", " false"),
+            ("forked", "context", " fork"),
+            ("routed", "agent", " Explore"),
+            ("bare", "agent", ""),
+            ("nested", "agent", "\n  name: Explore"),
+        ];
+        for (name, field, value) in declared {
+            let directory = root.join(name);
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                directory.join("SKILL.md"),
+                format!(
+                    "---\nname: {name}\ndescription: Fixture skill\n{field}:{value}\n---\nBody"
+                ),
+            )
+            .unwrap();
+        }
+        // The same words in the instructions declare nothing.
+        skill(&root, "plain", "agent: Explore");
+        let catalogue = Catalogue::load(workspace.path().into(), state.path().into())
+            .await
+            .unwrap();
+        for (name, field, _) in declared {
+            let error = catalogue.entries[name].error.as_deref();
+            assert!(
+                error.is_some_and(|error| error.contains(field)),
+                "{name}: {error:?}"
+            );
+        }
+        let mut names: Vec<String> = declared.iter().map(|skill| skill.0.to_owned()).collect();
+        names.push("plain".to_owned());
+        let selected = catalogue.selected(&names).unwrap();
+        assert_eq!(selected.skill_count(), 1);
+        assert!(selected.get_skill("plain").unwrap().is_some());
     }
 }

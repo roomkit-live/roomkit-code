@@ -2,12 +2,23 @@
 
 ## Unreleased
 
+- Built on RoomKit Rust 4c51283, after 0.2.0, with roomkit-tui f19f2de (0.3.1
+  and one commit) and roomkit-tools 5dfc582. That engine hands a running turn
+  only the next messages of whoever wrote the message it answers. Nothing
+  changes for what you write while an agent works: it still reaches the
+  running turn at its next step, a task's turn and the turns the application
+  opens (a background job's end, a task's result) included, because the
+  terminal now hands the message to the turn itself. A background job's end
+  still reaches the turn its agent is running. A turn that is interrupted,
+  fails or reaches its round limit before its next step does not read an end
+  it was handed, as before.
+
 - The OpenAI and Anthropic model providers now come from roomkit-providers
-  (6b2ebaa), which is built on the same engine revision; the engine's own
+  (3501b7e), which is built on the same engine revision; the engine's own
   provider crates are no longer linked. Settings, sign-in and conversations
-  are unchanged. One failure reads differently: an answer the provider
-  cannot read is shown as "Engine execution failed", no longer as "The
-  provider returned an invalid response".
+  are unchanged, and so is what a failure reads as: with roomkit-tui 0.3.1 an
+  answer the provider cannot read is again "The provider returned an invalid
+  response", where it read "Engine execution failed" on these providers.
 
 ## [0.3.1]
 

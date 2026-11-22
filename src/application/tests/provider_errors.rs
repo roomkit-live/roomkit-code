@@ -312,3 +312,44 @@ async fn anthropic_thinking_without_an_answer_is_explained_and_can_be_retried() 
         std::fs::read_to_string(app._storage.database.with_file_name("diagnostics.jsonl")).unwrap();
     assert!(log.contains("provider_empty_response"), "{log}");
 }
+
+/// An answer the provider cannot read is told as an invalid response and
+/// logged under its own code. The terminal knew the engine's wording of it
+/// alone, so with the providers of roomkit-providers it read "Engine
+/// execution failed" until roomkit-tui 0.3.1.
+#[tokio::test]
+async fn an_answer_the_provider_cannot_read_is_told_as_an_invalid_response() {
+    let router = Router::new().route(
+        "/v1/chat/completions",
+        post(|| async {
+            (
+                [("content-type", "text/event-stream")],
+                "data: {\"choices\": \"none\"}\n\ndata: [DONE]\n\n",
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let root = tempfile::tempdir().unwrap();
+    let storage = tempfile::tempdir().unwrap();
+    let settings = settings(root.path(), storage.path(), &base);
+    let app = Application::open(&settings, SECRET.into()).await.unwrap();
+    let events = submit(&app, "unreadable-turn").await;
+    let notices: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Notice { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    let told = "The provider returned an invalid response. Check protocol compatibility and host \
+        diagnostics.";
+    assert!(notices.contains(&told), "{notices:?}");
+    app.close().await.unwrap();
+    server.abort();
+    let log =
+        std::fs::read_to_string(app._storage.database.with_file_name("diagnostics.jsonl")).unwrap();
+    assert!(log.contains("provider_malformed"), "{log}");
+    assert!(!log.contains("engine_failed"), "{log}");
+}
