@@ -29,25 +29,22 @@ struct Entry {
     req: Requirements,
     pinned: Option<String>,
     reason: String,
-    worker: Option<String>,
+    placement: Option<String>,
 }
 impl Entry {
     fn accepts(&self, w: &Worker) -> bool {
         self.pinned.as_ref().is_none_or(|name| name == &w.name) && self.req.matches(w)
     }
     fn describe(&self, active: bool) -> String {
-        let placement = match &self.worker {
+        let placement = match &self.placement {
             Some(w) if active => format!("running on {w}"),
             Some(w) => format!("assigned to {w}"),
-            None => format!("queued · {}", self.reason),
+            None => match &self.req.profile {
+                Some(profile) => format!("queued · {} · profile {profile}", self.reason),
+                None => format!("queued · {}", self.reason),
+            },
         };
-        let profile = self
-            .req
-            .profile
-            .as_deref()
-            .map(|id| format!(" · profile {id}"))
-            .unwrap_or_default();
-        format!("{} · {placement}{profile} · {}", self.task, self.title)
+        format!("{} · {placement} · {}", self.task, self.title)
     }
 }
 pub(super) struct Ticket {
@@ -82,7 +79,7 @@ impl Queue {
             req,
             pinned,
             reason: "checking workers".into(),
-            worker: None,
+            placement: None,
         };
         let mut state = lock(&self.state);
         let id = state.next;
@@ -126,7 +123,7 @@ impl Ticket {
             enough_ram = true;
             if r.used >= w.slots
                 || state.active.range(..self.id).any(|(_, e)| {
-                    e.worker.is_none()
+                    e.placement.is_none()
                         && e.accepts(w)
                         && e.req.min_ram_mib <= w.metrics.available_mib
                 })
@@ -152,9 +149,9 @@ impl Ticket {
         }
         ranked
     }
-    pub fn assign(&self, name: &str) {
+    pub fn assign(&self, placement: &str) {
         if let Some(e) = lock(&self.queue.state).active.get_mut(&self.id) {
-            e.worker = Some(name.into());
+            e.placement = Some(placement.into());
         }
     }
 }
@@ -162,7 +159,7 @@ impl Drop for Ticket {
     fn drop(&mut self) {
         let mut state = lock(&self.queue.state);
         if let Some(entry) = state.active.remove(&self.id)
-            && entry.worker.is_some()
+            && entry.placement.is_some()
         {
             state.recent.push_back(entry);
             if state.recent.len() > 32 {

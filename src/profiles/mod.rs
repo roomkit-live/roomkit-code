@@ -216,6 +216,7 @@ impl Profiles {
         let (pool, executor_inventory) = crate::remote::pool::connect(
             settings.executor_pool.as_deref(),
             settings.serve_pool.as_deref(),
+            &resources.tasks,
         )
         .map_err(|e| e.to_string())?;
         Ok(Arc::new(Self {

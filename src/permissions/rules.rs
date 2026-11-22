@@ -98,6 +98,7 @@ const RULES: &[(&str, Rule)] = &[
     ("write", MUTATION),
     ("edit", MUTATION),
     ("shell", COMMAND),
+    (crate::remote::pool::CARGO_TEST, COMMAND),
     ("process_start", COMMAND),
     (
         "process_write",

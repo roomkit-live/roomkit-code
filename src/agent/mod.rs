@@ -255,7 +255,7 @@ pub(crate) async fn create(
     let tools = native_tools(root, resources, policy).await?;
     let mut tools = selected(profile, tools, (unattended, extensions.planning));
     if let Some(inventory) = extensions.executor_inventory {
-        tools.push((inventory.definition(), Arc::new(inventory)));
+        add_pool_tools(&mut tools, inventory, channel, profile, &resources.shell);
     }
     let native: Vec<AiTool> = tools
         .iter()
@@ -418,6 +418,23 @@ fn selected(
         .map(|tool| (tool.definition(), tool))
         .filter(|(definition, _)| selected(definition))
         .collect()
+}
+
+/// Owners and workers see the inventory. Only an opted-in worker profile
+/// exposes the fixed Cargo command.
+fn add_pool_tools(
+    tools: &mut Vec<(AiTool, Arc<dyn Tool>)>,
+    inventory: crate::remote::pool::Inventory,
+    channel: &str,
+    profile: &Agent,
+    shell: &ShellTool,
+) {
+    use crate::remote::pool::{CARGO_TEST, CargoTest};
+    if channel == crate::remote::AGENT && profile.tools.iter().any(|name| name == CARGO_TEST) {
+        let runner = CargoTest(Shell::new(shell.clone()));
+        tools.push((runner.definition(), Arc::new(runner)));
+    }
+    tools.push((inventory.definition(), Arc::new(inventory)));
 }
 
 /// The handler of the selected MCP servers' tools, each server's first in

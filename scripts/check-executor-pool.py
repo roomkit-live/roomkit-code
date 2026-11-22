@@ -30,6 +30,11 @@ TASKS = {
     "waiting-task": {"labels": {"role": "spare"}},
     "invalid-task": {"min_ram_mb": 1},
     "unpublished-task": {"profile": "private-agent"},
+    "rust-failing": {"profile": "code", "labels": {"role": "review"}},
+    "rust-passing": {"profile": "code", "labels": {"role": "review"}},
+    "rust-denied": {"profile": "code", "labels": {"role": "review"}},
+    "rust-plan": {"profile": "code", "labels": {"role": "review"}},
+    "rust-diff": {"profile": "reviewer"},
     "windows-task": {"os": "windows"},
     "large-task": {"min_ram_mib": 2**48},
 }
@@ -68,6 +73,9 @@ class Model(StreamingModel):
                     self.server.ids[self.server.submitting] = task_id.group()
                 return {"content": "Submitted " + self.server.submitting + "."}
             if "[Background task from remote-linux " in content:
+                for task in self.server.rust:
+                    if task + " reported." in content:
+                        return {"content": task + " report received."}
                 return {"content": "Background report received."}
             content = next((str(m.get("content", "")) for m in reversed(request["messages"])
                             if m["role"] == "user" and m.get("content") in (*TASKS, "cancel-waiting", INVENTORY_QUESTION)), "")
@@ -87,6 +95,13 @@ class Model(StreamingModel):
         name = next((key for key in TASKS if key in transcript), "unknown")
         if "inspect-pool-from-worker" in transcript:
             return inventory_call(request)
+        if name.startswith("rust-"):
+            if last["role"] == "tool":
+                self.server.rust[name] = content
+                return {"content": name + " reported."}
+            if name == "rust-diff":
+                return tool("diff", "review-change", old_path="sample/before.rs", new_path="sample/src/lib.rs")
+            return tool("cargo_test", "execute-test", cwd="sample")
         if last["role"] != "tool":
             self.server.started[name] = request["model"]
             if name in ("review-one", "review-two"):
@@ -161,6 +176,7 @@ def scenario(term, server, spare):
     primary, review = server.calls["review-one"], server.calls["review-two"]
     assert primary[0] == "/v1/chat/completions" and "write" in primary[1]
     assert review[0] == "/review/v1/chat/completions" and "read" in review[1]
+    assert "cargo_test" in primary[1] and "cargo_test" not in review[1]
     assert "write" not in review[1] and "shell" not in review[1] and "review-fixture-instruction" in review[2]
     print("PASS  Two exposed profiles shared one slot and workspace, with distinct connections, models and tools.", flush=True)
     term.send("unpublished-task", "Submitted unpublished-task.")
@@ -180,9 +196,46 @@ def scenario(term, server, spare):
     print("PASS  OS/RAM and invalid constraints enforced. New worker ran only the pending task.", flush=True)
 
 
+def rust_scenario(term, server, root):
+    crate = root / "macbook" / "sample"
+    (crate / "src").mkdir(parents=True)
+    (crate / "Cargo.toml").write_text('[package]\nname="sample"\nversion="0.1.0"\nedition="2021"\n')
+    source = crate / "src" / "lib.rs"
+    broken = "pub fn answer() -> u8 { 41 }\n#[test] fn expected_answer() { assert_eq!(answer(), 42); }\n"
+    source.write_text(broken)
+    (crate / "before.rs").write_text(broken)
+
+    def result(task, decision=None):
+        offset = term.send(task, "Submitted " + task + ".")
+        profile = "reviewer · model review-model" if task == "rust-diff" else "code · model macbook"
+        term.wait("assigned to macbook · profile " + profile, offset)
+        if decision is not None:
+            term.wait("Allow cargo_test?", offset)
+            time.sleep(.75)  # The approval card arms after it appears.
+            os.write(term.master, decision)
+        term.wait(task + " report received.", offset)
+        return server.rust[task]
+
+    assert "plan" in result("rust-plan").lower() and not (crate / "target").exists()
+    term.send("/mode ask", "[Ask]")
+    assert "exit_code=" not in result("rust-denied", b"\x1b") and not (crate / "target").exists()
+    for task, code, verdict in [("rust-failing", 101, "FAILED"), ("rust-passing", 0, "ok")]:
+        if not code:
+            term.send("/mode yolo", "[Yolo]")
+            source.write_text(broken.replace("{ 41 }", "{ 42 }"))
+        report = result(task, b"\x19" if code else None)
+        assert f"exit_code={code}" in report.splitlines(), report
+        assert "expected_answer" in report and verdict in report, report
+    diff = result("rust-diff")
+    assert "41" in diff and "42" in diff, diff
+    term.send("/executors", "assigned to macbook · profile reviewer · model review-model")
+    print("PASS  Plan blocked Cargo, Ask handled refusal and approval, and the review followed two real test runs.", flush=True)
+
+
 def model_server(stack):
     server = stack.enter_context(LoopbackHTTPServer(("127.0.0.1", 0), Model))
     server.started, server.finished, server.ids, server.calls = {}, {}, {}, {}
+    server.rust = {}
     server.release = threading.Event()
     server.worker_saw_inventory = threading.Event()
     server.markers = {name: uuid.uuid4().hex for name in ("macbook", "linux", "spare")}
@@ -200,6 +253,7 @@ def configure_profiles(command, env, state):
     agents_file = next(state.glob("projects/*/agents.json"))
     agents = json.loads(agents_file.read_text())
     original = agents["agents"]["code"]
+    original["tools"].append("cargo_test")
     connections_file = state / "connections.json"
     connections = json.loads(connections_file.read_text())
     primary = connections["profiles"][original["provider"]]
@@ -207,7 +261,7 @@ def configure_profiles(command, env, state):
                                               base_url=primary["base_url"].removesuffix("/v1") + "/review/v1")
     connections_file.write_text(json.dumps(connections))
     reviewer = dict(original, id="reviewer", label="Reviewer", provider="review", model="review-model",
-                    tools=["read", "shell"], instructions="review-fixture-instruction")
+                    tools=["read", "diff", "shell"], instructions="review-fixture-instruction")
     agents["agents"]["reviewer"] = reviewer
     agents["agents"]["private-agent"] = dict(original, id="private-agent", model="private-model")
     agents["selected"] = "private-agent"
@@ -229,6 +283,13 @@ def main():
         env.update(ROOMKIT_EXECUTOR_REDIS_URL=stack.enter_context(redis()), HOME=str(root/"home"),
                    XDG_CONFIG_HOME=str(root/"config"), XDG_DATA_HOME=str(root/"data"),
                    ROOMKIT_NO_UPDATE_CHECK="true", TERM="xterm-256color")
+        # Rustup shims cannot select a toolchain under the isolated HOME.
+        binaries = root / "bin"
+        binaries.mkdir()
+        for program in ("cargo", "rustc", "rustdoc"):
+            path = subprocess.check_output(["rustup", "which", program], text=True).strip()
+            (binaries / program).symlink_to(path)
+        env["PATH"] = str(binaries) + os.pathsep + env["PATH"]
         server = model_server(stack)
 
         def args(role, flag):
@@ -249,7 +310,8 @@ def main():
             if not select.select([proc.stdout], [], [], 20)[0] or not proc.stdout.readline().startswith("Serving"):
                 raise RuntimeError("Worker failed to register: " + name)
 
-        term = Terminal(stack, args("owner", "--executor-pool"), env)
+        owner_args = args("owner", "--executor-pool")
+        term = Terminal(stack, owner_args, env)
         term.send(INVENTORY_QUESTION, "Live inventory is empty.")
         term.send("bootstrap-task", "Submitted bootstrap-task.")
         term.send("/executors", "no online worker matches")
@@ -263,6 +325,8 @@ def main():
         assert server.worker_saw_inventory.wait(15), "Pool worker could not read the inventory"
         print("PASS  Owner and delegated worker can inspect the same live pool as /executors.", flush=True)
         scenario(term, server, lambda: worker("spare", "spare"))
+        fresh = Terminal(stack, [*owner_args, "--session", "rust-tests"], env)
+        rust_scenario(fresh, server, root)
 
 
 if __name__ == "__main__":

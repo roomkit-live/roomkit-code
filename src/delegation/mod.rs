@@ -16,11 +16,11 @@
 //! (`spending`).
 
 mod board;
-mod ended_line;
 pub(crate) mod history;
 pub(crate) mod panel;
 mod render;
 pub(crate) mod spending;
+mod task_lines;
 mod transcript;
 
 pub(crate) use board::{Outcome, Task, Tasks};

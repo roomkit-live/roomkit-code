@@ -162,7 +162,7 @@ async fn run(
 }
 
 pub(crate) fn permits(tool: &str, pooled: bool) -> bool {
-    TOOLS.contains(&tool) || (pooled && tool == pool::LIST_EXECUTORS)
+    TOOLS.contains(&tool) || (pooled && matches!(tool, pool::LIST_EXECUTORS | pool::CARGO_TEST))
 }
 
 async fn authorize(event: roomkit::ToolCallEvent, pooled: bool) -> crate::permissions::Verdict {

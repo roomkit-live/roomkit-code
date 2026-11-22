@@ -25,8 +25,9 @@ impl Scheduler {
         let req = Requirements::parse(request.context.room.metadata.get("task_context"))
             .map_err(RoomKitError::Value)?;
         let ram = req.min_ram_mib;
+        let profile = req.profile.clone();
         let ticket = self.queue.enter(&request, req);
-        let worker = loop {
+        let (worker, placement) = loop {
             let guard = self.queue.admission.lock().await;
             let rows = self.registry.rows().await.map_err(RoomKitError::Runtime)?;
             let mut found = None;
@@ -37,8 +38,9 @@ impl Scheduler {
                     .await
                     .map_err(RoomKitError::Runtime)?
                 {
-                    ticket.assign(&w.name);
-                    found = Some(w.clone());
+                    let placement = w.placement(profile.as_deref());
+                    ticket.assign(&placement);
+                    found = Some((w.clone(), placement));
                     break;
                 }
             }
@@ -56,7 +58,23 @@ impl Scheduler {
         );
         request.room_hooks.push(super::route(&worker.instance));
         let link = self.redis.submit(request).await?;
+        self.announce(link.request(), &placement).await;
         Ok(Arc::new(ScheduledLink { inner: link, lease }))
+    }
+
+    async fn announce(&self, request: &TurnRequest, placement: &str) {
+        let metadata = &request.context.room.metadata;
+        if let (Some(tasks), Some(parent), Some(task)) = (
+            self.tasks.upgrade(),
+            metadata
+                .get("parent_room_id")
+                .and_then(serde_json::Value::as_str),
+            metadata.get("task_id").and_then(serde_json::Value::as_str),
+        ) {
+            tasks
+                .assigned(parent, task, &request.turn_id, placement)
+                .await;
+        }
     }
 }
 impl TurnBackend for Scheduler {

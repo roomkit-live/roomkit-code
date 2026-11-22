@@ -11,6 +11,9 @@
   Repeat `--worker-profile ID` to serve several local agents on one worker.
   The inventory shows each exposed profile's model and tools. Target a profile
   with `context.executor.profile`; profiles share the worker's slot limit.
+  Each placement shows the machine, profile and model in the parent conversation.
+  Pool profiles can opt into `cargo_test` to run a crate's Rust tests and report
+  their exit code and output under the parent's command permissions.
 
 - An experimental Linux worker can run a delegated coding task in its own
   workspace over Redis. Start the worker with `--serve-worker GROUP` and

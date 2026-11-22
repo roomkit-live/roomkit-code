@@ -79,6 +79,22 @@ pub(super) struct Worker {
     pub slots: u16,
     pub metrics: Metrics,
 }
+impl Worker {
+    pub(super) fn placement(&self, requested: Option<&str>) -> String {
+        let profile = match requested {
+            Some(id) => self.profiles.iter().find(|p| p.id == id),
+            None => self.profiles.first(),
+        };
+        let mut text = self.name.clone();
+        if let Some(p) = profile {
+            text.push_str(&format!(" · profile {} · model {}", p.id, p.model));
+        } else if let Some(model) = &self.model {
+            text.push_str(&format!(" · model {model}"));
+        }
+        text
+    }
+}
+
 pub(super) struct Row {
     pub worker: Worker,
     pub age: u64,

@@ -643,12 +643,23 @@ roomkit-code . --serve-pool project-demo --worker-name laptop --worker-slots 1 \
 The first listed profile handles requests without a profile constraint. With
 no flags, the worker serves its selected profile. All exposed profiles share
 the checkout and slot limit. Each uses its own connection, instructions and
-allowed file tools. Restart the worker to apply profile changes. Unknown or
+selected workspace tools. Restart the worker to apply profile changes. Unknown or
 duplicate profile IDs prevent registration. Inspect the IDs, models and tools
 with `/executors` or `list_executors`. For example, ask the owner to have
 the `reviewer` profile read a file on macOS. The delegation context is
 `{"executor":{"profile":"reviewer","os":"macos"}}`. If no online worker
 exposes that profile, the task waits for one.
+
+To run Rust tests on the worker, add `cargo_test` to the coding profile's Tools
+field in `/agents`, save it and restart the executor with the same workspace,
+state directory and profiles. Put Cargo on the worker service's `PATH`.
+The tool runs `cargo test --manifest-path Cargo.toml` in the workspace root or
+a crate directory supplied as `cwd`, with a two-minute timeout. The result
+includes the exit code, stdout and stderr. Tests and build scripts run with the
+worker user's permissions. Plan blocks the call, Ask requests approval in the
+parent conversation, and Yolo runs it directly. A reviewer with file-reading
+tools can inspect the change after the tests. Each assignment records the
+machine, local profile and model in the parent conversation.
 
 Every field is optional. The scheduler filters online workers by execution OS, profile,
 exact label values, available memory and free slots, then chooses the lowest

@@ -337,12 +337,10 @@ impl Agent {
             return Err("Instructions must contain at most 8192 bytes of text".into());
         }
         let unique: std::collections::BTreeSet<_> = self.tools.iter().collect();
-        if self.tools.len() > TOOLS.len()
-            || unique.len() != self.tools.len()
-            || self
-                .tools
-                .iter()
-                .any(|tool| !TOOLS.contains(&tool.as_str()))
+        if unique.len() != self.tools.len()
+            || self.tools.iter().any(|tool| {
+                !TOOLS.contains(&tool.as_str()) && tool != crate::remote::pool::CARGO_TEST
+            })
         {
             return Err("Choose distinct tool names from the available inventory".into());
         }

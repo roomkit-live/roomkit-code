@@ -1,4 +1,6 @@
 //! Resource-based placement for the experimental Redis executor pool.
+mod cargo_test;
+pub(crate) use cargo_test::{CARGO_TEST, CargoTest};
 mod inventory;
 pub(crate) use inventory::{Inventory, LIST_EXECUTORS};
 mod metrics;
@@ -72,6 +74,7 @@ impl Requirements {
     }
 }
 pub(crate) struct Scheduler {
+    tasks: std::sync::Weak<crate::delegation::Tasks>,
     redis: roomkit::RedisTurnBackend,
     registry: Registry,
     queue: Arc<queue::Queue>,
@@ -81,6 +84,7 @@ pub(crate) struct Scheduler {
 pub(crate) fn connect(
     owner_group: Option<&str>,
     worker_group: Option<&str>,
+    tasks: &Arc<crate::delegation::Tasks>,
 ) -> crate::Result<(Option<Arc<Scheduler>>, Option<Inventory>)> {
     let Some(group) = owner_group.or(worker_group) else {
         return Ok((None, None));
@@ -88,6 +92,7 @@ pub(crate) fn connect(
     let inventory = Inventory::new(group)?;
     let scheduler = if owner_group.is_some() {
         Some(Arc::new(Scheduler {
+            tasks: Arc::downgrade(tasks),
             redis: super::backend(&format!("pool:{group}"))?,
             registry: inventory.0.clone(),
             queue: Arc::default(),
