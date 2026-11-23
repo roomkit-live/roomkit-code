@@ -640,8 +640,9 @@ roomkit-code . --executor-pool project-demo
 ```
 
 Open `/executors` and type a machine name, OS or label to filter the list.
-Select a worker to inspect its capacity, CPU load, available RAM and profile
-models. Select a profile to see its tools. Ask “Which executor machines are in this
+The list shows the RoomKit Code version each worker advertises. Select a worker
+to see its absolute workspace path on that machine, capacity, CPU load, available
+RAM and profile models. Older workers can omit the workspace and version. Select a profile to see its tools. Ask “Which executor machines are in this
 pool?” in the parent or a worker conversation. The agent can use `list_executors`
 to read the same live inventory. If that tool is unavailable in the conversation,
 ask the user to check `/executors` on the coordinator. The `remote-linux`

@@ -152,11 +152,11 @@ fn worker_choice(row: &Row) -> Choice {
             w.metrics.available_mib as f64 / 1024.0
         ));
     }
-    Choice::new(
-        format!("worker:{}", w.name),
-        format!("{} · {status}", w.name),
-    )
-    .with_description(description)
+    let mut title = format!("{} · {status}", w.name);
+    if let Some(version) = &w.version {
+        title.push_str(&format!(" · v{version}"));
+    }
+    Choice::new(format!("worker:{}", w.name), title).with_description(description)
 }
 
 fn worker_details(room: &str, rows: &[Row], name: &str) -> CommandResult {
@@ -222,6 +222,11 @@ fn resource_lines(row: &Row) -> Vec<String> {
         .load
         .map_or_else(|| "unknown".into(), |n| format!("{n:.2}"));
     let mut body = vec![
+        format!("Workspace  {}", w.workspace_display()),
+        format!(
+            "Version    {}",
+            w.version.as_deref().unwrap_or("Not reported")
+        ),
         format!("System     {}/{} · host {host}", w.os, w.arch),
         format!("Capacity   {}/{} slots free", row.free_slots(), w.slots),
         format!("CPU        {} cores · {cpu} · load {load}", m.cpus),

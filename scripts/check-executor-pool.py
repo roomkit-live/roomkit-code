@@ -57,7 +57,9 @@ class Model(StreamingModel):
         if last.get("tool_call_id") == "inventory":
             if "No workers registered" in content:
                 return {"content": "Live inventory is empty."}
-            if all(value in content for value in ("profile code (default)", "profile reviewer", "model review-model",
+            workspaces = (f"workspace {path} · RoomKit Code {self.server.version}"
+                          for path in self.server.workspaces.values())
+            if all(path in content for path in workspaces) and all(value in content for value in ("profile code (default)", "profile reviewer", "model review-model",
                                                   "macbook [online]", "host macos", "model macbook", "role=review",
                                                    "linux [online]", "model linux", "role=general")):
                 if request["model"] == "macbook":
@@ -179,7 +181,9 @@ def eventually(predicate, message):
 
 def scenario(term, server, spare):
     term.send("/executors", "2/2 online")
-    term.send("macbook", "Inspect reviewer")
+    offset = term.send("macbook", "Inspect reviewer")
+    term.wait(str(server.workspaces["macbook"]), offset)
+    term.wait(server.version, offset)
     offset = len(term.output)
     os.write(term.master, b"\x1b[B\r")
     term.wait("Tools (", offset)
@@ -319,6 +323,8 @@ def main():
             (binaries / program).symlink_to(path)
         env["PATH"] = str(binaries) + os.pathsep + env["PATH"]
         server = model_server(stack)
+        server.workspaces = {name: root.resolve() / name for name in ("linux", "macbook")}
+        server.version = next(p["version"] for p in metadata["packages"] if p["name"] == "roomkit-code")
 
         def args(role):
             project = root / role

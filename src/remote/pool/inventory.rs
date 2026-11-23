@@ -64,7 +64,7 @@ impl Tool for Inventory {
         AiTool {
             name: LIST_EXECUTORS.into(),
             description: "List the worker machines registered in this beta executor pool, including \
-                their online status, execution and host OS, exposed profile IDs, models, tools, resources, labels \
+                their working directory, RoomKit Code version, online status, execution and host OS, exposed profile IDs, models, tools, resources, labels \
                 and free slots. Use this to answer questions about available executors."
                 .into(),
             parameters: serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
@@ -115,7 +115,11 @@ fn describe(row: &Row) -> String {
         .join(" ");
     let model = worker.model.as_deref().unwrap_or("not reported");
     format!(
-        "{name} [{online}] {os}/{arch} · host {host} · model {model} · {} CPU ({busy}) · load {load} · {} MiB available · {free}/{} slots free · {labels}",
-        metrics.cpus, metrics.available_mib, worker.slots
+        "{name} [{online}] {os}/{arch} · host {host} · model {model} · {} CPU ({busy}) · load {load} · {} MiB available · {free}/{} slots free · {labels}\n  workspace {} · RoomKit Code {}",
+        metrics.cpus,
+        metrics.available_mib,
+        worker.slots,
+        worker.workspace_display(),
+        worker.version.as_deref().unwrap_or("Not reported")
     )
 }

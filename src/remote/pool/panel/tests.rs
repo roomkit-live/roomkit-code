@@ -10,6 +10,8 @@ fn worker(name: String) -> Row {
             os: "macos".into(),
             arch: "aarch64".into(),
             host_os: None,
+            workspace: None,
+            version: None,
             model: None,
             profiles: vec![],
             labels: Default::default(),
@@ -74,5 +76,30 @@ fn a_large_worker_offers_all_its_profiles_in_the_picker() -> Result<(), String> 
             .iter()
             .any(|c| c.value == "profile:laptop/agent-69" && c.description == "model-69")
     );
+    Ok(())
+}
+
+#[test]
+fn a_legacy_advertisement_keeps_its_unknown_workspace_and_version() -> crate::Result<()> {
+    let mut row = worker("laptop".into());
+    let mut legacy = serde_json::to_value(&row.worker)?;
+    let object = legacy.as_object_mut().ok_or("missing worker fields")?;
+    object.remove("workspace");
+    object.remove("version");
+    row.worker = serde_json::from_value(legacy)?;
+    let details = resource_lines(&row);
+    assert!(
+        details
+            .iter()
+            .any(|l| l.starts_with("Workspace") && l.ends_with("Not reported"))
+    );
+    assert!(
+        details
+            .iter()
+            .any(|l| l.starts_with("Version") && l.ends_with("Not reported"))
+    );
+    assert_eq!(worker_choice(&row).label, "laptop · Online");
+    row.worker.workspace = Some("/tmp/project\ncopy".into());
+    assert_eq!(row.worker.workspace_display(), "/tmp/project\\ncopy");
     Ok(())
 }

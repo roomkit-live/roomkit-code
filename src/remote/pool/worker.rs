@@ -49,11 +49,14 @@ pub(crate) async fn advertise(
     args: &WorkerArgs,
     profiles: Vec<super::WorkerProfile>,
     executor: &roomkit::TurnExecutor,
+    workspace: &std::path::Path,
 ) -> Result<Presence> {
     let registry = inventory.0.clone();
     let mut sampler = Sampler::default();
     let mut worker = Worker {
         name: args.name()?,
+        workspace: Some(workspace.display().to_string()),
+        version: Some(crate::updates::CURRENT.into()),
         instance: executor.executor_id().into(),
         os: std::env::consts::OS.into(),
         arch: std::env::consts::ARCH.into(),

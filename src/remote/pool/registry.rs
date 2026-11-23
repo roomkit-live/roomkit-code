@@ -71,6 +71,10 @@ pub(super) struct Worker {
     pub os: String,
     pub host_os: Option<String>,
     #[serde(default)]
+    pub workspace: Option<String>,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
     pub profiles: Vec<WorkerProfile>,
@@ -80,6 +84,16 @@ pub(super) struct Worker {
     pub metrics: Metrics,
 }
 impl Worker {
+    /// Keep filenames with control characters on one line in the terminal and tool output.
+    pub(super) fn workspace_display(&self) -> std::borrow::Cow<'_, str> {
+        let path = self.workspace.as_deref().unwrap_or("Not reported");
+        if path.chars().any(char::is_control) {
+            path.escape_debug().to_string().into()
+        } else {
+            path.into()
+        }
+    }
+
     pub(super) fn placement(&self, requested: Option<&str>) -> String {
         let profile = match requested {
             Some(id) => self.profiles.iter().find(|p| p.id == id),

@@ -99,7 +99,7 @@ pub(crate) async fn serve(
     settings.unattended = true;
     let storage = Storage::open(&settings.state_dir, &settings.workspace)?;
     let profiles = Profiles::load(&settings, &storage, settings.initial_api_key(), None).await?;
-    let served = run(&profiles, &backend, group, args).await;
+    let served = run(&profiles, &backend, group, args, &settings.workspace).await;
     let closed = backend.close().await;
     profiles.resources.compactions.close().await;
     profiles.accounts.close().await;
@@ -119,6 +119,7 @@ async fn run(
     backend: &RedisTurnBackend,
     group: &str,
     args: Option<&pool::WorkerArgs>,
+    workspace: &std::path::Path,
 ) -> Result<()> {
     let requested = args
         .map(|a| a.worker_profile.as_slice())
@@ -154,7 +155,7 @@ async fn run(
                 .executor_inventory
                 .as_ref()
                 .ok_or("Missing executor pool inventory")?;
-            Some(pool::advertise(inventory, args, offered, &executor).await?)
+            Some(pool::advertise(inventory, args, offered, &executor, workspace).await?)
         }
         None => None,
     };

@@ -8,7 +8,8 @@
 - Configure the executor pool from `/executors` on each machine. Scheduling is
   opt-in per workspace. The open coordinator applies changes when you save.
   Filter the machine list and open a worker to inspect its resources, models
-  and profile tools. Use `--executor` to start a worker with its saved group,
+  and profile tools. Workers now advertise their working directory and RoomKit Code
+  version in the terminal and in `list_executors`. Use `--executor` to start a worker with its saved group,
   connection, labels, capacity and local agent profiles, or `--local` to edit
   the configuration offline.
 
