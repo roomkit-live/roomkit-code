@@ -224,7 +224,7 @@ async fn auto_grows_once_keeps_usage_and_never_repeats_a_tool() {
         records
             .iter()
             .any(|r| r["event"] == "provider_request_finished"
-                && r["finish_reason"] == "max_tokens"
+                && r["finish_reason"] == "length"
                 && r["usage"]["output_tokens"] == 32000)
     );
     assert!(log.contains("output_budget"));

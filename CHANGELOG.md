@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Built on RoomKit Rust 8f49956, after 0.3.0, with roomkit-providers b33a7de,
+  roomkit-tools 4058f3f and roomkit-tui f1efcea: the engine now tells how a
+  model's answer ended in one closed vocabulary, which each provider maps its
+  own words onto. Two things follow in the application. Anthropic's retry
+  with a larger output budget, made once when a reply is cut at its token
+  bound before showing anything, is also made when the cut comes from a full
+  context window: the engine tells the two alike. And the diagnostics log
+  records how a request ended in that vocabulary (`stop`, `tool_calls`,
+  `length`, `refusal`), where it recorded Anthropic's own words.
+
 ## [0.4.0]
 
 Release for Linux x86-64/ARM64 and macOS Intel/Apple Silicon, built on RoomKit

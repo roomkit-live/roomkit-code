@@ -1,5 +1,5 @@
 //! Hold only an uncommitted attempt's thinking; never replay visible output or calls.
-use roomkit_ai::{ProviderError, StreamDone, StreamEvent};
+use roomkit_ai::{FinishReason, ProviderError, StreamDone, StreamEvent};
 
 const HELD_BYTES: usize = 4 * 1024 * 1024;
 
@@ -82,7 +82,7 @@ impl Attempt {
             && self
                 .done
                 .as_ref()
-                .is_some_and(|d| d.finish_reason.as_deref() == Some("max_tokens"))
+                .is_some_and(|d| d.finish_reason == Some(FinishReason::Length))
     }
 
     pub(super) fn finish(mut self) -> Vec<StreamEvent> {
@@ -109,7 +109,7 @@ mod tests {
         assert_eq!(attempt.accept(Ok(usage.clone())), vec![usage]);
         assert!(!attempt.committed);
         attempt.accept(Ok(StreamEvent::Done(StreamDone {
-            finish_reason: Some("max_tokens".into()),
+            finish_reason: Some(FinishReason::Length),
             ..StreamDone::default()
         })));
         assert!(attempt.exhausted());
@@ -129,7 +129,7 @@ mod tests {
             );
         }
         attempt.accept(Ok(StreamEvent::Done(StreamDone {
-            finish_reason: Some("max_tokens".into()),
+            finish_reason: Some(FinishReason::Length),
             ..StreamDone::default()
         })));
         assert!(attempt.exhausted());

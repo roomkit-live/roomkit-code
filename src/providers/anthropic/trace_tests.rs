@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, reason = "A broken fixture fails the test")]
 use super::*;
-use roomkit_ai::{AiMessage, AiRole, StreamDone, StreamTextDelta};
+use roomkit_ai::{AiMessage, AiRole, FinishReason, StreamDone, StreamTextDelta};
 
 #[test]
 fn cancelled_attempts_are_paired_without_logging_private_context() {
@@ -54,7 +54,7 @@ fn completed_usage_is_allowlisted_and_drop_does_not_log_twice() {
     );
     let mut attempt = Attempt::default();
     attempt.accept(Ok(StreamEvent::Done(StreamDone {
-        finish_reason: Some("PRIVATE_REASON".into()),
+        finish_reason: Some(FinishReason::Length),
         usage: serde_json::from_value(
             json!({"input_tokens":12, "output_tokens":"PRIVATE_VALUE", "PRIVATE_KEY":99}),
         )
@@ -71,6 +71,6 @@ fn completed_usage_is_allowlisted_and_drop_does_not_log_twice() {
         .collect::<Vec<_>>();
     assert_eq!(records.len(), 3);
     assert_eq!(records[2]["outcome"], "completed");
-    assert_eq!(records[2]["finish_reason"], "other");
+    assert_eq!(records[2]["finish_reason"], "length");
     assert_eq!(records[2]["usage"], json!({"input_tokens":12}));
 }

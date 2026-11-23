@@ -76,18 +76,16 @@ impl Trace {
     }
 
     pub(super) fn complete(&mut self, attempt: &Attempt) {
-        let reason = attempt
-            .done
-            .as_ref()
-            .and_then(|d| d.finish_reason.as_deref());
-        self.finish("completed", json!({
-            "finish_reason":match reason {
-                Some(r @ ("end_turn" | "stop_sequence" | "tool_use" | "max_tokens" | "pause_turn" | "refusal")) => Some(r),
-                Some(_) => Some("other"), None => None,
-            },
-            "usage":attempt.done.as_ref().map(|d| usage(&d.usage)),
-            "response_started":attempt.committed, "done_received":attempt.done.is_some(),
-        }));
+        // A word of the engine's closed vocabulary, never a provider's text.
+        let reason = attempt.done.as_ref().and_then(|d| d.finish_reason);
+        self.finish(
+            "completed",
+            json!({
+                "finish_reason":reason,
+                "usage":attempt.done.as_ref().map(|d| usage(&d.usage)),
+                "response_started":attempt.committed, "done_received":attempt.done.is_some(),
+            }),
+        );
     }
 
     pub(super) fn recovery(&self, fields: Value) {
