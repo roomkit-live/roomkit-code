@@ -38,6 +38,7 @@ class App:
         env["TERM"] = "xterm-256color"
         self.process = subprocess.Popen(args, stdin=self.slave, stdout=self.slave, stderr=self.slave, start_new_session=True, env=env)
         self.output = bytearray()
+        self.peer = None
 
     def send(self, text):
         offset = len(self.output)
@@ -45,12 +46,21 @@ class App:
         return offset
 
     def wait(self, text, offset=0):
+        def visible():
+            return text.encode() in re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", self.output[offset:])
+        self.wait_until(visible, text)
+
+    def wait_until(self, predicate, description):
         deadline = time.monotonic() + 20
-        while text.encode() not in re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", self.output[offset:]):
+        while not predicate():
             if time.monotonic() > deadline or self.process.poll() is not None:
-                raise AssertionError(f"Missing {text}: {self.output[-5000:]!r}")
-            if select.select([self.master], [], [], 0.05)[0]:
-                self.output.extend(os.read(self.master, 65536))
+                raise AssertionError(f"Missing {description}: {self.output[-5000:]!r}")
+            # Each renderer must keep draining, including the one whose output
+            # is not currently being asserted. A macOS PTY can fill in one frame.
+            outputs = {app.master: app.output for app in (self, self.peer)
+                       if app is not None and app.process.poll() is None}
+            for master in select.select(list(outputs), [], [], 0.05)[0]:
+                outputs[master].extend(os.read(master, 65536))
 
     def shell(self, marker):
         offset = self.send(f"!printf '{marker}'\r")

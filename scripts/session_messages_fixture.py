@@ -82,6 +82,7 @@ def exercise(App):
         profile["base_url"] = f"http://127.0.0.1:{server.server_port}/v1"
         connection.write_text(json.dumps(saved))
         receiver = open_session("review", server)
+        sender.peer, receiver.peer = receiver, sender
         stack.callback(server.release.set)
         sender.wait("Message an open session", sender.send("@rev\r"))
         sender.wait("Message to review", sender.send("\r"))
@@ -89,13 +90,15 @@ def exercise(App):
         sender.wait("Message to @review", sender.send("@review CHECK_IDLE\r"))
         sender.wait("IDLE_RESPONSE")
         receiver.wait("Recipient finished.")
-        sender.send("@review RUN_UNTIL_MESSAGE\r")
-        assert server.waiting.wait(12), "recipient is not running"
+        offset = sender.send("@review RUN_UNTIL_MESSAGE\r")
+        sender.wait("Message to @review", offset)
+        receiver.wait_until(server.waiting.is_set, "the recipient to start its turn")
+        busy_start = len(receiver.output)
         sender.wait("Message to @review", sender.send("@review CHECK_BUSY\r"))
         receiver.wait("CHECK_BUSY")
         server.release.set()
         sender.wait("BUSY_RESPONSE")
-        receiver.wait("Recipient finished.")
+        receiver.wait("Recipient finished.", busy_start)
         offset = sender.send("@review CHECK_SILENT\r")
         receiver.wait("PRIVATE_LOCAL_ANSWER")
         sender.wait("Message: CHECK_SILENT", offset)
