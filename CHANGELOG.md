@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Two active beta executor tasks can exchange a question and reply when the
+  parent enables consultation on both. The parent sees the exchange, including
+  the machines and task IDs. Each task keeps its normal tool permissions.
+
 - Beta pool workers report their Git checkout in the inventory. A Rust test
   task can pin a full commit SHA and return the verified revision, platform,
   duration and Cargo result from a disposable checkout.

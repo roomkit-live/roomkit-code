@@ -432,7 +432,12 @@ fn add_pool_tools(
     root: &Path,
     resources: &Resources,
 ) {
-    use crate::remote::pool::{CARGO_TEST, CargoTest};
+    use crate::remote::pool::{CARGO_TEST, CargoTest, PeerTool};
+    if channel == crate::remote::AGENT {
+        for tool in [PeerTool::Ask, PeerTool::Answer] {
+            tools.push((tool.definition(), Arc::new(tool)));
+        }
+    }
     if channel == crate::remote::AGENT && profile.tools.iter().any(|name| name == CARGO_TEST) {
         let runner = CargoTest {
             workspace: root.into(),

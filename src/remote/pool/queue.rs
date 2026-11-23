@@ -28,6 +28,7 @@ struct Entry {
     title: String,
     req: Requirements,
     pinned: Option<String>,
+    peer: Option<super::consultation::PeerTurn>,
     reason: String,
     placement: Option<String>,
 }
@@ -76,6 +77,7 @@ impl Queue {
                 .filter(|c| !c.is_control())
                 .take(80)
                 .collect(),
+            peer: None,
             req,
             pinned,
             reason: "checking workers".into(),
@@ -90,6 +92,15 @@ impl Queue {
             id,
         }
     }
+    /// Only a placed turn can receive a question. Its token ends with its slot.
+    pub(super) fn peer(&self, room: &str) -> Option<super::consultation::PeerTurn> {
+        lock(&self.state)
+            .active
+            .values()
+            .find(|e| e.room == room && e.placement.is_some())
+            .and_then(|e| e.peer.clone())
+    }
+
     pub fn report(&self, room: &str) -> Vec<String> {
         let state = lock(&self.state);
         state
@@ -143,7 +154,9 @@ impl Ticket {
             } else if matched {
                 "insufficient available RAM"
             } else {
-                if e.req.test_commit.is_some() {
+                if e.req.consultation {
+                    "no online worker matches placement and the required consultation tools"
+                } else if e.req.test_commit.is_some() {
                     "no online worker matches the requested placement and supports cargo_test at a commit on this profile"
                 } else {
                     "no online worker matches OS, profile, labels or workspace"
@@ -153,18 +166,27 @@ impl Ticket {
         }
         ranked
     }
-    pub fn assign(&self, placement: &str) {
+    pub fn assign(&self, placement: &str, worker: &str, turn: &str) {
         if let Some(e) = lock(&self.queue.state).active.get_mut(&self.id) {
             e.placement = Some(placement.into());
+            e.peer = e.req.consultation.then(|| super::consultation::PeerTurn {
+                worker: worker.into(),
+                id: turn.into(),
+                closed: Default::default(),
+            });
         }
     }
 }
 impl Drop for Ticket {
     fn drop(&mut self) {
         let mut state = lock(&self.queue.state);
-        if let Some(entry) = state.active.remove(&self.id)
-            && entry.placement.is_some()
-        {
+        let Some(mut entry) = state.active.remove(&self.id) else {
+            return;
+        };
+        if let Some(peer) = entry.peer.take() {
+            peer.closed.cancel();
+        }
+        if entry.placement.is_some() {
             state.recent.push_back(entry);
             if state.recent.len() > 32 {
                 state.recent.pop_front();

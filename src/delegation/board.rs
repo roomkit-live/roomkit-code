@@ -215,6 +215,14 @@ impl Tasks {
         self.changes.send_replace(());
     }
 
+    /// Leave the consultation visible beside the parent conversation's placements.
+    pub(crate) async fn consultation(&self, parent: &str, task: &str, id: String, text: &str) {
+        self.lines
+            .write(parent, task, id, "task_consultation", text)
+            .await;
+        self.changes.send_replace(());
+    }
+
     /// The recent task notices in `room`.
     pub(crate) fn task_lines(&self, room: &str) -> Vec<roomkit_tui::protocol::Item> {
         self.lines.recent(room)
@@ -354,6 +362,21 @@ impl Tasks {
             .into_iter()
             .map(|(_, task)| task)
             .find(|task| task.id == id)
+    }
+
+    /// A running task on the same channel, handed out by the same parent.
+    pub(crate) fn running_peer(&self, caller: &Task, id: &str) -> Option<Task> {
+        crate::sync::lock(&self.board)
+            .tasks
+            .iter()
+            .find(|t| {
+                t.id == id
+                    && t.id != caller.id
+                    && t.parent == caller.parent
+                    && t.agent_id == caller.agent_id
+                    && t.running()
+            })
+            .cloned()
     }
 
     /// The task that runs in `room`, if one does.
@@ -499,6 +522,29 @@ mod tests {
     fn ended(mut task: Task, outcome: Outcome) -> Task {
         task.ended = Some((Duration::from_millis(58_400), outcome));
         task
+    }
+
+    #[test]
+    fn consultation_only_reaches_a_running_sibling_on_the_same_channel() {
+        let tasks = Tasks::default();
+        let caller = task("caller", "parent", "caller-room");
+        let mut other_agent = task("local", "parent", "local-room");
+        other_agent.agent_id = "other-agent".into();
+        for task in [
+            caller.clone(),
+            task("peer", "parent", "peer-room"),
+            task("unrelated", "another-parent", "other-room"),
+            task("nested", "peer-room", "nested-room"),
+            other_agent,
+        ] {
+            tasks.started(task);
+        }
+        let peer = tasks.running_peer(&caller, "peer").unwrap();
+        for id in ["caller", "nested", "unrelated", "local", "unknown"] {
+            assert!(tasks.running_peer(&caller, id).is_none());
+        }
+        tasks.ended(ended(peer, Outcome::Completed));
+        assert!(tasks.running_peer(&caller, "peer").is_none());
     }
 
     #[tokio::test]

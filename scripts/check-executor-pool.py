@@ -16,10 +16,15 @@ import threading
 import time
 import uuid
 
+import executor_consultation_fixture as peers
 from executor_fixture import StreamingModel, child, redis, tool
 from fixture_http import LoopbackHTTPServer
 
 TASKS = {
+    peers.AUTHOR: {"labels": {"role": "general"}, "consultation": True},
+    peers.ENDING: {"labels": {"role": "general"}, "consultation": True},
+    peers.UNANSWERED: {"labels": {"role": "review"}, "consultation": True},
+    peers.REVIEW: {"labels": {"role": "review"}, "consultation": True},
     "inspect-pool-from-worker": {"labels": {"role": "review"}},
     "bootstrap-task": {"labels": {"role": "general"}},
     "review-one": {"labels": {"role": "review"}, "os": "macos" if sys.platform == "darwin" else "linux",
@@ -75,6 +80,10 @@ class Model(StreamingModel):
                     self.server.ids[self.server.submitting] = task_id.group()
                 return {"content": "Submitted " + self.server.submitting + "."}
             if "[Background task from remote-linux " in content:
+                if "Peer ended while I was waiting." in content:
+                    return {"content": "Unanswered consultation returned to the parent."}
+                if "Consultation finished." in content:
+                    return {"content": "Consultation returned to the parent."}
                 for task in self.server.rust:
                     if task + " reported." in content:
                         if task.startswith("rust-pin-") and "exit_code=" in self.server.rust[task]:
@@ -94,11 +103,16 @@ class Model(StreamingModel):
             if name is None:
                 return {"content": "No task requested."}
             self.server.submitting = name
-            return tool("delegate_task", "submit", agent="remote-linux", task=name,
-                        context={"executor": TASKS[name]})
+            context = {"executor": TASKS[name]}
+            if name in (peers.REVIEW, peers.UNANSWERED):
+                target = peers.AUTHOR if name == peers.REVIEW else peers.ENDING
+                context["peer_task_id"] = self.server.ids[target]
+            return tool("delegate_task", "submit", agent="remote-linux", task=name, context=context)
 
         transcript = json.dumps(request["messages"])
         name = next((key for key in TASKS if key in transcript), "unknown")
+        if name in (peers.AUTHOR, peers.REVIEW, peers.ENDING, peers.UNANSWERED):
+            return self.server.peer.reply(name, request["messages"])
         if "inspect-pool-from-worker" in transcript:
             return inventory_call(request)
         if name.startswith("rust-"):
@@ -311,6 +325,8 @@ def model_server(stack):
     server = stack.enter_context(LoopbackHTTPServer(("127.0.0.1", 0), Model))
     server.started, server.finished, server.ids, server.calls = {}, {}, {}, {}
     server.rust = {}
+    server.peer = peers.Consultation()
+    stack.callback(server.peer.release.set)
     server.release = threading.Event()
     server.worker_saw_inventory = threading.Event()
     server.markers = {name: uuid.uuid4().hex for name in ("macbook", "linux", "spare")}
@@ -413,6 +429,12 @@ def main():
         print("PASS  Owner and delegated worker can inspect the same live pool as /executors.", flush=True)
         scenario(term, server, lambda: worker("spare", "spare"))
         fresh = Terminal(stack, [*owner_args, "--session", "rust-tests"], owner_env)
+        reproduction = "cargo test repro_" + uuid.uuid4().hex
+        (root / "linux" / "reproduction.txt").write_text(reproduction)
+        peers.exercise(fresh, server, reproduction)
+        assert not (root / "macbook" / "peer-output.txt").exists()
+        peers.peer_ends(fresh, server)
+        peers.check_history(next((root / "owner-state").glob("projects/*/history.sqlite3")), reproduction)
         rust_scenario(fresh, server, root)
         save_pool(fresh, [b"", b"", b"redis://127.0.0.1:1/"],
                   ("Redis did not answer", "Cannot reach the executor pool in Redis"))

@@ -1,5 +1,7 @@
 //! Resource-based placement for the experimental Redis executor pool.
 mod cargo_test;
+mod consultation;
+pub(crate) use consultation::{ANSWER_PEER, ASK_PEER, PeerTool};
 mod coordinator;
 pub(crate) use cargo_test::{CARGO_TEST, CargoTest};
 pub(crate) use coordinator::Coordinator;
@@ -48,6 +50,7 @@ pub(crate) struct Requirements {
     pub(crate) profile: Option<String>,
     labels: BTreeMap<String, String>,
     min_ram_mib: u64,
+    consultation: bool,
     pub(crate) test_commit: Option<String>,
 }
 impl Requirements {
@@ -57,6 +60,12 @@ impl Requirements {
     ) -> Result<Self, String> {
         if pooled {
             return Self::parse(context);
+        }
+        if context
+            .and_then(|v| v.pointer("/executor/consultation"))
+            .is_some_and(|v| v != &serde_json::Value::Bool(false))
+        {
+            return Err("Task consultation requires the executor pool".into());
         }
         if context
             .and_then(|v| v.pointer("/executor/test_commit"))
@@ -94,11 +103,17 @@ impl Requirements {
         }
         Ok(req)
     }
-    pub(crate) fn check_test_call(
+    pub(crate) fn check_call(
         &self,
         name: &str,
         args: &roomkit::model::Metadata,
     ) -> Result<(), String> {
+        if matches!(name, ASK_PEER | ANSWER_PEER) {
+            return self
+                .consultation
+                .then_some(())
+                .ok_or_else(|| "The parent must enable consultation for this task".into());
+        }
         let Some(sha) = &self.test_commit else {
             return Ok(());
         };
@@ -112,17 +127,18 @@ impl Requirements {
     }
 
     fn matches(&self, w: &Worker) -> bool {
-        let tests = self.test_commit.is_none()
-            || (w.commit_tests
-                && w.profile(self.profile.as_deref())
-                    .is_some_and(|p| p.tools.iter().any(|name| name == CARGO_TEST)));
-        tests
-            && self.os.as_ref().is_none_or(|os| os == &w.os)
-            && self
-                .profile
-                .as_ref()
-                .is_none_or(|id| w.profiles.iter().any(|p| &p.id == id))
+        self.os.as_ref().is_none_or(|os| os == &w.os)
             && self.labels.iter().all(|(k, v)| w.labels.get(k) == Some(v))
+            && self.accepts_profile(w)
+    }
+
+    fn accepts_profile(&self, w: &Worker) -> bool {
+        let Some(profile) = w.profile(self.profile.as_deref()) else {
+            return self.profile.is_none() && self.test_commit.is_none() && !self.consultation;
+        };
+        let offers = |name: &str| profile.tools.iter().any(|tool| tool == name);
+        (self.test_commit.is_none() || (w.commit_tests && offers(CARGO_TEST)))
+            && (!self.consultation || (offers(ASK_PEER) && offers(ANSWER_PEER)))
     }
 }
 pub(crate) struct Scheduler {
@@ -134,6 +150,7 @@ pub(crate) struct Scheduler {
     redis: roomkit::RedisTurnBackend,
     registry: Registry,
     queue: Arc<queue::Queue>,
+    consultations: consultation::Consultations,
     closed: tokio_util::sync::CancellationToken,
 }
 impl Scheduler {
@@ -150,6 +167,7 @@ impl Scheduler {
             registry: Registry::new(group, &address)?,
             address,
             queue: Arc::default(),
+            consultations: Default::default(),
             closed: Default::default(),
             attending: Default::default(),
             turns: Default::default(),

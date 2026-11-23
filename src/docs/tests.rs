@@ -95,7 +95,11 @@ fn the_documents_the_prompt_names_are_in_the_guide() {
     let shipped = topics(GUIDE);
     let files = names(&shipped);
     let prompt = include_str!("../agent/coding-agent.txt");
-    for id in ["skills.md", "experimental-executor-pool.md"] {
+    for id in [
+        "skills.md",
+        "experimental-executor-pool.md",
+        "developing-across-executor-workspaces.md",
+    ] {
         assert!(files.contains(&id), "{id}");
         assert!(prompt.contains(&format!("document_id {id}")), "{id}");
     }

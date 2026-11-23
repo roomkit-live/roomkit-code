@@ -177,13 +177,23 @@ async fn run(
 }
 
 pub(crate) fn permits(tool: &str, pooled: bool) -> bool {
-    TOOLS.contains(&tool) || (pooled && matches!(tool, pool::LIST_EXECUTORS | pool::CARGO_TEST))
+    TOOLS.contains(&tool)
+        || (pooled
+            && matches!(
+                tool,
+                pool::LIST_EXECUTORS | pool::CARGO_TEST | pool::ASK_PEER | pool::ANSWER_PEER
+            ))
 }
 
 async fn authorize(event: roomkit::ToolCallEvent, pooled: bool) -> crate::permissions::Verdict {
     use crate::permissions::{allow, block};
     if !permits(&event.name, pooled) {
         return block("This tool is unavailable on the remote worker");
+    }
+    // The owner applies the same permission gate inside its consultation verb,
+    // immediately before the exchange. Running it here too would ask twice.
+    if matches!(event.name.as_str(), pool::ASK_PEER | pool::ANSWER_PEER) {
+        return allow();
     }
     let Some(host) = roomkit::current_turn_host() else {
         return block("No room owner is available to authorize this tool");

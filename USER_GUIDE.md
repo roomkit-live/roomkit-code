@@ -713,17 +713,41 @@ worker. A label describes a worker and does not install software or add tools.
 To exercise overlapping tasks locally with two workers and scripted models, run
 `python3 scripts/check-executor-pool.py` after `cargo build --locked`.
 
-### Developing across executor workspaces
+For peer questions and tests at a shared Git revision, see
+[Developing across executor workspaces](#developing-across-executor-workspaces).
+
+## Developing across executor workspaces
 
 Use the parent conversation to coordinate the agents on different machines.
 Each agent receives its task and the context the parent supplies. Its result
 comes back to the parent, which can pass a finding to the next agent. For
 example, ask a reviewer on macOS to propose test cases in Plan mode. Once you
 choose a case, ask the parent in Ask mode to send the agreed case to the Linux
-coding profile. A proposal by itself starts no tests. The beta has no direct
-worker-to-worker messaging or nested remote delegation. You can open an active
-task in `/tasks` and clarify its instructions yourself. Messages exchanged
-after the task has finished stay in its conversation.
+coding profile. A proposal by itself starts no tests. You can open an active task in
+`/tasks` and clarify its instructions yourself.
+
+Two running executor tasks with the same parent can also consult each other
+through the coordinator (beta). For example, ask “Have Linux investigate the
+failure. While it is working, have the macOS reviewer ask Linux which command
+reproduces it.” The parent sets `"consultation": true` inside
+`context.executor` on both tasks. It delegates the investigation first, then
+passes the returned task ID in the reviewer's task or context. Choose profiles
+advertising `ask_peer` and `answer_peer` and enough slots for both tasks to run.
+
+The reviewer calls `ask_peer` with the Linux `task_id` and a `question`. Linux
+reads the question at its next model step and calls `answer_peer` with the
+supplied `question_id` and its `answer`. The reviewer receives the answer as
+its tool result. The parent conversation shows the machines, task IDs,
+question and reply as terminal notices. The reviewer can include the answer in
+its normal report to the parent agent. Each turn takes part in one open
+consultation at a time.
+The requester waits up to 60 seconds. A queued or finished peer cannot answer.
+For sequential work, the parent can pass a completed task's findings to the
+next one.
+
+Consultation is available in Plan mode. A peer reply supplies information.
+Any subsequent test or edit goes through the task's usual permission checks.
+Delegating new tasks remains the parent's responsibility.
 
 Use the following workflow to compare test results on two machines.
 
@@ -756,7 +780,7 @@ Use the following workflow to compare test results on two machines.
    for the same SHA and check the exit status of each run.
 
 A commit-test assignment allows Cargo at the pinned SHA, pool inventory and
-stored-result reads. The clone is temporary and each Cargo call starts fresh.
+stored-result reads. The parent can also enable consultation on that assignment. The clone is temporary and each Cargo call starts fresh.
 Git preparation uses objects already present on the worker. Projects needing
 submodules, Git LFS content or uncommitted inputs should use a separately
 prepared checkout. Tests and build scripts run with the worker user's

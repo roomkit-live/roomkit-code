@@ -128,13 +128,36 @@ fn commit_placement_requires_support_on_the_selected_profile() -> crate::Result<
     assert!(req.matches(&w));
     w.profiles[0].tools.clear();
     assert!(!req.matches(&w));
+    assert!(req.check_call(CARGO_TEST, &Default::default()).is_err());
+    let args = [("commit".into(), sha.into())].into_iter().collect();
+    assert!(req.check_call(CARGO_TEST, &args).is_ok());
+    assert!(req.check_call("edit", &args).is_err());
+    assert!(Requirements::parse(Some(&json!({"executor":{"test_commit":"main"}}))).is_err());
+    Ok(())
+}
+
+#[test]
+fn consultation_needs_an_opted_in_task_and_a_profile_that_can_reply() -> crate::Result<()> {
+    use crate::remote::pool::{ANSWER_PEER, ASK_PEER, Requirements};
+    let context = serde_json::json!({"executor":{"consultation":true}});
+    assert!(Requirements::for_remote_task(Some(&context), false).is_err());
+    let req = Requirements::for_remote_task(Some(&context), true)?;
     assert!(
-        req.check_test_call(CARGO_TEST, &Default::default())
+        Requirements::default()
+            .check_call(ASK_PEER, &Default::default())
             .is_err()
     );
-    let args = [("commit".into(), sha.into())].into_iter().collect();
-    assert!(req.check_test_call(CARGO_TEST, &args).is_ok());
-    assert!(req.check_test_call("edit", &args).is_err());
-    assert!(Requirements::parse(Some(&json!({"executor":{"test_commit":"main"}}))).is_err());
+    assert!(req.check_call(ANSWER_PEER, &Default::default()).is_ok());
+    let mut w = worker("worker".into()).worker;
+    assert!(!req.matches(&w));
+    w.profiles.push(WorkerProfile {
+        id: "reviewer".into(),
+        label: "Reviewer".into(),
+        model: "model".into(),
+        tools: vec![ASK_PEER.into()],
+    });
+    assert!(!req.matches(&w));
+    w.profiles[0].tools.push(ANSWER_PEER.into());
+    assert!(req.matches(&w));
     Ok(())
 }

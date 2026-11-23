@@ -44,7 +44,7 @@ impl Scheduler {
             () = lease.lost.cancelled() => return Err(lost_slot()),
             result = self.redis.submit(request) => result?,
         };
-        ticket.assign(&placement);
+        ticket.assign(&placement, &worker.name, &link.request().turn_id);
         self.announce(link.request(), &placement).await;
         Ok(Arc::new(ScheduledLink {
             inner: link,
