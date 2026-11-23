@@ -35,6 +35,13 @@ pub(in crate::application) fn install(kit: &RoomKit<SqliteStore>, gate: Gate) ->
                     "Authorization requires a permitted tool in a delegated worker room".into(),
                 );
             }
+            let req = remote::pool::Requirements::for_remote_task(
+                room.metadata.get("task_context"),
+                gate.profiles.active_pool().is_some(),
+            )?;
+            if let Err(reason) = req.check_test_call(&request.name, &request.arguments) {
+                return Ok(Value::String(reason));
+            }
             let mut event = ToolCallEvent::new(
                 channel,
                 ChannelType::AI,

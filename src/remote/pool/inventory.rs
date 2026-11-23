@@ -44,6 +44,12 @@ impl Inventory {
         let mut lines = Vec::new();
         for row in rows {
             lines.push(describe(&row));
+            if let Some(checkout) = &row.worker.checkout {
+                lines.push(format!("  Git {}", checkout.display()));
+            }
+            if row.worker.commit_tests {
+                lines.push("  Commit tests supported on profiles offering cargo_test".into());
+            }
             for (i, p) in row.worker.profiles.iter().enumerate() {
                 let default = if i == 0 { " (default)" } else { "" };
                 lines.push(format!(
@@ -64,7 +70,7 @@ impl Tool for Inventory {
         AiTool {
             name: LIST_EXECUTORS.into(),
             description: "List the worker machines registered in this beta executor pool, including \
-                their working directory, RoomKit Code version, online status, execution and host OS, exposed profile IDs, models, tools, resources, labels \
+                their working directory, Git checkout when reported, RoomKit Code version, online status, execution and host OS, exposed profile IDs, models, tools, resources, labels \
                 and free slots. Use this to answer questions about available executors."
                 .into(),
             parameters: serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),

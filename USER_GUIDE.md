@@ -732,29 +732,40 @@ Use the following workflow to compare test results on two machines.
    Copy the full SHA from `git rev-parse HEAD` into the parent conversation.
    A branch can move between two test runs. Uncommitted changes on the
    developer's machine stay there.
-2. **Prepare each worker.** Open its **Workspace** path from `/executors` in a
-   terminal on that machine. Check that the worker is idle, the checkout is
-   dedicated to this run, and `git status --short` is empty. Set `TARGET_SHA`
-   to the SHA from step 1. This example uses the branch `feature/parser-fix`.
+2. **Make the commit available on each worker.** Open the worker details in
+   `/executors`. A Git workspace reports the repository path, branch, HEAD
+   and clean or dirty status. The sample refreshes about every 30 seconds.
+   In each worker repository, fetch the feature branch if necessary. For
+   example, run `git fetch origin feature/parser-fix`. The worker can stay
+   on its current branch with local edits.
+3. **Delegate one test per platform.** Select a profile that offers
+   `cargo_test` on a worker that supports commit tests. Ask the parent
+   “Test commit <full SHA> on Linux and macOS and compare the results.”
+   The parent submits each task with `context.executor.test_commit` set to
+   the same full SHA, plus `os` and any required profile or labels.
+   The worker calls `cargo_test` with that SHA as `commit` and an optional
+   workspace-relative crate directory as `cwd`. The parent checks the
+   requested SHA before authorizing the call. Plan blocks it, Ask presents
+   it for approval, and Yolo runs it directly.
+4. **Compare the evidence.** Each call creates a private local clone that
+   borrows the worker repository's Git objects, checks out the commit
+   detached, verifies HEAD and runs Cargo. The report includes the verified
+   SHA, execution OS and architecture, duration in milliseconds and Cargo
+   result. The placement identifies the worker, profile and model. A
+   missing commit yields an error before Cargo starts. Compare the reports
+   for the same SHA and check the exit status of each run.
 
-   ```sh
-   git fetch origin feature/parser-fix &&
-     git switch --detach "$TARGET_SHA" &&
-     git rev-parse HEAD
-   ```
+A commit-test assignment allows Cargo at the pinned SHA, pool inventory and
+stored-result reads. The clone is temporary and each Cargo call starts fresh.
+Git preparation uses objects already present on the worker. Projects needing
+submodules, Git LFS content or uncommitted inputs should use a separately
+prepared checkout. Tests and build scripts run with the worker user's
+permissions and can use its installed toolchain and dependency caches.
 
-   Verify the printed SHA on each machine before delegating. If the checkout
-   contains work in progress, leave it in place. After fetching the branch,
-   `git worktree add --detach ../parser-validation "$TARGET_SHA"` creates a
-   separate checkout. To use it, configure and start a worker **in that
-   directory**, give it a unique worker name and placement label, and select
-   that label in the task. An already running worker keeps its original path.
-3. **Delegate and compare.** Give the parent the verified SHA, test command
-   and expected outcome. For example, request one `cargo_test` run on Linux
-   and one on macOS with profiles that expose that tool. Keep each checkout
-   at that revision throughout the run. Ask the parent to collect the worker,
-   revision, exit code and failing test for each result. Git preparation and
-   revision verification are manual in this beta.
+For file review at a specific revision, prepare a dedicated checkout with
+`git worktree add --detach ../review <full-sha>`, start a worker in it with
+a unique label and select that label. Ordinary file tools use the worker's
+configured workspace.
 
 For a task that writes code, give each concurrent writer its own writable
 branch and checkout. From a terminal in the worker's checkout, inspect and

@@ -235,6 +235,16 @@ fn resource_lines(row: &Row) -> Vec<String> {
             m.available_mib as f64 / 1024.0
         ),
     ];
+    if let Some(checkout) = &w.checkout {
+        body.push(format!("Git        {}", checkout.display()));
+    }
+    if w.commit_tests
+        && w.profiles
+            .iter()
+            .any(|p| p.tools.iter().any(|t| t == super::CARGO_TEST))
+    {
+        body.push("Tests      Isolated Git commit available with cargo_test".into());
+    }
     if !labels.is_empty() {
         body.push(format!("Labels     {labels}"));
     }

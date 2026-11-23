@@ -53,7 +53,10 @@ pub(crate) async fn advertise(
 ) -> Result<Presence> {
     let registry = inventory.0.clone();
     let mut sampler = Sampler::default();
+    let workspace = workspace.to_owned();
     let mut worker = Worker {
+        checkout: super::revision::Checkout::sample(&workspace).await,
+        commit_tests: true,
         name: args.name()?,
         workspace: Some(workspace.display().to_string()),
         version: Some(crate::updates::CURRENT.into()),
@@ -74,8 +77,13 @@ pub(crate) async fn advertise(
     let instance = worker.instance.clone();
     let registry_copy = registry.clone();
     let heartbeat = tokio::spawn(async move {
+        let mut sampled = tokio::time::Instant::now();
         loop {
             sleep(Duration::from_secs(2)).await;
+            if sampled.elapsed() >= Duration::from_secs(30) {
+                worker.checkout = super::revision::Checkout::sample(&workspace).await;
+                sampled = tokio::time::Instant::now();
+            }
             worker.metrics = sampler.read().await;
             if matches!(registry.publish(&worker).await, Ok(false)) {
                 return format!("Worker name {} was taken by another instance", worker.name);

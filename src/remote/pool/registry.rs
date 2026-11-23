@@ -73,6 +73,10 @@ pub(super) struct Worker {
     #[serde(default)]
     pub workspace: Option<String>,
     #[serde(default)]
+    pub checkout: Option<super::revision::Checkout>,
+    #[serde(default)]
+    pub commit_tests: bool,
+    #[serde(default)]
     pub version: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
@@ -94,11 +98,14 @@ impl Worker {
         }
     }
 
-    pub(super) fn placement(&self, requested: Option<&str>) -> String {
-        let profile = match requested {
+    pub(super) fn profile(&self, requested: Option<&str>) -> Option<&WorkerProfile> {
+        match requested {
             Some(id) => self.profiles.iter().find(|p| p.id == id),
             None => self.profiles.first(),
-        };
+        }
+    }
+    pub(super) fn placement(&self, requested: Option<&str>) -> String {
+        let profile = self.profile(requested);
         let mut text = self.name.clone();
         if let Some(p) = profile {
             text.push_str(&format!(" · profile {} · model {}", p.id, p.model));

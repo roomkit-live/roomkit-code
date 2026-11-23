@@ -77,6 +77,10 @@ class Model(StreamingModel):
             if "[Background task from remote-linux " in content:
                 for task in self.server.rust:
                     if task + " reported." in content:
+                        if task.startswith("rust-pin-") and "exit_code=" in self.server.rust[task]:
+                            evidence = [line for line in self.server.rust[task].splitlines()
+                                        if line.startswith(("commit=", "platform=", "duration_ms=", "exit_code="))]
+                            assert all(line in content for line in evidence)
                         return {"content": task + " report received."}
                 return {"content": "Background report received."}
             content = next((str(m.get("content", "")) for m in reversed(request["messages"])
@@ -100,10 +104,16 @@ class Model(StreamingModel):
         if name.startswith("rust-"):
             if last["role"] == "tool":
                 self.server.rust[name] = content
+                if name.startswith("rust-pin-"):
+                    return {"content": name + " reported.\n" + content}
                 return {"content": name + " reported."}
             if name == "rust-diff":
                 return tool("diff", "review-change", old_path="sample/before.rs", new_path="sample/src/lib.rs")
-            return tool("cargo_test", "execute-test", cwd="sample")
+            arguments = {"cwd": "sample"}
+            if name.startswith("rust-pin-") and name != "rust-pin-omitted":
+                arguments["commit"] = TASKS[name]["test_commit"]
+                assert arguments["commit"] in transcript
+            return tool("cargo_test", "execute-test", **arguments)
         if last["role"] != "tool":
             self.server.started[name] = request["model"]
             if name in ("review-one", "review-two"):
@@ -258,10 +268,43 @@ def rust_scenario(term, server, root):
         report = result(task, b"\x19" if code else None)
         assert f"exit_code={code}" in report.splitlines(), report
         assert "expected_answer" in report and verdict in report, report
+    commit_scenario(term, result, crate.parent, source)
     diff = result("rust-diff")
     assert "41" in diff and "42" in diff, diff
     term.send("/executors tasks", "assigned to macbook · profile reviewer · model review-model")
     print("PASS  Plan blocked Cargo, Ask handled refusal and approval, and the review followed two real test runs.", flush=True)
+
+
+def commit_scenario(term, result, workspace, source):
+    def git(*args):
+        return subprocess.check_output(["git", "-C", workspace, "-c", "user.name=Test",
+                                        "-c", "user.email=test@example.org",
+                                        "-c", "commit.gpgSign=false", "-c", "core.hooksPath=/dev/null",
+                                        *args], text=True).strip()
+
+    git("init", "-b", "feature")
+    git("add", "sample/src/lib.rs", "sample/Cargo.toml")
+    git("commit", "-m", "passing tests")
+    sha = git("rev-parse", "HEAD")
+    git("switch", "-c", "ongoing")
+    git("commit", "--allow-empty", "-m", "unrelated work")
+    passing = source.read_text()
+    source.write_text("compile_error!(\"local work in progress\");")
+    before = git("status", "--porcelain")
+    for name, commit in [("rust-pin-target", sha), ("rust-pin-omitted", sha),
+                         ("rust-pin-missing", "0" * len(sha))]:
+        TASKS[name] = dict(TASKS["rust-passing"], test_commit=commit)
+    term.send("/mode ask", "[Ask]")
+    report = result("rust-pin-target", b"\x19")
+    term.send("/mode yolo", "[Yolo]")
+    assert f"commit={sha}" in report.splitlines() and "exit_code=0" in report.splitlines(), report
+    assert "duration_ms=" in report and "expected_answer" in report, report
+    assert "requires cargo_test with commit" in result("rust-pin-omitted")
+    assert "unavailable in the worker repository" in result("rust-pin-missing")
+    assert git("branch", "--show-current") == "ongoing" and git("rev-parse", "HEAD") != sha
+    assert before == git("status", "--porcelain") and "local work in progress" in source.read_text()
+    source.write_text(passing)
+    print("PASS  Pinned Cargo used a private checkout, refused a missing pin and reported an unavailable SHA.", flush=True)
 
 
 def model_server(stack):

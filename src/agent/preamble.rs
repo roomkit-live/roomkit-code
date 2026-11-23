@@ -480,6 +480,7 @@ mod tests {
         let all: Vec<AiTool> = crate::profiles::model::TOOLS
             .iter()
             .chain(&crate::permissions::MODE_TOOLS)
+            .chain([&crate::remote::pool::CARGO_TEST])
             .map(|name| tool(name))
             .collect();
         let (bare, full) = (
@@ -492,6 +493,7 @@ mod tests {
             "RoomKit Code's own user guide",
             "document_id experimental-executor-pool.md",
             "Web search uses Exa",
+            "context.executor.test_commit",
         ] {
             assert!(!bare.contains(text) && full.contains(text), "{text}");
         }
@@ -513,12 +515,13 @@ mod tests {
         let known: Vec<&str> = crate::profiles::model::TOOLS
             .iter()
             .chain(&crate::permissions::MODE_TOOLS)
+            .chain([&crate::remote::pool::CARGO_TEST])
             .copied()
             .collect();
         let tagged: Vec<(&str, &str)> = INSTRUCTIONS.split("\n\n").filter_map(tagged).collect();
         // Only a paragraph's opening is read as its tag.
         assert_eq!(tagged.len(), INSTRUCTIONS.matches("{with ").count());
-        assert_eq!(tagged.len(), 9);
+        assert_eq!(tagged.len(), 10);
         for name in tagged.iter().flat_map(|(names, _)| names.split(' ')) {
             assert!(known.contains(&name) || name == "mcp__*", "{name}");
         }

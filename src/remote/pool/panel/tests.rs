@@ -11,6 +11,8 @@ fn worker(name: String) -> Row {
             arch: "aarch64".into(),
             host_os: None,
             workspace: None,
+            checkout: None,
+            commit_tests: false,
             version: None,
             model: None,
             profiles: vec![],
@@ -86,7 +88,10 @@ fn a_legacy_advertisement_keeps_its_unknown_workspace_and_version() -> crate::Re
     let object = legacy.as_object_mut().ok_or("missing worker fields")?;
     object.remove("workspace");
     object.remove("version");
+    object.remove("checkout");
+    object.remove("commit_tests");
     row.worker = serde_json::from_value(legacy)?;
+    assert!(row.worker.checkout.is_none() && !row.worker.commit_tests);
     let details = resource_lines(&row);
     assert!(
         details
@@ -101,5 +106,35 @@ fn a_legacy_advertisement_keeps_its_unknown_workspace_and_version() -> crate::Re
     assert_eq!(worker_choice(&row).label, "laptop · Online");
     row.worker.workspace = Some("/tmp/project\ncopy".into());
     assert_eq!(row.worker.workspace_display(), "/tmp/project\\ncopy");
+    Ok(())
+}
+
+#[test]
+fn commit_placement_requires_support_on_the_selected_profile() -> crate::Result<()> {
+    use crate::remote::pool::{CARGO_TEST, Requirements};
+    use serde_json::json;
+    let mut w = worker("machine".into()).worker;
+    let sha = "a".repeat(40);
+    let context = json!({"executor": {"test_commit": sha}});
+    let req = Requirements::parse(Some(&context))?;
+    w.profiles.push(WorkerProfile {
+        id: "code".into(),
+        label: "Code".into(),
+        model: "model".into(),
+        tools: vec![CARGO_TEST.into()],
+    });
+    assert!(!req.matches(&w));
+    w.commit_tests = true;
+    assert!(req.matches(&w));
+    w.profiles[0].tools.clear();
+    assert!(!req.matches(&w));
+    assert!(
+        req.check_test_call(CARGO_TEST, &Default::default())
+            .is_err()
+    );
+    let args = [("commit".into(), sha.into())].into_iter().collect();
+    assert!(req.check_test_call(CARGO_TEST, &args).is_ok());
+    assert!(req.check_test_call("edit", &args).is_err());
+    assert!(Requirements::parse(Some(&json!({"executor":{"test_commit":"main"}}))).is_err());
     Ok(())
 }

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Beta pool workers report their Git checkout in the inventory. A Rust test
+  task can pin a full commit SHA and return the verified revision, platform,
+  duration and Cargo result from a disposable checkout.
+
 - The executor guide explains how to coordinate coding and review tasks through
   the parent conversation and test the same Git commit on multiple machines.
 

@@ -11,6 +11,7 @@ mod panel;
 pub(crate) use panel::panel;
 mod queue;
 mod registry;
+mod revision;
 pub(crate) mod settings;
 mod transport;
 mod worker;
@@ -47,14 +48,37 @@ pub(crate) struct Requirements {
     pub(crate) profile: Option<String>,
     labels: BTreeMap<String, String>,
     min_ram_mib: u64,
+    pub(crate) test_commit: Option<String>,
 }
 impl Requirements {
+    pub(crate) fn for_remote_task(
+        context: Option<&serde_json::Value>,
+        pooled: bool,
+    ) -> Result<Self, String> {
+        if pooled {
+            return Self::parse(context);
+        }
+        if context
+            .and_then(|v| v.pointer("/executor/test_commit"))
+            .is_some()
+        {
+            return Err("A commit-test assignment requires the executor pool".into());
+        }
+        Ok(Self::default())
+    }
     pub(crate) fn parse(context: Option<&serde_json::Value>) -> Result<Self, String> {
         let Some(value) = context.and_then(|v| v.get("executor")) else {
             return Ok(Self::default());
         };
         let req: Self = serde_json::from_value(value.clone())
             .map_err(|e| format!("Invalid executor requirements: {e}"))?;
+        if req
+            .test_commit
+            .as_deref()
+            .is_some_and(|sha| !revision::full_sha(sha))
+        {
+            return Err("test_commit requires a full Git commit SHA".into());
+        }
         if let Some(profile) = &req.profile {
             crate::profiles::profile_id(profile)?;
         }
@@ -70,8 +94,30 @@ impl Requirements {
         }
         Ok(req)
     }
+    pub(crate) fn check_test_call(
+        &self,
+        name: &str,
+        args: &roomkit::model::Metadata,
+    ) -> Result<(), String> {
+        let Some(sha) = &self.test_commit else {
+            return Ok(());
+        };
+        let asked = args.get("commit").and_then(|v| v.as_str());
+        match name {
+            CARGO_TEST if asked.is_some_and(|id| id.eq_ignore_ascii_case(sha)) => Ok(()),
+            CARGO_TEST => Err(format!("This task requires cargo_test with commit {sha}")),
+            LIST_EXECUTORS | "read_stored_result" => Ok(()),
+            _ => Err("This task is limited to testing a Git commit. Its working files are private to cargo_test.".into())
+        }
+    }
+
     fn matches(&self, w: &Worker) -> bool {
-        self.os.as_ref().is_none_or(|os| os == &w.os)
+        let tests = self.test_commit.is_none()
+            || (w.commit_tests
+                && w.profile(self.profile.as_deref())
+                    .is_some_and(|p| p.tools.iter().any(|name| name == CARGO_TEST)));
+        tests
+            && self.os.as_ref().is_none_or(|os| os == &w.os)
             && self
                 .profile
                 .as_ref()
