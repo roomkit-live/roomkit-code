@@ -252,6 +252,21 @@ permissions. Joining a group advertises only the named starting conversation.
 Other conversations opened with `/new` or `/resume` stay local. Use `/message`
 to choose an exact live address when several sessions have the same name.
 
+You can also ask your agent, in ordinary chat, “Ask the review session which
+commit it has checked out. While it checks, read our local revision.”
+Agents in the group discover the other open sessions with `list_sessions`.
+The asking agent calls `send_message(to, text)` and gets a message ID as soon
+as the peer accepts it. It can run other tools or finish its turn. When the
+peer calls `send_message(reply_to, text)`, the answer returns to the agent that
+asked. An active agent receives it in its current turn. An idle agent starts a
+turn to continue the task. A delivery notice follows the same route. An answer
+alone sends no acknowledgement back. Replies to messages you type with `@review`
+appear in your terminal without waking your agent.
+
+Agent-initiated messages use the named sessions that joined the same group,
+including two terminals on one machine. A session name must be unique, or the
+agent can copy the exact live address returned by `list_sessions`.
+
 Keep both terminals open until the reply arrives. Each launch gets a fresh
 address. To rejoin after closing, pass `--session-group` again. A lost
 acknowledgement leaves delivery uncertain. Check the recipient's history before

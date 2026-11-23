@@ -33,6 +33,13 @@ fn digest(s: &str, len: usize) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(super) struct AgentRequest {
+    pub agent: ChannelId,
+    pub turn: String,
+    pub question: String,
+}
+
 #[derive(Clone)]
 pub(super) struct Network {
     backend: RedisTurnBackend,
@@ -96,7 +103,7 @@ impl Network {
         if self.channel != route.to {
             return Err("The receiving session address has expired".into());
         }
-        self.send(kit, &route.from, id, mail).await?;
+        self.transmit(&route.from, id, mail).await?;
         if let Kind::Reply(original) = &mail.kind {
             kit.store()
                 .set_private_state(
@@ -136,20 +143,41 @@ impl Network {
         Ok(result)
     }
 
-    pub async fn send(&self, kit: &Kit, to: &ChannelId, id: &EventId, mail: &Mail) -> Result<()> {
+    pub async fn request(
+        &self,
+        kit: &Kit,
+        to: &ChannelId,
+        id: &EventId,
+        mail: &Mail,
+        request: Option<AgentRequest>,
+    ) -> Result<()> {
+        let mut origin = roomkit::model::Metadata::new();
+        origin.insert("peer".into(), json!(to));
+        if let Some(request) = request {
+            origin.insert("request".into(), json!(request));
+        }
+        // Store the route before transmitting: the answer can beat the acknowledgement.
+        kit.store()
+            .set_private_state(&self.room, &pending(id), Some(origin))
+            .await?;
+        self.transmit(to, id, mail).await
+    }
+
+    pub async fn agent_request(&self, kit: &Kit, id: &EventId) -> Result<Option<AgentRequest>> {
+        let origin = kit
+            .store()
+            .get_private_state(&self.room, &pending(id))
+            .await?;
+        Ok(origin
+            .and_then(|r| r.get("request").cloned())
+            .map(serde_json::from_value)
+            .transpose()?)
+    }
+
+    async fn transmit(&self, to: &ChannelId, id: &EventId, mail: &Mail) -> Result<()> {
         let room = room_of(to).ok_or("Invalid session address")?;
         if mail.from != self.room {
             return Err("Only the advertised session can send here".into());
-        }
-        if mail.kind == Kind::Message {
-            // A return is accepted only from this endpoint for this request.
-            kit.store()
-                .set_private_state(
-                    &self.room,
-                    &pending(id),
-                    Some([("peer".into(), json!(to))].into_iter().collect()),
-                )
-                .await?;
         }
         let mut call = ChannelCall::new(to.clone(), room, VERB);
         let mut wire = mail.clone();

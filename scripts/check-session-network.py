@@ -15,17 +15,22 @@ from urllib.parse import urlsplit
 
 from executor_fixture import StreamingModel, Terminal, redis, tool
 from session_messages_fixture import Sender, provider
+from session_agent_fixture import drain_terminal, exercise_agents
 
 
 class Reviewer(StreamingModel):
     def reply(self, request):
         messages = request["messages"]
         last = messages[-1]
-        if last.get("tool_call_id") in ("answer", "busy-answer"):
+        if last.get("tool_call_id") == "answer" and getattr(self.server, "repeat_answer", False):
+            self.server.repeat_answer = False
+            return tool("send_message", "repeat-answer", reply_to=self.server.message_id, text=self.server.answer)
+        if last.get("tool_call_id") in ("answer", "busy-answer", "repeat-answer"):
             assert "sent" in str(last["content"])
             return {"content": "PRIVATE_REVIEW_FINISHED"}
         if last.get("tool_call_id") == "read-proof":
             token = re.search(r"PROOF-[a-f0-9]{32}", str(last["content"])).group()
+            self.server.answer = token
             return tool("send_message", "answer", reply_to=self.server.message_id, text=token)
         if not self.server.waiting.is_set() and any(
                 m["role"] == "user" and "HOLD_FOR_MESSAGE" in str(m.get("content")) for m in messages):
@@ -35,6 +40,11 @@ class Reviewer(StreamingModel):
         incoming = next(str(m["content"]) for m in reversed(messages)
                         if "Incoming session correspondence." in str(m.get("content")))
         self.server.message_id = re.search(r"session-msg-[0-9a-f]{64}", incoming).group()
+        if any(tag in incoming for tag in ("AGENT_IDLE", "AGENT_BUSY", "AGENT_NOTICE")):
+            self.server.repeat_answer = "AGENT_IDLE" in incoming
+            assert self.server.agent_release.wait(20)
+            if "AGENT_NOTICE" in incoming:
+                return {"content": "PRIVATE_REVIEW_FINISHED"}
         if "SILENT_PROBE" in incoming:
             return {"content": "PRIVATE_SILENT_ANSWER"}
         if "BUSY_PROBE" in incoming:
@@ -111,16 +121,21 @@ def run(options):
         env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
         env.update(TERM="xterm-256color", ROOMKIT_EXECUTOR_REDIS_URL=broker)
         remote_url = f"redis://127.0.0.1:{peer.port(urlsplit(broker).port)}"
-        argv = ["env", "TERM=xterm-256color", "ROOMKIT_EXECUTOR_REDIS_URL=" + remote_url,
-                *args_for(options.peer_binary or binary, peer.work, "review", group, peer.port(model.server_port))]
-        reviewer = Terminal(stack, peer.command(argv, tty=True), env)
+        model_port = peer.port(model.server_port)
+
+        def open_reviewer(work, scope):
+            argv = ["env", "TERM=xterm-256color", "ROOMKIT_EXECUTOR_REDIS_URL=" + remote_url,
+                    *args_for(options.peer_binary or binary, work, "review", scope, model_port)]
+            return Terminal(stack, peer.command(argv, tty=True), env)
+
+        reviewer = open_reviewer(peer.work, group)
         sender = Terminal(stack, args_for(binary, owner, "api", group, unused.server_port), env)
         stack.callback(model.release.set)
 
-        def another_session(dirname, name, scope):
+        def another_session(dirname, name, scope, port=None):
             path = root / dirname
             (path / "workspace").mkdir(parents=True)
-            return Terminal(stack, args_for(binary, path, name, scope, unused.server_port), env)
+            return Terminal(stack, args_for(binary, path, name, scope, port or unused.server_port), env)
 
         outsider = another_session("outsider", "review", uuid.uuid4().hex)
         outsider.send("@api WRONG_GROUP", "Recipient unavailable")
@@ -149,6 +164,15 @@ def run(options):
         sender.send("@review second question", "Recipient unavailable")
         os.write(sender.master, b"\x04")
         sender.proc.wait(timeout=15)
+        agent_group = uuid.uuid4().hex
+        workspace = peer.work / "agents" / "workspace"
+        peer.run(["mkdir", "-p", str(workspace)])
+        peer.run(["cp", str(peer.work / "workspace/proof.txt"), str(workspace / "proof.txt")])
+        participant = open_reviewer(workspace.parent, agent_group)
+        with drain_terminal(participant):
+            exercise_agents(stack, root, lambda port: another_session("author", "author", agent_group, port), model, token)
+            os.write(participant.master, b"\x04")
+            participant.proc.wait(timeout=15)
         print("PASS", peer.run(["uname", "-sm"]).strip(), "read its own file and replied while idle and busy. Its transcript stayed private.")
         print("PASS separate stores, zero sender model requests, exact reply counts, ambiguous names, isolated groups, closed recipient.")
 

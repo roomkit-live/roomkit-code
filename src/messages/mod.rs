@@ -1,5 +1,6 @@
 //! Interactive session messages. RoomKit owns storage, addressing and steering.
 pub(crate) mod command;
+mod delivery;
 mod directory;
 mod network;
 mod receiver;
@@ -7,6 +8,7 @@ mod record;
 mod reply;
 #[cfg(test)]
 mod tests;
+mod tools;
 
 use crate::sync::lock;
 use roomkit::model::{EventId, RoomId};
@@ -18,11 +20,16 @@ use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::watch;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
-pub(crate) use reply::{NAME as SEND_MESSAGE, Reply};
+pub(crate) use tools::{LIST_SESSIONS, SEND_MESSAGE};
+
+struct Interactive {
+    kit: WeakRoomKit<SqliteStore>,
+    group_enabled: bool,
+}
 
 #[derive(Default)]
 pub(crate) struct Messages {
-    kit: OnceLock<WeakRoomKit<SqliteStore>>,
+    interactive: OnceLock<Interactive>,
     network: OnceLock<network::Network>,
     listening: Mutex<HashSet<RoomId>>,
     recent: Mutex<HashMap<RoomId, VecDeque<Item>>>,
@@ -32,8 +39,11 @@ pub(crate) struct Messages {
 }
 
 impl Messages {
-    pub(crate) fn install(&self, kit: &RoomKit<SqliteStore>) {
-        let _ = self.kit.set(kit.downgrade());
+    pub(crate) fn install(&self, kit: &RoomKit<SqliteStore>, group_enabled: bool) {
+        let _ = self.interactive.set(Interactive {
+            kit: kit.downgrade(),
+            group_enabled,
+        });
     }
 
     pub(crate) async fn open_network(
@@ -53,8 +63,8 @@ impl Messages {
             .map_err(|_| "Session network already open".into())
     }
 
-    pub(crate) fn enabled(&self) -> bool {
-        self.kit.get().is_some()
+    fn kit(&self) -> Option<RoomKit<SqliteStore>> {
+        self.interactive.get()?.kit.upgrade()
     }
 
     pub(crate) fn listen(
@@ -63,7 +73,7 @@ impl Messages {
         leases: &crate::storage::SessionLeases,
         diagnostics: Arc<crate::diagnostics::Diagnostics>,
     ) {
-        let Some(kit) = self.kit.get().and_then(WeakRoomKit::upgrade) else {
+        let Some(kit) = self.kit() else {
             return;
         };
         if self.stop.is_cancelled() || !lock(&self.listening).insert(room.clone()) {

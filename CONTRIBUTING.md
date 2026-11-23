@@ -50,8 +50,13 @@ as above. Replies follow the verified return address. The application defines
 the mail envelope and visibility policy. RoomKit owns discovery, liveness and
 transport. A direct channel call also works before either agent has a turn.
 `RoomOwner` and `TurnHost` route calls associated with an admitted turn, as used
-in executor consultation. Offline delivery would need separate persistence
-and redelivery semantics.
+in executor consultation.
+
+For an agent-initiated message, the sender records the asking agent, turn and
+question alongside the expected peer before transmitting. A correlated reply or
+delivery notice uses that local record to steer the asking agent or start a turn
+for it. Terminal-originated messages carry no asking agent. Offline delivery
+would need separate persistence and redelivery semantics.
 
 After `cargo build --locked`, run `python3 scripts/check-session-network.py`
 with Docker available for a temporary loopback Redis. To exercise a second

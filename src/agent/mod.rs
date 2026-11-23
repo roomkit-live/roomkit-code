@@ -261,9 +261,14 @@ pub(crate) async fn create(
     if let Some(inventory) = extensions.executor_inventory {
         add_pool_tools(&mut tools, inventory, channel, profile, root, resources);
     }
-    if !unattended && resources.messages.enabled() && channel != crate::remote::AGENT {
-        let reply = crate::messages::Reply(resources.messages.clone());
-        tools.push((reply.definition(), Arc::new(reply)));
+    if !unattended && channel != crate::remote::AGENT {
+        tools.extend(
+            resources
+                .messages
+                .tools()
+                .into_iter()
+                .map(|tool| (tool.definition(), tool)),
+        );
     }
     let native: Vec<AiTool> = tools
         .iter()

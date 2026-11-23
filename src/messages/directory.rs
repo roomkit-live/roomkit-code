@@ -92,18 +92,39 @@ async fn extend_network(
     local: BTreeSet<String>,
     contacts: &mut Vec<Contact>,
 ) -> Result<(), String> {
-    let peers = net.contacts().await.map_err(
+    let peers = group_contacts(net).await.map_err(
         |_| "Cannot list the session group. Use /message id:SESSION for an exact local recipient.",
     )?;
-    contacts.extend(
-        peers
-            .into_iter()
-            .filter(|(id, _)| !local.contains(id.as_str()))
-            .map(|(id, room)| Contact {
-                name: room.to_string(),
-                room,
-                remote: Some(id),
-            }),
-    );
+    contacts.extend(peers.into_iter().filter(|contact| {
+        contact
+            .remote
+            .as_ref()
+            .is_none_or(|id| !local.contains(id.as_str()))
+    }));
     Ok(())
+}
+
+pub(super) async fn group_contacts(net: &Network) -> Result<Vec<Contact>, String> {
+    Ok(net
+        .contacts()
+        .await
+        .map_err(|_| "Cannot list the session group")?
+        .into_iter()
+        .map(|(id, room)| Contact {
+            name: room.to_string(),
+            room,
+            remote: Some(id),
+        })
+        .collect())
+}
+
+pub(super) fn resolve<'a>(contacts: &'a [Contact], target: &str) -> Option<&'a Contact> {
+    if target.starts_with("id:") || target.starts_with("peer:") {
+        return contacts.iter().find(|c| c.key() == target);
+    }
+    let mut matches = contacts
+        .iter()
+        .filter(|c| c.room.as_str() == target || c.name == target);
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
 }

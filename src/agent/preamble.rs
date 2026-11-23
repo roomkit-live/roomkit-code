@@ -483,6 +483,7 @@ mod tests {
             .chain([
                 &crate::remote::pool::CARGO_TEST,
                 &crate::messages::SEND_MESSAGE,
+                &crate::messages::LIST_SESSIONS,
             ])
             .map(|name| tool(name))
             .collect();
@@ -521,13 +522,14 @@ mod tests {
             .chain([
                 &crate::remote::pool::CARGO_TEST,
                 &crate::messages::SEND_MESSAGE,
+                &crate::messages::LIST_SESSIONS,
             ])
             .copied()
             .collect();
         let tagged: Vec<(&str, &str)> = INSTRUCTIONS.split("\n\n").filter_map(tagged).collect();
         // Only a paragraph's opening is read as its tag.
         assert_eq!(tagged.len(), INSTRUCTIONS.matches("{with ").count());
-        assert_eq!(tagged.len(), 11);
+        assert_eq!(tagged.len(), 12);
         for name in tagged.iter().flat_map(|(names, _)| names.split(' ')) {
             assert!(known.contains(&name) || name == "mcp__*", "{name}");
         }

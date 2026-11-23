@@ -1,5 +1,5 @@
 //! The composer prefix and recipient picker resolve only writable project sessions.
-use super::directory::{Contact, contacts};
+use super::directory::{Contact, contacts, resolve};
 use super::record::{Mail, check_text};
 use crate::sessions::Sessions;
 use roomkit::model::{EventId, RoomId};
@@ -47,17 +47,6 @@ pub(crate) async fn handle(
         }
     };
     Ok(CommandResult::Events(vec![event]))
-}
-
-fn resolve<'a>(contacts: &'a [Contact], target: &str) -> Option<&'a Contact> {
-    if target.starts_with("id:") || target.starts_with("peer:") {
-        return contacts.iter().find(|c| c.key() == target);
-    }
-    let mut matches = contacts
-        .iter()
-        .filter(|c| c.room.as_str() == target || c.name == target);
-    let first = matches.next()?;
-    matches.next().is_none().then_some(first)
 }
 
 fn compose(room: &RoomId, c: &Contact) -> Event {
@@ -122,7 +111,7 @@ async fn send(
         kind: super::record::Kind::Message,
     };
     if let Some((net, peer)) = route {
-        net.send(&app.kit, peer, &id, &mail).await
+        net.request(&app.kit, peer, &id, &mail, None).await
     } else {
         mail.write(&app.kit, &to.room, id.clone(), view.organization.clone())
             .await

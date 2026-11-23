@@ -91,6 +91,7 @@ const RULES: &[(&str, Rule)] = &[
     (crate::remote::pool::ASK_PEER, DELEGATION),
     (crate::remote::pool::ANSWER_PEER, DELEGATION),
     (crate::messages::SEND_MESSAGE, DELEGATION),
+    (crate::messages::LIST_SESSIONS, READ),
     ("delegate_task", DELEGATION),
     ("task_status", DELEGATION),
     ("cancel_task", DELEGATION),

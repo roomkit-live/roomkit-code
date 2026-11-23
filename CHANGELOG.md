@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Agents in the same experimental session group can discover one another with
+  `list_sessions` and start an asynchronous exchange with `send_message`.
+  An answer reaches the asking agent while it works or resumes it after its turn.
+
 - Named interactive sessions on different machines can exchange messages with
   `--session-group GROUP` through a trusted Redis connection (experimental).
   Each session keeps its own workspace, model, tools and history.
