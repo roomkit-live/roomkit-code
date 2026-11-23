@@ -31,6 +31,26 @@ pub(crate) struct Cli {
     /// Disable automatic update checks (manual /update remains available).
     #[arg(long, env = "ROOMKIT_NO_UPDATE_CHECK")]
     pub no_update_check: bool,
+    /// Offer the remote-linux delegation target in this Redis group.
+    #[arg(long, conflicts_with_all = ["serve_worker", "serve_pool", "executor_pool", "prompt"], value_parser = crate::remote::group)]
+    pub remote_worker: Option<String>,
+    /// Serve the remote-linux agent for this Redis group from this workspace.
+    #[arg(long, conflicts_with_all = ["prompt", "session", "serve_pool", "executor_pool"], value_parser = crate::remote::group)]
+    pub serve_worker: Option<String>,
+    /// Schedule file tasks across workers registered in this Redis group.
+    #[arg(long, conflicts_with_all = ["serve_pool", "prompt"], value_parser = crate::remote::group)]
+    pub executor_pool: Option<String>,
+    /// Serve scheduled tasks in this Redis group.
+    #[arg(long, conflicts_with_all = ["prompt", "session"], value_parser = crate::remote::group)]
+    pub serve_pool: Option<String>,
+    /// Serve this workspace with the worker settings saved in /executors.
+    #[arg(long, conflicts_with_all = ["serve_pool", "serve_worker", "executor_pool", "remote_worker", "prompt", "session", "local"])]
+    pub executor: bool,
+    /// Open this project without its saved executor pool (also works offline).
+    #[arg(long, conflicts_with_all = ["serve_pool", "serve_worker", "executor_pool", "remote_worker"])]
+    pub local: bool,
+    #[command(flatten)]
+    pub worker: crate::remote::pool::WorkerArgs,
     /// Project directory used by the coding tools.
     #[arg(default_value = ".")]
     pub workspace: PathBuf,
@@ -309,6 +329,10 @@ impl Default for Appearance {
 }
 
 pub(crate) struct Settings {
+    pub executor_url: Option<String>,
+    pub serve_pool: Option<String>,
+    pub executor_pool: Option<String>,
+    pub remote_worker: Option<String>,
     pub update_check: bool,
     pub require_tool_intent: bool,
     pub herdr: bool,
@@ -536,6 +560,10 @@ impl Settings {
             herdr: file.integrations.herdr && !cli.no_herdr,
             inherit_env: inherit_env(cli, file.shell)?,
             resume_options: resume_options(cli)?,
+            executor_url: None,
+            serve_pool: cli.serve_pool.clone(),
+            executor_pool: cli.executor_pool.clone(),
+            remote_worker: cli.remote_worker.clone(),
             workspace,
             debug: cli.debug,
             state_dir,
@@ -641,6 +669,12 @@ fn choose_inherit_env(
 /// options are deliberately absent. Persisted profiles restore agent/model.
 fn resume_options(cli: &Cli) -> Result<Option<Vec<String>>> {
     let mut args = vec![];
+    if let Some(group) = &cli.executor_pool {
+        args.extend(["--executor-pool".into(), group.clone()]);
+    }
+    if let Some(group) = &cli.remote_worker {
+        args.extend(["--remote-worker".into(), group.clone()]);
+    }
     if !cli.inherit_env.is_empty() {
         args.extend(["--inherit-env".into(), cli.inherit_env.join(",")]);
     }
@@ -681,6 +715,7 @@ fn resume_options(cli: &Cli) -> Result<Option<Vec<String>>> {
         ]);
     }
     for (enabled, flag) in [
+        (cli.local, "--local"),
         (cli.no_animations, "--no-animations"),
         (cli.native_selection, "--native-selection"),
         (cli.no_logo, "--no-logo"),

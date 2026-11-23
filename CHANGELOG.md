@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- The agent’s built-in guide now identifies the executor pool as an opt-in
+  beta and shows how to find the requested model and delegate to its worker profile.
+
+- Configure the executor pool from `/executors` on each machine. Scheduling is
+  opt-in per workspace. Use `--executor` to start a worker with its saved group,
+  connection, labels, capacity and local agent profiles, or `--local` to edit
+  the configuration offline.
+
+- Short Redis interruptions can recover during slot renewal. Linux workers
+  account for parent cgroup memory limits when advertising available RAM.
+
+- An experimental executor pool routes remote file tasks by execution OS, labels,
+  available memory, load and free slots. Use `--executor-pool GROUP` on the
+  owner, `--serve-pool GROUP` on each worker and `/executors` to inspect placement.
+  The owner and pool workers can call `list_executors` to read the same live
+  machine inventory, including the model each worker advertises. Pool workers
+  can run natively on macOS and accept tasks requiring `os=macos`.
+  Repeat `--worker-profile ID` to serve several local agents on one worker.
+  The inventory shows each exposed profile's model and tools. Target a profile
+  with `context.executor.profile`; profiles share the worker's slot limit.
+  Each placement shows the machine, profile and model in the parent conversation.
+  Pool profiles can opt into `cargo_test` to run a crate's Rust tests and report
+  their exit code and output under the parent's command permissions.
+
+- An experimental Linux worker can run a delegated coding task in its own
+  workspace over Redis. Start the worker with `--serve-worker GROUP` and
+  the interactive owner with `--remote-worker GROUP`.
+
 - Built on RoomKit Rust 8f49956, after 0.3.0, with roomkit-providers b33a7de,
   roomkit-tools 4058f3f and roomkit-tui f1efcea: the engine now tells how a
   model's answer ended in one closed vocabulary, which each provider maps its

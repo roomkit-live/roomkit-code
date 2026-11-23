@@ -1,6 +1,4 @@
-//! The line a task's end leaves in the conversation that asked for it:
-//! stored for a resumed conversation, and shown at once to the views
-//! watching.
+//! Placement and completion notices shown live and kept in the parent conversation.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -18,24 +16,23 @@ use crate::system_row::{self, SystemRow};
 /// Where the lines go: the engine and the terminal's channel, once the
 /// application installed them; the lines the views show at once.
 #[derive(Default)]
-pub(super) struct EndedLines {
+pub(super) struct TaskLines {
     kit: OnceLock<(RoomKit<SqliteStore>, ChannelId)>,
     /// Each room's latest lines, and when they came: several tasks can end
     /// within the time a view takes to read them.
     recent: Mutex<HashMap<String, Vec<(Instant, Item)>>>,
 }
 
-impl EndedLines {
+impl TaskLines {
     pub fn install(&self, kit: &RoomKit<SqliteStore>, terminal: &ChannelId) {
         let _ = self.kit.set((kit.clone(), terminal.clone()));
     }
 
-    /// Stores `text`, the end of the task `task`, in `room`, and shows it.
-    pub async fn write(&self, room: &str, task: &str, text: &str) {
-        let id = format!("task-ended-{task}");
+    /// Record a task notice in its parent room and show it to attached views.
+    pub async fn write(&self, room: &str, task: &str, id: String, kind: &str, text: &str) {
         let terminal = match self.kit.get() {
             Some((kit, terminal)) => {
-                let about = ("task_ended", json!({"task_id": task}));
+                let about = (kind, json!({"task_id": task}));
                 let row = SystemRow {
                     room,
                     id: &id,

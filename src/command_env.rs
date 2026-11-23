@@ -80,7 +80,8 @@ const CREDENTIAL_WORDS: [&str; 6] = ["KEY", "TOKEN", "SECRET", "PASSWORD", "PASS
 /// Whether `name` reads as a credential.
 fn credential(name: &str) -> bool {
     let upper = name.to_uppercase();
-    CREDENTIAL_WORDS.iter().any(|word| upper.contains(word))
+    upper == "ROOMKIT_EXECUTOR_REDIS_URL"
+        || CREDENTIAL_WORDS.iter().any(|word| upper.contains(word))
 }
 
 /// `requested` with each `PREFIX*` replaced by the `host` names it starts,
@@ -133,6 +134,7 @@ mod tests {
             "AWS_SESSION_TOKEN",
             "ROOMKIT_API_KEY",
             "ROOMKIT_UPDATE_TOKEN",
+            "ROOMKIT_EXECUTOR_REDIS_URL",
         ]
         .map(String::from);
         let requested = ["LD_LIBRARY_PATH", "NIX_*"].map(String::from);

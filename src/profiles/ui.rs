@@ -881,7 +881,10 @@ fn agent_form(
                 "tools",
                 "Tools",
                 a.tools.join(", "),
-                &format!("Comma-separated: {}. Empty = no tools", TOOLS.join(", ")),
+                &format!(
+                    "Comma-separated: {}. Pool workers can also use cargo_test. Empty = no tools",
+                    TOOLS.join(", ")
+                ),
                 false,
                 FieldKind::Text,
             ),

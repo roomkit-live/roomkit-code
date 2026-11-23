@@ -16,11 +16,11 @@
 //! (`spending`).
 
 mod board;
-mod ended_line;
 pub(crate) mod history;
 pub(crate) mod panel;
 mod render;
 pub(crate) mod spending;
+mod task_lines;
 mod transcript;
 
 pub(crate) use board::{Outcome, Task, Tasks};
@@ -92,9 +92,12 @@ pub(crate) fn nesting_refusal(depth: usize) -> Option<String> {
 /// The agents a task can be handed to, by ID with their labels, as the
 /// project's and the global agent files list them now.
 #[derive(Default)]
-pub(crate) struct Roster(RwLock<Vec<(String, String)>>);
+pub(crate) struct Roster(RwLock<Vec<(String, String)>>, std::sync::atomic::AtomicBool);
 
 impl Roster {
+    pub(crate) fn enable_pool(&self, enabled: bool) {
+        self.1.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
     pub(crate) fn set(&self, agents: Vec<(String, String)>) {
         *crate::sync::write(&self.0) = agents;
     }
@@ -128,10 +131,14 @@ impl Roster {
             .iter()
             .map(|(id, label)| format!("{id} ({label})"))
             .collect();
-        Some(format!(
+        let mut text = format!(
             "Agents you can hand a task to with delegate_task, by ID: {}.",
             listed.join(", ")
-        ))
+        );
+        if self.1.load(std::sync::atomic::Ordering::Relaxed) {
+            text.push_str(r#" The remote-linux agent can run on multiple executor machines. For questions about which machines are available, call list_executors for the live inventory. When handing a task to remote-linux, set the executor field of context for required OS, local agent profile ID, labels and available RAM. Look up the exposed profile IDs, models and tools with list_executors. To use a particular agent on the worker, set context.executor.profile to its exact ID. Example context: {"executor":{"os":"linux","labels":{"role":"review"},"min_ram_mib":512}}. Omit constraints the task does not require."#);
+        }
+        Some(text)
     }
 
     /// Why `caller` cannot hand a task to `target`, if it cannot.

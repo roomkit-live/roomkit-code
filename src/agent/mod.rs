@@ -198,6 +198,7 @@ pub(crate) fn process_limits() -> ProcessLimits {
 
 /// What an agent receives beyond the application's own tools.
 pub(crate) struct Extensions {
+    pub executor_inventory: Option<crate::remote::pool::Inventory>,
     pub skills: SkillRegistry,
     pub skill_roots: Vec<std::path::PathBuf>,
     pub mcp: Vec<crate::profiles::McpTools>,
@@ -235,6 +236,7 @@ pub(crate) struct Extensions {
 
 pub(crate) async fn create(
     root: &std::path::Path,
+    channel: &str,
     resources: &Resources,
     profile: &Agent,
     provider: CodeProvider,
@@ -251,7 +253,10 @@ pub(crate) async fn create(
     };
     let policy = extensions.policy.clone();
     let tools = native_tools(root, resources, policy).await?;
-    let tools = selected(profile, tools, (unattended, extensions.planning));
+    let mut tools = selected(profile, tools, (unattended, extensions.planning));
+    if let Some(inventory) = extensions.executor_inventory {
+        add_pool_tools(&mut tools, inventory, channel, profile, &resources.shell);
+    }
     let native: Vec<AiTool> = tools
         .iter()
         .map(|(definition, _)| definition.clone())
@@ -313,7 +318,7 @@ pub(crate) async fn create(
         retry_policy: Some(retry_policy()),
         reasoning_effort: profile.reasoning_effort.clone(),
         memory: memory(
-            (ceiling, &profile.id),
+            (ceiling, &profile.id, channel),
             &provider,
             (resources, conversation.as_deref()),
         ),
@@ -325,7 +330,7 @@ pub(crate) async fn create(
         tool_search_pinned: preamble.pinned,
         ..AiChannelOptions::default()
     };
-    let agent = AiChannel::new(ChannelId::new(&profile.id)?, provider, options)?;
+    let agent = AiChannel::new(ChannelId::new(channel)?, provider, options)?;
     Ok((agent, preamble.inventory))
 }
 
@@ -333,7 +338,7 @@ pub(crate) async fn create(
 /// summarized by its own model, which also compacts its conversations
 /// outside its turns; none keeps its window of `HISTORY` messages.
 fn memory(
-    (ceiling, agent): (Option<u64>, &str),
+    (ceiling, profile, channel): (Option<u64>, &str, &str),
     provider: &CodeProvider,
     (resources, conversation): (&Resources, Option<&str>),
 ) -> Option<Arc<dyn roomkit_ai::memory::MemoryProvider>> {
@@ -342,14 +347,14 @@ fn memory(
     let compactions = resources.compactions.clone();
     let memory = Arc::new(crate::compaction::TieredMemory::new(
         summarizer,
-        (ceiling, agent),
+        (ceiling, channel),
         compactions.clone(),
     ));
-    // In a conversation that keeps a model of its own, its summaries are
-    // that model's.
+    // Profile IDs identify the summarizer; history is authored by the transport
+    // channel, which all profiles of a remote worker share.
     match conversation {
-        Some(room) => compactions.register_in(room, agent, memory.clone()),
-        None => compactions.register(agent, memory.clone()),
+        Some(room) => compactions.register_in(room, profile, memory.clone()),
+        None => compactions.register(profile, memory.clone()),
     }
     Some(memory)
 }
@@ -413,6 +418,23 @@ fn selected(
         .map(|tool| (tool.definition(), tool))
         .filter(|(definition, _)| selected(definition))
         .collect()
+}
+
+/// Owners and workers see the inventory. Only an opted-in worker profile
+/// exposes the fixed Cargo command.
+fn add_pool_tools(
+    tools: &mut Vec<(AiTool, Arc<dyn Tool>)>,
+    inventory: crate::remote::pool::Inventory,
+    channel: &str,
+    profile: &Agent,
+    shell: &ShellTool,
+) {
+    use crate::remote::pool::{CARGO_TEST, CargoTest};
+    if channel == crate::remote::AGENT && profile.tools.iter().any(|name| name == CARGO_TEST) {
+        let runner = CargoTest(Shell::new(shell.clone()));
+        tools.push((runner.definition(), Arc::new(runner)));
+    }
+    tools.push((inventory.definition(), Arc::new(inventory)));
 }
 
 /// The handler of the selected MCP servers' tools, each server's first in

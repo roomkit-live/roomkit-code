@@ -490,6 +490,7 @@ mod tests {
             "plan_mode_enter asks the user",
             "manage durable plans",
             "RoomKit Code's own user guide",
+            "document_id experimental-executor-pool.md",
             "Web search uses Exa",
         ] {
             assert!(!bare.contains(text) && full.contains(text), "{text}");
@@ -517,7 +518,7 @@ mod tests {
         let tagged: Vec<(&str, &str)> = INSTRUCTIONS.split("\n\n").filter_map(tagged).collect();
         // Only a paragraph's opening is read as its tag.
         assert_eq!(tagged.len(), INSTRUCTIONS.matches("{with ").count());
-        assert_eq!(tagged.len(), 8);
+        assert_eq!(tagged.len(), 9);
         for name in tagged.iter().flat_map(|(names, _)| names.split(' ')) {
             assert!(known.contains(&name) || name == "mcp__*", "{name}");
         }

@@ -3,6 +3,7 @@ mod catalog;
 mod conversation;
 mod deletion;
 mod discovery;
+mod executors;
 mod mcp;
 pub(crate) mod model;
 mod model_choice;
@@ -17,6 +18,7 @@ mod subscription_form;
 mod subscriptions;
 mod targets;
 mod ui;
+mod worker;
 
 use roomkit::model::{Access, ChannelId};
 use roomkit::{ListBindingsOptions, RoomKit};
@@ -27,6 +29,7 @@ use roomkit_tui_engine::SessionConfig;
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::sync::Mutex;
 
+use crate::storage::document::Document;
 use crate::{
     agent::{CodeAgent, Inventory},
     config::Settings,
@@ -37,9 +40,11 @@ pub(crate) use discovery::SUBSCRIPTION_SERVER;
 pub(crate) use mcp::McpTools;
 use model::{Agent, Authentication, PROJECT_SCHEMA, Project, Provider, Providers, TOOLS};
 use slot::AgentSlot;
-use store::Document;
+pub(crate) use worker::profile_id;
 
 pub(crate) struct Profiles {
+    pub(crate) executor_inventory: Option<crate::remote::pool::Inventory>,
+    pub(crate) pool: Option<Arc<crate::remote::pool::Scheduler>>,
     pub(crate) policy: crate::permissions::Policy,
     pub(crate) plans: Arc<crate::plans::PlanView>,
     require_tool_intent: bool,
@@ -67,6 +72,7 @@ pub(crate) struct Profiles {
 }
 
 struct State {
+    remote_worker: bool,
     instructions: Arc<crate::instructions::Instructions>,
     compactions: Arc<crate::compaction::Compactions>,
     /// The files the agents' tools change, which a slot settles as it closes.
@@ -74,6 +80,7 @@ struct State {
     policy: crate::permissions::Policy,
     mcp: Document<mcp::Servers>,
     pending_mcp: Option<mcp::Pending>,
+    executor_form: Option<executors::Pending>,
     providers: Document<Providers>,
     project: Document<Project>,
     /// Agents shared by every project, beside the shared connections.
@@ -200,6 +207,7 @@ impl Profiles {
         let compactions = resources.compactions.clone();
         let files = resources.files.clone();
         let roster = resources.roster.clone();
+        roster.enable_pool(settings.executor_pool.is_some());
         let turn_ends = resources.turn_ends.clone();
         // Nobody can answer a question in a launch nobody watches.
         let asking = (!settings.unattended)
@@ -207,7 +215,16 @@ impl Profiles {
             .transpose()
             .map_err(|error| error.to_string())?;
         let requests = asking.as_ref().map(|asking| asking.handler().clone());
+        let (pool, executor_inventory) = crate::remote::pool::connect(
+            settings.executor_pool.as_deref(),
+            settings.serve_pool.as_deref(),
+            settings.executor_url.as_deref(),
+            &resources.tasks,
+        )
+        .map_err(|e| e.to_string())?;
         Ok(Arc::new(Self {
+            pool,
+            executor_inventory,
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),
             require_tool_intent: settings.require_tool_intent,
@@ -226,12 +243,14 @@ impl Profiles {
             mcp_runtime: mcp::Runtime::default(),
             reported: std::sync::Mutex::default(),
             state: Mutex::new(State {
+                remote_worker: settings.remote_worker.is_some() || settings.executor_pool.is_some(),
                 instructions,
                 compactions,
                 files,
                 policy,
                 mcp,
                 pending_mcp: None,
+                executor_form: None,
                 providers,
                 project,
                 global,
@@ -270,6 +289,7 @@ impl Profiles {
         // A launch nobody watches ends with its turn, before a task it handed
         // over could end: no agent is served the delegation tools then.
         if !self.unattended {
+            state.register_remote(kit)?;
             state.delegation = Some(crate::delegation::handler(kit));
             state.refresh_roster();
         }
@@ -329,6 +349,17 @@ impl Profiles {
         provider: &Provider,
         conversation: Option<&str>,
     ) -> Result<(CodeAgent, Inventory), String> {
+        self.assemble_channel(profile, provider, conversation, &profile.id)
+            .await
+    }
+
+    async fn assemble_channel(
+        &self,
+        profile: &Agent,
+        provider: &Provider,
+        conversation: Option<&str>,
+        channel: &str,
+    ) -> Result<(CodeAgent, Inventory), String> {
         profile.validate()?;
         provider.validate()?;
         let provider_instance = self.generation_provider(profile, provider)?;
@@ -340,6 +371,7 @@ impl Profiles {
             )
         };
         let extensions = crate::agent::Extensions {
+            executor_inventory: self.executor_inventory.clone(),
             skills,
             skill_roots,
             mcp: self.mcp_runtime.selected(profile).await?,
@@ -356,6 +388,7 @@ impl Profiles {
         };
         let created = crate::agent::create(
             &self.workspace,
+            channel,
             &self.resources,
             profile,
             provider_instance,
@@ -536,7 +569,9 @@ impl State {
         let key = (view.room.to_string(), view.agent.to_string());
         view.submission_error = if let Some(reason) = self.unfitted.get(&key) {
             Some(reason.clone())
-        } else if self.tools.contains_key(view.agent.as_str()) {
+        } else if self.is_remote(view.agent.as_str())
+            || self.tools.contains_key(view.agent.as_str())
+        {
             None
         } else {
             Some(self.setup_error.clone().unwrap_or_else(|| "Configure a connection with /providers, then create or select an agent with /agents".into()))

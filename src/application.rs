@@ -58,7 +58,13 @@ impl Application {
             store.list_rooms(first).await?;
             store
         };
-        let kit = RoomKit::new(RoomKitOptions::with_store(store));
+        let mut options = RoomKitOptions::with_store(store);
+        if let Some(pool) = &profiles.pool {
+            options.turn_backend = Some(pool.handle());
+        } else if let Some(group) = &settings.remote_worker {
+            options.turn_backend = Some(crate::remote::handle(group)?);
+        }
+        let kit = RoomKit::new(options);
         let policy = profiles.policy.clone();
         match setup(settings, &kit, &profiles, &services, &policy).await {
             Ok((channel, view)) => Ok(Self {
@@ -178,6 +184,9 @@ async fn setup(
         profiles: profiles.clone(),
         kit: kit.downgrade(),
     };
+    if settings.remote_worker.is_some() || profiles.pool.is_some() {
+        gate::install_remote(kit, gate.clone())?;
+    }
     gate::install(kit, gate)?;
     crate::ask_user::install(kit, channel.clone(), policy.clone())?;
     if !settings.unattended {

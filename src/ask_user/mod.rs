@@ -11,7 +11,8 @@ use std::time::Duration;
 use roomkit::human_input::PendingInputEvent;
 use roomkit::model::hook::AllowOptions;
 use roomkit::model::{ChannelId, HookResult, RoomId};
-use roomkit::{HookOptions, HookTrigger, RejectInputOptions, RoomKit};
+use roomkit::turns::HookOptions;
+use roomkit::{HookTrigger, RejectInputOptions, RoomKit};
 use roomkit_ai::HumanInputToolHandler;
 use roomkit_sqlite::SqliteStore;
 use roomkit_tools_agents::{AskUserQuestion, AskUserTool};
@@ -48,7 +49,7 @@ pub(crate) fn install(
     policy: Policy,
 ) -> Result<()> {
     let engine = kit.downgrade();
-    kit.hook(
+    kit.turn_executor().hook(
         HookTrigger::OnUserInputRequired,
         move |event: PendingInputEvent, _context| {
             let (channel, policy, engine) = (channel.clone(), policy.clone(), engine.clone());

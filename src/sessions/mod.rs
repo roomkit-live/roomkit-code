@@ -80,6 +80,11 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "[process-id]",
         ),
         (
+            "executors",
+            "Inspect workers and configure this workspace’s executor pool (beta)",
+            "[configure]",
+        ),
+        (
             "tasks",
             "See the tasks agents handed to other agents, and stop them",
             "[task-id]",
@@ -233,6 +238,7 @@ impl CommandHandler for Sessions {
                 | "tools"
                 | "processes"
                 | "tasks"
+                | "executors"
                 | "back"
                 | "files"
                 | "diagnostics"
@@ -268,6 +274,7 @@ impl Sessions {
             _ => return Err("Unsupported application request".into()),
         };
         match name {
+            "executors" => return self.profiles.executors(request, &current).await,
             "mcp" => {
                 let result = self.profiles.mcp(&self.kit, request, current).await;
                 self.services.sidebar_changes.send_replace(());

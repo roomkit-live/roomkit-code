@@ -8,7 +8,7 @@ impl State {
     /// Sets the roster to the agents this project can use, as the agent files
     /// read last list them; none while no agent is served `delegate_task`.
     pub(super) fn refresh_roster(&self) {
-        let agents = match self.delegation {
+        let mut agents: Vec<_> = match self.delegation {
             Some(_) => self
                 .agents()
                 .into_iter()
@@ -16,6 +16,9 @@ impl State {
                 .collect(),
             None => Vec::new(),
         };
+        if self.remote_worker && self.delegation.is_some() {
+            agents.push((crate::remote::AGENT.into(), crate::remote::LABEL.into()));
+        }
         self.roster.set(agents);
     }
 }
@@ -39,6 +42,9 @@ impl Profiles {
         id: &str,
     ) -> Result<(), String> {
         let mut state = self.state.lock().await;
+        if state.is_remote(id) {
+            return Ok(());
+        }
         let agent = state.agent(id).ok_or("Unknown agent")?;
         let provider = state
             .providers

@@ -140,7 +140,7 @@ pub(crate) struct Tasks {
     board: Mutex<Board>,
     changes: watch::Sender<()>,
     pub(crate) panel: super::panel::Panel,
-    lines: super::ended_line::EndedLines,
+    lines: super::task_lines::TaskLines,
 }
 
 impl Default for Tasks {
@@ -148,7 +148,7 @@ impl Default for Tasks {
         Self {
             board: Mutex::default(),
             changes: watch::channel(()).0,
-            lines: super::ended_line::EndedLines::default(),
+            lines: super::task_lines::TaskLines::default(),
             panel: super::panel::Panel::default(),
         }
     }
@@ -194,12 +194,29 @@ impl Tasks {
         let Some(text) = self.ended(ended) else {
             return;
         };
-        self.lines.write(&room, &id, &text).await;
+        self.lines
+            .write(&room, &id, format!("task-ended-{id}"), "task_ended", &text)
+            .await;
         self.changes.send_replace(());
     }
 
-    /// The lines of the tasks that ended lately in `room`.
-    pub(crate) fn ended_lines(&self, room: &str) -> Vec<roomkit_tui::protocol::Item> {
+    /// Show the selected machine, agent and model as soon as its turn is submitted.
+    pub(crate) async fn assigned(&self, room: &str, task: &str, turn: &str, placement: &str) {
+        let text = format!("{task} assigned to {placement}");
+        self.lines
+            .write(
+                room,
+                task,
+                format!("task-placement-{turn}"),
+                "task_placement",
+                &text,
+            )
+            .await;
+        self.changes.send_replace(());
+    }
+
+    /// The recent task notices in `room`.
+    pub(crate) fn task_lines(&self, room: &str) -> Vec<roomkit_tui::protocol::Item> {
         self.lines.recent(room)
     }
 
@@ -496,7 +513,7 @@ mod tests {
         tasks.finished(second).await;
 
         let said: Vec<_> = tasks
-            .ended_lines("main")
+            .task_lines("main")
             .into_iter()
             .filter_map(|line| match line {
                 roomkit_tui::protocol::Item::Message(message) => Some(message.text),
@@ -510,7 +527,7 @@ mod tests {
                 "Task for Review failed"
             ]
         );
-        assert!(tasks.ended_lines("elsewhere").is_empty());
+        assert!(tasks.task_lines("elsewhere").is_empty());
     }
 
     #[test]

@@ -26,6 +26,7 @@ mod plans;
 mod processes;
 mod profiles;
 mod providers;
+mod remote;
 mod services;
 mod sessions;
 mod shell;
@@ -60,9 +61,18 @@ async fn launch() -> Result<ExitCode> {
     if updates::cli(&cli).await? {
         return Ok(ExitCode::SUCCESS);
     }
-    let settings = config::Settings::load(&cli)?;
+    let mut settings = config::Settings::load(&cli)?;
+    let worker = remote::pool::settings::apply(&cli, &mut settings)?;
     if cli.check_config {
         println!("Launch configuration valid. Provider and agent profiles are loaded at startup.");
+        return Ok(ExitCode::SUCCESS);
+    }
+    if let Some(group) = settings.serve_pool.clone() {
+        remote::serve(settings, &group, Some(&worker)).await?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    if let Some(group) = &cli.serve_worker {
+        remote::serve(settings, group, None).await?;
         return Ok(ExitCode::SUCCESS);
     }
     if let Some(prompt) = application::headless::Prompt::from_cli(&cli)? {

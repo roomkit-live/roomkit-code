@@ -86,6 +86,9 @@ impl State {
     /// Save `agent` in `scope`, moving it out of the other one: the form's
     /// create, edit and move. A new global ID is first claimed in every project.
     pub(super) fn save_agent(&mut self, agent: Agent, scope: Scope) -> Result<(), String> {
+        if self.is_remote(&agent.id) {
+            return Err("This agent ID is reserved by --remote-worker".into());
+        }
         let saved = self.write_agent(agent, scope);
         // Even a failed move may have written one file.
         self.refresh_roster();
