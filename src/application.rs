@@ -92,6 +92,7 @@ impl Application {
                 .diagnostics
                 .record("application_closing", fields, None);
         };
+        self.profiles.resources.messages.close().await;
         step("updates");
         self.services.updates.close().await;
         step("compactions");
@@ -172,6 +173,9 @@ async fn setup(
         Some(Ok(room)) => crate::sessions::designated(kit, &room).await,
         _ => None,
     };
+    if !settings.unattended {
+        profiles.resources.messages.install(kit);
+    }
     let agent_id = profiles.initialize(kit, designated).await?;
     let channel = ConversationChannel::new(ChannelId::new(TERMINAL)?);
     kit.register_channel(channel.clone())?;
@@ -230,6 +234,12 @@ async fn first_view(
         "shell",
         "Run a shell command in this project",
     )];
+    view.input_actions
+        .push(roomkit_tui::protocol::InputAction::new(
+            '@',
+            "message",
+            "Message a project session",
+        ));
     view.cycle_command = Some(crate::delegation::panel::COMMAND.to_owned());
     // The engine hands a running turn only its own author's next messages,
     // and the application opens turns here too: a task's, the one a

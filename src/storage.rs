@@ -172,6 +172,40 @@ impl SessionLeases {
         Ok(())
     }
 
+    fn message_lease_path(&self, id: &str) -> PathBuf {
+        self.directory
+            .join(format!("messages-{}.lock", crate::digest::sha256_hex(id)))
+    }
+
+    /// A live interactive receiver holds this for its lifetime. Older binaries and
+    /// unattended launches can own a session without accepting correspondence.
+    pub fn listen(&self, id: &str) -> io::Result<FileLease> {
+        FileLease::exclusive_wait(private_file(&self.message_lease_path(id))?)
+    }
+
+    pub fn accepts_messages(&self, id: &str) -> io::Result<bool> {
+        let file = match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(self.message_lease_path(id))
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e),
+        };
+        match FileExt::try_lock_shared(&file) {
+            Ok(()) => Ok(false),
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(true),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn owns(&self, id: &str) -> bool {
+        crate::sync::lock(&self.leases)
+            .as_ref()
+            .is_some_and(|held| held.contains_key(id))
+    }
+
     pub fn busy(&self, id: &str) -> io::Result<bool> {
         Ok(self.claim(id)?.is_none())
     }

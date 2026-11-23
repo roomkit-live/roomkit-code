@@ -26,6 +26,26 @@ examples. Local `docs/`, agent configuration, `*.local.toml`, `.env*`, databases
 and build output are ignored. Cargo's package allowlist and `make package-check`
 also exclude local planning and credentials. Do not force-add ignored files.
 
+## Routing messages between Code sessions
+
+Code owns terminal session names, the recipient picker and the lock identifying
+a live listener. RoomKit owns the rooms, event visibility, idempotency and agent
+turns. An explicit `RoomId` already identifies a destination.
+`InboundRoomRouter` resolves inbound traffic without a room ID. Within a room,
+`addressed_to` selects which intelligence channels to ask, and `Discussion`
+coordinates agents sharing that room.
+
+The interactive local backend keeps its turns in the owning process. Two kits
+can read the same SQLite room while only its owner can steer its running agent.
+The test `local_steering_reaches_only_the_kit_that_owns_the_turn` exercises both
+kits against the same live turn. Code records correspondence locally with
+`commit_event`. The receiving process uses `steer` or an addressed `post`.
+Room subscriptions use the realtime backend, which is ephemeral and in memory
+by default. For a cross-machine experiment, evaluate RoomKit's existing
+`TurnBackend` and room-owner routing for live work, and `deliver` with a
+`DeliveryBackend` for queued delivery. Independent Code workspaces each have
+their own history and must agree on the identity of the destination.
+
 ## Dependency access in CI
 
 Public dependencies need no GitHub token, including on fork pull requests.

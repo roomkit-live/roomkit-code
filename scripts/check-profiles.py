@@ -255,11 +255,12 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         answered("Hello again", 3, "Answer from fixture-a.")
         assert [r["model"] for r in requests] == ["fixture-a", "fixture-b", "fixture-a"]
         assert "Answer from fixture-a." in json.dumps(requests[1]["messages"])
-        # Each agent declares its one tool, beside the engine's own
-        # read_stored_result (roomkit-rs RMK-1228) and delegation (RMK-1532).
-        engine = {"read_stored_result", "delegate_task", "task_status", "cancel_task", "ask_user"}
-        assert all(len([t for t in r["tools"] if t["function"]["name"] not in engine]) == 1
-                   for r in requests)
+        # Each interactive agent exposes the session reply tool beside its
+        # selected tool and the engine's built-in tools.
+        shared = {"read_stored_result", "delegate_task", "task_status", "cancel_task", "ask_user", "send_message"}
+        for request in requests:
+            declared = {t["function"]["name"] for t in request["tools"]}
+            assert shared <= declared and len(declared - shared) == 1, declared
         # Reopening a secret never reveals it; Escape does not change storage.
         before = (state / "connections.json").read_bytes()
         after_turn("/providers", b"Providers")

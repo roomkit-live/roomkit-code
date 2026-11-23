@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Open project sessions on one machine can exchange messages (experimental).
+  Type `@review message` or choose a recipient with `/message`. The recipient's
+  current agent can reply directly, including while it works on another request.
+
 - Two active beta executor tasks can exchange a question and reply when the
   parent enables consultation on both. The parent sees the exchange, including
   the machines and task IDs. Each task keeps its normal tool permissions.

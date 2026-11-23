@@ -13,6 +13,8 @@ import tempfile
 import termios
 import time
 
+import session_messages_fixture
+
 from pty_checks import wait_for_exit
 
 metadata = json.loads(subprocess.check_output(
@@ -22,12 +24,14 @@ binary = Path(metadata["target_directory"]) / "debug" / "roomkit-code"
 
 
 class App:
-    def __init__(self, project, state, session=None):
+    def __init__(self, project, state, session=None, *, url=None):
         self.master, self.slave = pty.openpty()
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 35, 150, 0, 0))
         self.original = termios.tcgetattr(self.slave)
         args = [str(binary), str(project), "--state-dir", str(state), "--mode", "yolo",
                 "--no-update-check", "--no-herdr", "--no-terminal-status", "--color", "never"]
+        if url:
+            args.extend(["--base-url", url, "--model", "fixture"])
         if session:
             args.extend(["--session", session])
         env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
@@ -132,3 +136,5 @@ with tempfile.TemporaryDirectory(prefix="roomkit-multi-session-") as directory:
             app.cleanup()
 
 print("Multi-session PTY passed: independent drafts, simultaneous instances, busy picker/resume, continued execution, graceful handoff and recovery after process death.")
+
+session_messages_fixture.exercise(App)

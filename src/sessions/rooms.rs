@@ -44,7 +44,10 @@ pub(crate) async fn empty(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Result<b
 }
 
 /// The active rooms binding `channel`, oldest first.
-async fn active_rooms(kit: &RoomKit<SqliteStore>, channel: &ChannelId) -> Result<Vec<Room>> {
+pub(crate) async fn active_rooms(
+    kit: &RoomKit<SqliteStore>,
+    channel: &ChannelId,
+) -> Result<Vec<Room>> {
     let store = kit.store();
     let options = FindRoomIdsByChannelOptions {
         room_filter: Some(RoomFilter {

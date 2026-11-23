@@ -56,10 +56,9 @@ async fn a_schema_4_project_moves_to_the_current_schema_with_its_selections() {
     let app = Application::open(&settings, String::new()).await.unwrap();
     let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert_eq!(saved["schema"], crate::profiles::model::PROJECT_SCHEMA);
-    assert_eq!(
-        app.profiles.tools("code").await.len(),
-        crate::profiles::model::TOOLS.len() + crate::permissions::MODE_TOOLS.len()
-    );
+    let inventory = app.profiles.tools("code").await;
+    let names: BTreeSet<_> = inventory.iter().map(|tool| tool.name.as_str()).collect();
+    assert_eq!(names, interactive_tools());
     assert_eq!(saved["agents"]["reader"]["tools"], json!(["read"]));
     app.close().await.unwrap();
     drop(app);

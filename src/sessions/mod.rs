@@ -17,7 +17,7 @@ pub(crate) mod task_rooms;
 
 pub(crate) use agent::{designate, designated};
 pub(crate) use names::name;
-pub(crate) use rooms::{create, empty};
+pub(crate) use rooms::{active_rooms, create, empty};
 pub(crate) use settings::{
     Running, follow_modes, forget, keep, keep_modes, kept, kept_mode, last_model,
 };
@@ -120,6 +120,11 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "Summarize the conversation's earlier messages now, or once the turn ends",
             "",
         ),
+        (
+            "message",
+            "Message another open project session",
+            "[session] [text]",
+        ),
         ("new", "Start a new conversation in this project", ""),
         ("rename", "Name this conversation", "<name>"),
         (
@@ -214,6 +219,13 @@ impl CommandHandler for Sessions {
         &self,
         current: SessionConfig,
     ) -> Option<tokio::sync::watch::Receiver<Vec<Event>>> {
+        if current.group.is_none() && self.services.sessions.owns(current.room.as_str()) {
+            self.profiles.resources.messages.listen(
+                &current.room,
+                &self.services.sessions,
+                self.profiles.diagnostics.clone(),
+            );
+        }
         Some(live::subscribe(self, current))
     }
 
@@ -234,6 +246,7 @@ impl CommandHandler for Sessions {
         matches!(
             name,
             "mode"
+                | "message"
                 | "rename"
                 | "tools"
                 | "processes"
@@ -274,6 +287,7 @@ impl Sessions {
             _ => return Err("Unsupported application request".into()),
         };
         match name {
+            "message" => return crate::messages::command::handle(self, current, request).await,
             "executors" => return self.profiles.executors(&self.kit, request, &current).await,
             "mcp" => {
                 let result = self.profiles.mcp(&self.kit, request, current).await;

@@ -19,29 +19,27 @@ pub(crate) struct SystemRow<'a> {
     pub about: (&'a str, Value),
 }
 
+impl SystemRow<'_> {
+    /// Build the terminal-only record, including the metadata the application reads back.
+    pub(crate) fn event(self, terminal: &ChannelId) -> crate::Result<RoomEvent> {
+        let source = EventSource::new(terminal.clone(), ChannelType::WEBSOCKET);
+        let mut event =
+            RoomEvent::new(RoomId::new(self.room)?, source, TextContent::new(self.text));
+        event.id = EventId::new(self.id)?;
+        event.r#type = EventType::System;
+        event.visibility = Visibility::Channels(ChannelSet::new([terminal.clone()])?);
+        event.metadata.insert(self.about.0.into(), self.about.1);
+        Ok(event)
+    }
+}
+
 /// Stores `row` from the terminal and for it alone: the agents' histories
 /// never hold it. A row that cannot be stored is only shown.
 pub(crate) async fn commit(kit: &RoomKit<SqliteStore>, terminal: &ChannelId, row: SystemRow<'_>) {
-    let SystemRow {
-        room,
-        id,
-        text,
-        about: (key, value),
-    } = row;
-    let (Ok(room), Ok(id), Ok(visibility)) = (
-        RoomId::new(room),
-        EventId::new(id),
-        ChannelSet::new([terminal.clone()]).map(Visibility::Channels),
-    ) else {
-        return;
-    };
-    let source = EventSource::new(terminal.clone(), ChannelType::WEBSOCKET);
-    let mut event = RoomEvent::new(room.clone(), source, TextContent::new(text));
-    event.id = id;
-    event.r#type = EventType::System;
-    event.visibility = visibility;
-    event.metadata.insert(key.into(), value);
-    let _ = kit
-        .commit_event(&room, event, CommitEventOptions::default())
-        .await;
+    if let Ok(event) = row.event(terminal) {
+        let room = event.room_id.clone();
+        let _ = kit
+            .commit_event(&room, event, CommitEventOptions::default())
+            .await;
+    }
 }

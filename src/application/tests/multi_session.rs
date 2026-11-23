@@ -24,6 +24,55 @@ fn command(app: &Application, name: &str, arguments: &str) -> Request {
     )
 }
 
+/// Sharing RoomKit history does not share the in-process turn backend. This
+/// checks the native primitive directly, without the Code inbox or its polling.
+#[tokio::test]
+async fn local_steering_reaches_only_the_kit_that_owns_the_turn() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let mut config = settings(project.path(), state.path(), &mock.base_url);
+    let receiver = Application::open(&config, String::new()).await.unwrap();
+    config.session = Some("sender".into());
+    let sender = Application::open(&config, String::new()).await.unwrap();
+    let (room, agent) = (&receiver.view.room, &receiver.view.agent);
+    sender.kit.get_room(room, Default::default()).await.unwrap();
+    let held = mock.turns_held.lock().await;
+    let check = async {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while mock.requests.lock().unwrap().is_empty() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let directive = || roomkit::model::InjectMessage {
+            role: "user".into(),
+            content: "A message during the turn.".into(),
+        };
+        assert_eq!(
+            sender
+                .kit
+                .steer(room, agent, directive(), Default::default())
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            receiver
+                .kit
+                .steer(room, agent, directive(), Default::default())
+                .await
+                .unwrap(),
+            1
+        );
+        drop(held);
+    };
+    tokio::join!(turn_operation(&receiver, "local-steering"), check);
+    sender.close().await.unwrap();
+    receiver.close().await.unwrap();
+}
+
 #[tokio::test]
 async fn independent_instances_share_a_project_without_sharing_a_conversation() {
     let project = tempfile::tempdir().unwrap();

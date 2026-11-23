@@ -21,6 +21,7 @@ mod http_client;
 mod images;
 mod instructions;
 mod logo;
+mod messages;
 mod permissions;
 mod plans;
 mod processes;

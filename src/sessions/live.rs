@@ -25,6 +25,7 @@ type View<'a> = (
 
 /// Every source of a view's live events.
 struct Sources {
+    messages: watch::Receiver<u64>,
     processes: watch::Receiver<Vec<Event>>,
     accounts: watch::Receiver<Option<Event>>,
     sidebar: watch::Receiver<()>,
@@ -48,6 +49,7 @@ pub(super) fn subscribe(
     // without saying so: the panel is no longer followed.
     sessions.profiles.resources.tasks.panel.close();
     let mut sources = Sources {
+        messages: sessions.profiles.resources.messages.subscribe(),
         processes: sessions.profiles.processes.subscribe(
             sessions.kit.clone(),
             sessions.channel.clone(),
@@ -98,6 +100,7 @@ async fn events(
     sources: &mut Sources,
 ) -> (Vec<Event>, Option<Duration>) {
     let mut events = sources.processes.borrow_and_update().clone();
+    events.extend(profiles.resources.messages.events(&current.room));
     events.extend(profiles.plans.updates(current).await);
     events.extend(services.hooks.updates(current));
     events.extend(services.updates.events(current));
@@ -153,6 +156,7 @@ impl Sources {
     /// false once a source is gone.
     async fn changed(&mut self, poll: Option<Duration>) -> bool {
         tokio::select! {
+            changed = self.messages.changed() => changed.is_ok(),
             changed = self.processes.changed() => changed.is_ok(),
             changed = self.accounts.changed() => changed.is_ok(),
             changed = self.sidebar.changed() => changed.is_ok(),

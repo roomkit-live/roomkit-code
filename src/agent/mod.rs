@@ -66,6 +66,7 @@ pub(crate) const HISTORY: usize = 50;
 /// Application-scoped resources survive turn, agent and connection changes.
 /// Tool adapters derive archive/process ownership from the room and agent IDs.
 pub(crate) struct Resources {
+    pub messages: Arc<crate::messages::Messages>,
     pub instructions: Arc<crate::instructions::Instructions>,
     /// Each conversation's compactions, for the agents whose memory compacts.
     pub compactions: Arc<crate::compaction::Compactions>,
@@ -157,6 +158,7 @@ impl Resources {
             roster: Arc::default(),
             tasks: Arc::default(),
             turn_ends: Arc::default(),
+            messages: Arc::default(),
         })
     }
 
@@ -258,6 +260,10 @@ pub(crate) async fn create(
     let mut tools = selected(profile, tools, (unattended, extensions.planning));
     if let Some(inventory) = extensions.executor_inventory {
         add_pool_tools(&mut tools, inventory, channel, profile, root, resources);
+    }
+    if !unattended && resources.messages.enabled() && channel != crate::remote::AGENT {
+        let reply = crate::messages::Reply(resources.messages.clone());
+        tools.push((reply.definition(), Arc::new(reply)));
     }
     let native: Vec<AiTool> = tools
         .iter()

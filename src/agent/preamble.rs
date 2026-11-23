@@ -480,7 +480,10 @@ mod tests {
         let all: Vec<AiTool> = crate::profiles::model::TOOLS
             .iter()
             .chain(&crate::permissions::MODE_TOOLS)
-            .chain([&crate::remote::pool::CARGO_TEST])
+            .chain([
+                &crate::remote::pool::CARGO_TEST,
+                &crate::messages::SEND_MESSAGE,
+            ])
             .map(|name| tool(name))
             .collect();
         let (bare, full) = (
@@ -515,13 +518,16 @@ mod tests {
         let known: Vec<&str> = crate::profiles::model::TOOLS
             .iter()
             .chain(&crate::permissions::MODE_TOOLS)
-            .chain([&crate::remote::pool::CARGO_TEST])
+            .chain([
+                &crate::remote::pool::CARGO_TEST,
+                &crate::messages::SEND_MESSAGE,
+            ])
             .copied()
             .collect();
         let tagged: Vec<(&str, &str)> = INSTRUCTIONS.split("\n\n").filter_map(tagged).collect();
         // Only a paragraph's opening is read as its tag.
         assert_eq!(tagged.len(), INSTRUCTIONS.matches("{with ").count());
-        assert_eq!(tagged.len(), 10);
+        assert_eq!(tagged.len(), 11);
         for name in tagged.iter().flat_map(|(names, _)| names.split(' ')) {
             assert!(known.contains(&name) || name == "mcp__*", "{name}");
         }

@@ -198,6 +198,42 @@ string hides either. Neither is included in messages sent to the model.
 The selected theme supplies its background and text colors; monochrome mode
 uses reverse video to keep the area visible.
 
+## Messaging another session (experimental)
+
+Open two terminals with the same project path and state directory. Run one
+command in each terminal to open conversations named `api` and `review`.
+
+```sh
+roomkit-code /path/to/project --session api
+roomkit-code /path/to/project --session review
+```
+
+In `api`, type `@review Which commit are you reviewing?` and press Enter.
+The message appears in `review`. Its selected agent can reply with
+`send_message(reply_to, text)`. Its reply appears in `api`. Sending the
+message or receiving the reply costs no model turn in `api`. The recipient uses
+its own model, tools and permissions. A busy agent reads the message at its next
+model step. An idle agent starts a turn. Only the message and explicit reply
+cross between conversation histories. If the agent starts a turn for a message
+and finishes with only a local answer, the sender sees a delivery notice.
+The local answer stays in the receiving conversation. You can ask explicitly,
+for example `@review Read revision.txt and send me its value with send_message.`
+
+Use `/message` to choose an open session by name and ID, or type a prefix such
+as `@rev` and press Enter to narrow the list. Duplicate names can be resolved in
+the picker. A leading `\@` sends a literal at-sign to your own agent. A closed
+or unattended session is unavailable for a new message. If the sender closes
+after sending, an eventual reply is recorded in its history.
+
+This proof of concept uses the project's existing RoomKit SQLite history.
+Each interactive owner checks for new records about every 750 ms and passes
+them to RoomKit's addressed post or active-turn steering. The owner records
+its place before delivery to avoid steering a turn twice after a crash. If it
+exits between those steps, the message stays visible and may need to be sent
+again. The local experiment requires no executor pool or Redis. For two
+delegated tasks running on separate machines, see the executor consultation
+workflow under *Developing across executor workspaces*.
+
 ## Input history
 
 Up/Down recalls your last 100 saved messages from the selected conversation,
