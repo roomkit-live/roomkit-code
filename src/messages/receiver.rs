@@ -1,6 +1,7 @@
 //! Only the interactive session owner delivers an inbox record to its own agent.
 use super::{
     Messages,
+    delivery::Posts,
     record::{Mail, STREAM},
 };
 use roomkit::model::RoomId;
@@ -9,12 +10,10 @@ use roomkit::{EventFilter, store::ListEventsOptions};
 use roomkit_sqlite::SqliteStore;
 use serde_json::json;
 use std::time::Duration;
-use tokio::task::JoinSet;
 
 const CURSOR: &str = "roomkit_code:session_mail_cursor:v1";
 type Kit = RoomKit<SqliteStore>;
 const BATCH: u8 = 16;
-pub(super) type Posts = JoinSet<crate::Result<()>>;
 
 impl Messages {
     pub(super) async fn receive(

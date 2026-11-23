@@ -22,7 +22,7 @@ class Initiator(StreamingModel):
             return tool("send_message", "outside", to="review", text="UNPUBLISHED_MESSAGE")
         if last.get("tool_call_id") == "invalid":
             assert "exactly one" in content
-            return tool("send_message", "ask-" + phase, to=self.server.peer, text="AGENT_" + phase)
+            return tool("send_message", "ask-" + phase, to=self.server.peer, reply_to="", text="AGENT_" + phase)
         if last.get("tool_call_id") == "discover":
             peers = json.loads(content)["sessions"]
             assert {p["name"] for p in peers} == {"review"}

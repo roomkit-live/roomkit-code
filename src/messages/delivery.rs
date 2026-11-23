@@ -1,14 +1,12 @@
 //! Route correspondence to the recipient's model and explicit results back to the asking agent.
-use super::{
-    receiver::Posts,
-    record::{Kind, Mail},
-};
+use super::record::{Kind, Mail};
 use roomkit::model::{ChannelId, InjectMessage, RoomEvent, TextContent};
 use roomkit::{ConversationStore, PostOptions, RoomKit, SteerOptions};
 use roomkit_sqlite::SqliteStore;
 use serde_json::json;
 
 type Kit = RoomKit<SqliteStore>;
+pub(super) type Posts = tokio::task::JoinSet<crate::Result<()>>;
 
 pub(super) async fn deliver(
     net: Option<&super::network::Network>,

@@ -24,7 +24,7 @@ class Reviewer(StreamingModel):
         last = messages[-1]
         if last.get("tool_call_id") == "answer" and getattr(self.server, "repeat_answer", False):
             self.server.repeat_answer = False
-            return tool("send_message", "repeat-answer", reply_to=self.server.message_id, text=self.server.answer)
+            return tool("send_message", "repeat-answer", to="", reply_to=self.server.message_id, text=self.server.answer)
         if last.get("tool_call_id") in ("answer", "busy-answer", "repeat-answer"):
             assert "sent" in str(last["content"])
             return {"content": "PRIVATE_REVIEW_FINISHED"}

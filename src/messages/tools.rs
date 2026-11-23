@@ -64,7 +64,7 @@ impl Tool for SessionTool {
             Self::Send(m) if m.interactive.get().is_some_and(|c| c.group_enabled) => (
                 SEND_MESSAGE,
                 "Use to and text to start an asynchronous exchange with a session from list_sessions. Use reply_to and text to answer an incoming message. Give exactly one destination. Continue working after the send receipt.",
-                json!({"type":"object","required":["text"],"additionalProperties":false,"properties":{"to":{"type":"string"},"reply_to":{"type":"string"},"text":{"type":"string","maxLength":4000}}}),
+                json!({"type":"object","required":["text"],"additionalProperties":false,"properties":{"to":{"type":"string","description":"Recipient for a new message. Leave empty when replying."},"reply_to":{"type":"string","description":"Received message ID for a reply. Leave empty for a new message."},"text":{"type":"string","maxLength":4000}}}),
             ),
             Self::Send(_) => (
                 SEND_MESSAGE,
@@ -125,7 +125,10 @@ async fn send(
     let input: Input = serde_json::from_value(args.into())
         .map_err(|_| ToolError::refused("Use text and exactly one of to or reply_to"))?;
     check_text(&input.text).map_err(ToolError::refused)?;
-    match (input.to, input.reply_to) {
+    // Some providers fill an unused optional string with an empty value.
+    let to = input.to.filter(|s| !s.trim().is_empty());
+    let reply_to = input.reply_to.filter(|s| !s.trim().is_empty());
+    match (to, reply_to) {
         (Some(target), None) => initiate(messages.group_for(room)?, kit, &target, input.text).await,
         (None, Some(id)) => {
             let (event, mail) = reply::original(kit, room, id).await?;
