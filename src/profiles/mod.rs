@@ -44,7 +44,7 @@ pub(crate) use worker::profile_id;
 
 pub(crate) struct Profiles {
     pub(crate) executor_inventory: Option<crate::remote::pool::Inventory>,
-    pub(crate) pool: Option<Arc<crate::remote::pool::Scheduler>>,
+    pub(crate) pool: Option<Arc<crate::remote::pool::Coordinator>>,
     pub(crate) policy: crate::permissions::Policy,
     pub(crate) plans: Arc<crate::plans::PlanView>,
     require_tool_intent: bool,
@@ -215,13 +215,10 @@ impl Profiles {
             .transpose()
             .map_err(|error| error.to_string())?;
         let requests = asking.as_ref().map(|asking| asking.handler().clone());
-        let (pool, executor_inventory) = crate::remote::pool::connect(
-            settings.executor_pool.as_deref(),
-            settings.serve_pool.as_deref(),
-            settings.executor_url.as_deref(),
-            &resources.tasks,
-        )
-        .map_err(|e| e.to_string())?;
+        let pool = crate::remote::pool::Coordinator::for_launch(settings, &resources.tasks)
+            .map_err(|e| e.to_string())?;
+        let executor_inventory =
+            crate::remote::pool::Inventory::for_worker(settings).map_err(|e| e.to_string())?;
         Ok(Arc::new(Self {
             pool,
             executor_inventory,
@@ -360,6 +357,26 @@ impl Profiles {
         conversation: Option<&str>,
         channel: &str,
     ) -> Result<(CodeAgent, Inventory), String> {
+        let inventory = self
+            .active_pool()
+            .map(|p| p.inventory())
+            .or_else(|| self.executor_inventory.clone());
+        self.assemble_with_inventory(profile, provider, conversation, channel, inventory)
+            .await
+    }
+
+    pub(crate) fn active_pool(&self) -> Option<Arc<crate::remote::pool::Scheduler>> {
+        self.pool.as_ref().and_then(|p| p.active())
+    }
+
+    async fn assemble_with_inventory(
+        &self,
+        profile: &Agent,
+        provider: &Provider,
+        conversation: Option<&str>,
+        channel: &str,
+        inventory: Option<crate::remote::pool::Inventory>,
+    ) -> Result<(CodeAgent, Inventory), String> {
         profile.validate()?;
         provider.validate()?;
         let provider_instance = self.generation_provider(profile, provider)?;
@@ -371,7 +388,7 @@ impl Profiles {
             )
         };
         let extensions = crate::agent::Extensions {
-            executor_inventory: self.executor_inventory.clone(),
+            executor_inventory: inventory,
             skills,
             skill_roots,
             mcp: self.mcp_runtime.selected(profile).await?,

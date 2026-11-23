@@ -16,7 +16,11 @@ impl Scheduler {
         clippy::result_large_err,
         reason = "TurnBackend requires the engine error type"
     )]
-    async fn schedule(&self, mut request: TurnRequest) -> Result<Arc<dyn TurnLink>> {
+    pub(super) async fn schedule(&self, mut request: TurnRequest) -> Result<Arc<dyn TurnLink>> {
+        let permit = self.turns.clone().read_owned().await;
+        if self.closed.is_cancelled() {
+            return Err(RoomKitError::Runtime("Executor pool changed".into()));
+        }
         let req = Requirements::parse(request.context.room.metadata.get("task_context"))
             .map_err(RoomKitError::Value)?;
         let profile = req.profile.clone();
@@ -42,7 +46,11 @@ impl Scheduler {
         };
         ticket.assign(&placement);
         self.announce(link.request(), &placement).await;
-        Ok(Arc::new(ScheduledLink { inner: link, lease }))
+        Ok(Arc::new(ScheduledLink {
+            inner: link,
+            lease,
+            _permit: permit,
+        }))
     }
 
     async fn reserve(
@@ -83,51 +91,10 @@ impl Scheduler {
         }
     }
 }
-impl TurnBackend for Scheduler {
-    fn submit(&self, r: TurnRequest) -> TurnFuture<'_, Result<Arc<dyn TurnLink>>> {
-        if r.channel_id.as_str() == super::super::AGENT {
-            Box::pin(self.schedule(r))
-        } else {
-            TurnBackend::submit(&self.redis, r)
-        }
-    }
-    fn serve(&self, e: Arc<dyn ServedExecutor>) -> TurnFuture<'_, Result<()>> {
-        TurnBackend::serve(&self.redis, e)
-    }
-    fn attend(&self, o: Arc<dyn RoomOwner>) -> TurnFuture<'_, Result<()>> {
-        TurnBackend::attend(&self.redis, o)
-    }
-    fn control(&self, m: ChannelControl) -> TurnFuture<'_, Result<Option<ChannelResult>>> {
-        TurnBackend::control(&self.redis, m)
-    }
-    fn claim_presence<'a>(
-        &'a self,
-        c: &'a str,
-        r: &'a str,
-        o: Option<bool>,
-    ) -> Option<TurnFuture<'a, Result<bool>>> {
-        TurnBackend::claim_presence(&self.redis, c, r, o)
-    }
-    fn executors(&self) -> Option<TurnFuture<'_, Result<Vec<ExecutorInfo>>>> {
-        Some(Box::pin(async move {
-            let mut info = self.redis.executors().await?;
-            // The queue accepts requests even when its last worker goes offline.
-            info.push(ExecutorInfo::new(
-                "code-executor-queue",
-                ExecutorInfoOptions {
-                    hosts: Some([super::super::AGENT.into()].into()),
-                    ..Default::default()
-                },
-            ));
-            Ok(info)
-        }))
-    }
-    fn timeouts(&self) -> Option<TurnTimeouts> {
-        Some(self.redis.timeouts())
-    }
-    fn close(&self) -> TurnFuture<'_, Result<()>> {
+impl Scheduler {
+    pub(crate) fn close(&self) -> TurnFuture<'_, Result<()>> {
         self.closed.cancel();
-        Box::pin(self.redis.close())
+        TurnBackend::close(&self.redis)
     }
 }
 
@@ -136,6 +103,7 @@ fn lost_slot() -> RoomKitError {
 }
 
 struct ScheduledLink {
+    _permit: tokio::sync::OwnedRwLockReadGuard<()>,
     inner: Arc<dyn TurnLink>,
     lease: Lease,
 }

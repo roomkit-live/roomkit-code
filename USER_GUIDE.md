@@ -606,8 +606,10 @@ requirements. File changes stay in that worker’s checkout.
 Open `/executors` and choose **Configure this workspace** on each machine.
 Use the same workspace and `--state-dir` that its coordinator or worker will use.
 
-1. On the coordinator, turn **Schedule remote tasks on launch** on, choose a
-   group and enter the Redis URL. Save with Ctrl+S and reopen Code.
+1. On the coordinator, turn **Schedule remote tasks** on, choose a group and
+   enter the Redis URL. Press Ctrl+S to apply the settings in the open conversation.
+   Finish or cancel pending remote tasks before switching pools or turning scheduling off.
+   If the new Redis connection fails, the previous settings stay active.
 2. On each worker, configure its connections in `/providers` and its models
    and tools in `/agents`. In `/executors configure`, enter the same group
    and Redis connection, a unique worker name, labels such as `role=review`,
@@ -637,9 +639,9 @@ roomkit-code . --serve-pool project-demo --worker-name workstation --worker-labe
 roomkit-code . --executor-pool project-demo
 ```
 
-Open `/executors` to see the execution OS and architecture, declared physical
-host OS, configured model, CPU count and utilization, one-minute load average,
-available RAM, labels and free slots. Ask “Which executor machines are in this
+Open `/executors` and type a machine name, OS or label to filter the list.
+Select a worker to inspect its capacity, CPU load, available RAM and profile
+models. Select a profile to see its tools. Ask “Which executor machines are in this
 pool?” in the parent or a worker conversation. The agent can use `list_executors`
 to read the same live inventory. If that tool is unavailable in the conversation,
 ask the user to check `/executors` on the coordinator. The `remote-linux`
@@ -701,7 +703,8 @@ The scheduler filters online workers by execution OS, profile,
 exact label values, available memory and free slots, then chooses the lowest
 load per CPU. A worker accepting general tasks can have labels of its own.
 A task waits until a matching slot opens. Other eligible tasks can run in
-the meantime. `/executors` shows the reason for waiting and the assigned worker.
+the meantime. Choose **Task placements** in `/executors` or open
+`/executors tasks` to see the reason for waiting and the assigned worker.
 The owner holds the queue in memory, so keep its session open. The pool shares
 the single-worker file tools and permissions. Each checkout belongs to its
 worker. A label describes a worker and does not install software or add tools.

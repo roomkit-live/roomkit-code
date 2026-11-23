@@ -28,7 +28,8 @@ pub(in crate::application) fn install(kit: &RoomKit<SqliteStore>, gate: Gate) ->
                 .ok_or("Missing worker channel")?;
             if channel.as_str() != remote::AGENT
                 || room.metadata.get("task_agent_id").and_then(Value::as_str) != Some(remote::AGENT)
-                || !remote::permits(&request.name, gate.profiles.pool.is_some())
+                || !gate.profiles.remote_authorized().await
+                || !remote::permits(&request.name, gate.profiles.active_pool().is_some())
             {
                 return Err(
                     "Authorization requires a permitted tool in a delegated worker room".into(),

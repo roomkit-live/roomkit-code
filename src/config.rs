@@ -329,6 +329,7 @@ impl Default for Appearance {
 }
 
 pub(crate) struct Settings {
+    pub local_only: bool,
     pub executor_url: Option<String>,
     pub serve_pool: Option<String>,
     pub executor_pool: Option<String>,
@@ -560,6 +561,7 @@ impl Settings {
             herdr: file.integrations.herdr && !cli.no_herdr,
             inherit_env: inherit_env(cli, file.shell)?,
             resume_options: resume_options(cli)?,
+            local_only: cli.local,
             executor_url: None,
             serve_pool: cli.serve_pool.clone(),
             executor_pool: cli.executor_pool.clone(),

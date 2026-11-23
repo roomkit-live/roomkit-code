@@ -101,6 +101,14 @@ pub(super) struct Row {
     pub used: u16,
 }
 impl Row {
+    pub fn free_slots(&self) -> u16 {
+        if self.online() {
+            self.worker.slots.saturating_sub(self.used)
+        } else {
+            0
+        }
+    }
+
     pub fn online(&self) -> bool {
         self.age < 10
     }

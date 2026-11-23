@@ -274,7 +274,7 @@ impl Sessions {
             _ => return Err("Unsupported application request".into()),
         };
         match name {
-            "executors" => return self.profiles.executors(request, &current).await,
+            "executors" => return self.profiles.executors(&self.kit, request, &current).await,
             "mcp" => {
                 let result = self.profiles.mcp(&self.kit, request, current).await;
                 self.services.sidebar_changes.send_replace(());

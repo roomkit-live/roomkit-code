@@ -9,14 +9,35 @@ pub(crate) const LIST_EXECUTORS: &str = "list_executors";
 pub(crate) struct Inventory(pub(super) Registry);
 
 impl Inventory {
-    pub(crate) fn new(group: &str, address: &str) -> crate::Result<Self> {
+    pub(crate) fn for_worker(settings: &crate::config::Settings) -> crate::Result<Option<Self>> {
+        settings
+            .serve_pool
+            .as_deref()
+            .map(|group| {
+                Self::new(
+                    group,
+                    &crate::remote::address(settings.executor_url.as_deref())?,
+                )
+            })
+            .transpose()
+    }
+
+    fn new(group: &str, address: &str) -> crate::Result<Self> {
         Ok(Self(Registry::new(group, address)?))
     }
 
-    pub(super) async fn lines(&self) -> Result<Vec<String>, String> {
-        let rows = tokio::time::timeout(std::time::Duration::from_secs(3), self.0.rows())
+    pub(crate) async fn check(&self) -> Result<(), String> {
+        self.rows().await.map(|_| ())
+    }
+
+    pub(super) async fn rows(&self) -> Result<Vec<Row>, String> {
+        tokio::time::timeout(std::time::Duration::from_secs(3), self.0.rows())
             .await
-            .map_err(|_| "Redis did not answer within three seconds")??;
+            .map_err(|_| "Redis did not answer within three seconds")?
+    }
+
+    async fn lines(&self) -> Result<Vec<String>, String> {
+        let rows = self.rows().await?;
         if rows.is_empty() {
             return Ok(vec!["No workers registered.".into()]);
         }
@@ -78,11 +99,7 @@ fn describe(row: &Row) -> String {
     let (name, os, arch) = (&worker.name, &worker.os, &worker.arch);
     let host = worker.host_os.as_deref().unwrap_or("unspecified");
     let online = if row.online() { "online" } else { "offline" };
-    let free = if row.online() {
-        worker.slots.saturating_sub(row.used)
-    } else {
-        0
-    };
+    let free = row.free_slots();
     let metrics = &worker.metrics;
     let busy = metrics
         .busy

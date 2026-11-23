@@ -1,13 +1,16 @@
 //! Terminal editor for the pool settings of this workspace on this machine.
-use super::Profiles;
+use super::{Profiles, State};
 use crate::{
     remote::pool::{self, WorkerArgs, settings::PoolSettings},
     storage::document::Document,
 };
+use roomkit::RoomKit;
+use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::{
     Choice, Command, Event, FieldKind, FormField, FormSpec, FormValues, Request,
 };
 use roomkit_tui_engine::{CommandResult, SessionConfig};
+mod live;
 
 pub(super) struct Pending {
     room: String,
@@ -18,6 +21,7 @@ pub(super) struct Pending {
 impl Profiles {
     pub(crate) async fn executors(
         &self,
+        kit: &RoomKit<SqliteStore>,
         request: Request,
         current: &SessionConfig,
     ) -> Result<CommandResult, String> {
@@ -26,10 +30,10 @@ impl Profiles {
                 self.open_executor_form(current).await
             }
             Command::Invoke { arguments, .. } => {
-                pool::panel(self.pool.as_deref(), current, arguments.trim()).await
+                pool::panel(self.active_pool().as_deref(), current, arguments.trim()).await
             }
             Command::SubmitForm { form, values, .. } => {
-                self.save_executor_form(current, &form, &values).await
+                self.save_executor_form(kit, current, &form, &values).await
             }
             _ => Err("Unsupported executor request".into()),
         }
@@ -43,7 +47,12 @@ impl Profiles {
             .map(|(agent, _)| agent.id)
             .collect::<Vec<_>>();
         let id = uuid::Uuid::new_v4().to_string();
-        let form = editor(&id, &document.value, &available);
+        let mut effective = document.value.clone();
+        if let Some(active) = self.active_pool() {
+            effective.schedule = true;
+            effective.group = Some(active.group().to_owned());
+        }
+        let form = editor(&id, &effective, &available);
         state.executor_form = Some(Pending {
             room: current.room.to_string(),
             id,
@@ -56,6 +65,7 @@ impl Profiles {
     }
     async fn save_executor_form(
         &self,
+        kit: &RoomKit<SqliteStore>,
         current: &SessionConfig,
         form: &str,
         values: &FormValues,
@@ -67,31 +77,31 @@ impl Profiles {
             .filter(|p| p.id == form && p.room == current.room.as_str())
             .ok_or("Reopen /executors configure before saving")?;
         let saved = submitted(&pending.document.value, values)?;
-        if saved.schedule && state.agent(crate::remote::AGENT).is_some() {
+        validate_profiles(&state, &saved)?;
+        let change = live::Change::prepare(self, &state, &saved).await?;
+        let notice = live::save(self, kit, &mut state, saved, change).await?;
+        Ok(CommandResult::Events(vec![Event::Notice {
+            conversation: current.room.as_str().into(),
+            text: notice.into(),
+        }]))
+    }
+}
+
+fn validate_profiles(state: &State, saved: &PoolSettings) -> Result<(), String> {
+    if saved.schedule && state.agent(crate::remote::AGENT).is_some() {
+        return Err(format!(
+            "Rename the local agent {} before enabling the pool",
+            crate::remote::AGENT
+        ));
+    }
+    for id in &saved.worker.worker_profile {
+        if state.agent(id).is_none() {
             return Err(format!(
-                "Rename the local agent {} before enabling the pool",
-                crate::remote::AGENT
+                "Unknown local profile {id}; configure it in /agents"
             ));
         }
-        for id in &saved.worker.worker_profile {
-            if state.agent(id).is_none() {
-                return Err(format!(
-                    "Unknown local profile {id}; configure it in /agents"
-                ));
-            }
-        }
-        let pending = state
-            .executor_form
-            .as_mut()
-            .ok_or("Reopen /executors configure")?;
-        pending.document.save(saved)?;
-        state.executor_form = None;
-        let notice = Event::Notice {
-            conversation: current.room.as_str().into(),
-            text: "Executor settings saved. Reopen Code for scheduling, or start roomkit-code --executor in this workspace to serve tasks.".into(),
-        };
-        Ok(CommandResult::Events(vec![notice]))
     }
+    Ok(())
 }
 
 fn text(name: &str, title: &str, value: &str, help: &str) -> FormField {
@@ -110,7 +120,7 @@ fn editor(id: &str, saved: &PoolSettings, profiles: &[String]) -> FormSpec {
     let fields = vec![
         FormField::new(
             "schedule",
-            "Schedule remote tasks on launch",
+            "Schedule remote tasks",
             FieldKind::Choice {
                 choices: vec![Choice::new("off", "Off"), Choice::new("on", "On")],
             },
@@ -160,7 +170,7 @@ fn editor(id: &str, saved: &PoolSettings, profiles: &[String]) -> FormSpec {
     FormSpec::new(
         id,
         "executors",
-        "Executor settings · this workspace · apply on restart",
+        "Executor settings · this workspace",
         fields,
     )
 }

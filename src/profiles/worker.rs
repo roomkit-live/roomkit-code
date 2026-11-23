@@ -18,6 +18,17 @@ impl State {
                 "--remote-worker conflicts with the local agent {AGENT}"
             ));
         }
+        Self::declare_remote(kit)
+    }
+
+    pub(super) fn undeclare_remote(kit: &RoomKit<SqliteStore>) -> Result<(), String> {
+        let channel = ChannelId::new(AGENT).map_err(|e| e.to_string())?;
+        kit.unregister_channel(&channel)
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub(super) fn declare_remote(kit: &RoomKit<SqliteStore>) -> Result<(), String> {
         let channel = ChannelId::new(AGENT).map_err(|e| e.to_string())?;
         kit.register_channel(roomkit::ChannelDeclaration {
             steers_room_turns: true,
@@ -69,6 +80,10 @@ impl WorkerAgents {
 }
 
 impl Profiles {
+    pub(crate) async fn remote_authorized(&self) -> bool {
+        self.state.lock().await.remote_worker
+    }
+
     pub(crate) async fn worker(
         &self,
         requested: &[String],

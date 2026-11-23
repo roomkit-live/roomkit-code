@@ -128,42 +128,44 @@ class Terminal:
         self.wait("[Plan]", 0)
 
     def wait(self, text, offset):
+        markers = (text,) if isinstance(text, str) else text
         end = time.monotonic() + 35
         while time.monotonic() < end and self.proc.poll() is None:
             if select.select([self.master], [], [], .1)[0]:
                 self.output.extend(os.read(self.master, 65536))
             plain = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", self.output[offset:])
-            if text.encode() in plain:
+            if any(marker.encode() in plain for marker in markers):
                 return
         raise AssertionError(f"Terminal did not show {text!r}: {self.output[-2800:]!r}")
 
     def send(self, message, expect):
         offset = len(self.output)
         os.write(self.master, message.encode() + b"\r")
-        if message == "/executors":
-            self.wait("PgUp/PgDn output", offset)
         self.wait(expect, offset)
-        if message == "/executors":
+        if message == "/executors tasks":
+            self.wait("PgUp/PgDn output", offset)
             os.write(self.master, b"\x1b")
             time.sleep(.2)
         return offset
 
 
-def configure_pool(command, env, group, *, worker=None):
-    """Save through the form, then launch the returned command without pool flags."""
+def save_pool(term, fields, notice="Executor settings saved"):
+    term.send("/executors configure", "Schedule remote tasks")
+    offset = len(term.output)
+    os.write(term.master, b"\t".join(fields) + b"\x13")
+    term.wait(notice, offset)
+
+
+def configure_pool(command, env, group, *, worker):
+    """Save the worker's local configuration without running the service in the editor."""
     clean = {key: value for key, value in env.items() if key != "ROOMKIT_EXECUTOR_REDIS_URL"}
     with ExitStack() as editor:
         term = Terminal(editor, command + ["--local"], clean)
-        term.send("/executors configure", "Schedule remote tasks on launch")
-        url = env["ROOMKIT_EXECUTOR_REDIS_URL"]
-        fields = [b"" if worker else b"\x1b[C", group.encode(), url.encode()]
-        if worker:
-            fields += [worker.encode(), b"\x151", b"role=review", b"code,reviewer", b"macos"]
-        offset = len(term.output)
-        os.write(term.master, b"\t".join(fields) + b"\x13")
-        term.wait("Executor settings saved", offset)
-        assert url.encode() not in term.output, "Redis connection was visible in the terminal"
-    return (command + ["--executor"] if worker else command), clean
+        url = env["ROOMKIT_EXECUTOR_REDIS_URL"].encode()
+        save_pool(term, [b"", group.encode(), url, worker.encode(), b"\x151",
+                         b"role=review", b"code,reviewer", b"macos"])
+        assert url not in term.output, "Redis connection was visible in the terminal"
+    return command + ["--executor"], clean
 
 
 def eventually(predicate, message):
@@ -176,12 +178,21 @@ def eventually(predicate, message):
 
 
 def scenario(term, server, spare):
-    term.send("/executors", "role=review")
-    term.send("/executors", "profile reviewer")
+    term.send("/executors", "2/2 online")
+    term.send("macbook", "Inspect reviewer")
+    offset = len(term.output)
+    os.write(term.master, b"\x1b[B\r")
+    term.wait("Tools (", offset)
+    term.wait("review-model", offset)
+    os.write(term.master, b"\x1b")
+    time.sleep(.3)
     term.send("review-one", "Submitted review-one.")
     eventually(lambda: server.started.get("review-one") == "macbook", "First review misplaced")
     term.send("review-two", "Submitted review-two.")
-    term.send("/executors", "all matching slots busy")
+    term.send("/executors tasks", "all matching slots busy")
+    save_pool(term, [b"\x1b[D"], "Finish or cancel")
+    os.write(term.master, b"\x1b")
+    time.sleep(.3)
     term.send("ordinary-read", "Submitted ordinary-read.")
     eventually(lambda: server.finished.get("ordinary-read") == "linux", "Linux did not read its marker")
     assert "review-two" not in server.started
@@ -197,12 +208,12 @@ def scenario(term, server, spare):
     assert "write" not in review[1] and "shell" not in review[1] and "review-fixture-instruction" in review[2]
     print("PASS  Two exposed profiles shared one slot and workspace, with distinct connections, models and tools.", flush=True)
     term.send("unpublished-task", "Submitted unpublished-task.")
-    term.send("/executors", "no online worker matches")
+    term.send("/executors tasks", "no online worker matches")
     term.send("invalid-task", "Requirements rejected.")
     term.send("windows-task", "Submitted windows-task.")
-    term.send("/executors", "no online worker matches")
+    term.send("/executors tasks", "no online worker matches")
     term.send("large-task", "Submitted large-task.")
-    term.send("/executors", "insufficient available RAM")
+    term.send("/executors tasks", "insufficient available RAM")
     term.send("waiting-task", "Submitted waiting-task.")
     term.send("cancel-waiting", "Submitted cancel-waiting.")
     term.send("new-worker-task", "Submitted new-worker-task.")
@@ -245,7 +256,7 @@ def rust_scenario(term, server, root):
         assert "expected_answer" in report and verdict in report, report
     diff = result("rust-diff")
     assert "41" in diff and "42" in diff, diff
-    term.send("/executors", "assigned to macbook · profile reviewer · model review-model")
+    term.send("/executors tasks", "assigned to macbook · profile reviewer · model review-model")
     print("PASS  Plan blocked Cargo, Ask handled refusal and approval, and the review followed two real test runs.", flush=True)
 
 
@@ -331,24 +342,44 @@ def main():
             if not select.select([proc.stdout], [], [], 20)[0] or not proc.stdout.readline().startswith("Serving"):
                 raise RuntimeError("Worker failed to register: " + name)
 
-        owner_args, owner_env = configure_pool(args("owner"), env, group)
+        owner_args = args("owner")
+        owner_env = {k: v for k, v in env.items() if k != "ROOMKIT_EXECUTOR_REDIS_URL"}
         term = Terminal(stack, owner_args, owner_env)
+        term.send(INVENTORY_QUESTION, "No executor inventory tool is available.")
+        url = env["ROOMKIT_EXECUTOR_REDIS_URL"].encode()
+        save_pool(term, [b"\x1b[C", group.encode(), url], "Scheduling is on.")
+        assert url not in term.output
         term.send(INVENTORY_QUESTION, "Live inventory is empty.")
         term.send("bootstrap-task", "Submitted bootstrap-task.")
-        term.send("/executors", "no online worker matches")
+        term.send("/executors tasks", "no online worker matches")
         worker("linux", "general")
         eventually(lambda: server.finished.get("bootstrap-task") == "linux",
                    "Task submitted to an empty pool did not wake")
         print("PASS  A task submitted before the first worker joined completed.", flush=True)
         worker("macbook", "review")
         term.send(INVENTORY_QUESTION, "Live inventory includes the MacBook and Linux workstation.")
-        print("PASS  Coordinator and multi-profile worker launched from saved terminal settings.", flush=True)
+        print("PASS  Coordinator enabled scheduling live and worker loaded its saved profile settings.", flush=True)
         term.send("inspect-pool-from-worker", "Submitted inspect-pool-from-worker.")
         assert server.worker_saw_inventory.wait(15), "Pool worker could not read the inventory"
         print("PASS  Owner and delegated worker can inspect the same live pool as /executors.", flush=True)
         scenario(term, server, lambda: worker("spare", "spare"))
         fresh = Terminal(stack, [*owner_args, "--session", "rust-tests"], owner_env)
         rust_scenario(fresh, server, root)
+        save_pool(fresh, [b"", b"", b"redis://127.0.0.1:1/"],
+                  ("Redis did not answer", "Cannot reach the executor pool in Redis"))
+        os.write(fresh.master, b"\x1b")
+        time.sleep(.3)
+        saved = json.loads(next((root / "owner-state").glob("projects/*/executors.json")).read_text())
+        assert saved["url"] == url.decode(), "A failed connection overwrote the saved URL"
+        fresh.send(INVENTORY_QUESTION, "Live inventory includes the MacBook and Linux workstation.")
+        print("PASS  Unreachable broker preserved the working pool and saved URL.", flush=True)
+        save_pool(fresh, [b"\x1b[D"], "Scheduling is off.")
+        fresh.send(INVENTORY_QUESTION, "No executor inventory tool is available.")
+        save_pool(fresh, [b"\x1b[C", b"\x15" + (group + "-other").encode()], "Scheduling is on.")
+        fresh.send(INVENTORY_QUESTION, "Live inventory is empty.")
+        save_pool(fresh, [b"", b"\x15" + group.encode()])
+        fresh.send(INVENTORY_QUESTION, "Live inventory includes the MacBook and Linux workstation.")
+        print("PASS  Enable, disable and switch pools in the same open conversation.", flush=True)
 
 
 if __name__ == "__main__":

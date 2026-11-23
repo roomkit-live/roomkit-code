@@ -60,7 +60,7 @@ impl Application {
         };
         let mut options = RoomKitOptions::with_store(store);
         if let Some(pool) = &profiles.pool {
-            options.turn_backend = Some(pool.handle());
+            options.turn_backend = Some(roomkit::turns::TurnBackendHandle::new(pool.clone()));
         } else if let Some(group) = &settings.remote_worker {
             options.turn_backend = Some(crate::remote::handle(group)?);
         }

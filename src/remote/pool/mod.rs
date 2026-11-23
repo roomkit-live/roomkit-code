@@ -1,6 +1,8 @@
 //! Resource-based placement for the experimental Redis executor pool.
 mod cargo_test;
+mod coordinator;
 pub(crate) use cargo_test::{CARGO_TEST, CargoTest};
+pub(crate) use coordinator::Coordinator;
 mod inventory;
 pub(crate) use inventory::{Inventory, LIST_EXECUTORS};
 mod lease;
@@ -16,7 +18,7 @@ mod worker_options;
 
 pub(crate) use registry::WorkerProfile;
 use registry::{Registry, Worker};
-use roomkit::turns::TurnBackendHandle;
+
 use std::{collections::BTreeMap, sync::Arc};
 pub(crate) use worker::{advertise, declare, worker_failure};
 pub(crate) use worker_options::WorkerArgs;
@@ -79,45 +81,54 @@ impl Requirements {
 }
 pub(crate) struct Scheduler {
     group: String,
+    address: String,
+    attending: tokio::sync::OnceCell<()>,
+    turns: Arc<tokio::sync::RwLock<()>>,
     tasks: std::sync::Weak<crate::delegation::Tasks>,
     redis: roomkit::RedisTurnBackend,
     registry: Registry,
     queue: Arc<queue::Queue>,
     closed: tokio_util::sync::CancellationToken,
 }
-/// Owners place work and inspect the pool. Workers only need its inventory here.
-pub(crate) fn connect(
-    owner_group: Option<&str>,
-    worker_group: Option<&str>,
-    saved_url: Option<&str>,
-    tasks: &Arc<crate::delegation::Tasks>,
-) -> crate::Result<(Option<Arc<Scheduler>>, Option<Inventory>)> {
-    let Some(group) = owner_group.or(worker_group) else {
-        return Ok((None, None));
-    };
-    let address = super::address(saved_url)?;
-    let inventory = Inventory::new(group, &address)?;
-    let scheduler = if owner_group.is_some() {
-        Some(Arc::new(Scheduler {
+impl Scheduler {
+    pub(crate) fn new(
+        group: &str,
+        saved_url: Option<&str>,
+        tasks: &Arc<crate::delegation::Tasks>,
+    ) -> crate::Result<Arc<Self>> {
+        let address = super::address(saved_url)?;
+        Ok(Arc::new(Self {
             group: group.into(),
             tasks: Arc::downgrade(tasks),
             redis: super::backend(&format!("pool:{group}"), &address)?,
-            registry: inventory.0.clone(),
+            registry: Registry::new(group, &address)?,
+            address,
             queue: Arc::default(),
             closed: Default::default(),
+            attending: Default::default(),
+            turns: Default::default(),
         }))
-    } else {
-        None
-    };
-    Ok((scheduler, Some(inventory)))
-}
-
-impl Scheduler {
-    pub(crate) fn inventory(&self) -> Inventory {
-        Inventory(self.registry.clone())
     }
 
-    pub(crate) fn handle(self: &Arc<Self>) -> TurnBackendHandle {
-        TurnBackendHandle::new(self.clone())
+    pub(crate) fn matches_connection(
+        &self,
+        group: &str,
+        saved_url: Option<&str>,
+    ) -> crate::Result<bool> {
+        Ok(self.group == group && self.address == super::address(saved_url)?)
+    }
+
+    pub(crate) fn edit_permit(&self) -> Result<tokio::sync::OwnedRwLockWriteGuard<()>, String> {
+        self.turns.clone().try_write_owned().map_err(|_| {
+            "Finish or cancel the queued or running remote tasks before changing pools".into()
+        })
+    }
+
+    pub(crate) fn group(&self) -> &str {
+        &self.group
+    }
+
+    pub(crate) fn inventory(&self) -> Inventory {
+        Inventory(self.registry.clone())
     }
 }

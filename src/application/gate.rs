@@ -116,7 +116,7 @@ async fn delegation_refusal(gate: &Gate, event: &ToolCallEvent) -> Option<String
         .and_then(Value::as_str)
         .unwrap_or_default();
     if target == crate::remote::AGENT
-        && gate.profiles.pool.is_some()
+        && gate.profiles.active_pool().is_some()
         && let Err(error) = crate::remote::pool::Requirements::parse(event.arguments.get("context"))
     {
         return Some(error);
