@@ -1,5 +1,7 @@
-//! Project-local session messages. RoomKit owns storage, addressing and steering.
+//! Interactive session messages. RoomKit owns storage, addressing and steering.
 pub(crate) mod command;
+mod directory;
+mod network;
 mod receiver;
 mod record;
 mod reply;
@@ -21,6 +23,7 @@ pub(crate) use reply::{NAME as SEND_MESSAGE, Reply};
 #[derive(Default)]
 pub(crate) struct Messages {
     kit: OnceLock<WeakRoomKit<SqliteStore>>,
+    network: OnceLock<network::Network>,
     listening: Mutex<HashSet<RoomId>>,
     recent: Mutex<HashMap<RoomId, VecDeque<Item>>>,
     changes: watch::Sender<u64>,
@@ -31,6 +34,23 @@ pub(crate) struct Messages {
 impl Messages {
     pub(crate) fn install(&self, kit: &RoomKit<SqliteStore>) {
         let _ = self.kit.set(kit.downgrade());
+    }
+
+    pub(crate) async fn open_network(
+        &self,
+        settings: &crate::config::Settings,
+        kit: &RoomKit<SqliteStore>,
+        room: &RoomId,
+        leases: Arc<crate::storage::SessionLeases>,
+    ) -> crate::Result<()> {
+        let Some(group) = &settings.session_group else {
+            return Ok(());
+        };
+        let address = crate::remote::address(settings.executor_url.as_deref())?;
+        let net = network::Network::open(group, &address, kit, room, leases).await?;
+        self.network
+            .set(net)
+            .map_err(|_| "Session network already open".into())
     }
 
     pub(crate) fn enabled(&self) -> bool {
@@ -76,6 +96,9 @@ impl Messages {
         self.stop.cancel();
         self.workers.close();
         self.workers.wait().await;
+        if let Some(net) = self.network.get() {
+            net.close().await;
+        }
     }
 
     pub(crate) fn subscribe(&self) -> watch::Receiver<u64> {

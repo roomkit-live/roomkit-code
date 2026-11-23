@@ -16,8 +16,16 @@ pub(super) enum Kind {
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub(super) struct Route {
+    pub from: ChannelId,
+    pub to: ChannelId,
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub(super) struct Mail {
     pub from: RoomId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<Route>,
     pub text: String,
     pub kind: Kind,
 }

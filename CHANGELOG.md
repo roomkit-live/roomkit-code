@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Named interactive sessions on different machines can exchange messages with
+  `--session-group GROUP` through a trusted Redis connection (experimental).
+  Each session keeps its own workspace, model, tools and history.
+
 - Open project sessions on one machine can exchange messages (experimental).
   Type `@review message` or choose a recipient with `/message`. The recipient's
   current agent can reply directly, including while it works on another request.

@@ -1,24 +1,31 @@
 """Exercise placement, queued cancellation and overlapping work through a real terminal."""
 from contextlib import ExitStack
-import fcntl
 import json
 import os
 from pathlib import Path
-import pty
 import re
 import select
-import struct
 import subprocess
 import sys
 import tempfile
-import termios
 import threading
 import time
 import uuid
 
 import executor_consultation_fixture as peers
-from executor_fixture import StreamingModel, child, redis, tool
+from executor_fixture import StreamingModel, Terminal, child, redis, tool
 from fixture_http import LoopbackHTTPServer
+
+
+class PoolTerminal(Terminal):
+    def send(self, message, expect):
+        offset = super().send(message, expect)
+        if message == "/executors tasks":
+            self.wait("PgUp/PgDn output", offset)
+            os.write(self.master, b"\x1b")
+            time.sleep(.2)
+        return offset
+
 
 TASKS = {
     peers.AUTHOR: {"labels": {"role": "general"}, "consultation": True},
@@ -142,39 +149,6 @@ class Model(StreamingModel):
         return {"content": "Missing workspace marker."}
 
 
-class Terminal:
-    def __init__(self, stack, args, env):
-        self.master, slave = pty.openpty()
-        stack.callback(os.close, self.master)
-        stack.callback(os.close, slave)
-        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 58, 200, 0, 0))
-        self.proc = stack.enter_context(child(args, env, stdin=slave, stdout=slave,
-                                              stderr=slave, start_new_session=True))
-        self.output = bytearray()
-        self.wait("[Plan]", 0)
-
-    def wait(self, text, offset):
-        markers = (text,) if isinstance(text, str) else text
-        end = time.monotonic() + 35
-        while time.monotonic() < end and self.proc.poll() is None:
-            if select.select([self.master], [], [], .1)[0]:
-                self.output.extend(os.read(self.master, 65536))
-            plain = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", self.output[offset:])
-            if any(marker.encode() in plain for marker in markers):
-                return
-        raise AssertionError(f"Terminal did not show {text!r}: {self.output[-2800:]!r}")
-
-    def send(self, message, expect):
-        offset = len(self.output)
-        os.write(self.master, message.encode() + b"\r")
-        self.wait(expect, offset)
-        if message == "/executors tasks":
-            self.wait("PgUp/PgDn output", offset)
-            os.write(self.master, b"\x1b")
-            time.sleep(.2)
-        return offset
-
-
 def save_pool(term, fields, notice="Executor settings saved"):
     term.send("/executors configure", "Schedule remote tasks")
     offset = len(term.output)
@@ -186,7 +160,7 @@ def configure_pool(command, env, group, *, worker):
     """Save the worker's local configuration without running the service in the editor."""
     clean = {key: value for key, value in env.items() if key != "ROOMKIT_EXECUTOR_REDIS_URL"}
     with ExitStack() as editor:
-        term = Terminal(editor, command + ["--local"], clean)
+        term = PoolTerminal(editor, command + ["--local"], clean)
         url = env["ROOMKIT_EXECUTOR_REDIS_URL"].encode()
         save_pool(term, [b"", group.encode(), url, worker.encode(), b"\x151",
                          b"role=review", b"code,reviewer", b"macos"])
@@ -409,7 +383,7 @@ def main():
 
         owner_args = args("owner")
         owner_env = {k: v for k, v in env.items() if k != "ROOMKIT_EXECUTOR_REDIS_URL"}
-        term = Terminal(stack, owner_args, owner_env)
+        term = PoolTerminal(stack, owner_args, owner_env)
         term.send(INVENTORY_QUESTION, "No executor inventory tool is available.")
         url = env["ROOMKIT_EXECUTOR_REDIS_URL"].encode()
         save_pool(term, [b"\x1b[C", group.encode(), url], "Scheduling is on.")
@@ -428,7 +402,7 @@ def main():
         assert server.worker_saw_inventory.wait(15), "Pool worker could not read the inventory"
         print("PASS  Owner and delegated worker can inspect the same live pool as /executors.", flush=True)
         scenario(term, server, lambda: worker("spare", "spare"))
-        fresh = Terminal(stack, [*owner_args, "--session", "rust-tests"], owner_env)
+        fresh = PoolTerminal(stack, [*owner_args, "--session", "rust-tests"], owner_env)
         reproduction = "cargo test repro_" + uuid.uuid4().hex
         (root / "linux" / "reproduction.txt").write_text(reproduction)
         peers.exercise(fresh, server, reproduction)

@@ -81,6 +81,9 @@ pub(crate) struct Cli {
     /// Open or create a named conversation; without this, start a new session.
     #[arg(long)]
     pub session: Option<String>,
+    /// Advertise this named interactive session to a trusted Redis group (experimental).
+    #[arg(long, requires = "session", conflicts_with_all = ["prompt", "local"], value_parser = crate::remote::group)]
+    pub session_group: Option<String>,
     /// Send this message without the terminal interface, print the agent's
     /// answer and exit; `-` reads the message from standard input. Nobody
     /// answers approvals: they are refused.
@@ -343,6 +346,7 @@ pub(crate) struct Settings {
     /// Neither the flag nor its variable named the storage.
     pub default_storage: bool,
     pub session: Option<String>,
+    pub session_group: Option<String>,
     pub provider: crate::providers::ProviderKind,
     pub base_url: String,
     pub model: String,
@@ -571,6 +575,7 @@ impl Settings {
             state_dir,
             default_storage: cli.state_dir.is_none(),
             session: cli.session.clone(),
+            session_group: cli.session_group.clone(),
             mode: cli.mode.unwrap_or(file.permissions.mode),
             mode_given: cli.mode.is_some(),
             provider,

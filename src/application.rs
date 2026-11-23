@@ -203,6 +203,10 @@ async fn setup(
         settings, kit, profiles, services, policy, &channel, agent_id,
     )
     .await?;
+    resources
+        .messages
+        .open_network(settings, kit, &view.room, services.sessions.clone())
+        .await?;
     Ok((channel, view))
 }
 

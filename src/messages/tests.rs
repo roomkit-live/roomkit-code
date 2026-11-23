@@ -17,6 +17,7 @@ async fn replay_validates_the_content_and_reply_ids_stay_in_the_recipient_room()
     let message = Mail {
         from: sender.clone(),
         text: "Which branch?".into(),
+        remote: None,
         kind: super::record::Kind::Message,
     };
     let id = EventId::new("session-msg-example").unwrap();

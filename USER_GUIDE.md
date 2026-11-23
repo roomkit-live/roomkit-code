@@ -222,8 +222,7 @@ for example `@review Read revision.txt and send me its value with send_message.`
 Use `/message` to choose an open session by name and ID, or type a prefix such
 as `@rev` and press Enter to narrow the list. Duplicate names can be resolved in
 the picker. A leading `\@` sends a literal at-sign to your own agent. A closed
-or unattended session is unavailable for a new message. If the sender closes
-after sending, an eventual reply is recorded in its history.
+or unattended session is unavailable for a new message. With a shared project database, a reply can still reach the sender's history after its terminal closes.
 
 This proof of concept uses the project's existing RoomKit SQLite history.
 Each interactive owner checks for new records about every 750 ms and passes
@@ -233,6 +232,32 @@ exits between those steps, the message stays visible and may need to be sent
 again. The local experiment requires no executor pool or Redis. For two
 delegated tasks running on separate machines, see the executor consultation
 workflow under *Developing across executor workspaces*.
+
+### Across machines
+
+On each machine, choose the same trusted Redis connection using
+`ROOMKIT_EXECUTOR_REDIS_URL` or the URL saved in `/executors`. Choose a common
+session group for the participants. For example, launch one terminal per host:
+
+```sh
+# Linux
+roomkit-code /work/api --session api --session-group team
+# macOS
+roomkit-code ~/src/api --session review --session-group team
+```
+
+Type `@review Which Git revision is checked out on your machine?` in `api`.
+Both terminals use their own project files, SQLite history, model and tool
+permissions. Joining a group advertises only the named starting conversation.
+Other conversations opened with `/new` or `/resume` stay local. Use `/message`
+to choose an exact live address when several sessions have the same name.
+
+Keep both terminals open until the reply arrives. Each launch gets a fresh
+address. To rejoin after closing, pass `--session-group` again. A lost
+acknowledgement leaves delivery uncertain. Check the recipient's history before
+resending. Group names separate discovery on the broker. Anyone with access to
+the group's Redis keys can participate, so use a broker restricted to trusted
+participants. An executor pool and shared project directory are optional.
 
 ## Input history
 

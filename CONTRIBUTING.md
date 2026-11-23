@@ -40,11 +40,24 @@ can read the same SQLite room while only its owner can steer its running agent.
 The test `local_steering_reaches_only_the_kit_that_owns_the_turn` exercises both
 kits against the same live turn. Code records correspondence locally with
 `commit_event`. The receiving process uses `steer` or an addressed `post`.
-Room subscriptions use the realtime backend, which is ephemeral and in memory
-by default. For a cross-machine experiment, evaluate RoomKit's existing
-`TurnBackend` and room-owner routing for live work, and `deliver` with a
-`DeliveryBackend` for queued delivery. Independent Code workspaces each have
-their own history and must agree on the identity of the destination.
+For two independent databases, each named participant runs a RoomKit
+`TurnExecutor` that advertises one exact mailbox channel in the session group.
+Code discovers it through `RedisTurnBackend::executors`. The sender calls
+`TurnBackend::control` with an addressed `ChannelCall`. The receiving channel
+validates the room, endpoint and return correlation, then acknowledges the
+local event commit. Its own interactive kit performs the same post or steer
+as above. Replies follow the verified return address. The application defines
+the mail envelope and visibility policy. RoomKit owns discovery, liveness and
+transport. A direct channel call also works before either agent has a turn.
+`RoomOwner` and `TurnHost` route calls associated with an admitted turn, as used
+in executor consultation. Offline delivery would need separate persistence
+and redelivery semantics.
+
+After `cargo build --locked`, run `python3 scripts/check-session-network.py`
+with Docker available for a temporary loopback Redis. To exercise a second
+machine, add `--ssh HOST --peer-binary /path/to/roomkit-code`. Build the same
+revision there first. The test uses independent workspaces and scripted model
+endpoints, and removes the test data on exit.
 
 ## Dependency access in CI
 

@@ -92,8 +92,12 @@ impl Messages {
             *after = Some(index);
             if let Some(mail) = Mail::read(&event) {
                 self.show(room, &event.id, mail.line());
-                if mail.kind == Kind::Message {
-                    dispatch(kit, event, mail, posts).await?;
+                if mail.kind == Kind::Message
+                    && mail.remote.as_ref().is_none_or(|route| {
+                        self.network.get().is_some_and(|n| n.channel == route.to)
+                    })
+                {
+                    dispatch(self.network.get(), kit, event, mail, posts).await?;
                 }
             }
         }
@@ -103,24 +107,27 @@ impl Messages {
 
 /// A post waits for the whole turn. Keep polling the inbox while it runs so
 /// that later correspondence can steer even a turn started by an earlier post.
-async fn dispatch(kit: &Kit, event: RoomEvent, mail: Mail, posts: &mut Posts) -> crate::Result<()> {
+async fn dispatch(
+    net: Option<&super::network::Network>,
+    kit: &Kit,
+    event: RoomEvent,
+    mail: Mail,
+    posts: &mut Posts,
+) -> crate::Result<()> {
     match steer(kit, &event, &mail).await {
         Ok(None) => Ok(()),
         Ok(Some((text, options))) => {
             let kit = kit.clone();
+            let net = net.cloned();
             posts.spawn(async move {
                 let result = kit
                     .post(&event.room_id, TextContent::new(text), options)
                     .await;
                 match result {
                     Ok(posted) if posted.status != roomkit::model::EventStatus::Blocked => {
-                        if kit
-                            .store()
-                            .get_event(&super::reply::reply_id(&event.id)?)
-                            .await?
-                            .is_none()
-                        {
+                        if !answered(&kit, &event, &mail).await? {
                             notice(
+                                net.as_ref(),
                                 &kit,
                                 &event,
                                 &mail,
@@ -130,20 +137,42 @@ async fn dispatch(kit: &Kit, event: RoomEvent, mail: Mail, posts: &mut Posts) ->
                         }
                         Ok(())
                     }
-                    _ => notice(&kit, &event, &mail, UNDELIVERED).await,
+                    _ => notice(net.as_ref(), &kit, &event, &mail, UNDELIVERED).await,
                 }
             });
             Ok(())
         }
-        Err(_) => notice(kit, &event, &mail, UNDELIVERED).await,
+        Err(_) => notice(net, kit, &event, &mail, UNDELIVERED).await,
     }
+}
+
+async fn answered(kit: &Kit, event: &RoomEvent, mail: &Mail) -> crate::Result<bool> {
+    if mail.remote.is_some() {
+        return Ok(kit
+            .store()
+            .get_private_state(&event.room_id, &super::network::sent(&event.id))
+            .await?
+            .is_some());
+    }
+    Ok(kit
+        .store()
+        .get_event(&super::reply::reply_id(&event.id)?)
+        .await?
+        .is_some())
 }
 
 const UNDELIVERED: &str = "The receiving session could not deliver this message to its agent.";
 
-async fn notice(kit: &Kit, event: &RoomEvent, mail: &Mail, status: &str) -> crate::Result<()> {
+async fn notice(
+    net: Option<&super::network::Network>,
+    kit: &Kit,
+    event: &RoomEvent,
+    mail: &Mail,
+    status: &str,
+) -> crate::Result<()> {
     let subject: String = mail.text.chars().take(100).collect();
     super::reply::respond(
+        net,
         kit,
         event,
         mail,

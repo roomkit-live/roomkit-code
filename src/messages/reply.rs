@@ -55,6 +55,7 @@ impl Tool for Reply {
             }
             let (event, mail) = original(&kit, &room.id, input.reply_to).await?;
             respond(
+                messages.network.get(),
                 &kit,
                 &event,
                 &mail,
@@ -97,6 +98,7 @@ pub(super) fn reply_id(id: &EventId) -> crate::Result<EventId> {
 }
 
 pub(super) async fn respond(
+    net: Option<&super::network::Network>,
     kit: &RoomKit<SqliteStore>,
     event: &RoomEvent,
     original: &Mail,
@@ -104,6 +106,23 @@ pub(super) async fn respond(
     text: &str,
 ) -> crate::Result<()> {
     let room = kit.get_room(&event.room_id, Default::default()).await?;
+    let id = match &kind {
+        Kind::Reply(id) => reply_id(id)?,
+        Kind::Notice(id) => EventId::new(format!("session-notice-{id}"))?,
+        Kind::Message => return Err("Expected a session reply or delivery notice".into()),
+    };
+    let response = Mail {
+        from: room.id.clone(),
+        text: text.into(),
+        remote: None,
+        kind,
+    };
+    if let Some(route) = &original.remote {
+        return net
+            .ok_or("Remote session network unavailable")?
+            .reply(kit, route, &id, &response)
+            .await;
+    }
     let destination = kit
         .get_room(
             &original.from,
@@ -117,16 +136,7 @@ pub(super) async fn respond(
     {
         return Err("The sending session cannot receive this reply".into());
     }
-    let id = match &kind {
-        Kind::Reply(id) => reply_id(id)?,
-        Kind::Notice(id) => EventId::new(format!("session-notice-{id}"))?,
-        Kind::Message => return Err("Expected a session reply or delivery notice".into()),
-    };
-    Mail {
-        from: room.id,
-        text: text.into(),
-        kind,
-    }
-    .write(kit, &original.from, id, room.organization_id)
-    .await
+    response
+        .write(kit, &original.from, id, room.organization_id)
+        .await
 }

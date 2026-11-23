@@ -37,7 +37,7 @@ pub(crate) fn group(value: &str) -> std::result::Result<String, String> {
     Ok(value.into())
 }
 
-fn address(saved: Option<&str>) -> Result<String> {
+pub(crate) fn address(saved: Option<&str>) -> Result<String> {
     let address = match std::env::var("ROOMKIT_EXECUTOR_REDIS_URL") {
         Ok(endpoint) => endpoint,
         Err(std::env::VarError::NotPresent) => saved
