@@ -713,6 +713,54 @@ worker. A label describes a worker and does not install software or add tools.
 To exercise overlapping tasks locally with two workers and scripted models, run
 `python3 scripts/check-executor-pool.py` after `cargo build --locked`.
 
+### Developing across executor workspaces
+
+Use the parent conversation to coordinate the agents on different machines.
+Each agent receives its task and the context the parent supplies. Its result
+comes back to the parent, which can pass a finding to the next agent. For
+example, ask a reviewer on macOS to propose test cases in Plan mode. Once you
+choose a case, ask the parent in Ask mode to send the agreed case to the Linux
+coding profile. A proposal by itself starts no tests. The beta has no direct
+worker-to-worker messaging or nested remote delegation. You can open an active
+task in `/tasks` and clarify its instructions yourself. Messages exchanged
+after the task has finished stay in its conversation.
+
+Use the following workflow to compare test results on two machines.
+
+1. **Choose the revision.** Commit the changes you want tested on your feature
+   branch and make the commit available on a remote both machines can fetch.
+   Copy the full SHA from `git rev-parse HEAD` into the parent conversation.
+   A branch can move between two test runs. Uncommitted changes on the
+   developer's machine stay there.
+2. **Prepare each worker.** Open its **Workspace** path from `/executors` in a
+   terminal on that machine. Check that the worker is idle, the checkout is
+   dedicated to this run, and `git status --short` is empty. Set `TARGET_SHA`
+   to the SHA from step 1. This example uses the branch `feature/parser-fix`.
+
+   ```sh
+   git fetch origin feature/parser-fix &&
+     git switch --detach "$TARGET_SHA" &&
+     git rev-parse HEAD
+   ```
+
+   Verify the printed SHA on each machine before delegating. If the checkout
+   contains work in progress, leave it in place. After fetching the branch,
+   `git worktree add --detach ../parser-validation "$TARGET_SHA"` creates a
+   separate checkout. To use it, configure and start a worker **in that
+   directory**, give it a unique worker name and placement label, and select
+   that label in the task. An already running worker keeps its original path.
+3. **Delegate and compare.** Give the parent the verified SHA, test command
+   and expected outcome. For example, request one `cargo_test` run on Linux
+   and one on macOS with profiles that expose that tool. Keep each checkout
+   at that revision throughout the run. Ask the parent to collect the worker,
+   revision, exit code and failing test for each result. Git preparation and
+   revision verification are manual in this beta.
+
+For a task that writes code, give each concurrent writer its own writable
+branch and checkout. From a terminal in the worker's checkout, inspect and
+commit its edits, then share that commit through Git before handing the
+review to an agent on another machine.
+
 ## Tools and persistence
 
 Use **/tools** to browse the capabilities actually registered by the application,

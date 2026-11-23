@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The executor guide explains how to coordinate coding and review tasks through
+  the parent conversation and test the same Git commit on multiple machines.
+
 - The agent’s built-in guide now identifies the executor pool as an opt-in
   beta and shows how to find the requested model and delegate to its worker profile.
 
