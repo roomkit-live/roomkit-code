@@ -21,6 +21,9 @@ from pty_checks import wait_for_exit
 
 from fixture_http import LoopbackHTTPServer
 
+OSC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+CSI = re.compile(r"\x1b\[([0-9;?<]*)([A-Za-z])")
+
 if os.environ.get("ROOMKIT_TEST_BINARY"):
     binary = Path(os.environ["ROOMKIT_TEST_BINARY"])
 else:
@@ -129,7 +132,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
             if len(requests) >= count and answer in below and "Working" not in below:
                 return
             if time.monotonic() >= end or process.poll() is not None:
-                raise RuntimeError(f"No answer to {text!r}: {drawn}")
+                raise RuntimeError(f"No answer to {text!r} after {len(requests)}/{count} requests: {drawn}")
             pump()
 
     def screen(rows=28, cols=110):
@@ -139,11 +142,13 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
         data = captured.decode(errors="replace")
         index = 0
         while index < len(data):
-            osc = re.match(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", data[index:])
+            # Match in place. Slicing the remaining transcript at every
+            # character makes screen reconstruction quadratic.
+            osc = OSC.match(data, index)
             if osc:
-                index += len(osc.group(0))
+                index = osc.end()
                 continue
-            csi = re.match(r"\x1b\[([0-9;?<]*)([A-Za-z])", data[index:])
+            csi = CSI.match(data, index)
             if csi:
                 args, command = csi.groups()
                 if command == "H":
@@ -151,7 +156,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
                     row, col = position[0] - 1, (position[1] - 1 if len(position) > 1 else 0)
                 elif command == "K" and args == "2":
                     cells[row] = [" "] * cols
-                index += len(csi.group(0))
+                index = csi.end()
                 continue
             char = data[index]
             index += 1
