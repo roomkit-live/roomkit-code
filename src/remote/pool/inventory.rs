@@ -48,7 +48,7 @@ impl Inventory {
                 self.backend
                     .executors()
                     .await
-                    .map_err(|error| error.to_string())
+                    .map_err(super::registry::unavailable)
             },
             self.registry.rows(),
         )?;
