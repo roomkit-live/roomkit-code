@@ -241,12 +241,14 @@ async fn first_view(
         "shell",
         "Run a shell command in this project",
     )];
-    view.input_actions
-        .push(roomkit_tui::protocol::InputAction::new(
+    view.input_actions.push(
+        roomkit_tui::protocol::InputAction::new(
             '@',
             "message",
-            "Message a project session",
-        ));
+            "Choose a recipient or type its address and message",
+        )
+        .with_completion(),
+    );
     view.cycle_command = Some(crate::delegation::panel::COMMAND.to_owned());
     // The engine hands a running turn only its own author's next messages,
     // and the application opens turns here too: a task's, the one a

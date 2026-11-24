@@ -223,10 +223,23 @@ Messages exchanged between sessions appear in italics in the timeline. A reply
 can arrive while your agent is writing. It can use that reply at its next
 model step, so a message already in progress can still say it is waiting.
 
-Use `/message` to choose an open session by name and ID, or type a prefix such
-as `@rev` and press Enter to narrow the list. Duplicate names can be resolved in
-the picker. A leading `\@` sends a literal at-sign to your own agent. A closed
-or unattended session is unavailable for a new message. With a shared project database, a reply can still reach the sender's history after its terminal closes.
+Type `@` at the start of an empty draft to see the open local and network
+sessions. Type part of a name to filter, move with the arrow keys, and press
+Tab or Enter to choose its exact address. Type the message in the form and
+press Ctrl+S to send. Esc closes the list and keeps your draft. You can also
+type a known address directly, or use `/message` to open the recipient picker.
+
+With an executor pool enabled, the same list offers **Open task** for each
+running executor task in this conversation and **Start task** for each online
+machine and exposed profile. Opening a task takes you into its conversation.
+Write to its agent there and use `/back` to return. Starting a task opens a
+separate task form. Ctrl+S hands it to the selected machine and profile. A busy
+machine queues the task until it has a free slot. The worker inherits the
+parent conversation’s permission mode.
+
+A leading `\@` sends a literal at-sign to your own agent. A closed or
+unattended session is unavailable for a new message. With a shared project
+database, a reply can still reach the sender's history after its terminal closes.
 
 This proof of concept uses the project's existing RoomKit SQLite history.
 The owner remembers how far it has read. Local checks slow from 750 ms to at

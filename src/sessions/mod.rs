@@ -242,6 +242,10 @@ impl CommandHandler for Sessions {
         }))
     }
 
+    fn allow_form_while_busy(&self, name: &str) -> bool {
+        name == "message"
+    }
+
     fn allow_while_busy(&self, name: &str) -> bool {
         matches!(
             name,
@@ -282,6 +286,9 @@ impl Sessions {
         current: SessionConfig,
     ) -> std::result::Result<CommandResult, String> {
         let (name, form) = match &request.command {
+            Command::CompleteInput { name } if name == "message" => {
+                return crate::messages::command::suggest(self, &current, request.id).await;
+            }
             Command::Invoke { name, .. } => (name.as_str(), false),
             Command::SubmitForm { name, .. } => (name.as_str(), true),
             _ => return Err("Unsupported application request".into()),

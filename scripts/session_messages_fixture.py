@@ -84,7 +84,7 @@ def exercise(App):
         receiver = open_session("review", server)
         sender.peer, receiver.peer = receiver, sender
         stack.callback(server.release.set)
-        sender.wait("Message an open session", sender.send("@rev\r"))
+        sender.wait("Local session", sender.send("@rev"))
         sender.wait("Message to review", sender.send("\r"))
         sender.wait("Tab commands", sender.send("\x1b"))
         sender.wait("Message to @review", sender.send("@review CHECK_IDLE\r"))

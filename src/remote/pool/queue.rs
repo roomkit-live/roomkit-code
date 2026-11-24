@@ -68,6 +68,12 @@ impl Queue {
             .and_then(|t| t.executor_id.as_ref())
             .and_then(|id| id.split_once('~'))
             .map(|(name, _)| name.into());
+        let pinned = metadata
+            .get("task_context")
+            .and_then(|c| c.pointer("/executor_target/worker"))
+            .and_then(|w| w.as_str())
+            .map(str::to_owned)
+            .or(pinned);
         let entry = Entry {
             room: r.room_id.to_string(),
             parent: field("parent_room_id"),
@@ -99,6 +105,15 @@ impl Queue {
             .values()
             .find(|e| e.room == room && e.placement.is_some())
             .and_then(|e| e.peer.clone())
+    }
+
+    pub(super) fn placement(&self, room: &str) -> Option<String> {
+        lock(&self.state)
+            .active
+            .values()
+            .find(|e| e.room == room)?
+            .placement
+            .clone()
     }
 
     pub fn report(&self, room: &str) -> Vec<String> {

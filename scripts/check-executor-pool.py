@@ -118,6 +118,8 @@ class Model(StreamingModel):
             return tool("delegate_task", "submit", agent="remote-linux", task=name, context=context)
 
         transcript = json.dumps(request["messages"])
+        if request["model"] == "macbook" and "FOLLOW_UP_IN_ROOM" in transcript:
+            self.server.read_follow_up = True
         name = next((key for key in TASKS if key in transcript), "unknown")
         if name in (peers.AUTHOR, peers.REVIEW, peers.ENDING, peers.UNANSWERED):
             return self.server.peer.reply(name, request["messages"])
@@ -178,6 +180,19 @@ def eventually(predicate, message):
     raise AssertionError(message)
 
 
+def start_from_composer(term, task):
+    # Both machines expose "code"; selecting the Mac must pin this task to it.
+    offset = len(term.output)
+    os.write(term.master, b"@macbook")
+    term.wait("Start task · macbook · code", offset)
+    os.write(term.master, b"\r")
+    term.wait("Esc cancel", offset)
+    offset = len(term.output)
+    os.write(term.master, task.encode() + b"\x13")
+    term.wait("Task task-", offset)
+    return offset
+
+
 def scenario(term, server, spare):
     term.send("/executors", "2/2 online")
     offset = term.send("macbook", "Inspect reviewer")
@@ -189,8 +204,15 @@ def scenario(term, server, spare):
     term.wait("review-model", offset)
     os.write(term.master, b"\x1b")
     time.sleep(.3)
-    term.send("review-one", "Submitted review-one.")
+    start_from_composer(term, "review-one")
     eventually(lambda: server.started.get("review-one") == "macbook", "First review misplaced")
+    offset = len(term.output)
+    os.write(term.master, b"@review-one")
+    term.wait("Open task · macbook", offset)
+    os.write(term.master, b"\t")
+    term.wait("/back returns", offset)
+    term.send("FOLLOW_UP_IN_ROOM", "FOLLOW_UP_IN_ROOM")
+    term.send("/back", "Tab commands")
     term.send("review-two", "Submitted review-two.")
     term.send("/executors tasks", "all matching slots busy")
     save_pool(term, [b"\x1b[D"], "Finish or cancel")
@@ -203,6 +225,8 @@ def scenario(term, server, spare):
     server.release.set()
     eventually(lambda: all(server.finished.get(t) == "macbook" for t in ("review-one", "review-two")),
                "Both reviews must read the Mac worker workspace")
+    assert server.read_follow_up, "The running worker did not receive the message in its task room"
+    print("PASS  Composer opened a Mac task and delivered the follow-up to the running agent.", flush=True)
     assert server.started["review-two"] == "review-model", server.started
     primary, review = server.calls["review-one"], server.calls["review-two"]
     assert primary[0] == "/v1/chat/completions" and "write" in primary[1]
@@ -237,7 +261,10 @@ def rust_scenario(term, server, root):
     (crate / "before.rs").write_text(broken)
 
     def result(task, decision=None):
-        offset = term.send(task, "Submitted " + task + ".")
+        if task == "rust-plan":
+            offset = start_from_composer(term, task)
+        else:
+            offset = term.send(task, "Submitted " + task + ".")
         profile = "reviewer · model review-model" if task == "rust-diff" else "code · model macbook"
         term.wait("assigned to macbook · profile " + profile, offset)
         if decision is not None:
@@ -312,6 +339,7 @@ def commit_scenario(term, result, workspace, source):
 def model_server(stack):
     server = stack.enter_context(LoopbackHTTPServer(("127.0.0.1", 0), Model))
     server.started, server.finished, server.ids, server.calls = {}, {}, {}, {}
+    server.read_follow_up = False
     server.rust = {}
     server.peer = peers.Consultation()
     stack.callback(server.peer.release.set)

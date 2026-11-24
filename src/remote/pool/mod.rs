@@ -1,5 +1,6 @@
 //! Resource-based placement for the experimental Redis executor pool.
 mod cargo_test;
+mod composer;
 mod consultation;
 pub(crate) use consultation::{ANSWER_PEER, ASK_PEER, PeerTool};
 mod coordinator;
@@ -143,6 +144,7 @@ impl Requirements {
 }
 pub(crate) struct Scheduler {
     group: String,
+    scope: String,
     address: String,
     attending: tokio::sync::OnceCell<()>,
     turns: Arc<tokio::sync::RwLock<()>>,
@@ -161,6 +163,7 @@ impl Scheduler {
         let address = super::address(saved_url)?;
         Ok(Arc::new(Self {
             group: group.into(),
+            scope: crate::digest::sha256_hex(serde_json::to_vec(&(group, &address))?),
             tasks: Arc::downgrade(tasks),
             inventory: Inventory::new(group, &address)?,
             address,

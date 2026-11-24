@@ -145,7 +145,15 @@ def run(options):
 
         outsider = another_session("outsider", "review", uuid.uuid4().hex)
         outsider.send("@api WRONG_GROUP", "Recipient unavailable")
-        sender.send("@review Read proof.txt and send back its value.", "Message to @review")
+        # Choose the address in the live composer without sending a model request.
+        os.write(sender.master, b"@")
+        sender.wait("Network session", 0)
+        os.write(sender.master, b"rev\t")
+        sender.wait("Message to review", 0)
+        assert not unused.called.is_set()
+        offset = len(sender.output)
+        os.write(sender.master, b"Read proof.txt and send back its value.\x13")
+        sender.wait("Message to @review", offset)
         sender.wait(token, 0)
         reviewer.wait("PRIVATE_REVIEW_FINISHED", 0)
         os.write(reviewer.master, b"HOLD_FOR_MESSAGE\r")

@@ -161,7 +161,7 @@ impl Roster {
 
 /// How much of a worker's output comes back to the agent that delegated: the
 /// kit's default, 4,000 characters, cut a review short (RMK-1617).
-const MAX_RESULT_CHARS: NonZeroUsize = NonZeroUsize::new(20_000).unwrap();
+pub(crate) const MAX_RESULT_CHARS: NonZeroUsize = NonZeroUsize::new(20_000).unwrap();
 
 /// The handler of every agent's `delegate_task`: the delegating agent is told
 /// the result, and no message of the conversation is handed over

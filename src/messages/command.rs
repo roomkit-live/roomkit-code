@@ -1,9 +1,9 @@
-//! The composer prefix and recipient picker resolve only writable project sessions.
+//! Composer actions for contacting sessions and working with executor tasks.
 use super::directory::{Contact, contacts, resolve};
 use super::record::{Mail, check_text};
 use crate::sessions::Sessions;
 use roomkit::model::{EventId, RoomId};
-use roomkit_tui::protocol::{Choice, Command, Event, FieldKind, FormField, FormSpec, Request};
+use roomkit_tui::protocol::{Command, Event, FieldKind, FormField, FormSpec, Request};
 use roomkit_tui_engine::{CommandResult, SessionConfig};
 
 pub(crate) async fn handle(
@@ -11,15 +11,12 @@ pub(crate) async fn handle(
     view: SessionConfig,
     request: Request,
 ) -> Result<CommandResult, String> {
-    if view.group.is_some()
-        || !app.services.sessions.owns(view.room.as_str())
-        || !super::writable(&app.kit, &view.room, view.organization.clone()).await?
-    {
-        return Err("Send session messages from a writable project conversation".into());
-    }
+    require_correspondence(app, &view).await?;
     let (target, text) = match &request.command {
         Command::SubmitForm { form, values, .. }
-            if form.starts_with("id:") || form.starts_with("peer:") =>
+            if form.starts_with("id:")
+                || form.starts_with("peer:")
+                || form.starts_with("executor:") =>
         {
             (form.as_str(), Some(values.get("text").unwrap_or("")))
         }
@@ -31,13 +28,28 @@ pub(crate) async fn handle(
             }),
         _ => return Err("Invalid session message".into()),
     };
-    let contacts = contacts(app, &view, target.starts_with("id:")).await?;
+    if target.starts_with("executor:") || target.starts_with("task:") {
+        return super::executor::handle(app, &view, target, text, &request).await;
+    }
+    let exact = target.starts_with("id:") || target.starts_with("peer:");
+    if target.is_empty() && text.is_none() {
+        return super::recipients::picker(app, &view, target).await;
+    }
+    let contacts = contacts(app, &view, target.starts_with("id:")).await;
+    if !exact
+        && text.is_none()
+        && contacts
+            .as_ref()
+            .ok()
+            .and_then(|c| resolve(c, target))
+            .is_none()
+    {
+        return super::recipients::picker(app, &view, target).await;
+    }
+    let contacts = contacts?;
     let event = match (resolve(&contacts, target), text) {
         (Some(c), Some(text)) => send(app, &view, c, text, request.operation.as_str()).await?,
         (Some(c), None) => compose(&view.room, c),
-        (None, None) if !target.starts_with("id:") && !target.starts_with("peer:") => {
-            pick(&view.room, &contacts, target)?
-        }
         _ => {
             return Err(
                 "Recipient unavailable or ambiguous. Use /message to choose an open session".into(),
@@ -45,6 +57,26 @@ pub(crate) async fn handle(
         }
     };
     Ok(CommandResult::Events(vec![event]))
+}
+
+/// Resolve the catalogue when the composer opens. Sending revalidates the address.
+pub(crate) async fn suggest(
+    app: &Sessions,
+    view: &SessionConfig,
+    request: roomkit_tui::protocol::RequestId,
+) -> Result<CommandResult, String> {
+    require_correspondence(app, view).await?;
+    super::recipients::suggest(app, view, request).await
+}
+
+async fn require_correspondence(app: &Sessions, view: &SessionConfig) -> Result<(), String> {
+    if view.group.is_some()
+        || !app.services.sessions.owns(view.room.as_str())
+        || !super::writable(&app.kit, &view.room, view.organization.clone()).await?
+    {
+        return Err("Send session messages from a writable project conversation".into());
+    }
+    Ok(())
 }
 
 fn compose(room: &RoomId, c: &Contact) -> Event {
@@ -57,27 +89,6 @@ fn compose(room: &RoomId, c: &Contact) -> Event {
             vec![FormField::new("text", "Message", FieldKind::Multiline)],
         ),
     }
-}
-
-fn pick(room: &RoomId, contacts: &[Contact], query: &str) -> Result<Event, String> {
-    let query = query.to_lowercase();
-    let choices: Vec<_> = contacts
-        .iter()
-        .filter(|c| {
-            c.name.to_lowercase().contains(&query)
-                || c.room.as_str().to_lowercase().contains(&query)
-        })
-        .map(|c| Choice::new(c.key(), &c.name).with_description(c.description()))
-        .collect();
-    if choices.is_empty() {
-        return Err("No matching open session in this project".into());
-    }
-    Ok(Event::Choices {
-        conversation: room.as_str().into(),
-        command: "message".into(),
-        title: "Message an open session".into(),
-        choices,
-    })
 }
 
 async fn send(

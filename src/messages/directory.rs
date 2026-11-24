@@ -21,8 +21,8 @@ impl Contact {
     }
     pub fn description(&self) -> String {
         self.remote.as_ref().map_or_else(
-            || self.room.to_string(),
-            |ch| format!("{} · network · {}", self.room, ch),
+            || format!("Local session · {}", self.room),
+            |ch| format!("Network session · {} · {}", self.room, ch),
         )
     }
 }

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Typing `@` opens a filterable recipient list in the composer. Choose a session to message, open a running executor task, or start a task on a selected machine and profile.
+
 - Session correspondence records typed messages before sending and keeps one outcome per remote question. A recipient that restarts in the same group can finish mail it already accepted. Idle inboxes skip previously scanned history.
 
 - A reply from another session appears after the text already being written when it arrived. Reopening the conversation preserves that order.

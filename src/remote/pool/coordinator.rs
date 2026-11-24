@@ -62,9 +62,26 @@ impl Coordinator {
 
 impl TurnBackend for Coordinator {
     fn submit(&self, request: TurnRequest) -> TurnFuture<'_, Result<Arc<dyn TurnLink>>> {
-        if request.channel_id.as_str() == crate::remote::AGENT
-            && let Some(pool) = self.active()
+        if request.channel_id.as_str() != crate::remote::AGENT {
+            return self.local.submit(request);
+        }
+        let pool = self.active();
+        let target = request
+            .context
+            .room
+            .metadata
+            .get("task_context")
+            .and_then(|c| c.get("executor_target"));
+        if let Some(target) = target
+            && !pool.as_ref().is_some_and(|p| p.accepts_target(target))
         {
+            return Box::pin(async {
+                Err(RoomKitError::Value(
+                    "The selected executor pool or worker is unavailable".into(),
+                ))
+            });
+        }
+        if let Some(pool) = pool {
             return Box::pin(async move {
                 self.attend_pool(&pool).await?;
                 pool.schedule(request).await
