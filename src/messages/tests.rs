@@ -54,3 +54,22 @@ async fn replay_validates_the_content_and_reply_ids_stay_in_the_recipient_room()
     );
     kit.close().await.unwrap();
 }
+
+#[test]
+fn only_terminal_correspondence_uses_italics() {
+    use roomkit_tui::protocol::Message;
+    let styled = |actor, id| {
+        super::emphasis(&Message::new(id, actor, "Reply from @review"))
+            .is_some_and(|style| style.italic)
+    };
+    for id in [
+        "session-msg-a",
+        "sent-session-msg-a",
+        "session-reply-session-msg-a",
+    ] {
+        assert!(styled("terminal", id));
+        assert!(!styled("agent", id));
+    }
+    assert!(!styled("terminal", "session-notice-session-msg-a"));
+    assert!(!styled("terminal", "unrelated"));
+}

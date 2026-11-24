@@ -219,6 +219,10 @@ and finishes with only a local answer, the sender sees a delivery notice.
 The local answer stays in the receiving conversation. You can ask explicitly,
 for example `@review Read revision.txt and send me its value with send_message.`
 
+Messages exchanged between sessions appear in italics in the timeline. A reply
+can arrive while your agent is writing. It can use that reply at its next
+model step, so a message already in progress can still say it is waiting.
+
 Use `/message` to choose an open session by name and ID, or type a prefix such
 as `@rev` and press Enter to narrow the list. Duplicate names can be resolved in
 the picker. A leading `\@` sends a literal at-sign to your own agent. A closed

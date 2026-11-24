@@ -21,6 +21,7 @@ pub(crate) use labels::plain_label;
 
 pub(crate) fn renderers(workspace: &std::path::Path) -> Renderers {
     let mut renderers = Renderers::default();
+    renderers.set_message_emphasis(crate::messages::emphasis);
     for name in ["list", "glob", "grep", "read", "code_outline"] {
         renderers.register(
             name,

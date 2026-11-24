@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Messages and replies between sessions appear in italics in the live conversation
+  and when reopening its history.
+
 - Agents in the same experimental session group can discover one another with
   `list_sessions` and start an asynchronous exchange with `send_message`.
   An answer reaches the asking agent while it works or resumes it after its turn.

@@ -22,6 +22,25 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 pub(crate) use tools::{LIST_SESSIONS, SEND_MESSAGE};
 
+/// Live items and restored system rows share the same author and message ID.
+pub(crate) fn emphasis(message: &Message) -> Option<roomkit_tui::render::Emphasis> {
+    let id = message.id.as_str();
+    if message.actor.as_str() != crate::application::TERMINAL
+        || ![
+            "session-msg-",
+            "session-reply-session-msg-",
+            "sent-session-msg-",
+        ]
+        .iter()
+        .any(|prefix| id.starts_with(prefix))
+    {
+        return None;
+    }
+    let mut emphasis = roomkit_tui::render::Emphasis::default();
+    emphasis.italic = true;
+    Some(emphasis)
+}
+
 struct Interactive {
     kit: WeakRoomKit<SqliteStore>,
     group_enabled: bool,
