@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shlex
 import sqlite3
 import subprocess
 import tempfile
@@ -13,6 +12,7 @@ import threading
 import uuid
 from urllib.parse import urlsplit
 
+from executor_peer_fixture import Peer
 from executor_fixture import StreamingModel, Terminal, redis, tool
 from session_messages_fixture import Sender, provider
 from session_agent_fixture import drain_terminal, exercise_agents
@@ -62,32 +62,6 @@ def args_for(binary, work, name, pool, port):
             "--session", name, "--session-group", pool, "--model", "fixture",
             "--base-url", f"http://127.0.0.1:{port}/v1", "--mode", "plan",
             "--no-update-check", "--no-herdr", "--no-terminal-status", "--color", "never"]
-
-
-class Peer:
-    def __init__(self, stack, root, host):
-        self.host = host
-        if host:
-            self.conn = ["ssh", "-o", "BatchMode=yes", "-S", str(root / "ssh")]
-            subprocess.run([*self.conn, "-MNf", host], check=True)
-            stack.callback(subprocess.run, [*self.conn, "-O", "exit", host], capture_output=True)
-            self.work = Path(self.run(["mktemp", "-d", "/tmp/roomkit-mail-test.XXXXXXXX"]).strip())
-            stack.callback(self.run, ["rm", "-rf", str(self.work)])
-        else:
-            self.work = root / "review"
-        self.run(["mkdir", "-p", str(self.work / "workspace")])
-
-    def command(self, args, tty=False):
-        return [*self.conn, *(["-tt"] if tty else []), self.host, shlex.join(args)] if self.host else args
-
-    def run(self, args, data=None):
-        return subprocess.check_output(self.command(args), text=True, input=data)
-
-    def port(self, local):
-        if not self.host:
-            return local
-        forwarding = f"127.0.0.1:0:127.0.0.1:{local}"
-        return int(subprocess.check_output([*self.conn, "-O", "forward", "-R", forwarding, self.host], text=True))
 
 
 def check_histories(stack, owner, peer):

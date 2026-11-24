@@ -61,13 +61,11 @@ impl Scheduler {
                 at,
                 ticket.clone(),
             );
-            let mut attempt = request.clone();
-            // RMK-2098 will replace this hook with a native instance target.
-            attempt.room_hooks.push(super::route(&worker.instance));
+            let executor = ExecutorInfo::new(&worker.instance, ExecutorInfoOptions::default());
             let result = tokio::select! {
                 biased;
                 () = lease.lost.cancelled() => return Err(lost_slot()),
-                result = self.inventory.backend.submit(attempt) => result,
+                result = self.inventory.backend.submit_to(request.clone(), executor) => result,
             };
             match result {
                 Ok(link) => return Ok((worker, lease, link)),

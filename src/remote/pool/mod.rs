@@ -24,7 +24,7 @@ use registry::Worker;
 pub(crate) use registry::WorkerProfile;
 
 use std::{collections::BTreeMap, sync::Arc};
-pub(crate) use worker::{advertise, declare, worker_failure};
+pub(crate) use worker::{advertise, worker_failure};
 pub(crate) use worker_options::WorkerArgs;
 
 fn identifier(value: &str) -> Result<String, String> {
@@ -39,9 +39,6 @@ fn identifier(value: &str) -> Result<String, String> {
         );
     }
     Ok(value.into())
-}
-fn route(instance: &str) -> String {
-    format!("pool-worker-{instance}")
 }
 
 #[derive(Clone, Default, Debug, serde::Deserialize)]

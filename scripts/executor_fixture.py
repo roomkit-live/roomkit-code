@@ -121,3 +121,15 @@ class Terminal:
         os.write(self.master, message.encode() + b"\r")
         self.wait(expect, offset)
         return offset
+
+
+def start_from_composer(term, task, worker="macbook"):
+    offset = len(term.output)
+    os.write(term.master, ("@" + worker).encode())
+    term.wait(f"Start task · {worker} · code", offset)
+    os.write(term.master, b"\r")
+    term.wait("Esc cancel", offset)
+    offset = len(term.output)
+    os.write(term.master, task.encode() + b"\x13")
+    term.wait("Task task-", offset)
+    return offset

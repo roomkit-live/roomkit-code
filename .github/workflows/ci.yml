@@ -41,6 +41,9 @@ jobs:
       - name: Exercise pool placement and queueing
         if: runner.os == 'Linux'
         run: python3 scripts/check-executor-pool.py
+      - name: Check named placement and worker loss after admission
+        if: runner.os == 'Linux'
+        run: python3 scripts/check-pool-handover.py
       - name: Exercise session messaging across independent stores
         if: runner.os == 'Linux'
         run: python3 scripts/check-session-network.py

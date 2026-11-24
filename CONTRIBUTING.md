@@ -68,6 +68,11 @@ machine, add `--ssh HOST --peer-binary /path/to/roomkit-code`. Build the same
 revision there first. The test uses independent workspaces and scripted model
 endpoints, and removes the test data on exit.
 
+Run `python3 scripts/check-pool-handover.py` with the same options to exercise
+two workers. It checks explicit placement, kills the test worker that accepted
+an unconstrained task, and verifies that the surviving worker only handles
+new work.
+
 ## Dependency access in CI
 
 Public dependencies need no GitHub token, including on fork pull requests.

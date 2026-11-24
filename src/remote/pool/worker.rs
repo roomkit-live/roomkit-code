@@ -35,15 +35,6 @@ pub(crate) async fn worker_failure(presence: &mut Option<Presence>) -> String {
         None => std::future::pending().await,
     }
 }
-pub(crate) fn declare(executor: &roomkit::TurnExecutor) -> Result<()> {
-    executor.room_hook(
-        &super::route(executor.executor_id()),
-        roomkit::HookTrigger::OnToolCall,
-        |_: roomkit::ToolCallEvent, _| async {},
-        Default::default(),
-    )?;
-    Ok(())
-}
 pub(crate) async fn advertise(
     inventory: &super::Inventory,
     args: &WorkerArgs,

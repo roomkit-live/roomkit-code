@@ -149,9 +149,6 @@ async fn run(
         },
     )?;
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-    if args.is_some() {
-        pool::declare(&executor)?;
-    }
     backend.serve(executor.clone()).await?;
     let mut presence = match args {
         Some(args) => {

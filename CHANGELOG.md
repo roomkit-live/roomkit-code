@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The pool submits each turn directly to the reserved executor instance through
+  RoomKit. A task already handed to a worker is never replayed on another.
+
 - Typing `@` opens a filterable recipient list in the composer. Choose a session to message, open a running executor task, or start a task on a selected machine and profile.
 
 - Session correspondence records typed messages before sending and keeps one outcome per remote question. A recipient that restarts in the same group can finish mail it already accepted. Idle inboxes skip previously scanned history.

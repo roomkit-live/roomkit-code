@@ -703,7 +703,13 @@ placement by resource or OS are outside the single-worker mode.
 **The remote executor pool is an opt-in beta.** An executor is a
 `roomkit-code` process that runs a delegated agent in its own workspace on
 Linux or macOS. The coordinator chooses a worker that meets the task’s
-requirements. File changes stay in that worker’s checkout.
+requirements and reserves a slot on that executor instance. If the worker
+disappears after it accepts a task, check its workspace before starting the
+task again. File changes stay in that worker’s checkout.
+
+When upgrading a pool from the earlier beta, finish active tasks and update
+coordinators before workers. Earlier coordinators look for a routing hook
+that newer workers no longer advertise.
 
 Open `/executors` and choose **Configure this workspace** on each machine.
 Use the same workspace and `--state-dir` that its coordinator or worker will use.

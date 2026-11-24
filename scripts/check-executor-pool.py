@@ -14,7 +14,7 @@ import time
 import uuid
 
 import executor_consultation_fixture as peers
-from executor_fixture import StreamingModel, Terminal, child, redis, tool
+from executor_fixture import StreamingModel, Terminal, child, redis, start_from_composer, tool
 from fixture_http import LoopbackHTTPServer
 
 
@@ -178,19 +178,6 @@ def eventually(predicate, message):
             return
         time.sleep(.1)
     raise AssertionError(message)
-
-
-def start_from_composer(term, task):
-    # Both machines expose "code"; selecting the Mac must pin this task to it.
-    offset = len(term.output)
-    os.write(term.master, b"@macbook")
-    term.wait("Start task · macbook · code", offset)
-    os.write(term.master, b"\r")
-    term.wait("Esc cancel", offset)
-    offset = len(term.output)
-    os.write(term.master, task.encode() + b"\x13")
-    term.wait("Task task-", offset)
-    return offset
 
 
 def scenario(term, server, spare):
