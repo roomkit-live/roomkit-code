@@ -4,6 +4,7 @@ mod delivery;
 mod directory;
 mod dispatch;
 mod network;
+mod outgoing;
 mod receiver;
 mod record;
 mod reply;

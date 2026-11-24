@@ -73,3 +73,59 @@ fn only_terminal_correspondence_uses_italics() {
     assert!(!styled("terminal", "session-notice-session-msg-a"));
     assert!(!styled("terminal", "unrelated"));
 }
+
+#[tokio::test]
+async fn concurrent_network_outcomes_cannot_both_enter_the_asking_room() -> crate::Result<()> {
+    use super::record::{Kind, Route};
+    use roomkit::model::ChannelId;
+    let dir = tempfile::tempdir()?;
+    let kit = RoomKit::new(RoomKitOptions::with_store(SqliteStore::new(
+        SqliteStoreOptions {
+            path: dir.path().join("history.sqlite3"),
+        },
+    )));
+    let room = kit.create_room(Default::default()).await?.id;
+    let original = EventId::new("session-msg-question")?;
+    let reply = Mail {
+        from: roomkit::model::RoomId::new("review")?,
+        text: "Reviewed".into(),
+        kind: Kind::Reply(original.clone()),
+        remote: Some(Route {
+            from: ChannelId::new("sender")?,
+            to: ChannelId::new("receiver")?,
+        }),
+    };
+    let notice = Mail {
+        kind: Kind::Notice(original),
+        text: "No answer".into(),
+        ..reply.clone()
+    };
+    let (a, b) = tokio::join!(
+        reply.write(&kit, &room, super::reply::response_id(&reply.kind)?, None),
+        notice.write(&kit, &room, super::reply::response_id(&notice.kind)?, None)
+    );
+    assert_ne!(a.is_ok(), b.is_ok());
+    assert_eq!(
+        kit.store()
+            .get_event_count(&room, Default::default())
+            .await?,
+        1
+    );
+    kit.close().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_unreadable_store_is_not_an_undesignated_agent() -> crate::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let kit = RoomKit::new(RoomKitOptions::with_store(SqliteStore::new(
+        SqliteStoreOptions {
+            path: dir.path().join("history.sqlite3"),
+        },
+    )));
+    let room = kit.create_room(Default::default()).await?.id;
+    assert!(crate::sessions::designated(&kit, &room).await?.is_none());
+    kit.close().await?;
+    assert!(crate::sessions::designated(&kit, &room).await.is_err());
+    Ok(())
+}

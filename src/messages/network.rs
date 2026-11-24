@@ -1,7 +1,9 @@
 //! A named interactive session advertises one mailbox using RoomKit channel calls.
 //! The broker carries mail between independent databases. Each owner delivers locally.
 mod channel;
-use super::record::{Kind, Mail, Route};
+mod recovery;
+mod response;
+use super::record::{Mail, Route};
 use crate::{Result, storage::SessionLeases};
 use roomkit::model::{ChannelId, EventId, RoomId};
 use roomkit::turns::{ChannelCall, TurnBackend, wire::ChannelControl};
@@ -45,6 +47,9 @@ pub(super) struct Network {
     backend: RedisTurnBackend,
     pub room: RoomId,
     pub channel: ChannelId,
+    scope: String,
+    pub wake: Arc<tokio::sync::Notify>,
+    responses: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Network {
@@ -63,7 +68,14 @@ impl Network {
             },
         )?;
         let channel = ChannelId::new(format!("{PREFIX}{}-{room}", uuid::Uuid::new_v4().simple()))?;
-        let inbox = channel::Inbox::new(kit.downgrade(), room.clone(), channel.clone(), leases);
+        let wake = Arc::new(tokio::sync::Notify::new());
+        let inbox = channel::Inbox::new(
+            kit.downgrade(),
+            room.clone(),
+            channel.clone(),
+            leases,
+            wake.clone(),
+        );
         let executor = TurnExecutor::new(
             move |id| std::future::ready(Ok((id == inbox.channel).then(|| inbox.clone()))),
             TurnExecutorOptions {
@@ -75,19 +87,12 @@ impl Network {
             backend,
             channel,
             room: room.clone(),
+            scope: crate::digest::sha256_hex(serde_json::to_vec(&(group, address))?),
+            wake,
+            responses: Default::default(),
         };
         let registration: Result<()> = async {
-            kit.store()
-                .set_private_state(
-                    room,
-                    ADDRESS,
-                    Some(
-                        [("channel".into(), json!(network.channel))]
-                            .into_iter()
-                            .collect(),
-                    ),
-                )
-                .await?;
+            network.remember_endpoint(kit).await?;
             network.backend.serve(executor).await?;
             Ok(())
         }
@@ -99,21 +104,48 @@ impl Network {
         Ok(network)
     }
 
-    pub async fn reply(&self, kit: &Kit, route: &Route, id: &EventId, mail: &Mail) -> Result<()> {
-        if self.channel != route.to {
-            return Err("The receiving session address has expired".into());
-        }
-        self.transmit(&route.from, id, mail).await?;
-        if let Kind::Reply(original) = &mail.kind {
-            kit.store()
-                .set_private_state(
-                    &self.room,
-                    &sent(original),
-                    Some([("sent".into(), json!(true))].into_iter().collect()),
-                )
-                .await?;
-        }
+    async fn remember_endpoint(&self, kit: &Kit) -> Result<()> {
+        // An old address is usable only as the return identity of mail already
+        // accepted into this room, on the very same broker and group.
+        kit.store()
+            .set_private_state(
+                &self.room,
+                &endpoint(&self.channel),
+                Some([("scope".into(), json!(self.scope))].into_iter().collect()),
+            )
+            .await?;
+        kit.store()
+            .set_private_state(
+                &self.room,
+                ADDRESS,
+                Some(
+                    [("channel".into(), json!(self.channel))]
+                        .into_iter()
+                        .collect(),
+                ),
+            )
+            .await?;
         Ok(())
+    }
+
+    pub async fn owns_endpoint(
+        &self,
+        kit: &Kit,
+        room: &RoomId,
+        channel: &ChannelId,
+    ) -> Result<bool> {
+        if room != &self.room {
+            return Ok(false);
+        }
+        if channel == &self.channel {
+            return Ok(true);
+        }
+        let saved = kit
+            .store()
+            .get_private_state(room, &endpoint(channel))
+            .await?;
+        Ok(saved
+            .is_some_and(|s| s.get("scope").and_then(|v| v.as_str()) == Some(self.scope.as_str())))
     }
 
     pub async fn close(&self) {
@@ -160,7 +192,7 @@ impl Network {
         kit.store()
             .set_private_state(&self.room, &pending(id), Some(origin))
             .await?;
-        self.transmit(to, id, mail).await
+        self.transmit(&self.channel, to, id, mail).await
     }
 
     pub async fn agent_request(&self, kit: &Kit, id: &EventId) -> Result<Option<AgentRequest>> {
@@ -174,7 +206,13 @@ impl Network {
             .transpose()?)
     }
 
-    async fn transmit(&self, to: &ChannelId, id: &EventId, mail: &Mail) -> Result<()> {
+    async fn transmit(
+        &self,
+        from: &ChannelId,
+        to: &ChannelId,
+        id: &EventId,
+        mail: &Mail,
+    ) -> Result<()> {
         let room = room_of(to).ok_or("Invalid session address")?;
         if mail.from != self.room {
             return Err("Only the advertised session can send here".into());
@@ -182,7 +220,7 @@ impl Network {
         let mut call = ChannelCall::new(to.clone(), room, VERB);
         let mut wire = mail.clone();
         wire.remote = Some(Route {
-            from: self.channel.clone(),
+            from: from.clone(),
             to: to.clone(),
         });
         call.arguments = [("id".into(), json!(id)), ("mail".into(), json!(wire))]
@@ -205,6 +243,6 @@ fn pending(id: &EventId) -> String {
     format!("roomkit_code:outgoing:{id}")
 }
 
-pub(super) fn sent(id: &EventId) -> String {
-    format!("roomkit_code:session_reply:{id}")
+fn endpoint(channel: &ChannelId) -> String {
+    format!("roomkit_code:mail_endpoint:{channel}")
 }

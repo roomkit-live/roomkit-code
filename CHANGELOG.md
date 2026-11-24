@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Session correspondence records typed messages before sending and keeps one outcome per remote question. A recipient that restarts in the same group can finish mail it already accepted. Idle inboxes skip previously scanned history.
+
 - A reply from another session appears after the text already being written when it arrived. Reopening the conversation preserves that order.
 
 - Delegated workspace tools honor the coordinator’s project command hooks and report their outcomes there. Waiting tasks share a pool inventory refresh.

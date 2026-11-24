@@ -183,9 +183,12 @@ async fn an_unrecorded_agent_is_the_last_at_work_and_a_deleted_one_is_not_replac
             .await
             .unwrap();
     }
-    assert_eq!(designated(&app.kit, &one).await.unwrap().as_str(), "code");
     assert_eq!(
-        designated(&app.kit, &two).await.unwrap().as_str(),
+        designated(&app.kit, &one).await.unwrap().unwrap().as_str(),
+        "code"
+    );
+    assert_eq!(
+        designated(&app.kit, &two).await.unwrap().unwrap().as_str(),
         "reviewer"
     );
     switch(&mut app, &settings, "resume", one.as_str()).await;
@@ -213,7 +216,10 @@ async fn an_unrecorded_agent_is_the_last_at_work_and_a_deleted_one_is_not_replac
     // Until the person selects an agent there.
     select(&mut app, "code").await;
     assert_eq!(app.view.submission_error, None);
-    assert_eq!(designated(&app.kit, &two).await.unwrap().as_str(), "code");
+    assert_eq!(
+        designated(&app.kit, &two).await.unwrap().unwrap().as_str(),
+        "code"
+    );
     turn_operation(&app, "the-agent-selected-there").await;
     assert_eq!(first.requests.lock().unwrap().len(), 2);
     assert_eq!(second.requests.lock().unwrap().len(), 1);

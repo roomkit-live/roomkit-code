@@ -31,6 +31,21 @@ pub(super) fn reply_id(id: &EventId) -> crate::Result<EventId> {
     Ok(EventId::new(format!("session-reply-{id}"))?)
 }
 
+pub(super) fn response_id(kind: &Kind) -> crate::Result<EventId> {
+    match kind {
+        Kind::Reply(id) => reply_id(id),
+        Kind::Notice(id) => Ok(EventId::new(format!("session-notice-{id}"))?),
+        Kind::Message => Err("Expected a session reply or delivery notice".into()),
+    }
+}
+
+/// The peer accepted the response in both cases. Its local receipt may
+/// still need reconciliation when the receiving turn finishes.
+pub(super) enum Acknowledgement {
+    Saved,
+    LocalWritePending,
+}
+
 pub(super) async fn respond(
     net: Option<&super::network::Network>,
     kit: &RoomKit<SqliteStore>,
@@ -38,13 +53,8 @@ pub(super) async fn respond(
     original: &Mail,
     kind: Kind,
     text: &str,
-) -> crate::Result<()> {
+) -> crate::Result<Acknowledgement> {
     let room = kit.get_room(&event.room_id, Default::default()).await?;
-    let id = match &kind {
-        Kind::Reply(id) => reply_id(id)?,
-        Kind::Notice(id) => EventId::new(format!("session-notice-{id}"))?,
-        Kind::Message => return Err("Expected a session reply or delivery notice".into()),
-    };
     let response = Mail {
         from: room.id.clone(),
         text: text.into(),
@@ -54,7 +64,7 @@ pub(super) async fn respond(
     if let Some(route) = &original.remote {
         return net
             .ok_or("Remote session network unavailable")?
-            .reply(kit, route, &id, &response)
+            .reply(kit, route, &response)
             .await;
     }
     let destination = kit
@@ -70,7 +80,9 @@ pub(super) async fn respond(
     {
         return Err("The sending session cannot receive this reply".into());
     }
+    let id = response_id(&response.kind)?;
     response
         .write(kit, &original.from, id, room.organization_id)
-        .await
+        .await?;
+    Ok(Acknowledgement::Saved)
 }

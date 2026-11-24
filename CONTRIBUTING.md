@@ -46,7 +46,11 @@ Code discovers it through `RedisTurnBackend::executors`. The sender calls
 `TurnBackend::control` with an addressed `ChannelCall`. The receiving channel
 validates the room, endpoint and return correlation, then acknowledges the
 local event commit. Its own interactive kit performs the same post or steer
-as above. Replies follow the verified return address. The application defines
+as above. Only mail already committed locally can use an earlier return
+identity from the same room, broker connection and group. Fresh requests still
+require a live address. A persisted response and a shared RoomKit idempotency
+key keep the answer and automatic notice mutually exclusive. Replies follow
+the verified return address. The application defines
 the mail envelope and visibility policy. RoomKit owns discovery, liveness and
 transport. A direct channel call also works before either agent has a turn.
 `RoomOwner` and `TurnHost` route calls associated with an admitted turn, as used

@@ -22,20 +22,25 @@ const SELECTED: &str = "selected in roomkit-code";
 
 /// The agent conversation `room` designates. A conversation stored before
 /// its agent was recorded designates the agent that worked in it last. None
-/// for one nobody worked in yet, or that cannot be read.
-pub(crate) async fn designated(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Option<ChannelId> {
-    let stored = kit.store().get_room(room).await.ok()??;
-    let recorded = get_conversation_state(&stored)
-        .ok()
-        .and_then(|state| state.active_agent_id);
-    match recorded {
-        Some(agent) => Some(agent),
-        None => last_at_work(kit, room).await,
+/// for one nobody worked in yet or a room that does not exist.
+pub(crate) async fn designated(
+    kit: &RoomKit<SqliteStore>,
+    room: &RoomId,
+) -> crate::Result<Option<ChannelId>> {
+    let Some(stored) = kit.store().get_room(room).await? else {
+        return Ok(None);
+    };
+    if let Some(agent) = get_conversation_state(&stored)?.active_agent_id {
+        return Ok(Some(agent));
     }
+    last_at_work(kit, room).await
 }
 
 /// The agent the latest of `room`'s events comes from.
-async fn last_at_work(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Option<ChannelId> {
+async fn last_at_work(
+    kit: &RoomKit<SqliteStore>,
+    room: &RoomId,
+) -> crate::Result<Option<ChannelId>> {
     let latest = ListEventsOptions {
         limit: 1,
         newest_first: true,
@@ -45,11 +50,11 @@ async fn last_at_work(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Option<Chann
         }),
         ..ListEventsOptions::default()
     };
-    let events = kit.store().list_events(room, latest).await.ok()?;
-    events
+    let events = kit.store().list_events(room, latest).await?;
+    Ok(events
         .into_iter()
         .next()
-        .map(|event| event.source.channel_id)
+        .map(|event| event.source.channel_id))
 }
 
 /// Records `agent` as the one conversation `room` designates. The first

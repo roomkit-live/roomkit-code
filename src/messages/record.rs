@@ -65,7 +65,14 @@ impl Mail {
         }
         .event(&ChannelId::new(crate::application::TERMINAL)?)?;
         event.correlation_id = Some(STREAM.into());
-        event.idempotency_key = Some(id.to_string());
+        // Concurrent remote outcomes for one question compete for one native
+        // commit key. Their distinct event IDs still identify historical rows.
+        event.idempotency_key = Some(match (&self.remote, &self.kind) {
+            (Some(_), Kind::Reply(original) | Kind::Notice(original)) => {
+                format!("session-outcome-{original}")
+            }
+            _ => id.to_string(),
+        });
         let options = roomkit::CommitEventOptions {
             organization_id: org,
         };

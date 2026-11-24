@@ -132,7 +132,7 @@ async fn send(
         (Some(target), None) => initiate(messages.group_for(room)?, kit, &target, input.text).await,
         (None, Some(id)) => {
             let (event, mail) = reply::original(kit, room, id).await?;
-            reply::respond(
+            let ack = reply::respond(
                 messages.network.get(),
                 kit,
                 &event,
@@ -142,7 +142,11 @@ async fn send(
             )
             .await
             .map_err(|e| ToolError::refused(e.to_string()))?;
-            Ok(json!({"status":"sent","reply_to":event.id}))
+            let mut result = json!({"status":"sent","reply_to":event.id});
+            if matches!(ack, reply::Acknowledgement::LocalWritePending) {
+                result["local_receipt"] = json!("pending");
+            }
+            Ok(result)
         }
         _ => Err(ToolError::refused("Use exactly one of to or reply_to")),
     }

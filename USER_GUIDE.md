@@ -229,8 +229,9 @@ the picker. A leading `\@` sends a literal at-sign to your own agent. A closed
 or unattended session is unavailable for a new message. With a shared project database, a reply can still reach the sender's history after its terminal closes.
 
 This proof of concept uses the project's existing RoomKit SQLite history.
-Each interactive owner checks for new records about every 750 ms and passes
-them to RoomKit's addressed post or active-turn steering. An idle agent's addressed post has a durable receipt. After a transient storage failure the owner retries with the same idempotency key, including after a restart. Steering an active agent has no replay key. An interrupted attempt leaves a delivery notice in the conversation so you can check before sending again. The local experiment requires no executor pool or Redis. For two
+The owner remembers how far it has read. Local checks slow from 750 ms to at
+most five seconds when idle. An incoming network message wakes its owner
+immediately. The owner uses RoomKit's addressed post or active-turn steering. An idle agent's addressed post has a durable receipt. After a transient storage failure the owner retries with the same idempotency key, including after a restart. Steering an active agent has no replay key. An interrupted attempt leaves a delivery notice in the conversation so you can check before sending again. The local experiment requires no executor pool or Redis. For two
 delegated tasks running on separate machines, see the executor consultation
 workflow under *Developing across executor workspaces*.
 
@@ -270,10 +271,19 @@ Agent-initiated messages use the named sessions that joined the same group,
 including two terminals on one machine. A session name must be unique, or the
 agent can copy the exact live address returned by `list_sessions`.
 
-Keep both terminals open until the reply arrives. Each launch gets a fresh
-address. To rejoin after closing, pass `--session-group` again. A lost
-acknowledgement leaves delivery uncertain. Check the recipient's history before
-resending. Group names separate discovery on the broker. Anyone with access to
+Keep both terminals open to receive new mail. Each launch gets a fresh address.
+A recipient that restarts with the same named session, Redis connection and
+`--session-group` can finish mail already accepted at its previous address.
+If that address cannot be verified, the recipient sees an interruption in its
+history. This also applies to mail accepted by versions that did not record
+its group. A new question always uses a current address.
+
+A message you type is saved before sending. Its history shows **Delivery
+unconfirmed** until the peer acknowledges it or returns a reply or delivery
+notice. Check the conversation before resending an unconfirmed message.
+A remote reply and its automatic no-reply notice share one outcome per
+question. If delivery is interrupted, reopening the recipient in the same
+group retries its pending response with the original answer and message ID. Group names separate discovery on the broker. Anyone with access to
 the group's Redis keys can participate, so use a broker restricted to trusted
 participants. An executor pool and shared project directory are optional.
 

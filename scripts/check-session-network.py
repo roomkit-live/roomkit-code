@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from executor_fixture import StreamingModel, Terminal, redis, tool
 from session_messages_fixture import Sender, provider
 from session_agent_fixture import drain_terminal, exercise_agents
+from session_recovery_fixture import exercise_recovery
 
 
 class Reviewer(StreamingModel):
@@ -124,6 +125,7 @@ def run(options):
                   str(peer.work / "workspace/proof.txt")], token)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
         env.update(TERM="xterm-256color", ROOMKIT_EXECUTOR_REDIS_URL=broker)
+        exercise_recovery(stack, root / "recovery", binary, env, args_for)
         remote_url = f"redis://127.0.0.1:{peer.port(urlsplit(broker).port)}"
         model_port = peer.port(model.server_port)
 

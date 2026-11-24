@@ -18,7 +18,23 @@ pub(super) async fn deliver(
 ) -> crate::Result<()> {
     use super::dispatch::Checkpoint;
     let net = messages.network.get();
-    match Checkpoint::read(kit, &event).await? {
+    let checkpoint = Checkpoint::read(kit, &event).await?;
+    if !matches!(checkpoint, Some(Checkpoint::Delivered))
+        && let Some(route) = &mail.remote
+    {
+        let owned = match net {
+            Some(net) => net.owns_endpoint(kit, &event.room_id, &route.to).await?,
+            None => false,
+        };
+        if !owned {
+            const EXPIRED: &str = "Session correspondence was interrupted. The original network address is unavailable in this group.";
+            return messages
+                .interrupted(kit, &event.room_id, &event.id, EXPIRED)
+                .await;
+        }
+    }
+    super::outgoing::confirm_return(kit, &event.room_id, &mail).await?;
+    match checkpoint {
         Some(Checkpoint::Delivered) => {}
         Some(Checkpoint::Steering) => {
             messages.uncertain_steer(kit, &event).await?;
@@ -84,16 +100,9 @@ async fn directive(
     event: &RoomEvent,
     mail: &Mail,
 ) -> crate::Result<Option<(ChannelId, Option<String>, String)>> {
-    if mail
-        .remote
-        .as_ref()
-        .is_some_and(|route| !net.is_some_and(|n| n.channel == route.to))
-    {
-        return Ok(None);
-    }
     match &mail.kind {
         Kind::Message => {
-            let Some(agent) = crate::sessions::designated(kit, &event.room_id).await else {
+            let Some(agent) = crate::sessions::designated(kit, &event.room_id).await? else {
                 notice(net, kit, event, mail, UNDELIVERED).await?;
                 return Ok(None);
             };
@@ -123,7 +132,9 @@ pub(super) async fn after_post(
     }
     if blocked {
         notice(net, kit, event, mail, UNDELIVERED).await
-    } else if !answered(kit, event, mail).await? {
+    } else if mail.remote.is_some() || !has_local_reply(kit, event).await? {
+        // A remote notice reconciles the reserved response if the tool already
+        // tried to answer. Only a question without a response gets this notice.
         notice(
             net,
             kit,
@@ -137,14 +148,7 @@ pub(super) async fn after_post(
     }
 }
 
-async fn answered(kit: &Kit, event: &RoomEvent, mail: &Mail) -> crate::Result<bool> {
-    if mail.remote.is_some() {
-        return Ok(kit
-            .store()
-            .get_private_state(&event.room_id, &super::network::sent(&event.id))
-            .await?
-            .is_some());
-    }
+async fn has_local_reply(kit: &Kit, event: &RoomEvent) -> crate::Result<bool> {
     Ok(kit
         .store()
         .get_event(&super::reply::reply_id(&event.id)?)
@@ -171,6 +175,12 @@ async fn notice(
         &format!("{status}\nMessage: {subject}"),
     )
     .await
+    .and_then(|ack| match ack {
+        super::reply::Acknowledgement::Saved => Ok(()),
+        super::reply::Acknowledgement::LocalWritePending => {
+            Err("Could not persist the accepted session response".into())
+        }
+    })
 }
 
 fn result_prompt(mail: &Mail, request: &roomkit::model::EventId, question: &str) -> String {

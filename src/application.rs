@@ -170,7 +170,7 @@ async fn setup(
     // A conversation that is resumed opens with the agent it designates, a
     // new one with the project's selection.
     let designated = match settings.session.as_deref().map(roomkit::model::RoomId::new) {
-        Some(Ok(room)) => crate::sessions::designated(kit, &room).await,
+        Some(Ok(room)) => crate::sessions::designated(kit, &room).await?,
         _ => None,
     };
     if !settings.unattended {

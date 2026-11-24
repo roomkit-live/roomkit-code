@@ -320,7 +320,9 @@ impl Sessions {
         next.room = room.clone();
         // The conversation's agent, not the one the view comes with: its
         // history must not reach an agent selected elsewhere.
-        let agent = super::designated(&self.kit, &room).await;
+        let agent = super::designated(&self.kit, &room)
+            .await
+            .map_err(|e| e.to_string())?;
         let agent = agent.unwrap_or_else(|| next.agent.clone());
         self.profiles
             .show(&self.kit, &mut next, &self.channel, agent)

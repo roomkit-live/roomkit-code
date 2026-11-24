@@ -3,9 +3,7 @@ use super::directory::{Contact, contacts, resolve};
 use super::record::{Mail, check_text};
 use crate::sessions::Sessions;
 use roomkit::model::{EventId, RoomId};
-use roomkit_tui::protocol::{
-    ActorId, Choice, Command, Event, FieldKind, FormField, FormSpec, Item, Message, Request,
-};
+use roomkit_tui::protocol::{Choice, Command, Event, FieldKind, FormField, FormSpec, Request};
 use roomkit_tui_engine::{CommandResult, SessionConfig};
 
 pub(crate) async fn handle(
@@ -90,20 +88,21 @@ async fn send(
     op: &str,
 ) -> Result<Event, String> {
     check_text(text)?;
-    let operation = (view.room.as_str(), app.channel.as_str(), &view.sender, op);
     let net = app.profiles.resources.messages.network.get();
     let route = to
         .remote
         .as_ref()
         .map(|peer| net.map(|n| (n, peer)).ok_or("Session network unavailable"))
         .transpose()?;
-    let identity = match route {
-        Some((net, peer)) => serde_json::to_vec(&(&net.channel, peer, operation)),
-        None => serde_json::to_vec(&operation),
+    let endpoints = route.map(|(net, peer)| (&net.channel, peer));
+    let id = message_id(app, view, endpoints, op)?;
+    let outgoing =
+        super::outgoing::Outgoing::record(&app.kit, view, &app.channel, &to.room, &id, text)
+            .await
+            .map_err(|_| "Could not save the outgoing message. It was not sent.")?;
+    if outgoing.confirmed() {
+        return Ok(outgoing.item());
     }
-    .map_err(|_| "Invalid operation")?;
-    let hash = crate::digest::sha256_hex(identity);
-    let id = EventId::new(format!("session-msg-{hash}")).map_err(|_| "Invalid operation")?;
     let mail = Mail {
         from: view.room.clone(),
         text: text.into(),
@@ -117,24 +116,25 @@ async fn send(
             .await
     }
     .map_err(|e| e.to_string())?;
-    let text = format!("Message to @{}\n{text}", to.room);
-    let id = format!("sent-{id}");
-    let stored = crate::system_row::SystemRow {
-        room: view.room.as_str(),
-        id: &id,
-        text: &text,
-        about: ("session_recipient", serde_json::json!(to.room)),
+    outgoing.confirm(&app.kit, view.organization.clone()).await
+        .map_err(|_| "The recipient accepted the message, but its local receipt could not be saved. Check the conversation before resending.")?;
+    Ok(outgoing.item())
+}
+
+fn message_id(
+    app: &Sessions,
+    view: &SessionConfig,
+    endpoints: Option<(&roomkit::model::ChannelId, &roomkit::model::ChannelId)>,
+    op: &str,
+) -> Result<EventId, String> {
+    let operation = (view.room.as_str(), app.channel.as_str(), &view.sender, op);
+    let identity = match endpoints {
+        Some((from, to)) => serde_json::to_vec(&(from, to, operation)),
+        None => serde_json::to_vec(&operation),
     }
-    .store(&app.kit, &app.channel)
-    .await;
-    let mut message = Message::new(id, ActorId::new("terminal"), text);
-    message.position = stored
-        .ok()
-        .map(|row| roomkit_tui::protocol::RowPosition::stored(row.index, None));
-    Ok(Event::Item {
-        conversation: view.room.as_str().into(),
-        item: Item::Message(message),
-    })
+    .map_err(|_| "Invalid operation")?;
+    let hash = crate::digest::sha256_hex(identity);
+    EventId::new(format!("session-msg-{hash}")).map_err(|_| "Invalid operation".into())
 }
 
 #[cfg(test)]
