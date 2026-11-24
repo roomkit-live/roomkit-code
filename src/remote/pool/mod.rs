@@ -19,8 +19,8 @@ mod transport;
 mod worker;
 mod worker_options;
 
+use registry::Worker;
 pub(crate) use registry::WorkerProfile;
-use registry::{Registry, Worker};
 
 use std::{collections::BTreeMap, sync::Arc};
 pub(crate) use worker::{advertise, declare, worker_failure};
@@ -148,8 +148,7 @@ pub(crate) struct Scheduler {
     attending: tokio::sync::OnceCell<()>,
     turns: Arc<tokio::sync::RwLock<()>>,
     tasks: std::sync::Weak<crate::delegation::Tasks>,
-    redis: roomkit::RedisTurnBackend,
-    registry: Registry,
+    inventory: Inventory,
     queue: Arc<queue::Queue>,
     consultations: consultation::Consultations,
     closed: tokio_util::sync::CancellationToken,
@@ -164,8 +163,7 @@ impl Scheduler {
         Ok(Arc::new(Self {
             group: group.into(),
             tasks: Arc::downgrade(tasks),
-            redis: super::backend(&format!("pool:{group}"), &address)?,
-            registry: Registry::new(group, &address)?,
+            inventory: Inventory::new(group, &address)?,
             address,
             queue: Arc::default(),
             consultations: Default::default(),
@@ -194,6 +192,6 @@ impl Scheduler {
     }
 
     pub(crate) fn inventory(&self) -> Inventory {
-        Inventory(self.registry.clone())
+        self.inventory.clone()
     }
 }

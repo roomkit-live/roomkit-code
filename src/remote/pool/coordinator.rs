@@ -54,7 +54,7 @@ impl Coordinator {
             .get()
             .ok_or_else(|| RoomKitError::Runtime("Missing room owner".into()))?;
         pool.attending
-            .get_or_try_init(|| TurnBackend::attend(&pool.redis, owner.clone()))
+            .get_or_try_init(|| TurnBackend::attend(&pool.inventory.backend, owner.clone()))
             .await?;
         Ok(())
     }
@@ -87,7 +87,7 @@ impl TurnBackend for Coordinator {
         {
             return Box::pin(async move {
                 self.attend_pool(&pool).await?;
-                pool.redis.control(message).await
+                pool.inventory.backend.control(message).await
             });
         }
         self.local.control(message)
@@ -112,7 +112,10 @@ impl TurnBackend for Coordinator {
             && let Some(pool) = self.active()
         {
             return Some(Box::pin(async move {
-                pool.redis.claim_presence(channel, room, online).await
+                pool.inventory
+                    .backend
+                    .claim_presence(channel, room, online)
+                    .await
             }));
         }
         Some(self.local.claim_presence(channel, room, online))

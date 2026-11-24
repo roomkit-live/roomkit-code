@@ -84,6 +84,14 @@ class Model(StreamingModel):
         return {"content": "Could not read worker proof."}
 
 def automatic(owner, env, root, server, worker):
+    hooks = root / "owner/.roomkit"
+    hooks.mkdir()
+    log = root / "owner/worker-hooks.jsonl"
+    kinds = ("PreToolUse", "PostToolUse", "PostToolUseFailure")
+    command = {"type":"command", "command":"cat >> worker-hooks.jsonl", "timeout":3}
+    (hooks / "hooks.json").write_text(json.dumps({"hooks": {
+        kind: [{"matcher":"^(read|write)$", "hooks":[command]}] for kind in kinds
+    }}))
     master, slave = pty.openpty()
     captured = bytearray()
     with ExitStack() as stack:
@@ -102,6 +110,18 @@ def automatic(owner, env, root, server, worker):
                     captured.extend(os.read(master, 65536))
 
         wait("[Ask]")
+        for index in range(len(kinds)):
+            offset = len(captured)
+            os.write(master, b"/hooks\r")
+            wait("hooks discovered", offset)
+            os.write(master, b"\x1b[B" * (index + 1) + b"\r")
+            wait("Enable this hook", offset)
+            offset = len(captured)
+            os.write(master, b"\r")
+            wait("State: enabled", offset)
+            offset = len(captured)
+            os.write(master, b"\x1b")
+            wait("Ask about this project", offset)
         os.write(master, b"Check the remote workspace\r")
         wait("Allow write?")
         wait("denied.txt")
@@ -113,9 +133,17 @@ def automatic(owner, env, root, server, worker):
         time.sleep(APPROVAL_ARMING)
         os.write(master, b"\x19")  # Allow once.
         wait("Worker report received " + server.proof)
+        records = [json.loads(line) for line in log.read_text().splitlines()]
+        def hook_results(kind):
+            return {r["tool_use_id"]: r for r in records if r["hook_event_name"] == kind}
+        assert {"first", "second"} <= hook_results("PreToolUse").keys(), records
+        assert hook_results("PostToolUseFailure")["first"]["roomkit"]["outcome"] == "refused", records
+        success = hook_results("PostToolUse")["second"]
+        assert success["tool_input"]["path"] == "allowed.txt" and success["tool_response"], success
+        assert success["roomkit"]["turn_id"] == hook_results("PreToolUse")["second"]["roomkit"]["turn_id"]
         assert (root / "worker" / "allowed.txt").read_text() == "worker edit"
         assert not (root / "worker" / "denied.txt").exists(), "Refused write reached the worker"
-        assert not list((root / "owner").iterdir())
+        assert set((root / "owner").iterdir()) == {hooks, log}
         print("PASS  Refusal, approval, worker-only file effects and result in the parent.", flush=True)
 
         offset = len(captured)
@@ -150,7 +178,7 @@ def automatic(owner, env, root, server, worker):
         print("PASS  Parent receives a failure when the running worker disappears.", flush=True)
         os.write(master, b"\x04")
         assert wait_for_exit(proc, master, captured) == 0
-        assert not list((root / "owner").iterdir())
+        assert set((root / "owner").iterdir()) == {hooks, log}
 
 
 def main():

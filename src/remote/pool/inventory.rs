@@ -6,7 +6,10 @@ use roomkit_ai::{AiTool, Tool, ToolError, ToolFuture, ToolResult};
 pub(crate) const LIST_EXECUTORS: &str = "list_executors";
 
 #[derive(Clone)]
-pub(crate) struct Inventory(pub(super) Registry);
+pub(crate) struct Inventory {
+    pub(super) registry: Registry,
+    pub(crate) backend: roomkit::RedisTurnBackend,
+}
 
 impl Inventory {
     pub(crate) fn for_worker(settings: &crate::config::Settings) -> crate::Result<Option<Self>> {
@@ -22,8 +25,11 @@ impl Inventory {
             .transpose()
     }
 
-    fn new(group: &str, address: &str) -> crate::Result<Self> {
-        Ok(Self(Registry::new(group, address)?))
+    pub(super) fn new(group: &str, address: &str) -> crate::Result<Self> {
+        Ok(Self {
+            registry: Registry::new(group, address)?,
+            backend: crate::remote::backend(&format!("pool:{group}"), address)?,
+        })
     }
 
     pub(crate) async fn check(&self) -> Result<(), String> {
@@ -31,9 +37,33 @@ impl Inventory {
     }
 
     pub(super) async fn rows(&self) -> Result<Vec<Row>, String> {
-        tokio::time::timeout(std::time::Duration::from_secs(3), self.0.rows())
+        tokio::time::timeout(std::time::Duration::from_secs(3), self.sample())
             .await
             .map_err(|_| "Redis did not answer within three seconds")?
+    }
+
+    async fn sample(&self) -> Result<Vec<Row>, String> {
+        let (executors, rows) = tokio::try_join!(
+            async {
+                self.backend
+                    .executors()
+                    .await
+                    .map_err(|error| error.to_string())
+            },
+            self.registry.rows(),
+        )?;
+        let serving: std::collections::HashSet<_> = executors
+            .into_iter()
+            .filter(|executor| executor.online)
+            .map(|executor| executor.executor_id)
+            .collect();
+        Ok(rows
+            .into_iter()
+            .map(|mut row| {
+                row.serving = serving.contains(&row.worker.instance);
+                row
+            })
+            .collect())
     }
 
     async fn lines(&self) -> Result<Vec<String>, String> {
@@ -128,4 +158,55 @@ fn describe(row: &Row) -> String {
         worker.workspace_display(),
         worker.version.as_deref().unwrap_or("Not reported")
     )
+}
+
+/// One admission snapshot per coordinator. Redis remains authoritative for slot claims.
+#[derive(Default)]
+pub(super) struct Snapshot {
+    sample: Option<(tokio::time::Instant, Vec<Row>)>,
+}
+
+pub(super) const REFRESH: std::time::Duration = std::time::Duration::from_millis(350);
+
+impl Snapshot {
+    pub(super) async fn rows(
+        &mut self,
+        load: impl Future<Output = Result<Vec<Row>, String>>,
+    ) -> Result<&[Row], String> {
+        if self
+            .sample
+            .as_ref()
+            .is_none_or(|(at, _)| at.elapsed() >= REFRESH)
+        {
+            let rows = load.await?;
+            self.sample = Some((tokio::time::Instant::now(), rows));
+        }
+        Ok(self
+            .sample
+            .as_ref()
+            .map_or(&[], |(_, rows)| rows.as_slice()))
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+    #[tokio::test(start_paused = true)]
+    async fn waiting_tasks_share_one_catalogue_read_per_interval() -> Result<(), String> {
+        let mut snapshot = Snapshot::default();
+        let reads = std::cell::Cell::new(0);
+        for _ in 0..2 {
+            for _ in 0..4 {
+                snapshot
+                    .rows(async {
+                        reads.set(reads.get() + 1);
+                        Ok(Vec::new())
+                    })
+                    .await?;
+            }
+            tokio::time::advance(REFRESH).await;
+        }
+        assert_eq!(reads.get(), 2);
+        Ok(())
+    }
 }

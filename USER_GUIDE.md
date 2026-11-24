@@ -1808,6 +1808,8 @@ still uses the tool name, without blocking execution or triggering a retry.
 
 ## Command hooks
 
+For a delegated executor tool, the coordinator runs its project hooks in the coordinator workspace. The hook payload names the delegated room and the engine turn. To observe remote outcomes, update both the coordinator and the worker.
+
 `/hooks` discovers global definitions in `<state-dir>/hooks.json` and project
 ones in `.roomkit/hooks.json`. Both sources are additive, global first. No command
 runs until you inspect it and choose **Enable this hook** in `/hooks`. Approval is

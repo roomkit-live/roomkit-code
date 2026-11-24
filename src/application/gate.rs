@@ -37,7 +37,7 @@ pub(super) fn install(kit: &RoomKit<SqliteStore>, gate: Gate) -> Result<()> {
         HookTrigger::BeforeToolUse,
         move |event: ToolCallEvent, context: RoomContext| {
             let gate = gate.clone();
-            async move { decide(&gate, event, &context).await }
+            async move { decide(&gate, event, &context, None).await }
         },
         HookOptions {
             name: "code-permissions".into(),
@@ -53,7 +53,12 @@ pub(super) fn install(kit: &RoomKit<SqliteStore>, gate: Gate) -> Result<()> {
 /// request for review reaches the approval card. A call outside a
 /// conversation has no mode and no view to approve it. A delegated task's
 /// room takes its conversation's mode.
-async fn decide(gate: &Gate, event: ToolCallEvent, context: &RoomContext) -> Verdict {
+async fn decide(
+    gate: &Gate,
+    event: ToolCallEvent,
+    context: &RoomContext,
+    worker_turn: Option<&str>,
+) -> Verdict {
     let Gate {
         policy,
         channel,
@@ -68,7 +73,11 @@ async fn decide(gate: &Gate, event: ToolCallEvent, context: &RoomContext) -> Ver
     if policy.plan_blocks(&event) {
         return policy.gate(channel, event).await;
     }
-    let review = match hooks.before_tool(&event).await {
+    let decision = match worker_turn {
+        Some(id) => hooks.before_worker_tool(&event, &context.room, id).await,
+        None => hooks.before_tool(&event).await,
+    };
+    let review = match decision {
         roomkit_hooks::Decision::Deny(reason) => return block(reason),
         roomkit_hooks::Decision::Ask(reason) => Some(reason),
         roomkit_hooks::Decision::Continue => None,

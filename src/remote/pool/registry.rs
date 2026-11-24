@@ -117,6 +117,7 @@ impl Worker {
 }
 
 pub(super) struct Row {
+    pub serving: bool,
     pub worker: Worker,
     pub age: u64,
     pub used: u16,
@@ -131,7 +132,7 @@ impl Row {
     }
 
     pub fn online(&self) -> bool {
-        self.age < 10
+        self.serving && self.age < 10
     }
 }
 #[derive(Clone)]
@@ -209,6 +210,7 @@ impl Registry {
         rows.into_iter()
             .map(|(s, age, used)| {
                 Ok(Row {
+                    serving: false,
                     worker: serde_json::from_str(&s)
                         .map_err(|_| "Invalid executor resource record".to_owned())?,
                     age,

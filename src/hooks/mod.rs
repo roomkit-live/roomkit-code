@@ -1,5 +1,6 @@
 //! Host-owned command hooks. No scripts are exposed as model tools.
 mod catalogue;
+mod remote;
 mod ui;
 
 use catalogue::{Catalogue, Entry};
@@ -106,6 +107,7 @@ struct State {
     turns: BTreeMap<Key, Arc<Turn>>,
     completed: BTreeSet<Key>,
     recent: VecDeque<Receipt>,
+    worker_reports: BTreeMap<String, remote::Pending>,
     panel: Option<ui::Panel>,
 }
 
@@ -146,6 +148,7 @@ impl Hooks {
                 turns: BTreeMap::new(),
                 completed: BTreeSet::new(),
                 recent: VecDeque::new(),
+                worker_reports: BTreeMap::new(),
                 panel: None,
             }),
             background: TaskTracker::new(),
@@ -249,16 +252,7 @@ impl Hooks {
                 let task = turn.map(|turn| {
                     let tracker = turn.posts.clone();
                     tracker.spawn(async move {
-                        let mut context = turn.context.clone();
-                        tool_payload(&mut context.payload, &event);
-                        context.payload["tool_response"] = tool_response(&event);
-                        context.payload["roomkit"]["outcome"] = json!(tool_outcome(&event));
-                        let name = if event.is_error {
-                            HookEvent::PostToolUseFailure
-                        } else {
-                            HookEvent::PostToolUse
-                        };
-                        hooks.dispatch(name, &event.name, &context).await;
+                        hooks.post_tool(&event, turn.context.clone()).await;
                     })
                 });
                 async move {
@@ -305,10 +299,25 @@ impl Hooks {
                 Decision::Continue
             };
         };
-        let mut context = turn.context.clone();
+        self.pre_tool(event, turn.context.clone()).await
+    }
+
+    async fn pre_tool(&self, event: &ToolCallEvent, mut context: Context) -> Decision {
         tool_payload(&mut context.payload, event);
         self.dispatch(HookEvent::PreToolUse, &event.name, &context)
             .await
+    }
+
+    async fn post_tool(&self, event: &ToolCallEvent, mut context: Context) {
+        tool_payload(&mut context.payload, event);
+        context.payload["tool_response"] = tool_response(event);
+        context.payload["roomkit"]["outcome"] = json!(tool_outcome(event));
+        let kind = if event.is_error {
+            HookEvent::PostToolUseFailure
+        } else {
+            HookEvent::PostToolUse
+        };
+        self.dispatch(kind, &event.name, &context).await;
     }
 
     async fn dispatch(&self, event: HookEvent, matcher: &str, context: &Context) -> Decision {

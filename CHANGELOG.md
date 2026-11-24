@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Delegated workspace tools honor the coordinator’s project command hooks and report their outcomes there. Waiting tasks share a pool inventory refresh.
+
 - Idle sessions recover addressed messages and replies after a transient storage failure. Pinned test tasks wait for a worker with a Git checkout.
 
 - Messages and replies between sessions appear in italics in the live conversation
