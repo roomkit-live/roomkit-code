@@ -20,6 +20,19 @@ pub(crate) struct SystemRow<'a> {
 }
 
 impl SystemRow<'_> {
+    /// Store the terminal-only row and return its authoritative local index.
+    pub(crate) async fn store(
+        self,
+        kit: &RoomKit<SqliteStore>,
+        terminal: &ChannelId,
+    ) -> crate::Result<RoomEvent> {
+        let event = self.event(terminal)?;
+        let room = event.room_id.clone();
+        Ok(kit
+            .commit_event(&room, event, CommitEventOptions::default())
+            .await?)
+    }
+
     /// Build the terminal-only record, including the metadata the application reads back.
     pub(crate) fn event(self, terminal: &ChannelId) -> crate::Result<RoomEvent> {
         let source = EventSource::new(terminal.clone(), ChannelType::WEBSOCKET);
@@ -36,10 +49,5 @@ impl SystemRow<'_> {
 /// Stores `row` from the terminal and for it alone: the agents' histories
 /// never hold it. A row that cannot be stored is only shown.
 pub(crate) async fn commit(kit: &RoomKit<SqliteStore>, terminal: &ChannelId, row: SystemRow<'_>) {
-    if let Ok(event) = row.event(terminal) {
-        let room = event.room_id.clone();
-        let _ = kit
-            .commit_event(&room, event, CommitEventOptions::default())
-            .await;
-    }
+    let _ = row.store(kit, terminal).await;
 }

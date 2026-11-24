@@ -30,6 +30,8 @@ class Reviewer(StreamingModel):
             return {"content": "PRIVATE_REVIEW_FINISHED"}
         if last.get("tool_call_id") == "read-proof":
             token = re.search(r"PROOF-[a-f0-9]{32}", str(last["content"])).group()
+            if self.server.message_id == getattr(self.server, "busy_probe_id", None):
+                token = "PEER_ORDER_PROOF " + token
             self.server.answer = token
             return tool("send_message", "answer", reply_to=self.server.message_id, text=token)
         if not self.server.waiting.is_set() and any(
@@ -41,6 +43,8 @@ class Reviewer(StreamingModel):
                         if "Incoming session correspondence." in str(m.get("content")))
         self.server.message_id = re.search(r"session-msg-[0-9a-f]{64}", incoming).group()
         if any(tag in incoming for tag in ("AGENT_IDLE", "AGENT_BUSY", "AGENT_NOTICE", "AGENT_RESTART")):
+            if "AGENT_BUSY" in incoming:
+                self.server.busy_probe_id = self.server.message_id
             self.server.repeat_answer = "AGENT_IDLE" in incoming
             assert self.server.agent_release.wait(20)
             if "AGENT_NOTICE" in incoming:

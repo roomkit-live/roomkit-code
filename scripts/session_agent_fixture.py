@@ -9,6 +9,7 @@ import time
 
 from executor_fixture import StreamingModel, tool
 from session_messages_fixture import provider
+from pty_checks import screen_text, wait_for_exit
 
 
 class Initiator(StreamingModel):
@@ -42,6 +43,7 @@ class Initiator(StreamingModel):
             self.server.local_work.set()
             if phase == "BUSY":
                 assert self.server.release.wait(20)
+                return {"content": "WAITING_FOR_REVIEW"}
             return {"content": "Independent work finished."}
         result = next((str(m["content"]) for m in reversed(request["messages"])
                        if "Session correspondence result." in str(m.get("content"))
@@ -117,6 +119,22 @@ def fail_idle_post(root, *, checkpoint):
             db.execute("DROP TRIGGER reject_idle_post")
 
 
+def check_reading_order(terminal):
+    # Read what is on screen. The PTY byte stream records updates in arrival order.
+    markers = ("WAITING_FOR_REVIEW", "PEER_ORDER_PROOF", "RESUMED_BUSY")
+    deadline = time.monotonic() + 10
+    while True:
+        frame = screen_text(terminal.output, rows=58, cols=200)
+        if all(frame.count(m) == 1 for m in markers):
+            positions = [frame.index(m) for m in markers]
+            assert positions == sorted(positions), frame
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError("Missing or duplicate conversation text on screen:\n" + frame)
+        if select.select([terminal.master], [], [], .1)[0]:
+            terminal.output.extend(os.read(terminal.master, 65536))
+
+
 def exercise_agents(stack, root, launch, reviewer, token):
     model = provider(stack, Initiator)
     model.token, model.answers = token, []
@@ -154,6 +172,14 @@ def exercise_agents(stack, root, launch, reviewer, token):
             author.wait("Reply from @review", start)
             model.release.set()
         author.wait("RESUMED_" + phase, start)
+        if phase == "BUSY":
+            check_reading_order(author)
+            os.write(author.master, b"\x04")
+            assert wait_for_exit(author.proc, author.master, author.output) == 0
+            author = launch(model.server_port)
+            author.wait("RESUMED_BUSY", 0)
+            check_reading_order(author)
+            print("PASS Writing, intervening reply and synthesis appear once, in order, live and after reopen.", flush=True)
     assert model.answers == ["IDLE", "BUSY", "NOTICE", "RESTART"], model.answers
     with sqlite3.connect(next((root / "author/state").glob("projects/*/history.sqlite3"))) as db:
         posted = [json.loads(row[0]) for row in db.execute(

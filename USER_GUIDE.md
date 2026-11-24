@@ -262,7 +262,9 @@ peer calls `send_message(reply_to, text)`, the answer returns to the agent that
 asked. An active agent receives it in its current turn. An idle agent starts a
 turn to continue the task. A delivery notice follows the same route. An answer
 alone sends no acknowledgement back. Replies to messages you type with `@review`
-appear in your terminal without waking your agent.
+appear in your terminal without waking your agent. A reply appears below any
+text the local agent had already started writing and above its follow-up,
+including when you reopen the conversation.
 
 Agent-initiated messages use the named sessions that joined the same group,
 including two terminals on one machine. A session name must be unique, or the

@@ -119,20 +119,21 @@ async fn send(
     .map_err(|e| e.to_string())?;
     let text = format!("Message to @{}\n{text}", to.room);
     let id = format!("sent-{id}");
-    crate::system_row::commit(
-        &app.kit,
-        &app.channel,
-        crate::system_row::SystemRow {
-            room: view.room.as_str(),
-            id: &id,
-            text: &text,
-            about: ("session_recipient", serde_json::json!(to.room)),
-        },
-    )
+    let stored = crate::system_row::SystemRow {
+        room: view.room.as_str(),
+        id: &id,
+        text: &text,
+        about: ("session_recipient", serde_json::json!(to.room)),
+    }
+    .store(&app.kit, &app.channel)
     .await;
+    let mut message = Message::new(id, ActorId::new("terminal"), text);
+    message.position = stored
+        .ok()
+        .map(|row| roomkit_tui::protocol::RowPosition::stored(row.index, None));
     Ok(Event::Item {
         conversation: view.room.as_str().into(),
-        item: Item::Message(Message::new(id, ActorId::new("terminal"), text)),
+        item: Item::Message(message),
     })
 }
 

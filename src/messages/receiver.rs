@@ -55,7 +55,9 @@ impl Messages {
             "Delivery of {} to the active agent could not be confirmed. Check the conversation before resending.",
             event.id
         );
-        if kit.store().get_event(&id).await?.is_none() {
+        let stored = if let Some(row) = kit.store().get_event(&id).await? {
+            row
+        } else {
             let row = crate::system_row::SystemRow {
                 room: event.room_id.as_str(),
                 id: id.as_str(),
@@ -64,9 +66,9 @@ impl Messages {
             }
             .event(&ChannelId::new(crate::application::TERMINAL)?)?;
             kit.commit_event(&event.room_id, row, Default::default())
-                .await?;
-        }
-        self.show(&event.room_id, &id, text);
+                .await?
+        };
+        self.show(&stored, text);
         Ok(())
     }
 
@@ -125,7 +127,7 @@ impl Messages {
             }
             let index = event.index;
             if let Some(mail) = Mail::read(&event) {
-                self.show(room, &event.id, mail.line());
+                self.show(&event, mail.line());
                 super::delivery::deliver(self, diagnostics, kit, event, mail, posts).await?;
             }
             kit.store()

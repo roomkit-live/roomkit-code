@@ -15,14 +15,10 @@ import tempfile
 import termios
 import threading
 import time
-import unicodedata
-
-from pty_checks import wait_for_exit
 
 from fixture_http import LoopbackHTTPServer
+from pty_checks import screen_text, wait_for_exit
 
-OSC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
-CSI = re.compile(r"\x1b\[([0-9;?<]*)([A-Za-z])")
 
 if os.environ.get("ROOMKIT_TEST_BINARY"):
     binary = Path(os.environ["ROOMKIT_TEST_BINARY"])
@@ -136,35 +132,7 @@ with tempfile.TemporaryDirectory(prefix="roomkit-profiles-") as directory:
             pump()
 
     def screen(rows=28, cols=110):
-        """The screen as drawn so far, one string per row."""
-        cells = [[" "] * cols for _ in range(rows)]
-        row = col = 0
-        data = captured.decode(errors="replace")
-        index = 0
-        while index < len(data):
-            # Match in place. Slicing the remaining transcript at every
-            # character makes screen reconstruction quadratic.
-            osc = OSC.match(data, index)
-            if osc:
-                index = osc.end()
-                continue
-            csi = CSI.match(data, index)
-            if csi:
-                args, command = csi.groups()
-                if command == "H":
-                    position = [int(x) for x in args.split(";") if x.isdigit()] or [1, 1]
-                    row, col = position[0] - 1, (position[1] - 1 if len(position) > 1 else 0)
-                elif command == "K" and args == "2":
-                    cells[row] = [" "] * cols
-                index = csi.end()
-                continue
-            char = data[index]
-            index += 1
-            if char == "\x1b" or char in "\r\n" or not (0 <= row < rows and 0 <= col < cols):
-                continue
-            cells[row][col] = char
-            col += 2 if unicodedata.east_asian_width(char) in "WF" else 1
-        return "\n".join("".join(line) for line in cells)
+        return screen_text(captured, rows, cols)
 
     def fields(values):
         for index, value in enumerate(values):

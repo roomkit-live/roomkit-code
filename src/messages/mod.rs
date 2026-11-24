@@ -12,7 +12,7 @@ mod tests;
 mod tools;
 
 use crate::sync::lock;
-use roomkit::model::{EventId, RoomId};
+use roomkit::model::{RoomEvent, RoomId};
 use roomkit::{RoomKit, WeakRoomKit};
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::{ActorId, Event, Item, Message};
@@ -135,20 +135,18 @@ impl Messages {
         self.changes.subscribe()
     }
 
-    fn show(&self, room: &RoomId, id: &EventId, text: String) {
+    fn show(&self, row: &RoomEvent, text: String) {
         let mut recent = lock(&self.recent);
-        let items = recent.entry(room.clone()).or_default();
+        let items = recent.entry(row.room_id.clone()).or_default();
         if items
             .iter()
-            .any(|item| matches!(item, Item::Message(m) if m.id.as_str() == id.as_str()))
+            .any(|item| matches!(item, Item::Message(m) if m.id.as_str() == row.id.as_str()))
         {
             return;
         }
-        items.push_back(Item::Message(Message::new(
-            id.to_string(),
-            ActorId::new("terminal"),
-            text,
-        )));
+        let mut message = Message::new(row.id.to_string(), ActorId::new("terminal"), text);
+        message.position = Some(roomkit_tui::protocol::RowPosition::stored(row.index, None));
+        items.push_back(Item::Message(message));
         if items.len() > 16 {
             items.pop_front();
         }

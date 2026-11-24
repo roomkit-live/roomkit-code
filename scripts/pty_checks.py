@@ -1,10 +1,12 @@
-"""Shared process waits for native terminal integration checks."""
+"""Process waits and screen reconstruction for native terminal integration checks."""
 
 import errno
 import os
+import re
 import select
 import subprocess
 import time
+import unicodedata
 
 
 def wait_for_exit(process, master, output, timeout=10):
@@ -34,3 +36,41 @@ def wait_for_exit(process, master, output, timeout=10):
         if not chunk:
             return process.wait(timeout=max(0, deadline - time.monotonic()))
         output.extend(chunk)
+
+
+OSC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+CSI = re.compile(r"\x1b\[([0-9;?<]*)([A-Za-z])")
+
+
+def screen_text(captured, rows, cols):
+    """Reconstruct the visible grid from incremental terminal updates."""
+    cells = [[" "] * cols for _ in range(rows)]
+    row = col = 0
+    data = captured.decode(errors="replace")
+    index = 0
+    while index < len(data):
+        # Match in place. Slicing the remaining transcript at every
+        # character makes screen reconstruction quadratic.
+        osc = OSC.match(data, index)
+        if osc:
+            index = osc.end()
+            continue
+        csi = CSI.match(data, index)
+        if csi:
+            args, command = csi.groups()
+            if command == "H":
+                position = [int(x) for x in args.split(";") if x.isdigit()] or [1, 1]
+                row, col = position[0] - 1, (position[1] - 1 if len(position) > 1 else 0)
+            elif command == "J" and args == "2":
+                cells = [[" "] * cols for _ in range(rows)]
+            elif command == "K" and args == "2" and 0 <= row < rows:
+                cells[row] = [" "] * cols
+            index = csi.end()
+            continue
+        char = data[index]
+        index += 1
+        if char == "\x1b" or char in "\r\n" or not (0 <= row < rows and 0 <= col < cols):
+            continue
+        cells[row][col] = char
+        col += 2 if unicodedata.east_asian_width(char) in "WF" else 1
+    return "\n".join("".join(line) for line in cells)
