@@ -230,10 +230,7 @@ or unattended session is unavailable for a new message. With a shared project da
 
 This proof of concept uses the project's existing RoomKit SQLite history.
 Each interactive owner checks for new records about every 750 ms and passes
-them to RoomKit's addressed post or active-turn steering. The owner records
-its place before delivery to avoid steering a turn twice after a crash. If it
-exits between those steps, the message stays visible and may need to be sent
-again. The local experiment requires no executor pool or Redis. For two
+them to RoomKit's addressed post or active-turn steering. An idle agent's addressed post has a durable receipt. After a transient storage failure the owner retries with the same idempotency key, including after a restart. Steering an active agent has no replay key. An interrupted attempt leaves a delivery notice in the conversation so you can check before sending again. The local experiment requires no executor pool or Redis. For two
 delegated tasks running on separate machines, see the executor consultation
 workflow under *Developing across executor workspaces*.
 

@@ -5,6 +5,7 @@ import os
 import select
 import sqlite3
 import threading
+import time
 
 from executor_fixture import StreamingModel, tool
 from session_messages_fixture import provider
@@ -86,6 +87,29 @@ def drain_terminal(terminal):
         thread.join()
 
 
+@contextmanager
+def fail_idle_post(root):
+    """Hold only the addressed reply's insertion until the receiver reports the error."""
+    private = next((root / "author/state").glob("projects/*/history.sqlite3")).parent
+    diag = private / "diagnostics.jsonl"
+    offset = len(diag.read_text())
+    with sqlite3.connect(private / "history.sqlite3") as db:
+        db.execute("""CREATE TRIGGER reject_idle_post BEFORE INSERT ON events
+                      WHEN NEW.idempotency_key LIKE 'dispatch-session-reply-%'
+                      BEGIN SELECT RAISE(FAIL, 'inbox-retry-fixture'); END""")
+    def wait_for_failure():
+        deadline = time.monotonic() + 15
+        while "session_inbox_unavailable" not in diag.read_text()[offset:]:
+            if time.monotonic() >= deadline:
+                raise AssertionError("The idle reply did not reach the injected failure: " + (private / "diagnostics.jsonl").read_text()[-2400:])
+            time.sleep(.05)
+    try:
+        yield wait_for_failure
+    finally:
+        with sqlite3.connect(private / "history.sqlite3") as db:
+            db.execute("DROP TRIGGER reject_idle_post")
+
+
 def exercise_agents(stack, root, launch, reviewer, token):
     model = provider(stack, Initiator)
     model.token, model.answers = token, []
@@ -95,7 +119,7 @@ def exercise_agents(stack, root, launch, reviewer, token):
     stack.callback(model.release.set)
     stack.callback(reviewer.agent_release.set)
     (root / "author/workspace/local.txt").write_text("LOCAL_WORK_PROOF")
-    for phase in ["IDLE", "BUSY", "NOTICE"]:
+    for phase in ["IDLE", "BUSY", "NOTICE", "RESTART"]:
         model.phase = phase
         reviewer.agent_release.clear()
         model.local_work.clear()
@@ -105,16 +129,29 @@ def exercise_agents(stack, root, launch, reviewer, token):
         assert model.local_work.wait(15), "The asking agent could not work before the reply"
         if phase != "BUSY":
             author.wait("Independent work finished.", start)
-        reviewer.agent_release.set()
+        if phase in ("IDLE", "RESTART"):
+            with fail_idle_post(root) as failed:
+                reviewer.agent_release.set()
+                author.wait("Reply from @review", start)
+                failed()
+                if phase == "RESTART":
+                    author.proc.kill()
+                    author.proc.wait(timeout=10)
+            assert phase not in model.answers
+            if phase == "RESTART":
+                author = launch(model.server_port)
+                start = 0
+        else:
+            reviewer.agent_release.set()
         if phase == "BUSY":
             author.wait("Reply from @review", start)
             model.release.set()
         author.wait("RESUMED_" + phase, start)
-    assert model.answers == ["IDLE", "BUSY", "NOTICE"], model.answers
+    assert model.answers == ["IDLE", "BUSY", "NOTICE", "RESTART"], model.answers
     with sqlite3.connect(next((root / "author/state").glob("projects/*/history.sqlite3"))) as db:
         posted = [json.loads(row[0]) for row in db.execute(
             "SELECT data FROM events WHERE idempotency_key LIKE 'dispatch-session-%'")]
-        assert len(posted) == 2 and all("AGENT_BUSY" not in str(ev["content"]) for ev in posted), posted
+        assert len(posted) == 3 and all("AGENT_BUSY" not in str(ev["content"]) for ev in posted), posted
         assert db.execute("SELECT 1 FROM events WHERE data LIKE '%PRIVATE_REVIEW_FINISHED%'").fetchone() is None
     model.phase = "OUTSIDE"
     author.send("/new", "Start a conversation")

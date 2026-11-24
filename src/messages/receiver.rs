@@ -35,6 +35,34 @@ impl Messages {
         }
     }
 
+    /// RoomKit steering has no idempotency key. Surface an interrupted handover
+    /// without injecting the same mail into another turn.
+    pub(super) async fn uncertain_steer(
+        &self,
+        kit: &Kit,
+        event: &roomkit::model::RoomEvent,
+    ) -> crate::Result<()> {
+        use roomkit::model::{ChannelId, EventId};
+        let id = EventId::new(format!("uncertain-{}", event.id))?;
+        let text = format!(
+            "Delivery of {} to the active agent could not be confirmed. Check the conversation before resending.",
+            event.id
+        );
+        if kit.store().get_event(&id).await?.is_none() {
+            let row = crate::system_row::SystemRow {
+                room: event.room_id.as_str(),
+                id: id.as_str(),
+                text: &text,
+                about: ("session_mail_uncertain", json!(event.id)),
+            }
+            .event(&ChannelId::new(crate::application::TERMINAL)?)?;
+            kit.commit_event(&event.room_id, row, Default::default())
+                .await?;
+        }
+        self.show(&event.room_id, &id, text);
+        Ok(())
+    }
+
     async fn poll(&self, kit: &Kit, room: &RoomId, posts: &mut Posts) -> crate::Result<()> {
         let state = kit.store().get_private_state(room, CURSOR).await?;
         // RoomKit assigns index zero to the first event. None includes that record.
@@ -78,9 +106,11 @@ impl Messages {
             {
                 result??;
             }
-            // Steering has no replay key. Claim before delivery: a crash leaves the
-            // human-readable record but cannot prompt the model twice.
             let index = event.index;
+            if let Some(mail) = Mail::read(&event) {
+                self.show(room, &event.id, mail.line());
+                super::delivery::deliver(self, self.network.get(), kit, event, mail, posts).await?;
+            }
             kit.store()
                 .set_private_state(
                     room,
@@ -89,10 +119,6 @@ impl Messages {
                 )
                 .await?;
             *after = Some(index);
-            if let Some(mail) = Mail::read(&event) {
-                self.show(room, &event.id, mail.line());
-                super::delivery::deliver(self.network.get(), kit, event, mail, posts).await?;
-            }
         }
         Ok(full)
     }

@@ -54,9 +54,10 @@ pub(crate) async fn advertise(
     let registry = inventory.0.clone();
     let mut sampler = Sampler::default();
     let workspace = workspace.to_owned();
+    let checkout = super::revision::Checkout::sample(&workspace).await;
     let mut worker = Worker {
-        checkout: super::revision::Checkout::sample(&workspace).await,
-        commit_tests: true,
+        commit_tests: checkout.is_some(),
+        checkout,
         name: args.name()?,
         workspace: Some(workspace.display().to_string()),
         version: Some(crate::updates::CURRENT.into()),
@@ -82,6 +83,7 @@ pub(crate) async fn advertise(
             sleep(Duration::from_secs(2)).await;
             if sampled.elapsed() >= Duration::from_secs(30) {
                 worker.checkout = super::revision::Checkout::sample(&workspace).await;
+                worker.commit_tests = worker.checkout.is_some();
                 sampled = tokio::time::Instant::now();
             }
             worker.metrics = sampler.read().await;

@@ -40,7 +40,7 @@ class Reviewer(StreamingModel):
         incoming = next(str(m["content"]) for m in reversed(messages)
                         if "Incoming session correspondence." in str(m.get("content")))
         self.server.message_id = re.search(r"session-msg-[0-9a-f]{64}", incoming).group()
-        if any(tag in incoming for tag in ("AGENT_IDLE", "AGENT_BUSY", "AGENT_NOTICE")):
+        if any(tag in incoming for tag in ("AGENT_IDLE", "AGENT_BUSY", "AGENT_NOTICE", "AGENT_RESTART")):
             self.server.repeat_answer = "AGENT_IDLE" in incoming
             assert self.server.agent_release.wait(20)
             if "AGENT_NOTICE" in incoming:
@@ -134,7 +134,7 @@ def run(options):
 
         def another_session(dirname, name, scope, port=None):
             path = root / dirname
-            (path / "workspace").mkdir(parents=True)
+            (path / "workspace").mkdir(parents=True, exist_ok=True)
             return Terminal(stack, args_for(binary, path, name, scope, port or unused.server_port), env)
 
         outsider = another_session("outsider", "review", uuid.uuid4().hex)

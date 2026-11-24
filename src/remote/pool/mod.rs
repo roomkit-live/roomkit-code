@@ -137,7 +137,8 @@ impl Requirements {
             return self.profile.is_none() && self.test_commit.is_none() && !self.consultation;
         };
         let offers = |name: &str| profile.tools.iter().any(|tool| tool == name);
-        (self.test_commit.is_none() || (w.commit_tests && offers(CARGO_TEST)))
+        (self.test_commit.is_none()
+            || (w.commit_tests && w.checkout.is_some() && offers(CARGO_TEST)))
             && (!self.consultation || (offers(ASK_PEER) && offers(ANSWER_PEER)))
     }
 }

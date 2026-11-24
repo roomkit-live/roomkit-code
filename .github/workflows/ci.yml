@@ -41,6 +41,9 @@ jobs:
       - name: Exercise pool placement and queueing
         if: runner.os == 'Linux'
         run: python3 scripts/check-executor-pool.py
+      - name: Exercise session messaging across independent stores
+        if: runner.os == 'Linux'
+        run: python3 scripts/check-session-network.py
       - name: Install minimum supported Rust
         run: rustup toolchain install 1.94.0 --profile minimal
       - run: make msrv

@@ -124,7 +124,11 @@ fn commit_placement_requires_support_on_the_selected_profile() -> crate::Result<
         tools: vec![CARGO_TEST.into()],
     });
     assert!(!req.matches(&w));
-    w.commit_tests = true;
+    w.commit_tests = true; // Older workers could advertise this outside a repository.
+    assert!(!req.matches(&w));
+    w.checkout = Some(serde_json::from_value(
+        json!({"repository":"/project","branch":"feature","head":sha,"dirty":true}),
+    )?);
     assert!(req.matches(&w));
     w.profiles[0].tools.clear();
     assert!(!req.matches(&w));

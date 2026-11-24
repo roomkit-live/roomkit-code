@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import select
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -264,16 +265,29 @@ def rust_scenario(term, server, root):
 
 
 def commit_scenario(term, result, workspace, source):
-    def git(*args):
-        return subprocess.check_output(["git", "-C", workspace, "-c", "user.name=Test",
+    def git(*args, directory=workspace):
+        return subprocess.check_output(["git", "-C", directory, "-c", "user.name=Test",
                                         "-c", "user.email=test@example.org",
                                         "-c", "commit.gpgSign=false", "-c", "core.hooksPath=/dev/null",
                                         *args], text=True).strip()
 
-    git("init", "-b", "feature")
-    git("add", "sample/src/lib.rs", "sample/Cargo.toml")
-    git("commit", "-m", "passing tests")
-    sha = git("rev-parse", "HEAD")
+    # Prepare the objects elsewhere. The running worker starts outside a checkout.
+    with tempfile.TemporaryDirectory(dir=workspace.parent) as staging:
+        staging = Path(staging)
+        for name in ("sample/Cargo.toml", "sample/src/lib.rs"):
+            (staging / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(workspace / name, staging / name)
+        git("init", "-b", "feature", directory=staging)
+        git("add", "sample", directory=staging)
+        git("commit", "-m", "passing tests", directory=staging)
+        sha = git("rev-parse", "HEAD", directory=staging)
+        task = "rust-pin-wait-for-checkout"
+        TASKS[task] = dict(TASKS["rust-passing"], test_commit=sha)
+        offset = term.send(task, "Submitted " + task + ".")
+        term.send("/executors tasks", "no online worker matches")
+        (staging / ".git").rename(workspace / ".git")
+        term.wait(task + " report received.", offset)
+    print("PASS  Pinned task waited until the worker acquired a Git checkout.", flush=True)
     git("switch", "-c", "ongoing")
     git("commit", "--allow-empty", "-m", "unrelated work")
     passing = source.read_text()

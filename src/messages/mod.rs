@@ -2,6 +2,7 @@
 pub(crate) mod command;
 mod delivery;
 mod directory;
+mod dispatch;
 mod network;
 mod receiver;
 mod record;
@@ -137,6 +138,12 @@ impl Messages {
     fn show(&self, room: &RoomId, id: &EventId, text: String) {
         let mut recent = lock(&self.recent);
         let items = recent.entry(room.clone()).or_default();
+        if items
+            .iter()
+            .any(|item| matches!(item, Item::Message(m) if m.id.as_str() == id.as_str()))
+        {
+            return;
+        }
         items.push_back(Item::Message(Message::new(
             id.to_string(),
             ActorId::new("terminal"),
