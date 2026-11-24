@@ -77,7 +77,7 @@ impl Inventory {
             if let Some(checkout) = &row.worker.checkout {
                 lines.push(format!("  Git {}", checkout.display()));
             }
-            if row.worker.commit_tests {
+            if row.worker.supports_commit_tests() {
                 lines.push("  Commit tests supported on profiles offering cargo_test".into());
             }
             for (i, p) in row.worker.profiles.iter().enumerate() {

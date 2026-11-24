@@ -54,9 +54,10 @@ pub(crate) async fn advertise(
     let registry = inventory.registry.clone();
     let mut sampler = Sampler::default();
     let workspace = workspace.to_owned();
-    let checkout = super::revision::Checkout::sample(&workspace).await;
+    let (git_repository, checkout) = super::revision::Checkout::sample(&workspace).await;
     let mut worker = Worker {
-        commit_tests: checkout.is_some(),
+        commit_tests: git_repository.is_some(),
+        git_repository,
         checkout,
         name: args.name()?,
         workspace: Some(workspace.display().to_string()),
@@ -82,8 +83,9 @@ pub(crate) async fn advertise(
         loop {
             sleep(Duration::from_secs(2)).await;
             if sampled.elapsed() >= Duration::from_secs(30) {
-                worker.checkout = super::revision::Checkout::sample(&workspace).await;
-                worker.commit_tests = worker.checkout.is_some();
+                (worker.git_repository, worker.checkout) =
+                    super::revision::Checkout::sample(&workspace).await;
+                worker.commit_tests = worker.git_repository.is_some();
                 sampled = tokio::time::Instant::now();
             }
             worker.metrics = sampler.read().await;

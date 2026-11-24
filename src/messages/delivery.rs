@@ -10,20 +10,22 @@ pub(super) type Posts = tokio::task::JoinSet<crate::Result<()>>;
 
 pub(super) async fn deliver(
     messages: &super::Messages,
-    net: Option<&super::network::Network>,
+    diagnostics: &crate::diagnostics::Diagnostics,
     kit: &Kit,
     event: RoomEvent,
     mail: Mail,
     posts: &mut Posts,
 ) -> crate::Result<()> {
     use super::dispatch::Checkpoint;
+    let net = messages.network.get();
     match Checkpoint::read(kit, &event).await? {
+        Some(Checkpoint::Delivered) => {}
         Some(Checkpoint::Steering) => {
             messages.uncertain_steer(kit, &event).await?;
         }
         Some(Checkpoint::Post(post)) => post.admit(kit, net, event, mail, posts).await?,
         None => {
-            if let Some(post) = prepare(net, kit, &event, &mail).await? {
+            if let Some(post) = prepare(net, kit, &event, &mail, diagnostics).await? {
                 post.admit(kit, net, event, mail, posts).await?;
             }
         }
@@ -36,6 +38,7 @@ async fn prepare(
     kit: &Kit,
     event: &RoomEvent,
     mail: &Mail,
+    diagnostics: &crate::diagnostics::Diagnostics,
 ) -> crate::Result<Option<super::dispatch::PendingPost>> {
     use super::dispatch::{Checkpoint, PendingPost};
     let Some((agent, preferred_turn, text)) = directive(net, kit, event, mail).await? else {
@@ -59,6 +62,9 @@ async fn prepare(
     )
     .await?
     {
+        Checkpoint::Delivered
+            .save_known(kit, event, diagnostics)
+            .await;
         return Ok(None);
     }
     let post = PendingPost {
@@ -66,7 +72,9 @@ async fn prepare(
         text,
         organization: target.organization_id,
     };
-    Checkpoint::Post(post.clone()).save(kit, event).await?;
+    Checkpoint::Post(post.clone())
+        .save_known(kit, event, diagnostics)
+        .await;
     Ok(Some(post))
 }
 

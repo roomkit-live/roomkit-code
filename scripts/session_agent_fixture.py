@@ -88,13 +88,20 @@ def drain_terminal(terminal):
 
 
 @contextmanager
-def fail_idle_post(root):
+def fail_idle_post(root, *, checkpoint):
     """Hold only the addressed reply's insertion until the receiver reports the error."""
     private = next((root / "author/state").glob("projects/*/history.sqlite3")).parent
     diag = private / "diagnostics.jsonl"
     offset = len(diag.read_text())
     with sqlite3.connect(private / "history.sqlite3") as db:
-        db.execute("""CREATE TRIGGER reject_idle_post BEFORE INSERT ON events
+        if checkpoint:
+            db.execute("""CREATE TRIGGER reject_idle_post BEFORE INSERT ON private_state
+                          WHEN NEW.key = 'roomkit_code:session_mail_dispatch:v1'
+                            AND json_extract(NEW.value, '$.id') LIKE 'session-reply-%'
+                            AND json_type(NEW.value, '$.dispatch.Post') = 'object'
+                          BEGIN SELECT RAISE(FAIL, 'inbox-checkpoint-fixture'); END""")
+        else:
+            db.execute("""CREATE TRIGGER reject_idle_post BEFORE INSERT ON events
                       WHEN NEW.idempotency_key LIKE 'dispatch-session-reply-%'
                       BEGIN SELECT RAISE(FAIL, 'inbox-retry-fixture'); END""")
     def wait_for_failure():
@@ -130,7 +137,7 @@ def exercise_agents(stack, root, launch, reviewer, token):
         if phase != "BUSY":
             author.wait("Independent work finished.", start)
         if phase in ("IDLE", "RESTART"):
-            with fail_idle_post(root) as failed:
+            with fail_idle_post(root, checkpoint=phase == "IDLE") as failed:
                 reviewer.agent_release.set()
                 author.wait("Reply from @review", start)
                 failed()

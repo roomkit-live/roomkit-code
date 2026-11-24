@@ -13,6 +13,7 @@ fn worker(name: String) -> Row {
             host_os: None,
             workspace: None,
             checkout: None,
+            git_repository: None,
             commit_tests: false,
             version: None,
             model: None,
@@ -90,6 +91,7 @@ fn a_legacy_advertisement_keeps_its_unknown_workspace_and_version() -> crate::Re
     object.remove("workspace");
     object.remove("version");
     object.remove("checkout");
+    object.remove("git_repository");
     object.remove("commit_tests");
     row.worker = serde_json::from_value(legacy)?;
     assert!(row.worker.checkout.is_none() && !row.worker.commit_tests);
@@ -127,6 +129,9 @@ fn commit_placement_requires_support_on_the_selected_profile() -> crate::Result<
     assert!(!req.matches(&w));
     w.commit_tests = true; // Older workers could advertise this outside a repository.
     assert!(!req.matches(&w));
+    w.git_repository = Some("/project".into()); // Status is still being sampled.
+    assert!(req.matches(&w));
+    w.git_repository = None;
     w.checkout = Some(serde_json::from_value(
         json!({"repository":"/project","branch":"feature","head":sha,"dirty":true}),
     )?);

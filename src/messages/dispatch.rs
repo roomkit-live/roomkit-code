@@ -17,6 +17,7 @@ const RECEIPT: &str = "roomkit_code:session_mail_dispatch:v1";
 #[derive(Serialize, Deserialize)]
 pub(super) enum Checkpoint {
     Steering,
+    Delivered,
     Post(PendingPost),
 }
 
@@ -30,6 +31,19 @@ impl Checkpoint {
             .set_private_state(&event.room_id, RECEIPT, Some(state.into_iter().collect()))
             .await?;
         Ok(())
+    }
+
+    /// Once the steering outcome is known, retain it in memory while storage
+    /// recovers. Reading the older claim back would make a known outcome ambiguous.
+    pub(super) async fn save_known(
+        &self,
+        kit: &Kit,
+        event: &RoomEvent,
+        diagnostics: &crate::diagnostics::Diagnostics,
+    ) {
+        while let Err(error) = self.save(kit, event).await {
+            super::receiver::report_unavailable(diagnostics, error.as_ref()).await;
+        }
     }
 
     pub(super) async fn read(kit: &Kit, event: &RoomEvent) -> crate::Result<Option<Self>> {
@@ -101,6 +115,16 @@ impl PendingPost {
                         posted.status == EventStatus::Blocked,
                     )
                     .await
+                }
+                Err(
+                    roomkit::RoomKitError::NoRecipient { .. }
+                    | roomkit::RoomKitError::ChannelNotRegistered { .. }
+                    | roomkit::RoomKitError::ChannelNotFound { .. }
+                    | roomkit::RoomKitError::RoomClosed { .. },
+                ) => {
+                    after_post(network.as_ref(), &owner, &event, &mail, true).await?;
+                    let _ = admitted.send(Ok(()));
+                    Ok(())
                 }
                 Err(error) => {
                     let _ = admitted.send(Err(error));

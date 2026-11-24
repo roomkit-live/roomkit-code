@@ -238,7 +238,7 @@ fn resource_lines(row: &Row) -> Vec<String> {
     if let Some(checkout) = &w.checkout {
         body.push(format!("Git        {}", checkout.display()));
     }
-    if w.commit_tests
+    if w.supports_commit_tests()
         && w.profiles
             .iter()
             .any(|p| p.tools.iter().any(|t| t == super::CARGO_TEST))

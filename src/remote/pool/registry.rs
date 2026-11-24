@@ -75,6 +75,8 @@ pub(super) struct Worker {
     #[serde(default)]
     pub checkout: Option<super::revision::Checkout>,
     #[serde(default)]
+    pub git_repository: Option<std::path::PathBuf>,
+    #[serde(default)]
     pub commit_tests: bool,
     #[serde(default)]
     pub version: Option<String>,
@@ -88,6 +90,11 @@ pub(super) struct Worker {
     pub metrics: Metrics,
 }
 impl Worker {
+    pub(super) fn supports_commit_tests(&self) -> bool {
+        // Older workers also advertised commit tests outside Git workspaces.
+        self.commit_tests && (self.git_repository.is_some() || self.checkout.is_some())
+    }
+
     /// Keep filenames with control characters on one line in the terminal and tool output.
     pub(super) fn workspace_display(&self) -> std::borrow::Cow<'_, str> {
         let path = self.workspace.as_deref().unwrap_or("Not reported");

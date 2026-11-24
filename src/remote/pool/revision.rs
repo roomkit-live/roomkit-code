@@ -69,16 +69,22 @@ pub(super) struct Checkout {
 }
 
 impl Checkout {
-    pub(super) async fn sample(root: &Path) -> Option<Self> {
-        tokio::time::timeout(Duration::from_secs(2), Self::status(root))
+    pub(super) async fn sample(root: &Path) -> (Option<PathBuf>, Option<Self>) {
+        let limit = Duration::from_secs(2);
+        let Some(repository) = tokio::time::timeout(limit, repo(root)).await.ok().flatten() else {
+            return (None, None);
+        };
+        // A slow status in a large tree does not prevent testing from its Git objects.
+        let status = tokio::time::timeout(limit, Self::status(&repository))
             .await
-            .ok()?
+            .ok()
+            .flatten();
+        (Some(repository), status)
     }
 
-    async fn status(root: &Path) -> Option<Self> {
-        let repository = repo(root).await?;
+    async fn status(repository: &Path) -> Option<Self> {
         // Read just the headers and first changed path, even in a large dirty tree.
-        let mut child = git(&repository)
+        let mut child = git(repository)
             .args([
                 "status",
                 "--porcelain=v2",
@@ -105,7 +111,7 @@ impl Checkout {
             return None;
         }
         Some(Self {
-            repository,
+            repository: repository.to_owned(),
             head: head?,
             branch: branch?,
             dirty,

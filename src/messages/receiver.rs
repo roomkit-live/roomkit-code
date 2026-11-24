@@ -15,6 +15,18 @@ const CURSOR: &str = "roomkit_code:session_mail_cursor:v1";
 type Kit = RoomKit<SqliteStore>;
 const BATCH: u8 = 16;
 
+pub(super) async fn report_unavailable(
+    diagnostics: &crate::diagnostics::Diagnostics,
+    error: &(dyn std::error::Error + Send + Sync),
+) {
+    diagnostics.record(
+        "session_inbox_unavailable",
+        json!({"error":error.to_string()}),
+        None,
+    );
+    tokio::time::sleep(Duration::from_secs(5)).await;
+}
+
 impl Messages {
     pub(super) async fn receive(
         &self,
@@ -24,13 +36,8 @@ impl Messages {
     ) {
         let mut posts = Posts::new();
         loop {
-            if let Err(error) = self.poll(kit, room, &mut posts).await {
-                diagnostics.record(
-                    "session_inbox_unavailable",
-                    json!({"error":error.to_string()}),
-                    None,
-                );
-                tokio::time::sleep(Duration::from_secs(5)).await;
+            if let Err(error) = self.poll(kit, room, &mut posts, diagnostics).await {
+                report_unavailable(diagnostics, error.as_ref()).await;
             }
         }
     }
@@ -63,12 +70,21 @@ impl Messages {
         Ok(())
     }
 
-    async fn poll(&self, kit: &Kit, room: &RoomId, posts: &mut Posts) -> crate::Result<()> {
+    async fn poll(
+        &self,
+        kit: &Kit,
+        room: &RoomId,
+        posts: &mut Posts,
+        diagnostics: &crate::diagnostics::Diagnostics,
+    ) -> crate::Result<()> {
         let state = kit.store().get_private_state(room, CURSOR).await?;
         // RoomKit assigns index zero to the first event. None includes that record.
         let mut after = state.and_then(|s| s.get("index")?.as_u64());
         loop {
-            if !self.drain(kit, room, &mut after, posts).await? {
+            if !self
+                .drain(kit, room, &mut after, posts, diagnostics)
+                .await?
+            {
                 tokio::time::sleep(Duration::from_millis(750)).await;
             }
         }
@@ -80,6 +96,7 @@ impl Messages {
         room: &RoomId,
         after: &mut Option<u64>,
         posts: &mut Posts,
+        diagnostics: &crate::diagnostics::Diagnostics,
     ) -> crate::Result<bool> {
         while let Some(result) = posts.try_join_next() {
             result??;
@@ -109,7 +126,7 @@ impl Messages {
             let index = event.index;
             if let Some(mail) = Mail::read(&event) {
                 self.show(room, &event.id, mail.line());
-                super::delivery::deliver(self, self.network.get(), kit, event, mail, posts).await?;
+                super::delivery::deliver(self, diagnostics, kit, event, mail, posts).await?;
             }
             kit.store()
                 .set_private_state(
