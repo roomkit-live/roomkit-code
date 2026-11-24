@@ -134,7 +134,7 @@ pub(super) struct Registry {
     connection: Arc<OnceCell<ConnectionManager>>,
     prefix: String,
 }
-fn failed(_: redis::RedisError) -> String {
+pub(super) fn unavailable<E>(_: E) -> String {
     "Cannot reach the executor pool in Redis".into()
 }
 impl Registry {
@@ -151,8 +151,10 @@ impl Registry {
             .connection
             .get_or_try_init(|| self.client.get_connection_manager())
             .await
-            .map_err(failed)?;
-        cmd.query_async(&mut conn.clone()).await.map_err(failed)
+            .map_err(unavailable)?;
+        cmd.query_async(&mut conn.clone())
+            .await
+            .map_err(unavailable)
     }
     fn workers(&self) -> String {
         format!("{}:workers", self.prefix)
