@@ -4,6 +4,7 @@ use crate::remote::pool::{Worker, WorkerProfile};
 
 fn worker(name: String) -> Row {
     Row {
+        serving: true,
         worker: Worker {
             name,
             instance: "instance".into(),

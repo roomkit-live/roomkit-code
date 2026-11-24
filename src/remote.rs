@@ -1,6 +1,8 @@
 //! Remote delegation using RoomKit's Redis turn transport.
 
+mod outcomes;
 pub(crate) mod pool;
+pub(crate) use outcomes::{OUTCOME, REPORT_LIFETIME, ToolOutcome};
 
 use std::sync::Arc;
 
@@ -89,16 +91,14 @@ pub(crate) async fn serve(
         }
         _ => {}
     }
-    let prefix = if args.is_some() {
-        format!("pool:{group}")
-    } else {
-        group.into()
-    };
-    let backend = backend(&prefix, &address(settings.executor_url.as_deref())?)?;
     // The worker serves no delegation or human-input tools of its own.
     settings.unattended = true;
     let storage = Storage::open(&settings.state_dir, &settings.workspace)?;
     let profiles = Profiles::load(&settings, &storage, settings.initial_api_key(), None).await?;
+    let backend = match &profiles.executor_inventory {
+        Some(inventory) => inventory.backend.clone(),
+        None => backend(group, &address(settings.executor_url.as_deref())?)?,
+    };
     let served = run(&profiles, &backend, group, args, &settings.workspace).await;
     let closed = backend.close().await;
     profiles.resources.compactions.close().await;
@@ -134,9 +134,13 @@ async fn run(
             ..Default::default()
         },
     )?;
+    let reports = outcomes::install(&executor)?;
     executor.hook(
         roomkit::HookTrigger::BeforeToolUse,
-        move |event: roomkit::ToolCallEvent, _| async move { authorize(event, pooled).await },
+        move |event: roomkit::ToolCallEvent, _| {
+            let reports = reports.clone();
+            async move { authorize(event, pooled, &reports).await }
+        },
         roomkit::turns::HookOptions {
             name: "remote-workspace-permissions".into(),
             fail_closed: true,
@@ -180,7 +184,11 @@ pub(crate) fn permits(tool: &str, pooled: bool) -> bool {
     TOOLS.contains(&tool) || (pooled && matches!(tool, pool::LIST_EXECUTORS | pool::CARGO_TEST))
 }
 
-async fn authorize(event: roomkit::ToolCallEvent, pooled: bool) -> crate::permissions::Verdict {
+async fn authorize(
+    event: roomkit::ToolCallEvent,
+    pooled: bool,
+    reports: &outcomes::Reports,
+) -> crate::permissions::Verdict {
     use crate::permissions::{allow, block};
     if !permits(&event.name, pooled) {
         return block("This tool is unavailable on the remote worker");
@@ -188,7 +196,28 @@ async fn authorize(event: roomkit::ToolCallEvent, pooled: bool) -> crate::permis
     let Some(host) = roomkit::current_turn_host() else {
         return block("No room owner is available to authorize this tool");
     };
-    let fields = [
+    let call = event.tool_call_id.clone();
+    let mut fields = tool_fields(event);
+    fields.insert("report_outcomes".into(), true.into());
+    let Ok(mut decision) = host.call(AUTHORIZE, Some(fields)).await else {
+        return block("The room owner did not authorize this tool");
+    };
+    if let Some(receipt) = decision
+        .get("report_receipt")
+        .and_then(serde_json::Value::as_str)
+    {
+        reports.request(host.turn_id(), call, receipt.to_owned());
+        decision = decision["decision"].take();
+    }
+    match decision {
+        serde_json::Value::Bool(true) => allow(),
+        serde_json::Value::String(reason) => block(reason),
+        _ => block("The room owner did not authorize this tool"),
+    }
+}
+
+fn tool_fields(event: roomkit::ToolCallEvent) -> serde_json::Map<String, serde_json::Value> {
+    [
         ("name".into(), event.name.into()),
         (
             "arguments".into(),
@@ -197,10 +226,5 @@ async fn authorize(event: roomkit::ToolCallEvent, pooled: bool) -> crate::permis
         ("id".into(), event.tool_call_id.into()),
     ]
     .into_iter()
-    .collect();
-    match host.call(AUTHORIZE, Some(fields)).await {
-        Ok(serde_json::Value::Bool(true)) => allow(),
-        Ok(serde_json::Value::String(reason)) => block(reason),
-        _ => block("The room owner did not authorize this tool"),
-    }
+    .collect()
 }

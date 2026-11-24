@@ -7,7 +7,7 @@ use roomkit::{
         *,
     },
 };
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 use tokio::time::{Instant, sleep};
 
 type Result<T> = std::result::Result<T, RoomKitError>;
@@ -16,7 +16,7 @@ impl Scheduler {
         clippy::result_large_err,
         reason = "TurnBackend requires the engine error type"
     )]
-    pub(super) async fn schedule(&self, mut request: TurnRequest) -> Result<Arc<dyn TurnLink>> {
+    pub(super) async fn schedule(&self, request: TurnRequest) -> Result<Arc<dyn TurnLink>> {
         let permit = self.turns.clone().read_owned().await;
         if self.closed.is_cancelled() {
             return Err(RoomKitError::Runtime("Executor pool changed".into()));
@@ -26,24 +26,8 @@ impl Scheduler {
         let profile = req.profile.clone();
         let ram = req.min_ram_mib;
         let ticket = Arc::new(self.queue.enter(&request, req));
-        let (worker, claimed) = self
-            .reserve(&request.turn_id, ram, &ticket)
-            .await
-            .map_err(RoomKitError::Runtime)?;
-        let lease = Lease::start(
-            self.registry.clone(),
-            &worker.instance,
-            request.turn_id.clone(),
-            claimed,
-            ticket.clone(),
-        );
+        let (worker, lease, link) = self.submit_reserved(&request, ram, &ticket).await?;
         let placement = worker.placement(profile.as_deref());
-        request.room_hooks.push(super::route(&worker.instance));
-        let link = tokio::select! {
-            biased;
-            () = lease.lost.cancelled() => return Err(lost_slot()),
-            result = self.redis.submit(request) => result?,
-        };
         ticket.assign(&placement);
         self.announce(link.request(), &placement).await;
         Ok(Arc::new(ScheduledLink {
@@ -53,6 +37,49 @@ impl Scheduler {
         }))
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "Preserve the native pre-admission error for the turn backend"
+    )]
+    async fn submit_reserved(
+        &self,
+        request: &TurnRequest,
+        ram: u64,
+        ticket: &Arc<super::queue::Ticket>,
+    ) -> Result<(super::Worker, Lease, Arc<dyn TurnLink>)> {
+        loop {
+            // Each attempt owns its own lease, including while a previous release is in flight.
+            let claim = uuid::Uuid::new_v4().to_string();
+            let (worker, at) = self
+                .reserve(&claim, ram, ticket)
+                .await
+                .map_err(RoomKitError::Runtime)?;
+            let lease = Lease::start(
+                self.inventory.registry.clone(),
+                &worker.instance,
+                claim,
+                at,
+                ticket.clone(),
+            );
+            let mut attempt = request.clone();
+            // RMK-2098 will replace this hook with a native instance target.
+            attempt.room_hooks.push(super::route(&worker.instance));
+            let result = tokio::select! {
+                biased;
+                () = lease.lost.cancelled() => return Err(lost_slot()),
+                result = self.inventory.backend.submit(attempt) => result,
+            };
+            match result {
+                Ok(link) => return Ok((worker, lease, link)),
+                Err(error) if refused_before_admission(&error, request.handed()) => {
+                    drop(lease);
+                    sleep(super::inventory::REFRESH).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
     async fn reserve(
         &self,
         turn: &str,
@@ -60,18 +87,18 @@ impl Scheduler {
         ticket: &super::queue::Ticket,
     ) -> std::result::Result<(super::Worker, Instant), String> {
         loop {
-            let guard = self.queue.admission.lock().await;
-            let rows = self.registry.rows().await?;
-            for worker in ticket.candidates(&rows) {
+            let mut guard = self.queue.admission.lock().await;
+            let rows = guard.rows(self.inventory.rows()).await?;
+            for worker in ticket.candidates(rows) {
                 let sent = Instant::now();
-                if self.registry.claim(worker, turn, ram).await? {
+                if self.inventory.registry.claim(worker, turn, ram).await? {
                     return Ok((worker.clone(), sent));
                 }
             }
             drop(guard);
             tokio::select! {
                 () = self.closed.cancelled() => return Err("Executor pool closed".into()),
-                () = sleep(Duration::from_millis(350)) => {}
+                () = sleep(super::inventory::REFRESH) => {}
             }
         }
     }
@@ -94,8 +121,12 @@ impl Scheduler {
 impl Scheduler {
     pub(crate) fn close(&self) -> TurnFuture<'_, Result<()>> {
         self.closed.cancel();
-        TurnBackend::close(&self.redis)
+        TurnBackend::close(&self.inventory.backend)
     }
+}
+
+fn refused_before_admission(error: &RoomKitError, handed: bool) -> bool {
+    !handed && matches!(error, RoomKitError::TurnLink { reason, .. } if reason == "no_executor")
 }
 
 fn lost_slot() -> RoomKitError {
@@ -135,5 +166,20 @@ impl TurnLink for ScheduledLink {
     }
     fn beat_heard(&self) -> bool {
         self.inner.beat_heard()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn only_a_confirmed_pre_admission_refusal_can_retry() {
+        let missing = RoomKitError::TurnLink {
+            reason: "no_executor".into(),
+            message: None,
+        };
+        assert!(refused_before_admission(&missing, false));
+        assert!(!refused_before_admission(&missing, true));
+        assert!(!refused_before_admission(&lost_slot(), false));
     }
 }

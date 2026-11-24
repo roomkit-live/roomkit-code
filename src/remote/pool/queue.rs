@@ -12,7 +12,7 @@ use std::{
 
 #[derive(Default)]
 pub(super) struct Queue {
-    pub admission: tokio::sync::Mutex<()>,
+    pub admission: tokio::sync::Mutex<super::inventory::Snapshot>,
     state: Mutex<State>,
 }
 #[derive(Default)]

@@ -51,7 +51,7 @@ pub(crate) async fn advertise(
     executor: &roomkit::TurnExecutor,
     workspace: &std::path::Path,
 ) -> Result<Presence> {
-    let registry = inventory.0.clone();
+    let registry = inventory.registry.clone();
     let mut sampler = Sampler::default();
     let mut worker = Worker {
         name: args.name()?,

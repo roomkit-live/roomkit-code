@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Delegated workspace tools honor the coordinator’s project command hooks and report their outcomes there. Waiting tasks share a pool inventory refresh.
+
 - The agent’s built-in guide now identifies the executor pool as an opt-in
   beta and shows how to find the requested model and delegate to its worker profile.
 
