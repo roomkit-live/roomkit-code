@@ -42,7 +42,7 @@ OSC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 CSI = re.compile(r"\x1b\[([0-9;?<]*)([A-Za-z])")
 
 
-def screen_text(captured, rows, cols):
+def screen_text(captured: bytes | bytearray, rows: int, cols: int) -> str:
     """Reconstruct the visible grid from incremental terminal updates."""
     cells = [[" "] * cols for _ in range(rows)]
     row = col = 0

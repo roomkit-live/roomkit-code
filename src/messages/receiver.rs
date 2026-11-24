@@ -58,15 +58,14 @@ impl Messages {
         let stored = if let Some(row) = kit.store().get_event(&id).await? {
             row
         } else {
-            let row = crate::system_row::SystemRow {
+            crate::system_row::SystemRow {
                 room: event.room_id.as_str(),
                 id: id.as_str(),
                 text: &text,
                 about: ("session_mail_uncertain", json!(event.id)),
             }
-            .event(&ChannelId::new(crate::application::TERMINAL)?)?;
-            kit.commit_event(&event.room_id, row, Default::default())
-                .await?
+            .store(kit, &ChannelId::new(crate::application::TERMINAL)?)
+            .await?
         };
         self.show(&stored, text);
         Ok(())

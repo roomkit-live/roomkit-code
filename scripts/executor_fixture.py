@@ -28,17 +28,25 @@ class StreamingModel(BaseHTTPRequestHandler):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         delta = self.reply(request)
         reason = "tool_calls" if "tool_calls" in delta else "stop"
-        frames = [{"delta": delta}, {"delta": {}, "finish_reason": reason}]
-        body = "".join("data: " + json.dumps({"choices": [{"index": 0, **frame}]})
-                       + "\n\n" for frame in frames) + "data: [DONE]\n\n"
+        def event(frame):
+            return ("data: " + json.dumps({"choices": [{"index": 0, **frame}]}) + "\n\n").encode()
+        first = event({"delta": delta})
+        end = event({"delta": {}, "finish_reason": reason}) + b"data: [DONE]\n\n"
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Content-Length", str(len(body.encode())))
+        self.send_header("Content-Length", str(len(first) + len(end)))
         try:
             self.end_headers()
-            self.wfile.write(body.encode())
+            self.wfile.write(first)
+            self.wfile.flush()
+            self.after_delta(delta)
+            self.wfile.write(end)
         except (BrokenPipeError, ConnectionResetError):
             pass  # A cancelled worker drops its model request.
+
+
+    def after_delta(self, delta: dict) -> None:
+        """Override to hold a stream open after the client receives its first fragment."""
 
 
 def wait_for_redis(port):

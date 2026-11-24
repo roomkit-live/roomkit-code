@@ -2545,7 +2545,7 @@ dependencies = [
 [[package]]
 name = "roomkit-tui"
 version = "0.3.1"
-source = "git+https://github.com/roomkit-live/roomkit-tui?rev=00161019d9dabeb0c61b81cb1be192f1f07a14ba#00161019d9dabeb0c61b81cb1be192f1f07a14ba"
+source = "git+https://github.com/roomkit-live/roomkit-tui?rev=c9a647e0249a5001c3948bc1fd449b5c3a95a8f7#c9a647e0249a5001c3948bc1fd449b5c3a95a8f7"
 dependencies = [
  "arboard",
  "base64 0.23.1",
@@ -2565,7 +2565,7 @@ dependencies = [
 [[package]]
 name = "roomkit-tui-engine"
 version = "0.3.1"
-source = "git+https://github.com/roomkit-live/roomkit-tui?rev=00161019d9dabeb0c61b81cb1be192f1f07a14ba#00161019d9dabeb0c61b81cb1be192f1f07a14ba"
+source = "git+https://github.com/roomkit-live/roomkit-tui?rev=c9a647e0249a5001c3948bc1fd449b5c3a95a8f7#c9a647e0249a5001c3948bc1fd449b5c3a95a8f7"
 dependencies = [
  "roomkit",
  "roomkit-ai",
@@ -2580,7 +2580,7 @@ dependencies = [
 [[package]]
 name = "roomkit-tui-protocol"
 version = "0.3.1"
-source = "git+https://github.com/roomkit-live/roomkit-tui?rev=00161019d9dabeb0c61b81cb1be192f1f07a14ba#00161019d9dabeb0c61b81cb1be192f1f07a14ba"
+source = "git+https://github.com/roomkit-live/roomkit-tui?rev=c9a647e0249a5001c3948bc1fd449b5c3a95a8f7#c9a647e0249a5001c3948bc1fd449b5c3a95a8f7"
 dependencies = [
  "serde",
  "serde_json",
@@ -2589,7 +2589,7 @@ dependencies = [
 [[package]]
 name = "roomkit-tui-transport"
 version = "0.3.1"
-source = "git+https://github.com/roomkit-live/roomkit-tui?rev=00161019d9dabeb0c61b81cb1be192f1f07a14ba#00161019d9dabeb0c61b81cb1be192f1f07a14ba"
+source = "git+https://github.com/roomkit-live/roomkit-tui?rev=c9a647e0249a5001c3948bc1fd449b5c3a95a8f7#c9a647e0249a5001c3948bc1fd449b5c3a95a8f7"
 dependencies = [
  "roomkit-tui-protocol",
 ]

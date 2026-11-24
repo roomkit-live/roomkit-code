@@ -7,12 +7,16 @@ import sqlite3
 import threading
 import time
 
-from executor_fixture import StreamingModel, tool
+from executor_fixture import StreamingModel, Terminal, tool
 from session_messages_fixture import provider
 from pty_checks import screen_text, wait_for_exit
 
 
 class Initiator(StreamingModel):
+    def after_delta(self, delta: dict) -> None:
+        if delta.get("content") == "WAITING_FOR_REVIEW":
+            assert self.server.finish_text.wait(25), "the terminal did not display the open stream"
+
     def reply(self, request):
         last = request["messages"][-1]
         content = str(last.get("content") or "")
@@ -119,9 +123,13 @@ def fail_idle_post(root, *, checkpoint):
             db.execute("DROP TRIGGER reject_idle_post")
 
 
-def check_reading_order(terminal):
+WRITING = "WAITING_FOR_REVIEW"
+REPLY = "PEER_ORDER_PROOF"
+SUMMARY = "RESUMED_BUSY"
+
+
+def check_reading_order(terminal: Terminal, markers: tuple[str, ...]) -> None:
     # Read what is on screen. The PTY byte stream records updates in arrival order.
-    markers = ("WAITING_FOR_REVIEW", "PEER_ORDER_PROOF", "RESUMED_BUSY")
     deadline = time.monotonic() + 10
     while True:
         frame = screen_text(terminal.output, rows=58, cols=200)
@@ -139,6 +147,8 @@ def exercise_agents(stack, root, launch, reviewer, token):
     model = provider(stack, Initiator)
     model.token, model.answers = token, []
     model.local_work, model.release = threading.Event(), threading.Event()
+    model.finish_text = threading.Event()
+    stack.callback(model.finish_text.set)
     reviewer.agent_release = threading.Event()
     author = launch(model.server_port)
     stack.callback(model.release.set)
@@ -169,17 +179,28 @@ def exercise_agents(stack, root, launch, reviewer, token):
         else:
             reviewer.agent_release.set()
         if phase == "BUSY":
-            author.wait("Reply from @review", start)
+            author.wait(REPLY, start)
             model.release.set()
+            check_reading_order(author, (WRITING, REPLY))
+            model.finish_text.set()
         author.wait("RESUMED_" + phase, start)
         if phase == "BUSY":
-            check_reading_order(author)
+            check_reading_order(author, (WRITING, REPLY, SUMMARY))
             os.write(author.master, b"\x04")
             assert wait_for_exit(author.proc, author.master, author.output) == 0
             author = launch(model.server_port)
             author.wait("RESUMED_BUSY", 0)
-            check_reading_order(author)
-            print("PASS Writing, intervening reply and synthesis appear once, in order, live and after reopen.", flush=True)
+            check_reading_order(author, (WRITING, REPLY, SUMMARY))
+            # Reopen the same fixture in the format used before the engine stored anchors.
+            os.write(author.master, b"\x04")
+            assert wait_for_exit(author.proc, author.master, author.output) == 0
+            with sqlite3.connect(next((root / "author/state").glob("projects/*/history.sqlite3"))) as db:
+                updated = db.execute("""UPDATE events SET data = json_remove(data, '$.metadata.follows_index')
+                    WHERE json_type(data, '$.metadata.follows_index') IS NOT NULL""").rowcount
+                assert updated > 0, "the fixture must originally contain anchored messages"
+            author = launch(model.server_port)
+            check_reading_order(author, (REPLY, WRITING, SUMMARY))
+            print("PASS Writing, intervening reply and synthesis appear once in order during streaming and after reopen. Older history retains storage order.", flush=True)
     assert model.answers == ["IDLE", "BUSY", "NOTICE", "RESTART"], model.answers
     with sqlite3.connect(next((root / "author/state").glob("projects/*/history.sqlite3"))) as db:
         posted = [json.loads(row[0]) for row in db.execute(
