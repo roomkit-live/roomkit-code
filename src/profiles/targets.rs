@@ -17,7 +17,10 @@ impl State {
             None => Vec::new(),
         };
         if self.remote_worker && self.delegation.is_some() {
-            agents.push((crate::remote::AGENT.into(), crate::remote::LABEL.into()));
+            agents.push((
+                crate::names::REMOTE_AGENT.into(),
+                crate::remote::LABEL.into(),
+            ));
         }
         self.roster.set(agents);
     }
@@ -26,11 +29,8 @@ impl State {
 impl Profiles {
     /// Makes agent `id` ready for a task handed to it: its slot holds its
     /// agent, assembled now from its profile, its connection, its skills and
-    /// its MCP servers as they stand. A connection, skill or server edit
-    /// reinstalls only the selected agent, so an agent assembled earlier may
-    /// hold a key or an endpoint since replaced. A turn of that agent already
-    /// running keeps the agent it began with. The view's selection is
-    /// unchanged.
+    /// its MCP servers as they stand. A turn of that agent already running
+    /// keeps the agent it began with. The view's selection is unchanged.
     ///
     /// # Errors
     ///

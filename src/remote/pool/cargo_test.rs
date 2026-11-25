@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::{path::PathBuf, time::Instant};
 
-pub(crate) const CARGO_TEST: &str = "cargo_test";
+pub(crate) use crate::names::CARGO_TEST;
 const COMMAND: &str = "cargo test --manifest-path Cargo.toml";
 
 #[derive(Clone)]

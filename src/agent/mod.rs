@@ -258,7 +258,7 @@ pub(crate) async fn create(
     let policy = extensions.policy.clone();
     let tools = native_tools(root, resources, policy).await?;
     let mut tools = selected(profile, tools, (unattended, extensions.planning));
-    if !unattended && channel != crate::remote::AGENT {
+    if !unattended && channel != crate::names::REMOTE_AGENT {
         tools.extend(
             resources
                 .messages
@@ -444,14 +444,15 @@ fn add_pool_tools(
     resources: &Resources,
 ) {
     use crate::remote::pool::{CARGO_TEST, CargoTest, PeerTool};
-    if channel == crate::remote::AGENT {
+    if channel == crate::names::REMOTE_AGENT {
         let reply = crate::messages::WorkerReply;
         tools.push((reply.definition(), Arc::new(reply)));
         for tool in [PeerTool::Ask, PeerTool::Answer] {
             tools.push((tool.definition(), Arc::new(tool)));
         }
     }
-    if channel == crate::remote::AGENT && profile.tools.iter().any(|name| name == CARGO_TEST) {
+    if channel == crate::names::REMOTE_AGENT && profile.tools.iter().any(|name| name == CARGO_TEST)
+    {
         let runner = CargoTest {
             workspace: root.into(),
             shell: Shell::new(resources.shell.clone()),

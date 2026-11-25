@@ -91,7 +91,7 @@ fn line(event: &RoomEvent, agent: &str, ended: &HashSet<&str>) -> Option<String>
             }
             let who = match event.source.channel_id.as_str() {
                 SYSTEM => "Task",
-                crate::application::TERMINAL => "You",
+                crate::names::TERMINAL => "You",
                 _ => agent,
             };
             Some(format!("{who}: {}", clip(text.trim(), MESSAGE_CHARS)))
@@ -266,7 +266,7 @@ mod tests {
         let text = |body: &str| EventContent::Text(TextContent::new(body));
         let events = [
             event(
-                crate::application::TERMINAL,
+                crate::names::TERMINAL,
                 EventType::Message,
                 text("Look at the tests too"),
             ),

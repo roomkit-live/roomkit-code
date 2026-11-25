@@ -54,19 +54,6 @@ impl Inbox {
         }
         let Envelope { id, mail } = serde_json::from_value(arguments.into())?;
         validate(&kit, room, &self.channel, &id, &mail).await?;
-        // Workers predating the shared outcome key can still send a notice
-        // after an acknowledged reply. Leave their already accepted answer alone.
-        if let Kind::Notice(original) = &mail.kind {
-            let reply = crate::messages::reply::reply_id(original)?;
-            if kit
-                .store()
-                .get_event(&reply)
-                .await?
-                .is_some_and(|e| e.room_id == *room)
-            {
-                return Ok(json!(id));
-            }
-        }
         mail.write(&kit, room, id.clone(), None).await?;
         self.wake.notify_one();
         Ok(json!(id))

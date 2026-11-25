@@ -50,15 +50,12 @@ impl Hooks {
         if !self.state().catalogue.problems.is_empty() {
             return Err("Invalid hook configuration. Inspect /hooks on the coordinator.".into());
         }
-        let agent =
-            roomkit::model::ChannelId::new(crate::remote::AGENT).map_err(|e| e.to_string())?;
-        let mut view = roomkit_tui_engine::SessionConfig::new(
-            room.id.clone(),
-            agent,
-            crate::application::TERMINAL,
-        );
+        let agent = roomkit::model::ChannelId::new(crate::names::REMOTE_AGENT)
+            .map_err(|e| e.to_string())?;
+        let mut view =
+            roomkit_tui_engine::SessionConfig::new(room.id.clone(), agent, crate::names::TERMINAL);
         view.group = Some(parent.into());
-        Ok(self.context(&self.session(&view), crate::remote::AGENT, Some(turn)))
+        Ok(self.context(&self.session(&view), crate::names::REMOTE_AGENT, Some(turn)))
     }
 
     pub(crate) async fn before_worker_tool(

@@ -371,64 +371,28 @@ pub(crate) struct Settings {
 }
 
 impl Settings {
-    /// Bootstrap credentials; saved profiles remain authoritative thereafter.
-    pub fn initial_api_key(&self) -> String {
-        std::env::var("ROOMKIT_API_KEY")
-            .or_else(|error| {
-                if self.provider == crate::providers::ProviderKind::Anthropic {
-                    std::env::var("ANTHROPIC_API_KEY")
-                } else {
-                    Err(error)
+    /// How the launch options' connection authenticates when it starts a
+    /// project: with the environment variable that holds a key now, read
+    /// again at every launch, never copied to the profile, so a rotated key
+    /// is the one used. Saved profiles remain authoritative thereafter.
+    pub fn initial_authentication(&self) -> crate::profiles::model::Authentication {
+        use crate::profiles::model::Authentication;
+        let mut variables = vec!["ROOMKIT_API_KEY"];
+        if self.provider == crate::providers::ProviderKind::Anthropic {
+            variables.push("ANTHROPIC_API_KEY");
+        }
+        variables
+            .into_iter()
+            .find(|name| std::env::var(name).is_ok_and(|key| !key.is_empty()))
+            .map_or(Authentication::None, |variable| {
+                Authentication::Environment {
+                    variable: variable.into(),
                 }
             })
-            .unwrap_or_default()
     }
 
     pub fn load(cli: &Cli) -> Result<Self> {
-        let file = match &cli.config {
-            Some(path) => {
-                let text = std::fs::read_to_string(path)
-                    .map_err(|_| "Cannot read --config; choose an existing UTF-8 TOML file")?;
-                // Do not echo configuration lines that might contain credentials.
-                toml::from_str::<FileConfig>(&text)
-                    .map_err(|_| "Invalid configuration; see roomkit-code.example.toml")?
-            }
-            None => FileConfig::default(),
-        };
-        let provider = cli.provider.or(file.provider.kind).unwrap_or_default();
-        let mut base_url = cli
-            .base_url
-            .clone()
-            .or(file.provider.base_url)
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_default();
-        if !base_url.is_empty() {
-            let url = url::Url::parse(&base_url).map_err(|_| "Invalid provider base URL")?;
-            if !matches!(url.scheme(), "http" | "https")
-                || url.host_str().is_none()
-                || !url.username().is_empty()
-                || url.password().is_some()
-                || url.query().is_some()
-                || url.fragment().is_some()
-            {
-                return Err("Use an HTTP(S) API root without credentials, query or fragment; set ROOMKIT_API_KEY separately".into());
-            }
-        }
-        let model = cli
-            .model
-            .clone()
-            .or(file.provider.model)
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_default();
-        if base_url.is_empty() && !model.is_empty() {
-            base_url = provider.default_url().into();
-        }
-        if base_url.is_empty() != model.is_empty() {
-            return Err(
-                "Supply both a base URL and model, or configure them with /providers and /agents"
-                    .into(),
-            );
-        }
+        let file = read_file(cli)?;
         if cli
             .session
             .as_deref()
@@ -438,123 +402,12 @@ impl Settings {
                 "Session names use 1–64 ASCII letters, digits, hyphens or underscores".into(),
             );
         }
-        let provider_timeout_seconds = cli
-            .provider_timeout_seconds
-            .or(file.provider.timeout_seconds)
-            .unwrap_or(600);
-        if !(1..=86_400).contains(&provider_timeout_seconds) {
-            return Err("provider timeout must be between 1 and 86400 seconds".into());
-        }
-        let context_window = cli.context_window.or(file.provider.context_window);
-        if context_window == Some(0) {
-            return Err("context window must be a positive token count".into());
-        }
-        let max_output_tokens = cli.max_output_tokens.or(file.provider.max_output_tokens);
-        let reasoning_effort = cli
-            .reasoning_effort
-            .clone()
-            .or(file.provider.reasoning_effort);
-        if reasoning_effort
-            .as_deref()
-            .is_some_and(|effort| !crate::profiles::model::EFFORTS.contains(&effort))
-        {
-            return Err(format!(
-                "reasoning effort must be one of {}",
-                crate::profiles::model::EFFORTS.join(", ")
-            )
-            .into());
-        }
-        if max_output_tokens == Some(0) {
-            return Err("max output tokens must be a positive token count".into());
-        }
+        let first = FirstAgent::read(cli, file.provider)?;
         let max_tool_rounds = tool_rounds(
             cli.max_tool_rounds.or(file.agent.max_tool_rounds),
             cli.prompt.is_some(),
         )?;
-        let pricing = file.provider.pricing.map(Pricing::read).transpose()?;
-        let workspace = cli
-            .workspace
-            .canonicalize()
-            .map_err(|_| format!("Workspace does not exist: {}", cli.workspace.display()))?;
-        if !workspace.is_dir() {
-            return Err("Workspace must be a directory".into());
-        }
-        let state_dir = cli
-            .state_dir
-            .clone()
-            .or_else(default_state_dir)
-            .ok_or("Cannot locate application storage; supply --state-dir")?;
-        let state_dir = std::path::absolute(state_dir)?;
-        let appearance = file.ui;
-        let custom_logo = appearance.logo.is_some();
-        let mut branding =
-            Branding::new(appearance.name).with_subtitle("Explore, edit and test your project");
-        branding = match appearance.logo {
-            Some(logo) => branding.with_logo(logo),
-            None => branding.with_logo_tiles(crate::logo::header_tiles()),
-        };
-        if cli.no_logo {
-            branding.logo.clear();
-            branding.logo_tiles.clear();
-        }
-        let welcome = appearance.welcome.then(|| {
-            let mut welcome = WelcomeScreen::default();
-            welcome.width = appearance.welcome_width;
-            if !cli.no_logo {
-                match appearance.welcome_logo {
-                    Some(logo) => welcome.logo = logo,
-                    None if custom_logo => welcome.logo = branding.logo.clone(),
-                    None => welcome = welcome.with_logo_tiles(crate::logo::welcome_tiles()),
-                }
-            }
-            welcome.wordmark = if cli.no_logo {
-                Vec::new()
-            } else {
-                appearance.welcome_wordmark.unwrap_or_else(|| {
-                    if branding.name == "RoomKit Code" {
-                        crate::branding::welcome_wordmark()
-                    } else {
-                        Vec::new()
-                    }
-                })
-            };
-            welcome
-        });
-        // UiOptions is non-exhaustive: start from its defaults, then set each field.
-        let mut ui = UiOptions::default();
-        ui.welcome = welcome;
-        ui.bottom_margin = appearance.bottom_margin;
-        ui.sidebar_visible = appearance.sidebar;
-        ui.sidebar_width = appearance.sidebar_width;
-        ui.terminal_status = (appearance.terminal_status && !cli.no_terminal_status)
-            .then(|| TerminalStatus::new("roomkit-code"))
-            .transpose()?;
-        ui.branding = branding;
-        ui.theme = match cli.theme.unwrap_or(appearance.theme) {
-            Palette::Dark => Theme::dark(),
-            Palette::Light => Theme::light(),
-            Palette::Terminal => Theme::terminal(),
-        };
-        ui.color = match cli.color.unwrap_or(appearance.color) {
-            Color::Auto => ColorMode::Auto,
-            Color::Always => ColorMode::Always,
-            Color::Never => ColorMode::Never,
-        };
-        ui.animations = appearance.animations && !cli.no_animations;
-        ui.markdown = appearance.markdown;
-        ui.message_gap = appearance.message_gap;
-        ui.highlight_own_messages = appearance.highlight_own_messages;
-        ui.tool_preview_lines = appearance.tool_preview_lines;
-        ui.tool_activity = appearance.tool_activity;
-        ui.input_min_lines = appearance.input_min_lines;
-        ui.input_padding = appearance.input_padding;
-        ui.input_placeholder = appearance.input_placeholder;
-        ui.input_prompt = appearance.input_prompt;
-        ui.selection = if cli.native_selection || appearance.native_selection {
-            SelectionMode::Native
-        } else {
-            SelectionMode::CopyOnSelect
-        };
+        let (workspace, state_dir) = locations(cli)?;
         Ok(Self {
             update_check: file.updates.check && !cli.no_update_check,
             require_tool_intent: cli
@@ -576,19 +429,231 @@ impl Settings {
             session_group: cli.session_group.clone(),
             mode: cli.mode.unwrap_or(file.permissions.mode),
             mode_given: cli.mode.is_some(),
-            provider,
-            base_url,
-            model,
-            provider_timeout_seconds,
-            context_window,
-            max_output_tokens,
-            reasoning_effort,
-            pricing,
-            ui,
+            provider: first.provider,
+            base_url: first.base_url,
+            model: first.model,
+            provider_timeout_seconds: first.timeout_seconds,
+            context_window: first.context_window,
+            max_output_tokens: first.max_output_tokens,
+            reasoning_effort: first.reasoning_effort,
+            pricing: first.pricing,
+            ui: ui_options(cli, file.ui)?,
             max_tool_rounds,
             unattended: cli.prompt.is_some(),
         })
     }
+}
+
+/// The `--config` file as it reads, or the defaults without one.
+fn read_file(cli: &Cli) -> Result<FileConfig> {
+    let Some(path) = &cli.config else {
+        return Ok(FileConfig::default());
+    };
+    let text = std::fs::read_to_string(path)
+        .map_err(|_| "Cannot read --config; choose an existing UTF-8 TOML file")?;
+    // Do not echo configuration lines that might contain credentials, nor
+    // the parser's message, which quotes values: the line it stopped at
+    // says where to look.
+    Ok(
+        toml::from_str::<FileConfig>(&text).map_err(|error| match error.span() {
+            Some(span) => format!(
+                "Invalid configuration at line {}; see roomkit-code.example.toml",
+                text[..span.start.min(text.len())].matches('\n').count() + 1
+            ),
+            None => "Invalid configuration; see roomkit-code.example.toml".to_owned(),
+        })?,
+    )
+}
+
+/// What the options and the file say of the project's first agent: its
+/// connection and its model, checked.
+struct FirstAgent {
+    provider: crate::providers::ProviderKind,
+    base_url: String,
+    model: String,
+    timeout_seconds: u64,
+    context_window: Option<u64>,
+    max_output_tokens: Option<u32>,
+    reasoning_effort: Option<String>,
+    pricing: Option<roomkit_ai::ModelPricing>,
+}
+
+impl FirstAgent {
+    /// The options first, then `file`.
+    fn read(cli: &Cli, file: Provider) -> Result<Self> {
+        let provider = cli.provider.or(file.kind).unwrap_or_default();
+        let given = |option: &Option<String>, file: Option<String>| {
+            let value = option.clone().or(file);
+            value
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_default()
+        };
+        let mut base_url = given(&cli.base_url, file.base_url);
+        if !base_url.is_empty() {
+            check_base_url(&base_url)?;
+        }
+        let model = given(&cli.model, file.model);
+        if base_url.is_empty() && !model.is_empty() {
+            base_url = provider.default_url().into();
+        }
+        if base_url.is_empty() != model.is_empty() {
+            return Err(
+                "Supply both a base URL and model, or configure them with /providers and /agents"
+                    .into(),
+            );
+        }
+        let timeout_seconds = cli
+            .provider_timeout_seconds
+            .or(file.timeout_seconds)
+            .unwrap_or(600);
+        if !(1..=86_400).contains(&timeout_seconds) {
+            return Err("provider timeout must be between 1 and 86400 seconds".into());
+        }
+        let context_window = cli.context_window.or(file.context_window);
+        if context_window == Some(0) {
+            return Err("context window must be a positive token count".into());
+        }
+        let reasoning_effort = cli.reasoning_effort.clone().or(file.reasoning_effort);
+        if reasoning_effort
+            .as_deref()
+            .is_some_and(|effort| !crate::profiles::model::EFFORTS.contains(&effort))
+        {
+            return Err(format!(
+                "reasoning effort must be one of {}",
+                crate::profiles::model::EFFORTS.join(", ")
+            )
+            .into());
+        }
+        let max_output_tokens = cli.max_output_tokens.or(file.max_output_tokens);
+        if max_output_tokens == Some(0) {
+            return Err("max output tokens must be a positive token count".into());
+        }
+        Ok(Self {
+            provider,
+            base_url,
+            model,
+            timeout_seconds,
+            context_window,
+            max_output_tokens,
+            reasoning_effort,
+            pricing: file.pricing.map(Pricing::read).transpose()?,
+        })
+    }
+}
+
+/// Refuses a base URL that is not an API root: its credential goes in
+/// `ROOMKIT_API_KEY`, never in the URL.
+fn check_base_url(base_url: &str) -> Result<()> {
+    let url = url::Url::parse(base_url).map_err(|_| "Invalid provider base URL")?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("Use an HTTP(S) API root without credentials, query or fragment; set ROOMKIT_API_KEY separately".into());
+    }
+    Ok(())
+}
+
+/// The project's directory, which must exist, and where the application
+/// keeps its state.
+fn locations(cli: &Cli) -> Result<(PathBuf, PathBuf)> {
+    let workspace = cli
+        .workspace
+        .canonicalize()
+        .map_err(|_| format!("Workspace does not exist: {}", cli.workspace.display()))?;
+    if !workspace.is_dir() {
+        return Err("Workspace must be a directory".into());
+    }
+    let state_dir = cli
+        .state_dir
+        .clone()
+        .or_else(default_state_dir)
+        .ok_or("Cannot locate application storage; supply --state-dir")?;
+    Ok((workspace, std::path::absolute(state_dir)?))
+}
+
+/// The name and the logo the views show, as the file sets them, unless
+/// `--no-logo` leaves the logo out.
+fn branding(cli: &Cli, name: String, logo: Option<Vec<String>>) -> Branding {
+    let branding = Branding::new(name).with_subtitle("Explore, edit and test your project");
+    let mut branding = match logo {
+        Some(logo) => branding.with_logo(logo),
+        None => branding.with_logo_tiles(crate::logo::header_tiles()),
+    };
+    if cli.no_logo {
+        branding.logo.clear();
+        branding.logo_tiles.clear();
+    }
+    branding
+}
+
+/// What the terminal's views look like: the file's `[ui]`, with the
+/// options that override it for this launch.
+fn ui_options(cli: &Cli, appearance: Appearance) -> Result<UiOptions> {
+    let custom_logo = appearance.logo.is_some();
+    let branding = branding(cli, appearance.name, appearance.logo);
+    let welcome = appearance.welcome.then(|| {
+        let mut welcome = WelcomeScreen::default();
+        welcome.width = appearance.welcome_width;
+        if !cli.no_logo {
+            match appearance.welcome_logo {
+                Some(logo) => welcome.logo = logo,
+                None if custom_logo => welcome.logo = branding.logo.clone(),
+                None => welcome = welcome.with_logo_tiles(crate::logo::welcome_tiles()),
+            }
+        }
+        welcome.wordmark = if cli.no_logo {
+            Vec::new()
+        } else {
+            appearance.welcome_wordmark.unwrap_or_else(|| {
+                if branding.name == "RoomKit Code" {
+                    crate::branding::welcome_wordmark()
+                } else {
+                    Vec::new()
+                }
+            })
+        };
+        welcome
+    });
+    // UiOptions is non-exhaustive: start from its defaults, then set each field.
+    let mut ui = UiOptions::default();
+    ui.welcome = welcome;
+    ui.bottom_margin = appearance.bottom_margin;
+    ui.sidebar_visible = appearance.sidebar;
+    ui.sidebar_width = appearance.sidebar_width;
+    ui.terminal_status = (appearance.terminal_status && !cli.no_terminal_status)
+        .then(|| TerminalStatus::new("roomkit-code"))
+        .transpose()?;
+    ui.branding = branding;
+    ui.theme = match cli.theme.unwrap_or(appearance.theme) {
+        Palette::Dark => Theme::dark(),
+        Palette::Light => Theme::light(),
+        Palette::Terminal => Theme::terminal(),
+    };
+    ui.color = match cli.color.unwrap_or(appearance.color) {
+        Color::Auto => ColorMode::Auto,
+        Color::Always => ColorMode::Always,
+        Color::Never => ColorMode::Never,
+    };
+    ui.animations = appearance.animations && !cli.no_animations;
+    ui.markdown = appearance.markdown;
+    ui.message_gap = appearance.message_gap;
+    ui.highlight_own_messages = appearance.highlight_own_messages;
+    ui.tool_preview_lines = appearance.tool_preview_lines;
+    ui.tool_activity = appearance.tool_activity;
+    ui.input_min_lines = appearance.input_min_lines;
+    ui.input_padding = appearance.input_padding;
+    ui.input_placeholder = appearance.input_placeholder;
+    ui.input_prompt = appearance.input_prompt;
+    ui.selection = if cli.native_selection || appearance.native_selection {
+        SelectionMode::Native
+    } else {
+        SelectionMode::CopyOnSelect
+    };
+    Ok(ui)
 }
 
 /// The rounds of tool calls a turn may run: at least one when set, else

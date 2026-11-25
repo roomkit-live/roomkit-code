@@ -129,7 +129,7 @@ impl Requirements {
         match name {
             CARGO_TEST if asked.is_some_and(|id| id.eq_ignore_ascii_case(sha)) => Ok(()),
             CARGO_TEST => Err(format!("This task requires cargo_test with commit {sha}")),
-            LIST_EXECUTORS | "read_stored_result" | crate::messages::SEND_MESSAGE => Ok(()),
+            LIST_EXECUTORS | "read_stored_result" | crate::names::SEND_MESSAGE => Ok(()),
             _ => Err("This task is limited to testing a Git commit. Its working files are private to cargo_test.".into())
         }
     }

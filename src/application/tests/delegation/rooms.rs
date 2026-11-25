@@ -144,6 +144,7 @@ async fn until_requested(requests: &Arc<Mutex<Vec<Value>>>, found: impl Fn(&Valu
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn a_view_moves_into_a_task_s_room_writes_to_its_worker_and_comes_back() {
     let project = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
@@ -509,6 +510,7 @@ async fn a_task_of_an_earlier_launch_can_be_written_to() {
 /// A later task for the same agent does not take the loop the first one runs
 /// in: a message to the first still reaches it.
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn a_second_task_for_the_agent_leaves_the_first_within_reach() {
     let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
     let seen = requests.clone();

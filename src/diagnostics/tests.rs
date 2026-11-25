@@ -29,7 +29,7 @@ fn independent_loggers_serialize_records_and_follow_rotation() -> crate::Result<
     assert_ne!(first.instance, second.instance);
     assert!(!first.state.lock().map_err(|_| "poisoned")?.write_failed);
     assert!(!second.state.lock().map_err(|_| "poisoned")?.write_failed);
-    private_file(&path)?.set_len(LIMIT)?;
+    log_file(&path)?.set_len(LIMIT)?;
     first.record("rotated_by_first", json!({}), None);
     second.record("second_follows_rotation", json!({}), None);
     let current = std::fs::read_to_string(&path)?;
@@ -77,7 +77,7 @@ fn write_failures_remain_visible_in_the_diagnostic_panel() -> crate::Result<()> 
     let log = Diagnostics::open(directory.path().join("diagnostics.jsonl"), false)?;
     // Force a rotation failure while retaining the open current file.
     std::fs::create_dir(log.path.with_extension("previous.jsonl"))?;
-    private_file(&log.path)?.set_len(LIMIT)?;
+    log_file(&log.path)?.set_len(LIMIT)?;
     log.record("engine_error", json!({}), Some("HTTP 429 secret"));
     let current = SessionConfig::new(
         roomkit::model::RoomId::new("test")?,

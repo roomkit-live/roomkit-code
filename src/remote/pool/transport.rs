@@ -11,6 +11,12 @@ use std::sync::Arc;
 use tokio::time::{Instant, sleep};
 
 type Result<T> = std::result::Result<T, RoomKitError>;
+
+/// How long Redis may fail to answer while a task waits for a slot before
+/// the task fails.
+const UNREACHABLE_FOR: std::time::Duration = std::time::Duration::from_secs(30);
+/// The most one slot claim waits for Redis.
+const CLAIM_WITHIN: std::time::Duration = std::time::Duration::from_secs(3);
 impl Scheduler {
     #[allow(
         clippy::result_large_err,
@@ -81,27 +87,63 @@ impl Scheduler {
         }
     }
 
+    /// Waits for a worker slot and claims it. Redis failing to answer does
+    /// not fail the task at once: the wait goes on, as the lease's renewal
+    /// does, until Redis has not answered for [`UNREACHABLE_FOR`].
     async fn reserve(
         &self,
         turn: &str,
         ram: u64,
         ticket: &super::queue::Ticket,
     ) -> std::result::Result<(super::Worker, Instant), String> {
+        let mut unreachable: Option<Instant> = None;
         loop {
-            let mut guard = self.queue.admission.lock().await;
-            let rows = guard.rows(self.inventory.rows()).await?;
-            for worker in ticket.candidates(rows) {
-                let sent = Instant::now();
-                if self.inventory.registry.claim(worker, turn, ram).await? {
-                    return Ok((worker.clone(), sent));
+            match self.claim_one(turn, ram, ticket).await {
+                Ok(Some(claimed)) => return Ok(claimed),
+                Ok(None) => unreachable = None,
+                Err(error) => {
+                    let since = *unreachable.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= UNREACHABLE_FOR {
+                        return Err(error);
+                    }
                 }
             }
-            drop(guard);
             tokio::select! {
                 () = self.closed.cancelled() => return Err("Executor pool closed".into()),
                 () = sleep(super::inventory::REFRESH) => {}
             }
         }
+    }
+
+    /// One pass over the workers that can take the ticket: the first whose
+    /// slot Redis grants, or none. The admission lock is held for the pass,
+    /// each request of which is bounded: the tasks waiting behind it are
+    /// not held back by a Redis that stopped answering.
+    async fn claim_one(
+        &self,
+        turn: &str,
+        ram: u64,
+        ticket: &super::queue::Ticket,
+    ) -> std::result::Result<Option<(super::Worker, Instant)>, String> {
+        let registry = &self.inventory.registry;
+        let mut guard = self.queue.admission.lock().await;
+        let rows = guard.rows(self.inventory.rows()).await?;
+        for worker in ticket.candidates(rows) {
+            let sent = Instant::now();
+            match tokio::time::timeout(CLAIM_WITHIN, registry.claim(worker, turn, ram)).await {
+                Ok(Ok(true)) => return Ok(Some((worker.clone(), sent))),
+                Ok(Ok(false)) => {}
+                Ok(Err(error)) => return Err(error),
+                Err(_) => {
+                    // Redis may have granted it without the answer arriving:
+                    // give the slot back rather than hold it until it expires.
+                    let release = registry.release(&worker.instance, turn);
+                    let _ = tokio::time::timeout(CLAIM_WITHIN, release).await;
+                    return Err("Redis did not answer a slot claim in time".into());
+                }
+            }
+        }
+        Ok(None)
     }
 
     async fn announce(&self, request: &TurnRequest, worker: &str, placement: &str) {
@@ -156,6 +198,14 @@ impl TurnLink for ScheduledLink {
             tokio::select! {
                 biased;
                 () = self.lease.lost.cancelled() => {
+                    // The slot is another task's to claim once it expires:
+                    // the worker is told to cut this turn before the link is
+                    // let go. Nothing confirms it did when the broker is
+                    // the one that stopped answering.
+                    let cancel = self.inner.send(Control::Cancel {
+                        reason: "slot_lost".into(),
+                    });
+                    let _ = tokio::time::timeout(CLAIM_WITHIN, cancel).await;
                     self.inner.release();
                     Err(lost_slot())
                 }

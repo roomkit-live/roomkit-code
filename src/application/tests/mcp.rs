@@ -169,6 +169,7 @@ fn alive(root: &std::path::Path, id: &str) -> bool {
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn saving_mcp_connects_and_enables_tools_with_permissions_and_durable_selection() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
@@ -692,6 +693,20 @@ impl Drop for HttpFixture {
     }
 }
 async fn configure_http(app: &Application, root: &std::path::Path, action: &str, url: &str) {
+    assert_eq!(
+        submit_http(app, root, action, url).await,
+        RunOutcome::Completed
+    );
+}
+
+/// Opens the HTTP form with `action`, submits it for `url` and tells how
+/// the connection it starts ended.
+async fn submit_http(
+    app: &Application,
+    root: &std::path::Path,
+    action: &str,
+    url: &str,
+) -> RunOutcome {
     let CommandResult::Events(events) = invoke(app, action).await.unwrap() else {
         panic!("Expected HTTP form")
     };
@@ -714,10 +729,38 @@ async fn configure_http(app: &Application, root: &std::path::Path, action: &str,
         form: form.id.clone(),
         values: Box::new(values),
     };
-    assert_eq!(
-        execute_command(app, root, command).await.0,
-        RunOutcome::Completed
-    );
+    execute_command(app, root, command).await.0
+}
+
+/// Review finding: when a reconnection failed and the previous connection
+/// was kept, the attempt was taken for a success: the diagnostics recorded
+/// "Connected" and the tools' activation went on.
+#[tokio::test]
+async fn a_failed_http_reconnection_keeps_the_previous_connection_and_is_a_failure() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let fixture = HttpFixture::start(root.path()).await;
+    let mock = Mock::start(vec![]).await;
+    let settings = settings(root.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    configure_http(&app, root.path(), "add-http", &fixture.url).await;
+    // Nothing listens on the discard port.
+    let outcome = submit_http(&app, root.path(), "edit remote", "http://127.0.0.1:9/mcp").await;
+    assert_eq!(outcome, RunOutcome::Failed);
+    // The session that answered is neither closed nor replaced.
+    assert!(!root.path().join("http.trace").exists());
+    let tools = app.profiles.tools("code").await;
+    assert!(tools.iter().any(|t| t.name == "mcp__remote__read"));
+    let log =
+        std::fs::read_to_string(app._storage.database.with_file_name("diagnostics.jsonl")).unwrap();
+    let attempts: Vec<&str> = log
+        .lines()
+        .filter(|line| line.contains("\"mcp_connection\""))
+        .collect();
+    assert_eq!(attempts.len(), 2, "{log}");
+    assert!(attempts[0].contains("\"status\":\"Connected\""), "{log}");
+    assert!(attempts[1].contains("previous connection kept"), "{log}");
+    app.close().await.unwrap();
 }
 
 #[tokio::test]

@@ -2,14 +2,13 @@
 use super::record::{Kind, Mail};
 use crate::system_row::SystemRow;
 use roomkit::model::{ChannelId, EventContent, EventId, RoomEvent, RoomId, TextContent};
-use roomkit::{CommitEventOptions, ConversationStore, RoomKit, UpdateEventOptions};
-use roomkit_sqlite::SqliteStore;
+use roomkit::{CommitEventOptions, ConversationStore, UpdateEventOptions};
 use roomkit_tui_engine::SessionConfig;
 use serde_json::json;
 
 const PENDING: &str = "Delivery unconfirmed · ";
 
-type Kit = RoomKit<SqliteStore>;
+use super::Kit;
 
 pub(super) struct Outgoing {
     row: RoomEvent,

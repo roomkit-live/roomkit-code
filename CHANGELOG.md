@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- Closing the terminal or sending SIGTERM or SIGHUP to an interactive launch now closes it as leaving does, a signal received while it opens included: the agent's processes are stopped, and SIGTERM prints the exit report. A third signal exits at once. `--prompt` launches and workers close on SIGHUP too, unless they were started with it ignored, as under `nohup`; in `--prompt` the second signal no longer skips the close.
+
+- Command hooks start with the shell tool's filtered environment, not the whole one: an API key exported in your shell stays out of them unless `--inherit-env` names it. A hook's review now covers the project scripts found in its command, which the review panel lists: once one changes, the hook fails until it is reviewed again in `/hooks`. An enabled hook that launches such a script needs one review after this update; the others stay enabled. The review panel shows a command's control characters instead of leaving them out.
+
+- A key given in `ROOMKIT_API_KEY` (or `ANTHROPIC_API_KEY`) is no longer copied into the first connection's profile: the profile records the variable's name and reads it at each launch, so a rotated key is used and the variable must stay set. Connections saved earlier keep their stored key.
+
+- Changing a connection, reloading skills or reconnecting an MCP server now reaches every agent already assembled, not only the one shown: another agent no longer keeps a replaced key until the next launch.
+
+- A failed compaction says why (credential refused, rate limit, context too long…) and records it in the diagnostics. After two failures in a row the next tries are spaced, from one minute up to fifteen, instead of sending a full-size request at every message; `/compact` still tries at once. A saved summary that cannot be read is set aside rather than replaced silently.
+
+- A launch that fails after loading the profiles releases what it opened and records where it stopped. A session whose creation was interrupted is completed by the next launch. A launch whose session group's Redis cannot be reached opens without the group and says so in the conversation, instead of refusing to start.
+
+- Connections and HTTP MCP servers that would send a credential over plain `http://` to a host outside this machine and its local network are refused when saved.
+
+- A conversation no view opened no longer inherits a launch's Yolo mode.
+
+- Executor pool (beta): a task waiting for a slot survives Redis errors for 30 seconds; a worker record that does not read is left out instead of stopping the pool; a worker whose heartbeats fail says so and stops after five minutes; a lost slot cancels the worker's turn; a worker's tool result past 256 KiB is omitted from its report.
+
+- Updates follow a download redirect to github.com only for this repository's releases.
+
+- Errors keep their cause: plan storage names what is wrong with its file or directory, a settings file is named, `--config` errors give the line, Redis errors say whether the host, the credentials or a timeout failed, and a busy history is no longer reported as a missing session.
+
+- The Herdr reporter backs off up to one minute between failed calls and records a failure once, not every second. Panics are recorded in the diagnostic log in `--prompt` launches and workers too.
+
 - Agents can use `list_sessions` and `send_message` to contact a delegated executor session by its `child_room_id`, including after handback. Explicit replies return to the asking agent. A conversation turn preserves the recorded task outcome.
 
 - The parent terminal shows a failed task’s reported stop reason.

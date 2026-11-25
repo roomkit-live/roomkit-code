@@ -11,7 +11,7 @@ use roomkit::{RedisTurnBackend, RedisTurnBackendOptions, TurnExecutor, TurnExecu
 
 use crate::{Result, config::Settings, profiles::Profiles, storage::Storage};
 
-pub(crate) const AGENT: &str = "remote-linux";
+pub(crate) use crate::names::REMOTE_AGENT as AGENT;
 pub(crate) const LABEL: &str = "Remote worker";
 pub(crate) const TOOLS: &[&str] = &[
     "list",
@@ -94,7 +94,11 @@ pub(crate) async fn serve(
     // The worker serves no delegation or human-input tools of its own.
     settings.unattended = true;
     let storage = Storage::open(&settings.state_dir, &settings.workspace)?;
-    let profiles = Profiles::load(&settings, &storage, settings.initial_api_key(), None).await?;
+    let profiles =
+        Profiles::load(&settings, &storage, settings.initial_authentication(), None).await?;
+    // A worker has no terminal to hide a panic's message, and no one
+    // watching it either: its record goes to the diagnostic log.
+    crate::diagnostics::report_panics(profiles.diagnostics.clone());
     let backend = match &profiles.executor_inventory {
         Some(inventory) => inventory.backend.clone(),
         None => backend(group, &address(settings.executor_url.as_deref())?)?,
@@ -149,6 +153,14 @@ async fn run(
         },
     )?;
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    // A worker started under `nohup` keeps serving when its terminal closes.
+    let mut hangup = if crate::application::hangup_ignored() {
+        None
+    } else {
+        Some(tokio::signal::unix::signal(
+            tokio::signal::unix::SignalKind::hangup(),
+        )?)
+    };
     backend.serve(executor.clone()).await?;
     let mut presence = match args {
         Some(args) => {
@@ -168,6 +180,8 @@ async fn run(
     let stopped = tokio::select! {
         result = tokio::signal::ctrl_c() => result,
         _ = terminate.recv() => Ok(()),
+        // A worker started from a terminal that closes retires as well.
+        _ = hung_up(&mut hangup) => Ok(()),
         error = pool::worker_failure(&mut presence) => Err(std::io::Error::other(error)),
     };
     if let Some(p) = presence {
@@ -175,6 +189,16 @@ async fn run(
     }
     executor.close().await;
     Ok(stopped?)
+}
+
+/// Waits for SIGHUP on `signals`; for ever when it is not listened for.
+async fn hung_up(signals: &mut Option<tokio::signal::unix::Signal>) {
+    match signals {
+        Some(signals) => {
+            signals.recv().await;
+        }
+        None => std::future::pending().await,
+    }
 }
 
 pub(crate) fn permits(tool: &str, pooled: bool) -> bool {
@@ -186,7 +210,7 @@ pub(crate) fn permits(tool: &str, pooled: bool) -> bool {
                     | pool::CARGO_TEST
                     | pool::ASK_PEER
                     | pool::ANSWER_PEER
-                    | crate::messages::SEND_MESSAGE
+                    | crate::names::SEND_MESSAGE
             ))
 }
 
@@ -203,7 +227,7 @@ async fn authorize(
     // immediately before the exchange. Running it here too would ask twice.
     if matches!(
         event.name.as_str(),
-        pool::ASK_PEER | pool::ANSWER_PEER | crate::messages::SEND_MESSAGE
+        pool::ASK_PEER | pool::ANSWER_PEER | crate::names::SEND_MESSAGE
     ) {
         return allow();
     }

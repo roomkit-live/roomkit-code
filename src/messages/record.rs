@@ -55,7 +55,7 @@ impl Mail {
     pub fn read(event: &RoomEvent) -> Option<Self> {
         if event.correlation_id.as_deref() != Some(STREAM)
             || event.r#type != EventType::System
-            || event.source.channel_id.as_str() != crate::application::TERMINAL
+            || event.source.channel_id.as_str() != crate::names::TERMINAL
         {
             return None;
         }
@@ -86,7 +86,7 @@ impl Mail {
             text: &self.line(),
             about: (STREAM, serde_json::to_value(self)?),
         }
-        .event(&ChannelId::new(crate::application::TERMINAL)?)?;
+        .event(&ChannelId::new(crate::names::TERMINAL)?)?;
         event.correlation_id = Some(STREAM.into());
         // Concurrent outcomes for one question compete for one native
         // commit key. Their distinct event IDs still identify historical rows.

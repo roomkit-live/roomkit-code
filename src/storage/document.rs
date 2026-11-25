@@ -5,7 +5,6 @@ use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use std::{
     fs::OpenOptions,
-    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -15,25 +14,39 @@ pub(crate) struct Document<T> {
     revision: Option<Vec<u8>>,
 }
 
+/// The name a settings file is told by in an error: its file name, which
+/// says which of the profile files it is, never its directory.
+fn named(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || "settings".into(),
+        |name| name.to_string_lossy().into_owned(),
+    )
+}
+
 fn read(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    let name = named(path);
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(value) => value,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err("Cannot read local settings file".into()),
+        Err(_) => return Err(format!("Cannot read the local settings file {name}")),
     };
     if !metadata.is_file() || metadata.len() > 2_097_152 {
-        return Err("Settings file must be a regular file smaller than 2 MiB".into());
+        return Err(format!(
+            "The settings file {name} must be a regular file smaller than 2 MiB"
+        ));
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         if metadata.permissions().mode() & 0o077 != 0 {
-            return Err("Settings file permissions must be private (chmod 600)".into());
+            return Err(format!(
+                "The settings file {name} must be private (chmod 600)"
+            ));
         }
     }
     std::fs::read(path)
         .map(Some)
-        .map_err(|_| "Cannot read local settings file".into())
+        .map_err(|_| format!("Cannot read the local settings file {name}"))
 }
 
 impl<T: Serialize + DeserializeOwned + Default> Document<T> {
@@ -56,7 +69,10 @@ impl<T: Serialize + DeserializeOwned + Default> Document<T> {
             .as_ref()
             .map(|bytes| {
                 serde_json::from_slice(bytes).map_err(|_| {
-                    "Invalid local settings file; its contents were not printed".to_string()
+                    format!(
+                        "Invalid local settings file {}; its contents were not printed",
+                        named(&path)
+                    )
                 })
             })
             .transpose()?
@@ -99,18 +115,7 @@ impl<T: Serialize + DeserializeOwned + Default> Document<T> {
         if bytes.len() > 2_097_152 {
             return Err("Settings storage exceeds 2 MiB".into());
         }
-        let parent = self.path.parent().ok_or("Invalid settings location")?;
-        let mut temporary = tempfile::NamedTempFile::new_in(parent)
-            .map_err(|_| "Cannot create private settings file")?;
-        temporary
-            .write_all(&bytes)
-            .map_err(|_| "Cannot write settings")?;
-        temporary
-            .as_file()
-            .sync_all()
-            .map_err(|_| "Cannot flush settings")?;
-        temporary
-            .persist(&self.path)
+        crate::storage::write_atomic(&self.path, &bytes)
             .map_err(|_| "Cannot replace settings atomically")?;
         self.revision = Some(Sha256::digest(bytes).to_vec());
         self.value = value;

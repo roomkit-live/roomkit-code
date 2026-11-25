@@ -17,10 +17,20 @@ pub(super) struct Change<'a> {
     _permit: Option<OwnedRwLockWriteGuard<()>>,
 }
 
-impl<'a> Change<'a> {
-    pub(super) async fn prepare(
+/// A pool edit whose new connection answered, before the profiles are
+/// locked to apply it.
+pub(super) struct Connected<'a> {
+    coordinator: &'a Coordinator,
+    current: Option<Arc<Scheduler>>,
+    next: Option<Arc<Scheduler>>,
+}
+
+impl<'a> Connected<'a> {
+    /// Opens the pool `saved` asks for and checks that its Redis answers,
+    /// when the edit changes the pool; none when it leaves it as it is. No
+    /// lock is held here: Redis may take its whole deadline to answer.
+    pub(super) async fn open(
         profiles: &'a Profiles,
-        state: &State,
         saved: &PoolSettings,
     ) -> Result<Option<Self>, String> {
         let Some(coordinator) = &profiles.pool else {
@@ -39,30 +49,89 @@ impl<'a> Change<'a> {
             }
             _ => {}
         }
-        if profiles.resources.tasks.agent_running(crate::remote::AGENT) {
-            return Err(
-                "Finish or cancel the queued or running remote tasks before changing pools".into(),
-            );
-        }
         let next = group
             .map(|group| Scheduler::new(group, saved.url.as_deref(), &profiles.resources.tasks))
             .transpose()
             .map_err(|e| e.to_string())?;
-        let inventory = next.as_ref().map(|pool| pool.inventory());
-        if let Some(inventory) = &inventory {
-            inventory.check().await?;
+        if let Some(pool) = &next
+            && let Err(error) = pool.inventory().check().await
+        {
+            let _ = pool.close().await;
+            return Err(error);
         }
+        Ok(Some(Self {
+            coordinator,
+            current,
+            next,
+        }))
+    }
+
+    /// Closes the connection opened for an edit that is not applied.
+    pub(super) async fn discard(self) {
+        if let Some(pool) = self.next {
+            let _ = pool.close().await;
+        }
+    }
+}
+
+impl<'a> Change<'a> {
+    /// Stages `connected` on the profiles as `state` holds them: the agents
+    /// assembled for the next pool, and the previous pool kept from new
+    /// submissions.
+    pub(super) async fn prepare(
+        profiles: &'a Profiles,
+        state: &State,
+        connected: Connected<'a>,
+    ) -> Result<Self, (String, Connected<'a>)> {
+        match Self::stage(profiles, state, &connected).await {
+            Ok((agents, permit)) => Ok(Self {
+                coordinator: connected.coordinator,
+                next: connected.next,
+                agents,
+                _permit: permit,
+            }),
+            Err(error) => Err((error, connected)),
+        }
+    }
+
+    async fn stage(
+        profiles: &Profiles,
+        state: &State,
+        connected: &Connected<'_>,
+    ) -> Result<
+        (
+            Vec<(String, CodeAgent, Inventory)>,
+            Option<OwnedRwLockWriteGuard<()>>,
+        ),
+        String,
+    > {
+        // The pool this edit was opened against is still the active one.
+        let active = connected.coordinator.active();
+        let unchanged = match (&active, &connected.current) {
+            (None, None) => true,
+            (Some(active), Some(current)) => Arc::ptr_eq(active, current),
+            _ => false,
+        };
+        if !unchanged {
+            return Err("The pool changed meanwhile; reopen /executors configure".into());
+        }
+        if profiles
+            .resources
+            .tasks
+            .agent_running(crate::names::REMOTE_AGENT)
+        {
+            return Err(
+                "Finish or cancel the queued or running remote tasks before changing pools".into(),
+            );
+        }
+        let inventory = connected.next.as_ref().map(|pool| pool.inventory());
         let agents = prepare_agents(profiles, state, inventory).await?;
-        let permit = current
+        let permit = connected
+            .current
             .as_ref()
             .map(|pool| pool.edit_permit())
             .transpose()?;
-        Ok(Some(Self {
-            coordinator,
-            next,
-            agents,
-            _permit: permit,
-        }))
+        Ok((agents, permit))
     }
 
     async fn apply(
@@ -76,10 +145,14 @@ impl<'a> Change<'a> {
         state.remote_worker = enabled;
         state.roster.enable_pool(enabled);
         state.refresh_roster();
+        // The previous pool is closed whatever happens to the agents: an
+        // agent that fails to install must not leave it open.
+        let mut installed = Ok(());
         for (id, agent, inventory) in self.agents {
-            profiles
-                .installed(kit, state, &id, agent, inventory)
-                .await?;
+            let result = profiles.installed(kit, state, &id, agent, inventory).await;
+            if installed.is_ok() {
+                installed = result;
+            }
         }
         if let Some(previous) = previous {
             previous
@@ -87,6 +160,7 @@ impl<'a> Change<'a> {
                 .await
                 .map_err(|_| "Pool changed, but the previous connection did not close cleanly")?;
         }
+        installed?;
         Ok(if enabled {
             "Executor settings saved. Scheduling is on."
         } else {
@@ -139,6 +213,10 @@ pub(super) async fn save(
         set_declaration(kit, enabled)?;
     }
     if let Err(error) = document.save(saved) {
+        // The pool opened for this edit is not kept open for nothing.
+        if let Some(next) = change.and_then(|change| change.next) {
+            let _ = next.close().await;
+        }
         if let Some(enabled) = toggled {
             set_declaration(kit, !enabled)?;
         }

@@ -174,7 +174,7 @@ impl Profiles {
     pub async fn load(
         settings: &Settings,
         storage: &Storage,
-        api_key: String,
+        authentication: Authentication,
         resources: Option<crate::agent::Resources>,
     ) -> Result<Arc<Self>, String> {
         let diagnostics = crate::diagnostics::Diagnostics::open(
@@ -187,7 +187,7 @@ impl Profiles {
             providers,
             project,
             global,
-        } = startup::load(settings, storage, api_key).await?;
+        } = startup::load(settings, storage, authentication).await?;
         let resources = match resources {
             Some(resources) => resources,
             None => crate::agent::Resources::new(
@@ -202,7 +202,7 @@ impl Profiles {
         };
         let skill_catalogue =
             skills::Catalogue::load(settings.workspace.clone(), settings.state_dir.clone()).await?;
-        let policy = crate::permissions::Policy::new(settings.mode);
+        let policy = crate::permissions::Policy::of_launch(settings.mode, settings.unattended);
         let instructions = resources.instructions.clone();
         let compactions = resources.compactions.clone();
         let files = resources.files.clone();
@@ -446,12 +446,14 @@ impl Profiles {
     }
 
     /// Only attach within a room whose terminal binding is already readable.
+    /// True when the view's agent was attached by this call: what a caller
+    /// whose next step fails gives to [`Self::saved_or_detached`].
     pub async fn attach(
         &self,
         kit: &RoomKit<SqliteStore>,
         view: &SessionConfig,
         terminal: &ChannelId,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         let bindings = kit
             .list_bindings(
                 &view.room,
@@ -466,12 +468,32 @@ impl Profiles {
         }) {
             return Err("Session is not accessible to this terminal".into());
         }
-        if !bindings.iter().any(|b| b.channel_id == view.agent) {
-            kit.attach_channel(&view.room, &view.agent, Default::default())
-                .await
-                .map_err(|_| "Cannot attach the selected agent")?;
+        if bindings.iter().any(|b| b.channel_id == view.agent) {
+            return Ok(false);
         }
-        Ok(())
+        kit.attach_channel(&view.room, &view.agent, Default::default())
+            .await
+            .map_err(|_| "Cannot attach the selected agent")?;
+        Ok(true)
+    }
+
+    /// `saved`, the save an [`attach`](Self::attach) of `view`'s agent came
+    /// before; when it failed, the agent `attached` then is detached again:
+    /// a save that fails leaves the conversation as it was, not bound to an
+    /// agent nothing selected.
+    async fn saved_or_detached<T>(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        view: &SessionConfig,
+        attached: bool,
+        saved: Result<T, String>,
+    ) -> Result<T, String> {
+        if saved.is_err() && attached {
+            let _ = kit
+                .detach_channel(&view.room, &view.agent, Default::default())
+                .await;
+        }
+        saved
     }
 
     /// Makes `view` show `agent`, the one its conversation designates,
@@ -555,10 +577,8 @@ impl State {
             .collect();
         // What the application tells its views in a conversation, such as a
         // compaction's line, comes from the terminal's channel.
-        view.actor_names.insert(
-            crate::application::TERMINAL.into(),
-            env!("CARGO_PKG_NAME").into(),
-        );
+        view.actor_names
+            .insert(crate::names::TERMINAL.into(), env!("CARGO_PKG_NAME").into());
         if let Some(profile) = agent {
             let kind = self
                 .providers

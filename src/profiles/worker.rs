@@ -140,7 +140,7 @@ impl Profiles {
             .ok_or("The worker profile references an unknown connection")?;
         profile.tools.retain(|name| {
             WORKER_TOOLS.contains(&name.as_str())
-                || (self.executor_inventory.is_some() && name == crate::remote::pool::CARGO_TEST)
+                || (self.executor_inventory.is_some() && name == crate::names::CARGO_TEST)
         });
         profile.mcp.clear();
         profile.skills.clear();

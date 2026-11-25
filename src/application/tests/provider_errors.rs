@@ -102,6 +102,7 @@ pub(super) async fn submit(app: &Application, operation: &str) -> Vec<Event> {
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn anthropic_errors_reach_the_view_and_log_then_the_session_recovers() {
     for (status, message, code, expected, streamed) in [
         (
@@ -141,7 +142,9 @@ async fn anthropic_errors_reach_the_view_and_log_then_the_session_recovers() {
         let mut settings = settings(root.path(), storage.path(), &server.base);
         settings.provider = ProviderKind::Anthropic;
         settings.model = "claude-fable-5-2".into();
-        let app = Application::open(&settings, SECRET.into()).await.unwrap();
+        let app = Application::open(&settings, SECRET.to_owned())
+            .await
+            .unwrap();
         let events = submit(&app, "failed-turn").await;
         assert!(
             events.iter().any(|e| matches!(
@@ -229,7 +232,9 @@ async fn a_provider_s_refusal_reaches_the_view_in_its_own_words() {
     let root = tempfile::tempdir().unwrap();
     let storage = tempfile::tempdir().unwrap();
     let settings = settings(root.path(), storage.path(), &base);
-    let app = Application::open(&settings, SECRET.into()).await.unwrap();
+    let app = Application::open(&settings, SECRET.to_owned())
+        .await
+        .unwrap();
     let events = submit(&app, "refused-turn").await;
     let notices: Vec<_> = events
         .iter()
@@ -276,7 +281,9 @@ async fn anthropic_thinking_without_an_answer_is_explained_and_can_be_retried() 
     let mut settings = settings(root.path(), storage.path(), &server.base);
     settings.provider = ProviderKind::Anthropic;
     settings.model = "claude-fable-5-2".into();
-    let app = Application::open(&settings, SECRET.into()).await.unwrap();
+    let app = Application::open(&settings, SECRET.to_owned())
+        .await
+        .unwrap();
     let events = submit(&app, "thinking-only").await;
     assert!(
         events.iter().any(|e| matches!(
@@ -334,7 +341,9 @@ async fn an_answer_the_provider_cannot_read_is_told_as_an_invalid_response() {
     let root = tempfile::tempdir().unwrap();
     let storage = tempfile::tempdir().unwrap();
     let settings = settings(root.path(), storage.path(), &base);
-    let app = Application::open(&settings, SECRET.into()).await.unwrap();
+    let app = Application::open(&settings, SECRET.to_owned())
+        .await
+        .unwrap();
     let events = submit(&app, "unreadable-turn").await;
     let notices: Vec<_> = events
         .iter()

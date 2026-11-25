@@ -597,6 +597,7 @@ async fn refused(client: &roomkit_tui::Client, id: u64) -> bool {
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn ask_gates_real_changes_and_yolo_never_auto_approves_an_existing_request() {
     use roomkit_tui::protocol::Decision;
     let project = tempfile::tempdir().unwrap();
@@ -766,6 +767,7 @@ async fn ask_gates_real_changes_and_yolo_never_auto_approves_an_existing_request
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn ask_shell_and_patch_require_approval_but_patch_preview_does_not() {
     use roomkit_tui::protocol::Decision;
     let project = tempfile::tempdir().unwrap();
@@ -969,6 +971,7 @@ async fn command_event(
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn fresh_launch_new_resume_and_retried_new_preserve_scoped_durable_history() {
     use roomkit::ConversationStore;
     let project = tempfile::tempdir().unwrap();
@@ -1202,6 +1205,7 @@ async fn missing_last_usage_is_unknown_and_previous_round_totals_are_partial() {
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn provider_timeouts_and_refusals_have_actionable_private_diagnostics() {
     // A timeout and a rate limit are tried 3 more times before the turn fails
     // (RMK-1531); a refused credential is not.
@@ -1248,7 +1252,7 @@ async fn provider_timeouts_and_refusals_have_actionable_private_diagnostics() {
         let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
         let mut settings = settings(project.path(), state.path(), &base);
         settings.provider_timeout_seconds = 1;
-        let app = Application::open(&settings, "secret-key".into())
+        let app = Application::open(&settings, "secret-key".to_owned())
             .await
             .unwrap();
         let (client, host) = connection(NonZeroUsize::new(256).unwrap());
@@ -1346,9 +1350,12 @@ async fn a_transient_provider_failure_is_tried_again_and_the_turn_completes() {
         }),
     );
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    let app = Application::open(&settings(project.path(), state.path(), &base), "key".into())
-        .await
-        .unwrap();
+    let app = Application::open(
+        &settings(project.path(), state.path(), &base),
+        "key".to_owned(),
+    )
+    .await
+    .unwrap();
     let session = turn(&app).await.snapshot().cloned().unwrap();
     app.close().await.unwrap();
     server.abort();
@@ -1611,6 +1618,7 @@ async fn submit_profile(
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn profiles_select_independent_providers_tools_and_auth_in_one_durable_conversation() {
     use roomkit_tui_engine::CommandResult;
     let root = tempfile::tempdir().unwrap();
@@ -1987,6 +1995,8 @@ async fn effort_selection_persists_reconfigures_requests_and_can_restore_provide
 mod images;
 mod shell;
 mod skills;
+mod stale_agents;
+mod startup;
 mod steering;
 mod tool_failures;
 mod turn_ends;

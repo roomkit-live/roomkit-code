@@ -65,7 +65,7 @@ impl Journal {
                 commit(kit, terminal, told, &id, &text).await;
                 terminal.to_string()
             }
-            None => crate::application::TERMINAL.to_owned(),
+            None => crate::names::TERMINAL.to_owned(),
         };
         let line = Item::Message(Message::new(id, ActorId::new(terminal), text));
         crate::sync::lock(&self.recent).insert(told.room.into(), (Instant::now(), line));

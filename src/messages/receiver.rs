@@ -4,26 +4,24 @@ use super::{
     delivery::Posts,
     record::{Mail, STREAM},
 };
+use roomkit::ConversationStore;
 use roomkit::model::RoomId;
-use roomkit::{ConversationStore, RoomKit};
 use roomkit::{EventFilter, store::ListEventsOptions};
-use roomkit_sqlite::SqliteStore;
 use serde_json::json;
 use std::time::Duration;
 
 const CURSOR: &str = "roomkit_code:session_mail_cursor:v1";
-type Kit = RoomKit<SqliteStore>;
+use super::Kit;
 const BATCH: u8 = 16;
 
 pub(super) async fn report_unavailable(
     diagnostics: &crate::diagnostics::Diagnostics,
     error: &(dyn std::error::Error + Send + Sync),
 ) {
-    diagnostics.record(
-        "session_inbox_unavailable",
-        json!({"error":error.to_string()}),
-        None,
-    );
+    // Classified, never its text: a broker's error can hold its URL, and
+    // the password in it.
+    let error = error.to_string();
+    diagnostics.record("session_inbox_unavailable", json!({}), Some(&error));
     tokio::time::sleep(Duration::from_secs(5)).await;
 }
 
@@ -88,7 +86,7 @@ impl Messages {
                 text,
                 about: ("session_mail_uncertain", json!(source)),
             }
-            .store(kit, &ChannelId::new(crate::application::TERMINAL)?)
+            .store(kit, &ChannelId::new(crate::names::TERMINAL)?)
             .await?
         };
         self.show(&stored, text.to_owned());
@@ -202,7 +200,7 @@ async fn recover_session_questions(kit: &Kit, room: &RoomId) -> crate::Result<()
 }
 
 pub(super) async fn answered(kit: &Kit, row: &roomkit::model::RoomEvent) -> crate::Result<bool> {
-    let terminal = roomkit::model::ChannelId::new(crate::application::TERMINAL)?;
+    let terminal = roomkit::model::ChannelId::new(crate::names::TERMINAL)?;
     let key = format!("session-outcome-{}", row.id);
     Ok(kit
         .store()
@@ -276,8 +274,8 @@ fn idle_delay(last: Duration, progress: bool) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use roomkit::{RoomKitOptions, model::ChannelId};
-    use roomkit_sqlite::SqliteStoreOptions;
+    use roomkit::{RoomKit, RoomKitOptions, model::ChannelId};
+    use roomkit_sqlite::{SqliteStore, SqliteStoreOptions};
     #[tokio::test]
     async fn restart_closes_an_interrupted_question_once_and_leaves_new_mail_pending()
     -> crate::Result<()> {
@@ -291,7 +289,7 @@ mod tests {
         )));
         let parent = kit.create_room(Default::default()).await?.id;
         let child = kit.create_room(Default::default()).await?.id;
-        let terminal = ChannelId::new(crate::application::TERMINAL)?;
+        let terminal = ChannelId::new(crate::names::TERMINAL)?;
         kit.register_channel(roomkit_tui_engine::ConversationChannel::new(
             terminal.clone(),
         ))?;

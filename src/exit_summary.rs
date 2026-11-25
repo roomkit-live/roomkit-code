@@ -222,7 +222,7 @@ impl Usage {
 
     fn read(&mut self, message: bool, metadata: &Metadata) {
         // A turn that wrote no message holds its record on its last row.
-        let recorded = metadata.contains_key("loop_end_reason");
+        let recorded = metadata.contains_key(crate::turn_ends::END);
         // A `!` command's row is no turn's, whatever it says.
         if (message || recorded) && !metadata.keys().any(|key| key.starts_with("shell_")) {
             self.last_turn_recorded = recorded;
@@ -234,7 +234,7 @@ impl Usage {
         else {
             // A turn stopped before anything told what it used, or a provider
             // that reported nothing: unknown tokens.
-            self.complete &= metadata.get("loop_end_reason") != Some(&json!("cancelled"))
+            self.complete &= metadata.get(crate::turn_ends::END) != Some(&json!("cancelled"))
                 && metadata.get("ai_usage_complete") != Some(&Value::Bool(false));
             return;
         };

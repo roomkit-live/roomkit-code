@@ -27,6 +27,22 @@ pub(crate) fn write<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
     lock.write().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Runs `work`, which reads or writes files, from wherever it is called.
+/// On the multi-threaded runtime's own threads it runs in place while the
+/// tasks queued behind this one move to another thread: a slow disk, or a
+/// file's lock another instance holds, no longer stalls every task of the
+/// thread. Elsewhere, on a blocking thread, outside a runtime or on a
+/// single-threaded one, it just runs.
+pub(crate) fn blocking<T>(work: impl FnOnce() -> T) -> T {
+    use tokio::runtime::{Handle, RuntimeFlavor};
+    match Handle::try_current() {
+        Ok(runtime) if runtime.runtime_flavor() == RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(work)
+        }
+        _ => work(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::panic, reason = "The test poisons a lock on purpose")]

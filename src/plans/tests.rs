@@ -35,6 +35,7 @@ fn update(plan: &Plan, status: StepStatus) -> PlanUpdateInput {
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn native_facades_preserve_plans_and_selection_across_restart_and_isolate_owners() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("plans");

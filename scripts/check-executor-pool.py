@@ -440,7 +440,7 @@ def main():
         peers.check_history(next((root / "owner-state").glob("projects/*/history.sqlite3")), reproduction)
         rust_scenario(fresh, server, root)
         save_pool(fresh, [b"", b"", b"redis://127.0.0.1:1/"],
-                  ("Redis did not answer", "Cannot reach the executor pool in Redis"))
+                  ("Redis did not answer", "Cannot reach the executor pool"))
         os.write(fresh.master, b"\x1b")
         time.sleep(.3)
         saved = json.loads(next((root / "owner-state").glob("projects/*/executors.json")).read_text())

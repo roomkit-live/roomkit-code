@@ -68,6 +68,10 @@ impl Updates {
         self.state().panel = Some((room.into(), panel));
         self.changes.send_replace(());
     }
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Debt recorded when the limit was set: split it, never grow it"
+    )]
     pub fn handle(
         self: &Arc<Self>,
         view: &SessionConfig,

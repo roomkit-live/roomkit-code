@@ -21,6 +21,24 @@ impl Instructions {
     }
 }
 
+impl Instructions {
+    /// `target` as the scopes are looked up: relative to the workspace. The
+    /// file tools take an absolute path inside the workspace too, which was
+    /// refused here as not a project path, and the model was warned of a
+    /// problem its call did not have.
+    pub(super) fn in_workspace(&self, target: &str) -> String {
+        let path = Path::new(target);
+        if !path.is_absolute() {
+            return target.to_owned();
+        }
+        match path.strip_prefix(&self.workspace) {
+            Ok(inside) if inside.as_os_str().is_empty() => ".".to_owned(),
+            Ok(inside) => inside.to_string_lossy().into_owned(),
+            Err(_) => target.to_owned(),
+        }
+    }
+}
+
 /// The paths a call of `name` with `arguments` reads, whose scoped rules
 /// accompany its result.
 fn targets(name: &str, arguments: &Metadata) -> Vec<String> {
@@ -67,7 +85,10 @@ impl Tool for Scoped {
         let Some((room, agent)) = caller.filter(|_| name == self.name) else {
             return self.inner.handler(name, arguments);
         };
-        let targets = targets(&name, &arguments);
+        let targets: Vec<String> = targets(&name, &arguments)
+            .iter()
+            .map(|target| self.instructions.in_workspace(target))
+            .collect();
         let call = self.inner.handler(name, arguments);
         let instructions = self.instructions.clone();
         Box::pin(async move {

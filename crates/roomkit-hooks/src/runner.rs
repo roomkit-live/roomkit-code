@@ -47,10 +47,17 @@ pub struct Report {
 }
 
 /// Execute a validated hook with one JSON object and newline on stdin.
-/// No user text is interpolated into the command. Both streams are drained
-/// concurrently. Unix process groups are killed on timeout, normal exit and
+/// No user text is interpolated into the command. The command starts with
+/// the host variables named in `inherit_env` that are set, and no other:
+/// the host's credentials stay out of it unless the host lists them. Both
+/// streams are drained concurrently. Unix process groups are killed on timeout, normal exit and
 /// future cancellation; this is cleanup, not a sandbox against escaping children.
-pub async fn run(hook: &CommandHook, cwd: &Path, input: &serde_json::Value) -> Report {
+pub async fn run(
+    hook: &CommandHook,
+    cwd: &Path,
+    inherit_env: &[String],
+    input: &serde_json::Value,
+) -> Report {
     let started = std::time::Instant::now();
     let mut bytes = serde_json::to_vec(input).unwrap_or_default();
     bytes.push(b'\n');
@@ -70,7 +77,7 @@ pub async fn run(hook: &CommandHook, cwd: &Path, input: &serde_json::Value) -> R
         };
     }
     #[cfg(unix)]
-    let result = unix::execute(hook, cwd, &bytes).await;
+    let result = unix::execute(hook, cwd, inherit_env, &bytes).await;
     #[cfg(not(unix))]
     let result = (RunStatus::Failed, Vec::new(), Vec::new());
     Report {

@@ -141,7 +141,7 @@ async fn run(server: &Server, manual: Option<u32>) -> (Vec<Event>, String) {
     settings.provider = ProviderKind::Anthropic;
     settings.model = "claude-fable-5-2".into();
     settings.max_output_tokens = manual;
-    let app = Application::open(&settings, "fixture-key".into())
+    let app = Application::open(&settings, "fixture-key".to_owned())
         .await
         .unwrap();
     let events = super::provider_errors::submit(&app, "recovery").await;

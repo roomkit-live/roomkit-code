@@ -7,6 +7,11 @@ CI runs on Linux and macOS; tests must not require a real model or credentials.
 For native image paste on Linux, `make clipboard-check` additionally uses Xvfb
 and xclip on a dedicated display; it never touches the desktop clipboard.
 
+`clippy.toml` limits a function to 100 lines and a cognitive complexity of 15.
+The functions past them when the limits were set carry an `#[expect]`: split one
+rather than add to the list. Names shared across modules (tool names, the
+terminal's channel) belong in `src/names.rs`, which depends on nothing.
+
 Keep generic engine, tools and UI behavior in their owning repositories.
 Application-specific choices belong here. Dependencies use immutable Git
 revisions and a committed lockfile. All consumers must use the same engine URL

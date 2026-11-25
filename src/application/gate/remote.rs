@@ -105,7 +105,7 @@ impl WorkerAction {
         match self {
             Self::Peer(peer) => (peer.name(), peer.verb()),
             Self::Reply => (
-                crate::messages::SEND_MESSAGE,
+                crate::names::SEND_MESSAGE,
                 crate::messages::WorkerReply::VERB,
             ),
         }

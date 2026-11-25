@@ -1,7 +1,7 @@
 //! Address the active delegated turn using RoomKit steering.
 use super::Scheduler;
-use roomkit::model::{ChannelId, InjectMessage, Room, RoomId};
-use roomkit::{ConversationStore, RoomKit, SteerOptions};
+use roomkit::model::{ChannelId, Room, RoomId};
+use roomkit::{ConversationStore, RoomKit};
 use roomkit_sqlite::SqliteStore;
 use serde_json::{Value, json};
 
@@ -25,21 +25,19 @@ impl Scheduler {
     ) -> Result<Value, String> {
         let (room, turn, _) = self.queue.task_turn(caller.id.as_str(), task)
             .ok_or("No running executor task with that ID is accepting messages in this conversation. Check task_status.")?;
-        let directive = InjectMessage {
-            role: "assistant".into(),
-            content: format!(
-                "Follow-up from the delegating conversation. Continue under the task's existing permissions. Return your result through the task.\n{}",
-                json!({"message":text})
-            ),
-        };
-        let options = SteerOptions {
-            turn_id: Some(turn),
-            organization_id: caller.organization_id.clone(),
-        };
+        let content = format!(
+            "Follow-up from the delegating conversation. Continue under the task's existing permissions. Return your result through the task.\n{}",
+            json!({"message":text})
+        );
         let room = RoomId::new(room).map_err(|e| e.to_string())?;
-        let agent = ChannelId::new(crate::remote::AGENT).map_err(|e| e.to_string())?;
-        if kit
-            .steer(&room, &agent, directive, options)
+        let agent = ChannelId::new(crate::names::REMOTE_AGENT).map_err(|e| e.to_string())?;
+        let to = crate::messages::RunningTurn {
+            room: &room,
+            agent: &agent,
+            turn: Some(turn),
+            organization: caller.organization_id.clone(),
+        };
+        if crate::messages::inject(kit, to, content)
             .await
             .map_err(|e| e.to_string())?
             == 0
@@ -74,7 +72,7 @@ pub(crate) async fn session_placement(
         .get_event(&id)
         .await?
         .filter(|e| {
-            e.room_id == parent.id && e.source.channel_id.as_str() == crate::application::TERMINAL
+            e.room_id == parent.id && e.source.channel_id.as_str() == crate::names::TERMINAL
         })
         .and_then(|e| {
             e.metadata

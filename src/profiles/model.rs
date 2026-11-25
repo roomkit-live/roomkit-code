@@ -43,6 +43,18 @@ pub(crate) enum Authentication {
     ChatGpt { account: String },
 }
 
+/// A test's literal key: none when empty, else stored.
+#[cfg(test)]
+impl From<String> for Authentication {
+    fn from(key: String) -> Self {
+        if key.is_empty() {
+            Self::None
+        } else {
+            Self::Stored { key }
+        }
+    }
+}
+
 impl Authentication {
     pub fn key(&self) -> Result<String, String> {
         match self {
@@ -108,6 +120,21 @@ pub(super) struct Providers {
     pub schema: u32,
     pub profiles: BTreeMap<String, Provider>,
 }
+/// The most connections the profiles hold.
+pub(super) const MAX_PROVIDERS: usize = 128;
+/// What a connection past [`MAX_PROVIDERS`] is refused with.
+pub(super) const TOO_MANY_PROVIDERS: &str = "Maximum of 128 provider profiles reached";
+
+impl Providers {
+    /// Refuses one more connection once [`MAX_PROVIDERS`] are saved.
+    pub(super) fn check_room(&self) -> Result<(), String> {
+        if self.profiles.len() >= MAX_PROVIDERS {
+            return Err(TOO_MANY_PROVIDERS.into());
+        }
+        Ok(())
+    }
+}
+
 impl Default for Providers {
     fn default() -> Self {
         Self {
@@ -224,6 +251,18 @@ impl Provider {
 }
 
 impl Provider {
+    /// Refuses a connection that would send a key unencrypted to a host
+    /// outside this machine and its local network. Checked as a connection
+    /// is created or edited, not as saved ones are read: a profile saved
+    /// before this check still opens.
+    pub fn check_credential_transport(&self) -> Result<(), String> {
+        let sends_key = !matches!(self.authentication, Authentication::None);
+        if sends_key && crate::http_client::plaintext_to_remote(&self.base_url) {
+            return Err(crate::http_client::PLAINTEXT_CREDENTIAL.into());
+        }
+        Ok(())
+    }
+
     /// The subscription this connection goes through, if any: an account
     /// credential belongs to its service, a pasted key to the one the
     /// connection names.
@@ -338,9 +377,10 @@ impl Agent {
         }
         let unique: std::collections::BTreeSet<_> = self.tools.iter().collect();
         if unique.len() != self.tools.len()
-            || self.tools.iter().any(|tool| {
-                !TOOLS.contains(&tool.as_str()) && tool != crate::remote::pool::CARGO_TEST
-            })
+            || self
+                .tools
+                .iter()
+                .any(|tool| !TOOLS.contains(&tool.as_str()) && tool != crate::names::CARGO_TEST)
         {
             return Err("Choose distinct tool names from the available inventory".into());
         }

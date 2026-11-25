@@ -215,6 +215,24 @@ impl SessionLeases {
     }
 }
 
+/// Replaces the file at `path` with `bytes`, whole or not at all: written
+/// to a private temporary file beside it, flushed, renamed over it, then
+/// its directory flushed, without which a crash can undo the rename. The
+/// one way a state file is written.
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let directory = path
+        .parent()
+        .ok_or_else(|| io::Error::other("A state file has a directory"))?;
+    let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
+    temporary.write_all(bytes)?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(path).map_err(|error| error.error)?;
+    #[cfg(unix)]
+    File::open(directory)?.sync_all()?;
+    Ok(())
+}
+
 pub(crate) fn private_file(path: &Path) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true).write(true).create(true).truncate(false);

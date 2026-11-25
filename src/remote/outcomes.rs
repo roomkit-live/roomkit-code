@@ -6,6 +6,27 @@ use serde_json::Value;
 pub(crate) const REPORT_LIFETIME: std::time::Duration = std::time::Duration::from_secs(86400);
 pub(crate) const OUTCOME: &str = "code_observe_workspace_tool";
 
+/// The most bytes of a tool's result, as JSON, a report carries: under the
+/// megabyte a hook reads, with room for the rest of its input.
+const REPORT_BYTES: usize = 256 * 1024;
+
+/// `value`, or a line saying how large it was when it is past
+/// [`REPORT_BYTES`]. The owner's hooks read a report whole: a worker's
+/// result of any size would cross the broker, be held by the owner and fail
+/// the hooks it was reported for.
+fn bounded(value: Option<Value>) -> Option<Value> {
+    let value = value?;
+    let bytes = serde_json::to_vec(&value).map_or(usize::MAX, |json| json.len());
+    Some(if bytes > REPORT_BYTES {
+        Value::String(format!(
+            "[Tool result omitted from this report: over {} KiB]",
+            REPORT_BYTES / 1024
+        ))
+    } else {
+        value
+    })
+}
+
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ToolOutcome {
     result: Option<Value>,
@@ -29,9 +50,11 @@ impl ToolOutcome {
         }
     }
 
+    /// Reports the outcome on `event`. The owner bounds what it is sent as
+    /// the worker bounds what it sends: it does not rely on the worker.
     pub(crate) fn apply(self, event: &mut ToolCallEvent) {
-        event.result = self.result;
-        event.structured_content = self.structured_content;
+        event.result = bounded(self.result);
+        event.structured_content = bounded(self.structured_content);
         event.is_error = self.is_error;
         event.cancelled = self.cancelled;
         event.refused = self.refused;
@@ -79,8 +102,8 @@ pub(super) fn install(executor: &TurnExecutor) -> crate::Result<std::sync::Arc<R
                     return;
                 };
                 let outcome = ToolOutcome {
-                    result: event.result.take(),
-                    structured_content: event.structured_content.take(),
+                    result: bounded(event.result.take()),
+                    structured_content: bounded(event.structured_content.take()),
                     is_error: event.is_error,
                     cancelled: event.cancelled,
                     refused: event.refused,
@@ -96,4 +119,24 @@ pub(super) fn install(executor: &TurnExecutor) -> crate::Result<std::sync::Arc<R
         options,
     )?;
     Ok(reports)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_report_carries_a_result_within_its_bound_or_says_it_was_omitted() {
+        let small = Value::String("ok".into());
+        assert_eq!(bounded(Some(small.clone())), Some(small));
+        assert_eq!(bounded(None), None);
+        let large = Value::String("x".repeat(REPORT_BYTES));
+        let reported = bounded(Some(large));
+        assert_eq!(
+            reported,
+            Some(Value::String(
+                "[Tool result omitted from this report: over 256 KiB]".into()
+            ))
+        );
+    }
 }

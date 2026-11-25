@@ -62,12 +62,12 @@ const MCP: Rule = Rule {
 /// `rule_for`).
 const RULES: &[(&str, Rule)] = &[
     // Asking the person changes nothing: it needs no approval, in Plan too.
-    (crate::ask_user::ASK_USER, READ),
+    (crate::names::ASK_USER, READ),
     ("activate_skill", READ),
     ("read_skill_reference", READ),
     ("find_tools", READ),
     ("list_tools", READ),
-    (crate::remote::pool::LIST_EXECUTORS, READ),
+    (crate::names::LIST_EXECUTORS, READ),
     ("list", READ),
     ("glob", READ),
     ("grep", READ),
@@ -88,10 +88,10 @@ const RULES: &[(&str, Rule)] = &[
     ("docs_list", READ),
     ("docs_search", READ),
     ("docs_read", READ),
-    (crate::remote::pool::ASK_PEER, DELEGATION),
-    (crate::remote::pool::ANSWER_PEER, DELEGATION),
-    (crate::messages::SEND_MESSAGE, DELEGATION),
-    (crate::messages::LIST_SESSIONS, READ),
+    (crate::names::ASK_PEER, DELEGATION),
+    (crate::names::ANSWER_PEER, DELEGATION),
+    (crate::names::SEND_MESSAGE, DELEGATION),
+    (crate::names::LIST_SESSIONS, READ),
     ("delegate_task", DELEGATION),
     ("task_status", DELEGATION),
     ("cancel_task", DELEGATION),
@@ -102,7 +102,7 @@ const RULES: &[(&str, Rule)] = &[
     ("write", MUTATION),
     ("edit", MUTATION),
     ("shell", COMMAND),
-    (crate::remote::pool::CARGO_TEST, COMMAND),
+    (crate::names::CARGO_TEST, COMMAND),
     ("process_start", COMMAND),
     (
         "process_write",

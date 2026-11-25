@@ -22,6 +22,10 @@ pub(crate) use settings::{
     Running, follow_modes, forget, keep, keep_modes, kept, kept_mode, last_model,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Debt recorded when the limit was set: split it, never grow it"
+)]
 pub(crate) fn commands() -> Vec<CommandSpec> {
     [
         (
@@ -280,6 +284,10 @@ impl CommandHandler for Sessions {
 
 impl Sessions {
     /// Route a command to the part of the application that owns it.
+    #[expect(
+        clippy::cognitive_complexity,
+        reason = "Debt recorded when the limit was set: split it, never grow it"
+    )]
     async fn dispatch(
         &self,
         request: Request,
@@ -503,10 +511,11 @@ impl Sessions {
             ..Default::default()
         };
         if let Err(error) = self.kit.steer(&room, agent, update, options).await {
-            let detail = serde_json::json!({ "error": error.to_string() });
+            let error = error.to_string();
+            let fields = serde_json::json!({ "room": room.as_str() });
             self.profiles
                 .diagnostics
-                .record("mode_change_not_steered", detail, None);
+                .record("mode_change_not_steered", fields, Some(&error));
         }
     }
 

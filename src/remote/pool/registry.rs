@@ -91,18 +91,12 @@ pub(super) struct Worker {
 }
 impl Worker {
     pub(super) fn supports_commit_tests(&self) -> bool {
-        // Older workers also advertised commit tests outside Git workspaces.
-        self.commit_tests && (self.git_repository.is_some() || self.checkout.is_some())
+        self.commit_tests
     }
 
     /// Keep filenames with control characters on one line in the terminal and tool output.
     pub(super) fn workspace_display(&self) -> std::borrow::Cow<'_, str> {
-        let path = self.workspace.as_deref().unwrap_or("Not reported");
-        if path.chars().any(char::is_control) {
-            path.escape_debug().to_string().into()
-        } else {
-            path.into()
-        }
+        super::inventory::shown(self.workspace.as_deref().unwrap_or("Not reported"))
     }
 
     pub(super) fn profile(&self, requested: Option<&str>) -> Option<&WorkerProfile> {
@@ -142,14 +136,55 @@ impl Row {
         self.serving && self.age < 10
     }
 }
+/// The row of one worker's `record`. None for a record that does not read:
+/// one worker of another version, or a damaged entry, is left out rather
+/// than stop the whole group's pool.
+fn row(record: &str, age: u64, used: u16) -> Option<Row> {
+    Some(Row {
+        serving: false,
+        worker: serde_json::from_str(record).ok()?,
+        age,
+        used,
+    })
+}
+
+/// The rows of the `records` that read, and how many did not.
+fn listed(records: Vec<(String, u64, u16)>) -> (Vec<Row>, usize) {
+    let recorded = records.len();
+    let rows: Vec<Row> = records
+        .into_iter()
+        .filter_map(|(record, age, used)| row(&record, age, used))
+        .collect();
+    let unread = recorded - rows.len();
+    (rows, unread)
+}
+
 #[derive(Clone)]
 pub(super) struct Registry {
     client: redis::Client,
     connection: Arc<OnceCell<ConnectionManager>>,
     prefix: String,
 }
-pub(super) fn unavailable<E>(_: E) -> String {
-    "Cannot reach the executor pool in Redis".into()
+/// What a failed Redis request is told as: its kind, so a refused
+/// password, an unreachable host and a request that timed out are not one
+/// sentence. Never the error's text, which can hold the URL and its
+/// password.
+pub(super) fn unavailable(error: redis::RedisError) -> String {
+    use redis::ErrorKind;
+    let cause = if error.is_timeout() {
+        "Redis did not answer in time"
+    } else if error.is_connection_refusal() {
+        "Redis refused the connection; check its address and that it is running"
+    } else if error.is_io_error() || error.is_connection_dropped() {
+        "the connection to Redis failed or was lost"
+    } else {
+        match error.kind() {
+            ErrorKind::AuthenticationFailed => "Redis refused the credentials",
+            ErrorKind::InvalidClientConfig => "the Redis address or options are not valid",
+            _ => "Redis refused the request",
+        }
+    };
+    format!("Cannot reach the executor pool: {cause}")
 }
 impl Registry {
     pub fn new(group: &str, address: &str) -> crate::Result<Self> {
@@ -206,7 +241,9 @@ impl Registry {
             )
             .await;
     }
-    pub async fn rows(&self) -> Result<Vec<Row>> {
+    /// The workers' rows, and how many records did not read and are left
+    /// out.
+    pub async fn rows(&self) -> Result<(Vec<Row>, usize)> {
         let rows: Vec<(String, u64, u16)> = self
             .query(
                 redis::cmd("EVAL")
@@ -216,17 +253,7 @@ impl Registry {
                     .arg(&self.prefix),
             )
             .await?;
-        rows.into_iter()
-            .map(|(s, age, used)| {
-                Ok(Row {
-                    serving: false,
-                    worker: serde_json::from_str(&s)
-                        .map_err(|_| "Invalid executor resource record".to_owned())?,
-                    age,
-                    used,
-                })
-            })
-            .collect()
+        Ok(listed(rows))
     }
     pub async fn claim(&self, w: &Worker, turn: &str, ram: u64) -> Result<bool> {
         self.query(
@@ -257,5 +284,31 @@ impl Registry {
         let _: Result<i64> = self
             .query(redis::cmd("ZREM").arg(self.slots(id)).arg(turn))
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One record that did not read failed the whole listing: the pool
+    /// stopped for the group.
+    #[test]
+    fn a_record_that_does_not_read_is_left_out_of_the_listing() {
+        assert!(row("{\"name\": 3}", 1, 0).is_none());
+        assert!(row("not json", 1, 0).is_none());
+        let record = serde_json::json!({
+            "name": "mini", "instance": "i", "os": "macos", "host_os": null,
+            "arch": "aarch64", "labels": {}, "slots": 2,
+            "metrics": serde_json::to_value(Metrics::default()).unwrap_or_default(),
+        });
+        // The listing counts what it left out, for the inventory to say.
+        let (rows, unread) = listed(vec![("not json".into(), 1, 0), (record.to_string(), 4, 1)]);
+        assert_eq!((rows.len(), unread), (1, 1));
+        let listed = row(&record.to_string(), 4, 1);
+        assert_eq!(
+            listed.map(|row| (row.worker.name, row.age, row.used)),
+            Some(("mini".into(), 4, 1))
+        );
     }
 }

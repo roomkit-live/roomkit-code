@@ -481,9 +481,9 @@ mod tests {
             .iter()
             .chain(&crate::permissions::MODE_TOOLS)
             .chain([
-                &crate::remote::pool::CARGO_TEST,
-                &crate::messages::SEND_MESSAGE,
-                &crate::messages::LIST_SESSIONS,
+                &crate::names::CARGO_TEST,
+                &crate::names::SEND_MESSAGE,
+                &crate::names::LIST_SESSIONS,
             ])
             .map(|name| tool(name))
             .collect();
@@ -520,9 +520,9 @@ mod tests {
             .iter()
             .chain(&crate::permissions::MODE_TOOLS)
             .chain([
-                &crate::remote::pool::CARGO_TEST,
-                &crate::messages::SEND_MESSAGE,
-                &crate::messages::LIST_SESSIONS,
+                &crate::names::CARGO_TEST,
+                &crate::names::SEND_MESSAGE,
+                &crate::names::LIST_SESSIONS,
             ])
             .copied()
             .collect();

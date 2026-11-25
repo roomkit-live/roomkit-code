@@ -70,15 +70,45 @@ impl Profiles {
         form: &str,
         values: &FormValues,
     ) -> Result<CommandResult, String> {
+        let pending = |state: &State| {
+            state
+                .executor_form
+                .as_ref()
+                .filter(|p| p.id == form && p.room == current.room.as_str())
+                .map(|p| p.document.value.clone())
+                .ok_or("Reopen /executors configure before saving")
+        };
+        let saved = {
+            let state = self.state.lock().await;
+            let saved = submitted(&pending(&state)?, values)?;
+            validate_profiles(&state, &saved)?;
+            saved
+        };
+        // Redis is reached with the profiles unlocked: the sidebar and the
+        // other profile commands do not wait on it.
+        let connected = live::Connected::open(self, &saved).await?;
         let mut state = self.state.lock().await;
-        let pending = state
-            .executor_form
-            .as_ref()
-            .filter(|p| p.id == form && p.room == current.room.as_str())
-            .ok_or("Reopen /executors configure before saving")?;
-        let saved = submitted(&pending.document.value, values)?;
-        validate_profiles(&state, &saved)?;
-        let change = live::Change::prepare(self, &state, &saved).await?;
+        // The form may have been closed or reopened meanwhile.
+        let checked = match pending(&state) {
+            Ok(_) => validate_profiles(&state, &saved),
+            Err(error) => Err(error.to_owned()),
+        };
+        if let Err(error) = checked {
+            if let Some(connected) = connected {
+                connected.discard().await;
+            }
+            return Err(error);
+        }
+        let change = match connected {
+            Some(connected) => match live::Change::prepare(self, &state, connected).await {
+                Ok(change) => Some(change),
+                Err((error, connected)) => {
+                    connected.discard().await;
+                    return Err(error);
+                }
+            },
+            None => None,
+        };
         let notice = live::save(self, kit, &mut state, saved, change).await?;
         Ok(CommandResult::Events(vec![Event::Notice {
             conversation: current.room.as_str().into(),
@@ -88,10 +118,10 @@ impl Profiles {
 }
 
 fn validate_profiles(state: &State, saved: &PoolSettings) -> Result<(), String> {
-    if saved.schedule && state.agent(crate::remote::AGENT).is_some() {
+    if saved.schedule && state.agent(crate::names::REMOTE_AGENT).is_some() {
         return Err(format!(
             "Rename the local agent {} before enabling the pool",
-            crate::remote::AGENT
+            crate::names::REMOTE_AGENT
         ));
     }
     for id in &saved.worker.worker_profile {

@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use roomkit::model::{ChannelId, RoomEvent};
 use roomkit::tasks::{DelegateHandler, DelegateHandlerOptions};
-use roomkit::{HookExecution, HookOptions, HookTrigger, RoomKit};
+use roomkit::{HookTrigger, RoomKit};
 use roomkit_ai::AiTool;
 use roomkit_ai::tasks::{DELEGATE_TOOL, SetupDelegationOptions, setup_delegation};
 use roomkit_sqlite::SqliteStore;
@@ -169,7 +169,7 @@ pub(crate) const MAX_RESULT_CHARS: NonZeroUsize = NonZeroUsize::new(20_000).unwr
 /// child room from its start: the engine then streams the worker to it, as it
 /// does a conversation's agent, for a view that moves there.
 pub(crate) fn handler(kit: &RoomKit<SqliteStore>) -> DelegateHandler<SqliteStore> {
-    let terminal = ChannelId::new(crate::application::TERMINAL).ok();
+    let terminal = ChannelId::new(crate::names::TERMINAL).ok();
     let options = DelegateHandlerOptions {
         default_share_channels: terminal.map(|terminal| vec![terminal]),
         max_result_chars: MAX_RESULT_CHARS,
@@ -243,7 +243,7 @@ pub(crate) fn install(
     tasks: std::sync::Arc<Tasks>,
     roster: std::sync::Arc<Roster>,
 ) -> crate::Result<()> {
-    if let Ok(terminal) = ChannelId::new(crate::application::TERMINAL) {
+    if let Ok(terminal) = ChannelId::new(crate::names::TERMINAL) {
         tasks.install_lines(kit, &terminal);
     }
     let (started, ended) = (tasks.clone(), roster.clone());
@@ -270,7 +270,7 @@ pub(crate) fn install(
                 task.ended = Some((took, Outcome::of(text(&event, "task_status"))));
                 let reason = event
                     .metadata
-                    .get("loop_end_reason")
+                    .get(crate::turn_ends::END)
                     .and_then(Value::as_str);
                 tasks.finished(task, reason).await;
             }
@@ -294,7 +294,7 @@ pub(crate) fn install(
                 let tasks = consumed.clone();
                 async move {
                     if event.metadata.contains_key("ai_usage")
-                        || event.metadata.contains_key("loop_end_reason")
+                        || event.metadata.contains_key(crate::turn_ends::END)
                     {
                         tasks.consumed(event.room_id.as_str());
                     }
@@ -322,13 +322,7 @@ fn task(event: &RoomEvent, roster: &Roster) -> Task {
     }
 }
 
-fn observer(name: &str) -> HookOptions {
-    HookOptions {
-        execution: HookExecution::Async,
-        name: name.into(),
-        ..HookOptions::default()
-    }
-}
+use crate::diagnostics::observer;
 
 /// The text the task event's metadata keeps under `key`, else empty.
 fn text<'a>(event: &'a RoomEvent, key: &str) -> &'a str {

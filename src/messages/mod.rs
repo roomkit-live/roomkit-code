@@ -28,12 +28,12 @@ use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::watch;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
-pub(crate) use tools::{LIST_SESSIONS, SEND_MESSAGE};
+pub(crate) use tools::SEND_MESSAGE;
 
 /// Live items and restored system rows share the same author and message ID.
 pub(crate) fn emphasis(message: &Message) -> Option<roomkit_tui::render::Emphasis> {
     let id = message.id.as_str();
-    if message.actor.as_str() != crate::application::TERMINAL
+    if message.actor.as_str() != crate::names::TERMINAL
         || ![
             "session-msg-",
             "session-reply-session-msg-",
@@ -49,6 +49,46 @@ pub(crate) fn emphasis(message: &Message) -> Option<roomkit_tui::render::Emphasi
     Some(emphasis)
 }
 
+/// The engine on the project's store, as every part of the messaging names
+/// it.
+type Kit = RoomKit<SqliteStore>;
+
+/// The role a turn reads correspondence in, when it is handed some while
+/// it runs: a session's message, a follow-up to a task, a peer's question.
+/// One place decides it for them all.
+const INJECTED_ROLE: &str = "assistant";
+
+/// The turn correspondence is handed to: `agent`'s in `room`, the one
+/// `turn` names or any it runs there.
+pub(crate) struct RunningTurn<'a> {
+    pub room: &'a RoomId,
+    pub agent: &'a roomkit::model::ChannelId,
+    pub turn: Option<String>,
+    pub organization: Option<String>,
+}
+
+/// Hands `content` to the running turn `to` names, and tells how many turns
+/// took it: none when it no longer runs.
+#[expect(
+    clippy::result_large_err,
+    reason = "The engine's own error, which each caller reports in its words"
+)]
+pub(crate) async fn inject(
+    kit: &RoomKit<SqliteStore>,
+    to: RunningTurn<'_>,
+    content: String,
+) -> Result<usize, roomkit::RoomKitError> {
+    let directive = roomkit::model::InjectMessage {
+        role: INJECTED_ROLE.into(),
+        content,
+    };
+    let options = roomkit::SteerOptions {
+        organization_id: to.organization,
+        turn_id: to.turn,
+    };
+    kit.steer(to.room, to.agent, directive, options).await
+}
+
 struct Interactive {
     kit: WeakRoomKit<SqliteStore>,
     group_enabled: bool,
@@ -59,6 +99,8 @@ struct Interactive {
 pub(crate) struct Messages {
     interactive: OnceLock<Interactive>,
     network: OnceLock<network::Network>,
+    /// Set when the session group asked for could not be joined at launch.
+    network_unavailable: std::sync::atomic::AtomicBool,
     listening: Mutex<HashSet<RoomId>>,
     recent: Mutex<HashMap<RoomId, VecDeque<Item>>>,
     changes: watch::Sender<u64>,
@@ -80,21 +122,60 @@ impl Messages {
         });
     }
 
+    /// Joins the launch's session group. A group whose address is not
+    /// valid, or whose record this project's store does not take, refuses
+    /// the launch. One whose broker cannot be reached does not: the
+    /// conversation opens without it, its local work unaffected, and says
+    /// so; the diagnostics record why, and the session tools refuse with
+    /// the reason.
     pub(crate) async fn open_network(
         &self,
         settings: &crate::config::Settings,
         kit: &RoomKit<SqliteStore>,
         room: &RoomId,
         leases: Arc<crate::storage::SessionLeases>,
+        diagnostics: &crate::diagnostics::Diagnostics,
     ) -> crate::Result<()> {
         let Some(group) = &settings.session_group else {
             return Ok(());
         };
         let address = crate::remote::address(settings.executor_url.as_deref())?;
-        let net = network::Network::open(group, &address, kit, room, leases).await?;
-        self.network
-            .set(net)
-            .map_err(|_| "Session network already open".into())
+        let error = match network::Network::open(group, &address, kit, room, leases).await? {
+            network::Joined::Group(net) => {
+                return self
+                    .network
+                    .set(net)
+                    .map_err(|_| "Session network already open".into());
+            }
+            network::Joined::Unreachable(error) => error,
+        };
+        diagnostics.record(
+            "session_group_unavailable",
+            serde_json::json!({}),
+            Some(&error),
+        );
+        self.network_unavailable
+            .store(true, std::sync::atomic::Ordering::Release);
+        // Said in the conversation as it opens, not only when a session
+        // tool is first used.
+        let text = format!(
+            "Session group {group} could not be reached: this conversation runs without it. Relaunch once its Redis is reachable."
+        );
+        let id = format!(
+            "session-group-unavailable-{}",
+            uuid::Uuid::new_v4().simple()
+        );
+        let row = crate::system_row::SystemRow {
+            room: room.as_str(),
+            id: &id,
+            text: &text,
+            about: ("session_group_unavailable", serde_json::json!(group)),
+        };
+        let terminal = roomkit::model::ChannelId::new(crate::names::TERMINAL)?;
+        if let Ok(stored) = row.store(kit, &terminal).await {
+            self.show(&stored, text);
+        }
+        Ok(())
     }
 
     fn pool(&self) -> Option<Arc<crate::remote::pool::Scheduler>> {
@@ -121,11 +202,9 @@ impl Messages {
             Ok(lease) => lease,
             Err(error) => {
                 lock(&self.listening).remove(room);
-                diagnostics.record(
-                    "session_listener_unavailable",
-                    serde_json::json!({"error":error.to_string()}),
-                    None,
-                );
+                let error = error.to_string();
+                let fields = serde_json::json!({});
+                diagnostics.record("session_listener_unavailable", fields, Some(&error));
                 return;
             }
         };
@@ -196,7 +275,7 @@ async fn writable(
         .await
         .map_err(|_| "Cannot inspect session access")?;
     Ok(bindings.iter().any(|b| {
-        b.channel_id.as_str() == crate::application::TERMINAL
+        b.channel_id.as_str() == crate::names::TERMINAL
             && b.access == roomkit::model::Access::ReadWrite
     }))
 }

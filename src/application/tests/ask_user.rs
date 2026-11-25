@@ -8,7 +8,7 @@ use super::*;
 
 fn asking() -> Vec<(&'static str, Value)> {
     vec![(
-        crate::ask_user::ASK_USER,
+        crate::names::ASK_USER,
         json!({"questions": [{"header": "Database", "question": "Which database?", "options": [
             {"label": "SQLite (Recommended)", "description": "One file"},
             {"label": "Postgres"}

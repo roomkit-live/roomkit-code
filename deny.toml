@@ -1,5 +1,7 @@
 [advisories]
 version = 2
+# A yanked version was withdrawn by its authors: it fails the audit.
+yanked = "deny"
 ignore = [
     # Inherited from the TUI: Syntect loads only its embedded syntax grammars.
     # Revisit when the upstream highlighter replaces bincode 1.3.3.

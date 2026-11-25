@@ -15,10 +15,10 @@ use crate::{Result, config::Settings, profiles::Profiles, services::Services, st
 mod gate;
 pub(crate) mod headless;
 mod integrations;
+mod signals;
+pub(crate) use signals::hangup_ignored;
 
-/// The channel of the application's views, the terminal's: what a row the
-/// application writes for its views alone comes from.
-pub(crate) const TERMINAL: &str = "terminal";
+use crate::names::TERMINAL;
 
 pub(crate) struct Application {
     pub kit: RoomKit<SqliteStore>,
@@ -31,40 +31,32 @@ pub(crate) struct Application {
 }
 
 impl Application {
-    pub async fn open(settings: &Settings, api_key: String) -> Result<Self> {
-        Self::open_with_tools(settings, api_key, None).await
+    /// Opens the application; `authentication` is that of the connection
+    /// the launch options start a new project with.
+    pub async fn open(
+        settings: &Settings,
+        authentication: impl Into<crate::profiles::model::Authentication>,
+    ) -> Result<Self> {
+        Self::open_with_tools(settings, authentication, None).await
     }
 
     async fn open_with_tools(
         settings: &Settings,
-        api_key: String,
+        authentication: impl Into<crate::profiles::model::Authentication>,
         resources: Option<crate::agent::Resources>,
     ) -> Result<Self> {
+        let authentication = authentication.into();
         let storage = Storage::open(&settings.state_dir, &settings.workspace)?;
-        let profiles = Profiles::load(settings, &storage, api_key, resources).await?;
-        let services = Services::new(settings, &storage, &profiles)?;
-        let store = {
-            let _initializing = storage.initialization_lease().await?;
-            let store = SqliteStore::new(SqliteStoreOptions {
-                path: storage.database.clone(),
-            });
-            // The store opens its file, creating or migrating its schema, at
-            // its first operation: run one under the lease, which serializes
-            // that across instances, and refuse a file it cannot open now.
-            let first = ListRoomsOptions {
-                limit: 1,
-                ..ListRoomsOptions::default()
-            };
-            store.list_rooms(first).await?;
-            store
+        let profiles = Profiles::load(settings, &storage, authentication, resources).await?;
+        // From here the profiles hold processes, MCP connections and the
+        // diagnostic log: a start that fails releases them and records where.
+        let (services, kit) = match engine(settings, &storage, &profiles).await {
+            Ok(opened) => opened,
+            Err(error) => {
+                abandon("engine", &error.to_string(), None, &profiles, None).await;
+                return Err(error);
+            }
         };
-        let mut options = RoomKitOptions::with_store(store);
-        if let Some(pool) = &profiles.pool {
-            options.turn_backend = Some(roomkit::turns::TurnBackendHandle::new(pool.clone()));
-        } else if let Some(group) = &settings.remote_worker {
-            options.turn_backend = Some(crate::remote::handle(group)?);
-        }
-        let kit = RoomKit::new(options);
         let policy = profiles.policy.clone();
         match setup(settings, &kit, &profiles, &services, &policy).await {
             Ok((channel, view)) => Ok(Self {
@@ -77,7 +69,14 @@ impl Application {
                 _storage: storage,
             }),
             Err(error) => {
-                abandon(&kit, &profiles).await;
+                abandon(
+                    "setup",
+                    &error.to_string(),
+                    Some(&kit),
+                    &profiles,
+                    Some(&services),
+                )
+                .await;
                 Err(error)
             }
         }
@@ -103,14 +102,14 @@ impl Application {
         self.profiles.accounts.close().await;
         step("mcp");
         self.profiles.mcp_runtime.close().await;
-        // Closing cancels running shell calls: the agents' slots record what
-        // they changed as they close, before the engine closes its store.
         // The conversations' modes, kept as they change, once more before the
         // engine closes its store.
         if !self.profiles.unattended() {
             crate::sessions::keep_modes(&self.kit, &self.policy).await;
         }
         step("engine");
+        // Closing cancels running shell calls: the agents' slots record what
+        // they changed as they close, before the engine closes its store.
         let engine = self.kit.close().await;
         step("hooks");
         self.services.hooks.close().await;
@@ -184,6 +183,8 @@ async fn setup(
     let channel = ConversationChannel::new(ChannelId::new(TERMINAL)?);
     kit.register_channel(channel.clone())?;
     profiles.resources.compactions.install(kit, channel.id());
+    let compactions = &profiles.resources.compactions;
+    compactions.report_to(profiles.diagnostics.clone());
     let gate = gate::Gate {
         policy: policy.clone(),
         channel: channel.clone(),
@@ -209,7 +210,13 @@ async fn setup(
     .await?;
     resources
         .messages
-        .open_network(settings, kit, &view.room, services.sessions.clone())
+        .open_network(
+            settings,
+            kit,
+            &view.room,
+            services.sessions.clone(),
+            &profiles.diagnostics,
+        )
         .await?;
     Ok((channel, view))
 }
@@ -280,20 +287,85 @@ async fn first_view(
     Ok(view)
 }
 
-/// Release what a failed setup opened.
-async fn abandon(kit: &RoomKit<SqliteStore>, profiles: &Profiles) {
-    let _ = kit.close().await;
+/// The services and the engine on the project's store, opened and readable.
+async fn engine(
+    settings: &Settings,
+    storage: &Storage,
+    profiles: &std::sync::Arc<Profiles>,
+) -> Result<(std::sync::Arc<Services>, RoomKit<SqliteStore>)> {
+    let services = Services::new(settings, storage, profiles)?;
+    let store = {
+        let _initializing = storage.initialization_lease().await?;
+        let store = SqliteStore::new(SqliteStoreOptions {
+            path: storage.database.clone(),
+        });
+        // The store opens its file, creating or migrating its schema, at
+        // its first operation: run one under the lease, which serializes
+        // that across instances, and refuse a file it cannot open now.
+        let first = ListRoomsOptions {
+            limit: 1,
+            ..ListRoomsOptions::default()
+        };
+        store.list_rooms(first).await?;
+        store
+    };
+    let mut options = RoomKitOptions::with_store(store);
+    if let Some(pool) = &profiles.pool {
+        options.turn_backend = Some(roomkit::turns::TurnBackendHandle::new(pool.clone()));
+    } else if let Some(group) = &settings.remote_worker {
+        options.turn_backend = Some(crate::remote::handle(group)?);
+    }
+    Ok((services, RoomKit::new(options)))
+}
+
+/// Records that the start failed at `stage`, with its error's
+/// classification, then releases what it opened: the engine and the
+/// services when it got that far, and what the profiles hold.
+async fn abandon(
+    stage: &str,
+    error: &str,
+    kit: Option<&RoomKit<SqliteStore>>,
+    profiles: &Profiles,
+    services: Option<&Services>,
+) {
+    let fields = serde_json::json!({"stage": stage});
+    profiles
+        .diagnostics
+        .record("application_start_failed", fields, Some(error));
+    profiles.resources.messages.close().await;
+    profiles.resources.compactions.close().await;
+    if let Some(services) = services {
+        services.shell.close().await;
+    }
+    profiles.accounts.close().await;
+    if let Some(kit) = kit {
+        let _ = kit.close().await;
+    }
+    if let Some(services) = services {
+        services.hooks.close().await;
+        services.sessions.close();
+    }
     profiles.mcp_runtime.close().await;
-    profiles.diagnostics.close().await;
     let _ = profiles.resources.close(false).await;
+    profiles.diagnostics.close().await;
 }
 
 /// Events the terminal and the engine may queue for each other.
 const QUEUE: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 
-pub(crate) async fn run(settings: Settings) -> Result<()> {
-    let api_key = settings.initial_api_key();
-    let app = Application::open(&settings, api_key).await?;
+/// How long a view whose host closed on a signal is given to return and
+/// restore the terminal before the launch closes without it.
+const VIEW_RETURNS: std::time::Duration = std::time::Duration::from_secs(2);
+
+pub(crate) async fn run(settings: Settings) -> Result<std::process::ExitCode> {
+    // Listen first: a signal while the application opens still closes what
+    // it opened.
+    let signals = signals::listen()?;
+    let app = Application::open(&settings, settings.initial_authentication()).await?;
+    if let Some(signal) = signals.received() {
+        app.close().await?;
+        return Ok(signal.exit_code());
+    }
     // Refuse an invalid attachment before entering alternate-screen mode.
     if let Err(error) = app.session().snapshot().await {
         let _ = app.close().await;
@@ -319,21 +391,71 @@ pub(crate) async fn run(settings: Settings) -> Result<()> {
         app.profiles.resources.processes.clone(),
     );
     let view = observer.clone();
-    let terminal = tokio::task::spawn_blocking(move || {
+    let mut terminal = tokio::task::spawn_blocking(move || {
         roomkit_tui::run_with_observer(client, renderers, settings.ui, view)
-    })
-    .await;
+    });
+    let returned = until_left(&mut terminal, &adapter.abort_handle(), &signals).await;
     integrations.freeze();
     let attached = adapter.await;
+    let received = signals.received();
+    // A closed terminal, or one the view still holds, takes no report.
+    let printed = returned.is_some() && received != Some(signals::Signal::Hangup);
     let summary = summarize(&app, observer.latest(), &resume).await;
-    summary.print_conversation();
+    if printed {
+        summary.print_conversation();
+    }
     let closed = app.close().await;
     integrations.close().await;
-    report(&app, &summary, closed.is_ok());
-    terminal??;
-    attached??;
+    if printed {
+        report(&app, &summary, closed.is_ok());
+    }
+    let Some(signal) = received else {
+        // Without a signal the view returned.
+        if let Some(returned) = returned {
+            returned??;
+        }
+        attached??;
+        closed?;
+        return Ok(std::process::ExitCode::SUCCESS);
+    };
+    // The signal cut the view and its host: only the close can still fail.
+    if returned.is_none() {
+        // The view's thread may never end, and the runtime would wait for
+        // it: a close that failed is recorded, then the process exits all
+        // the same, rather than stay for ever.
+        if let Err(error) = &closed {
+            let error = error.to_string();
+            let fields = serde_json::json!({});
+            let diagnostics = &app.profiles.diagnostics;
+            diagnostics.record("application_close_failed", fields, Some(&error));
+        }
+        signal.exit();
+    }
     closed?;
-    Ok(())
+    Ok(signal.exit_code())
+}
+
+/// What the view's thread returned.
+type Returned =
+    std::result::Result<std::io::Result<roomkit_tui::ExitReason>, tokio::task::JoinError>;
+
+/// Waits for the view to return, which it does when the user leaves. On a
+/// signal its host is closed, which makes a view on a live terminal return
+/// and restore it: it is given a moment for that, whichever the signal, as
+/// SIGHUP can come with the terminal still there. A view whose terminal is
+/// gone may never return: none then, and the close does not depend on it.
+async fn until_left(
+    terminal: &mut tokio::task::JoinHandle<std::io::Result<roomkit_tui::ExitReason>>,
+    host: &tokio::task::AbortHandle,
+    signals: &signals::Signals,
+) -> Option<Returned> {
+    tokio::select! {
+        returned = &mut *terminal => Some(returned),
+        _ = signals.wait() => {
+            host.abort();
+            tokio::time::timeout(VIEW_RETURNS, terminal).await.ok()
+        }
+    }
 }
 
 /// The processes closing stopped, then a line when internal errors occurred.

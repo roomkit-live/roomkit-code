@@ -44,6 +44,7 @@ fn setup() -> (tempfile::TempDir, Resume, Session) {
 }
 
 #[test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 fn resume_follows_the_displayed_session_and_confirmed_mode_with_explicit_options() {
     let (root, resume, mut session) = setup();
     let initial = resume.report(session.observation().unwrap(), Background::default());

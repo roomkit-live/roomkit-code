@@ -99,6 +99,12 @@ impl<P: AiProvider> TieredMemory<P> {
         let footprint = current_turn_footprint().unwrap_or_else(|| TurnFootprint::new(0, 0));
         let measured = measure(&events, (agent, after), &footprint);
         crate::sync::lock(&self.fixed).insert(room.into(), measured.fixed);
+        // After summaries that failed in a row, the next one waits: each
+        // is a request of the history's size. A `/compact` asked meanwhile
+        // stays asked.
+        if self.compactions.waits(room, agent) {
+            return result(compacted.as_ref(), events);
+        }
         let forced = self.compactions.take_forced(room, agent);
         // The rows of the room since the summary, the agent's own included,
         // which its context reads among the room's latest.
@@ -126,7 +132,7 @@ impl<P: AiProvider> TieredMemory<P> {
     /// row `newest`, leaving in it the events kept whole: the latest within
     /// the tier's budget, or the fewest when `forced`. None when nothing
     /// would be summarized, or the summary failed: the history is read as it
-    /// is, and the next turn tries again.
+    /// is, and a later turn tries again ([`Compactions::failed`]).
     async fn compact(
         &self,
         (room, agent): (&str, &str),
@@ -157,16 +163,17 @@ impl<P: AiProvider> TieredMemory<P> {
         let read = (&events[..cut], calls.as_slice(), agent);
         let chars = tiers::summary_chars(self.ceiling);
         let (_running, began) = (self.compactions.running(room), Instant::now());
-        let Some(written) = summary::summarize(&self.provider, prior, read, chars).await else {
-            if forced {
-                self.compactions.force(room, agent);
+        let written = match summary::summarize(&self.provider, prior, read, chars).await {
+            Ok(written) => written,
+            Err(failure) => {
+                if forced {
+                    self.compactions.force(room, agent);
+                }
+                self.compactions.failed((room, agent), &failure);
+                return None;
             }
-            self.compactions.notice(
-                room,
-                "Compaction failed: the model wrote no summary; it is tried again at the next message",
-            );
-            return None;
         };
+        self.compactions.succeeded(room, agent);
         let (written, cut_short) = (written.text, written.cut);
         let newest = events.last().map_or(0, |event| event.index);
         // The messages the summary stands for, not the rows of tool calls
@@ -242,7 +249,7 @@ impl<P: AiProvider> TieredMemory<P> {
         let ended: Vec<bool> = events
             .iter()
             .zip(&written)
-            .map(|(event, own)| *own && event.metadata.contains_key("loop_end_reason"))
+            .map(|(event, own)| *own && event.metadata.contains_key(crate::turn_ends::END))
             .collect();
         let starts = tiers::turn_starts(&written, &ended);
         let budget = if forced {
@@ -466,7 +473,7 @@ mod tests {
                 let mut event = said(index, if own { "code" } else { "terminal" }, None);
                 if own {
                     let ended = serde_json::json!("complete");
-                    event.metadata.insert("loop_end_reason".into(), ended);
+                    event.metadata.insert(crate::turn_ends::END.into(), ended);
                 }
                 event
             })
@@ -493,7 +500,7 @@ mod tests {
                 let mut event = said(index, if own { "code" } else { "terminal" }, None);
                 if own {
                     let ended = serde_json::json!("complete");
-                    event.metadata.insert("loop_end_reason".into(), ended);
+                    event.metadata.insert(crate::turn_ends::END.into(), ended);
                 }
                 event
             })

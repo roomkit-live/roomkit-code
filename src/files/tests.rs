@@ -303,6 +303,26 @@ async fn an_unreadable_saved_list_is_never_overwritten() {
     assert!(body(&record).contains("could not be read"));
     let stored = kit.store().get_private_state(&room.id, STATE_KEY).await;
     assert_eq!(stored.unwrap(), Some(unreadable));
+    // The list reads again: it stayed in memory for the whole process, the
+    // changes made since never saved.
+    let readable = serde_json::to_value(Record::default()).unwrap();
+    let serde_json::Value::Object(readable) = readable else {
+        panic!("a record is an object")
+    };
+    kit.store()
+        .set_private_state(&room.id, STATE_KEY, Some(readable))
+        .await
+        .unwrap();
+    let effects = vec![effect("b.txt", Change::Modified, false)];
+    files.observed("room", effects, None).await;
+    let record = files.record("room").await;
+    assert!(!record.offline);
+    let paths: Vec<&str> = record.changes().iter().map(|c| c.path.as_str()).collect();
+    assert_eq!(paths, ["b.txt", "a.txt"]);
+    let stored = kit.store().get_private_state(&room.id, STATE_KEY).await;
+    let stored: Record =
+        serde_json::from_value(serde_json::Value::Object(stored.unwrap().unwrap())).unwrap();
+    assert_eq!(stored.changes().len(), 2, "both are saved");
     kit.close().await.unwrap();
 }
 

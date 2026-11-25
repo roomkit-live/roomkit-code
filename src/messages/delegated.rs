@@ -4,21 +4,20 @@ use super::{
     request::origin,
 };
 use roomkit::{
-    ConversationStore, RoomKit,
+    ConversationStore,
     model::{Room, RoomId, RoomStatus},
     store::FindRoomsOptions,
 };
 use roomkit_ai::ToolError;
-use roomkit_sqlite::SqliteStore;
 use serde_json::{Value, json};
 
-type Kit = RoomKit<SqliteStore>;
+use super::Kit;
 
 fn reachable(parent: &Room, child: &Room) -> bool {
     child.status == RoomStatus::Active
         && child.organization_id == parent.organization_id
         && child.metadata.get("parent_room_id") == Some(&json!(parent.id))
-        && child.metadata.get("task_agent_id") == Some(&json!(crate::remote::AGENT))
+        && child.metadata.get("task_agent_id") == Some(&json!(crate::names::REMOTE_AGENT))
 }
 
 pub(super) async fn contacts(kit: &Kit, parent: &Room) -> crate::Result<Vec<Value>> {
@@ -28,7 +27,7 @@ pub(super) async fn contacts(kit: &Kit, parent: &Room) -> crate::Result<Vec<Valu
         metadata_filter: Some(
             [
                 ("parent_room_id".into(), json!(parent.id)),
-                ("task_agent_id".into(), json!(crate::remote::AGENT)),
+                ("task_agent_id".into(), json!(crate::names::REMOTE_AGENT)),
             ]
             .into_iter()
             .collect(),
@@ -165,7 +164,7 @@ pub(super) async fn prepare(
         return Ok(None);
     };
     let post = PendingPost {
-        agent: roomkit::model::ChannelId::new(crate::remote::AGENT)?,
+        agent: roomkit::model::ChannelId::new(crate::names::REMOTE_AGENT)?,
         text: question_prompt(event, mail),
         executor_target: Some(target),
         organization: child.organization_id,
@@ -199,24 +198,14 @@ async fn steer_active(
         return notice(None, kit, event, mail, reason).await;
     };
     Checkpoint::Steering.save(kit, event).await?;
-    let directive = roomkit::model::InjectMessage {
-        role: "assistant".into(),
-        content: question_prompt(event, mail),
+    let agent = roomkit::model::ChannelId::new(crate::names::REMOTE_AGENT)?;
+    let to = super::RunningTurn {
+        room: &child.id,
+        agent: &agent,
+        turn: Some(turn),
+        organization: child.organization_id.clone(),
     };
-    let options = roomkit::SteerOptions {
-        turn_id: Some(turn),
-        organization_id: child.organization_id.clone(),
-    };
-    if kit
-        .steer(
-            &child.id,
-            &roomkit::model::ChannelId::new(crate::remote::AGENT)?,
-            directive,
-            options,
-        )
-        .await?
-        == 0
-    {
+    if super::inject(kit, to, question_prompt(event, mail)).await? == 0 {
         return notice(
             None,
             kit,

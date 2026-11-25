@@ -94,6 +94,7 @@ pub(crate) async fn create(
         .ok_or(crate::storage::SESSION_BUSY)?;
     match kit.get_room(&id, GetRoomOptions::default()).await {
         Ok(_) => {
+            complete(kit, &id, channel, agent).await?;
             leases.keep(claim)?;
             return Ok(id);
         }
@@ -121,6 +122,36 @@ pub(crate) async fn create(
     super::designate(kit, &room.id, agent).await?;
     leases.keep(claim)?;
     Ok(room.id)
+}
+
+/// Ends the creation of `room` when an earlier launch stopped part-way: a
+/// room is created, then bound to the terminal and to its agent, then
+/// designates its agent, and a failure or a kill between two of these left
+/// a room that no later launch could use. A room that designates an agent
+/// was created whole, and keeps the agent selected in it. One bound to
+/// other channels and not to the terminal is not this terminal's to take.
+async fn complete(
+    kit: &RoomKit<SqliteStore>,
+    room: &RoomId,
+    channel: &ChannelId,
+    agent: &ChannelId,
+) -> Result<()> {
+    if super::designated(kit, room).await?.is_some() {
+        return Ok(());
+    }
+    let bindings = kit
+        .list_bindings(room, ListBindingsOptions::default())
+        .await?;
+    let bound = |id: &ChannelId| bindings.iter().any(|binding| &binding.channel_id == id);
+    if !bindings.is_empty() && !bound(channel) {
+        return Ok(());
+    }
+    for id in [channel, agent] {
+        if !bound(id) {
+            kit.attach_channel(room, id, Default::default()).await?;
+        }
+    }
+    super::designate(kit, room, agent).await
 }
 
 /// The newest empty draft both channels can still write to, claimed. The
@@ -312,7 +343,14 @@ impl Sessions {
                 },
             )
             .await
-            .map_err(|_| "Session not found in this project".to_string())?;
+            .map_err(|error| match error {
+                roomkit::RoomKitError::RoomNotFound(_) => {
+                    "Session not found in this project".to_string()
+                }
+                // A store that is busy or does not read is not a missing
+                // session: saying so sent people looking for one that exists.
+                _ => "This project's history could not be read just now; try again".to_string(),
+            })?;
         if found.status != RoomStatus::Active {
             return Err("This session is not active".into());
         }

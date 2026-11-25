@@ -91,11 +91,11 @@ def environment(root):
     return env
 
 
-def launch(root, model, *options, stdin=None, name="fixture-model", stderr=subprocess.PIPE, named_storage=True):
+def launch(root, model, *options, stdin=None, name="fixture-model", stderr=subprocess.PIPE, named_storage=True, preexec_fn=None):
     """Start the binary on pipes, the way a benchmark harness does."""
     storage = ["--state-dir", str(root / "storage" / "state")] if named_storage else []
     argv = [str(binary), str(root / "project"), *storage, "--base-url", model.url, "--model", name, "--no-update-check", *options]
-    return subprocess.Popen(argv, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=stderr, text=True, env=environment(root))
+    return subprocess.Popen(argv, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=stderr, text=True, env=environment(root), preexec_fn=preexec_fn)
 
 
 def run(root, model, *options, stdin=None, name="fixture-model", named_storage=True):
@@ -284,6 +284,21 @@ def interrupted(root, model, sig=signal.SIGINT):
     assert time.monotonic() - started < 20, "the sleep was not cut"
     outcomes = [json.loads(line)["outcome"] for line in rest.splitlines() if json.loads(line)["kind"] == "run_finished"]
     assert outcomes == ["interrupted"], outcomes
+
+
+def hangup_ignored(root, model):
+    """Started as nohup starts it, the launch goes on when it is hung up."""
+    process = launch(root, model, "--mode", "yolo", "--json", "--prompt", "Wait a little.",
+                     preexec_fn=lambda: signal.signal(signal.SIGHUP, signal.SIG_IGN))
+    for line in process.stdout:
+        event = json.loads(line)
+        if event["kind"] == "item" and event["item"].get("kind") == "tool" and event["item"]["call"]["state"] == "running":
+            break
+    process.send_signal(signal.SIGHUP)
+    rest, err = process.communicate(timeout=30)
+    assert process.returncode == 0, (process.returncode, err)
+    outcomes = [json.loads(line)["outcome"] for line in rest.splitlines() if json.loads(line)["kind"] == "run_finished"]
+    assert outcomes == ["completed"], outcomes
 
 
 def stored_result(root, model):
@@ -541,6 +556,8 @@ scenario("events to a reader that left", [call("process_start", command="echo $$
 scenario("a message too long", [ANSWER], too_long)
 scenario("SIGINT interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], interrupted)
 scenario("SIGTERM interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], lambda root, model: interrupted(root, model, signal.SIGTERM))
+scenario("SIGHUP interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], lambda root, model: interrupted(root, model, signal.SIGHUP))
+scenario("SIGHUP ignored at launch stays ignored", [call("shell", command="sleep 2", timeout_ms=60000), ANSWER], hangup_ignored)
 scenario("the engine's stored results are read", [call("read_stored_result", result_id="evicted_unknown"), ANSWER], stored_result)
 scenario("a shell command past two minutes", [call("shell", command="printf ran > long", timeout_ms=130000), ANSWER], long_shell)
 # The parent releases this writer after the host exits. No timer cadence or

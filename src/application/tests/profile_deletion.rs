@@ -136,7 +136,7 @@ async fn provider_deletion_rechecks_references_created_in_another_project_during
     let state = tempfile::tempdir().unwrap();
     let mock = Mock::start(vec![]).await;
     let a_settings = settings(first.path(), state.path(), &mock.base_url);
-    let mut a = Application::open(&a_settings, "fixture-private-key".into())
+    let mut a = Application::open(&a_settings, "fixture-private-key".to_owned())
         .await
         .unwrap();
     let provider = saved_provider_id(&a_settings);
@@ -231,7 +231,7 @@ async fn deleting_a_chatgpt_connection_keeps_account_management_separate_and_nev
     let state = tempfile::tempdir().unwrap();
     let mock = Mock::start(vec![]).await;
     let settings = settings(root.path(), state.path(), &mock.base_url);
-    let mut app = Application::open(&settings, "fixture-secret".into())
+    let mut app = Application::open(&settings, "fixture-secret".to_owned())
         .await
         .unwrap();
     let path = state.path().join("connections.json");

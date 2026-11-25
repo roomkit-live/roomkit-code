@@ -258,37 +258,8 @@ impl State {
             .parent()
             .and_then(std::path::Path::parent)
             .ok_or("Invalid profile location")?;
-        let entries = std::fs::read_dir(root).map_err(|_| "Cannot inspect project profiles")?;
-        let mut documents = Vec::new();
-        for entry in entries {
-            let entry = entry.map_err(|_| "Cannot inspect project profiles")?;
-            let kind = entry
-                .file_type()
-                .map_err(|_| "Cannot inspect project profiles")?;
-            if kind.is_symlink() {
-                return Err(format!(
-                    "{} is a symlink; cannot share an agent",
-                    entry.path().display()
-                ));
-            }
-            let path = entry.path().join("agents.json");
-            if !kind.is_dir() || path == current || !path.exists() {
-                continue;
-            }
-            let document = Document::<Project>::load(path.clone()).map_err(|_| {
-                format!(
-                    "Cannot read {}; repair it before sharing an agent",
-                    path.display()
-                )
-            })?;
-            if !matches!(document.value.schema, 4 | PROJECT_SCHEMA) {
-                return Err(format!(
-                    "{} has an unsupported version; cannot share an agent",
-                    path.display()
-                ));
-            }
-            documents.push(document);
-        }
+        let mut documents = project_files(root)?;
+        documents.retain(|document| document.path() != current);
         Ok(documents)
     }
 
@@ -303,6 +274,46 @@ impl State {
         }
         Ok(())
     }
+}
+
+/// Every project's agent file under `root`, the directory that holds one
+/// directory per project. The one walk of the projects: a change that must
+/// hold for all of them, sharing an agent's ID or deleting a connection,
+/// reads them the same way. A project directory that is a symlink, a file
+/// that does not read or one of an unsupported version refuses the change
+/// rather than let it miss a conflict; a project without agents is left out.
+pub(super) fn project_files(root: &std::path::Path) -> Result<Vec<Document<Project>>, String> {
+    // Read under the profiles' lock, which an async task holds: one file
+    // per project, off the runtime's thread.
+    crate::sync::blocking(|| read_project_files(root))
+}
+
+fn read_project_files(root: &std::path::Path) -> Result<Vec<Document<Project>>, String> {
+    let entries = std::fs::read_dir(root).map_err(|_| "Cannot inspect project profiles")?;
+    let mut documents = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|_| "Cannot inspect project profiles")?;
+        let kind = entry
+            .file_type()
+            .map_err(|_| "Cannot inspect project profiles")?;
+        if kind.is_symlink() {
+            return Err(format!(
+                "{} is a symlink; its profiles cannot be checked",
+                entry.path().display()
+            ));
+        }
+        let path = entry.path().join("agents.json");
+        if !kind.is_dir() || !path.exists() {
+            continue;
+        }
+        let document = Document::<Project>::load(path.clone())
+            .map_err(|_| format!("Cannot read {}; repair it first", path.display()))?;
+        if !matches!(document.value.schema, 4 | PROJECT_SCHEMA) {
+            return Err(format!("{} has an unsupported version", path.display()));
+        }
+        documents.push(document);
+    }
+    Ok(documents)
 }
 
 fn refuse_shared(others: &[Document<Project>], id: &str) -> Result<(), String> {

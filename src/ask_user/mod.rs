@@ -24,8 +24,7 @@ use serde_json::{Map, Value};
 use crate::Result;
 use crate::permissions::Policy;
 
-/// The tool's name.
-pub(crate) const ASK_USER: &str = "ask_user";
+pub(crate) use crate::names::ASK_USER;
 
 /// How long a question waits for its answer. A turn waits on it as on an
 /// approval, and the person may be away for a while.
@@ -54,13 +53,26 @@ pub(crate) fn install(
         move |event: PendingInputEvent, _context| {
             let (channel, policy, engine) = (channel.clone(), policy.clone(), engine.clone());
             async move {
-                if let Err(reason) = show(&channel, &policy, &event)
-                    && let Some(kit) = engine.upgrade()
-                {
-                    let options = RejectInputOptions { reason };
-                    let _ = kit.reject_input(&event.pending_id, options).await;
+                let Err(reason) = show(&channel, &policy, &event) else {
+                    return HookResult::allow(AllowOptions::default());
+                };
+                let rejected = match engine.upgrade() {
+                    Some(kit) => {
+                        let options = RejectInputOptions {
+                            reason: reason.clone(),
+                        };
+                        kit.reject_input(&event.pending_id, options).await.is_ok()
+                    }
+                    None => false,
+                };
+                if rejected {
+                    HookResult::allow(AllowOptions::default())
+                } else {
+                    // The request could not be rejected with its reason: the
+                    // hook refuses it, so the agent does not wait a day for
+                    // an answer nobody was asked.
+                    HookResult::block(reason, roomkit::model::hook::BlockOptions::default())
                 }
-                HookResult::allow(AllowOptions::default())
             }
         },
         HookOptions {

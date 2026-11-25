@@ -4,8 +4,7 @@ use roomkit_ai::{AiTool, Tool, ToolError, ToolFuture, ToolResult};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-pub(crate) const ASK_PEER: &str = "ask_peer";
-pub(crate) const ANSWER_PEER: &str = "answer_peer";
+pub(crate) use crate::names::{ANSWER_PEER, ASK_PEER};
 
 #[derive(Clone, Copy)]
 pub(crate) enum PeerTool {

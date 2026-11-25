@@ -241,6 +241,76 @@ impl Catalogue {
     }
 }
 
+/// `/skills`: the skills discovered, each with whether `agent` has it, the
+/// ones it selected that are no longer found, and the catalogue's actions.
+fn list(catalogue: &Catalogue, current: &SessionConfig, agent: &model::Agent) -> CommandResult {
+    let mut choices = vec![
+        ui::choice(
+            "locations",
+            "Skill directories and diagnostics",
+            "Where to install skills; precedence and loading errors",
+        ),
+        ui::choice(
+            "reload",
+            "Reload skills",
+            "Reread files and refresh the current agent",
+        ),
+    ];
+    for (name, entry) in &catalogue.entries {
+        let status = if entry.error.is_some() {
+            "unavailable"
+        } else if agent.skills.contains(name) {
+            "enabled"
+        } else {
+            "disabled"
+        };
+        choices.push(
+            Choice::new(format!("open:{name}"), format!("{name} · {status}"))
+                .with_description(format!("{} · {}", entry.source, entry.description)),
+        );
+    }
+    let missing = agent
+        .skills
+        .iter()
+        .filter(|name| !catalogue.entries.contains_key(*name));
+    for name in missing {
+        choices.push(ui::choice(
+            format!("disable:{name}"),
+            format!("{name} · missing (remove)"),
+            "No longer found in the skill directories",
+        ));
+    }
+    let title = format!(
+        "Skills for {} · {} discovered",
+        agent.label,
+        catalogue.entries.len()
+    );
+    ui::choices(current, "skills", &title, choices)
+}
+
+/// `/skills locations`: where skills are read from, in order, and what
+/// reading them reported.
+fn locations(catalogue: &Catalogue, current: &SessionConfig) -> CommandResult {
+    let mut body =
+        "Install each skill as <directory>/<name>/SKILL.md.\nPrecedence (last wins):\n".to_owned();
+    for root in &catalogue.roots {
+        body.push_str(&format!("  {}\n", root.display()));
+    }
+    body.push_str("\nSkills start disabled. Inspect and enable them per agent.\nOnly metadata is advertised until the model calls activate_skill.\nReferences use read_skill_reference; scripts are not automatically executed.\nSkills never override Ask/Plan/Yolo permissions. Provider-specific skill sidecars are not supported.\nReload after changing files. Existing active instructions use the new version after reload/restart.\n\n");
+    body.push_str(&catalogue.notes.join("\n"));
+    CommandResult::Events(vec![Event::Panel {
+        conversation: current.room.as_str().into(),
+        panel: PanelSpec::new(
+            uuid::Uuid::new_v4().to_string(),
+            "skills",
+            "Skill discovery",
+            body,
+        )
+        .with_actions(vec![ui::choice("list", "Back to skills", "")])
+        .with_dismiss("close"),
+    }])
+}
+
 impl Profiles {
     pub async fn skills(
         &self,
@@ -267,147 +337,31 @@ impl Profiles {
             return Ok(CommandResult::Events(Vec::new()));
         }
         if arguments == "reload" {
-            let next = Catalogue::load(self.workspace.clone(), self.state_dir.clone()).await?;
-            let previous = std::mem::replace(&mut *self.skill_catalogue.write().await, next);
-            let provider = state
-                .providers
-                .value
-                .profiles
-                .get(&agent.provider)
-                .ok_or("Unknown provider")?;
-            let assembled = self.assemble(&agent, provider).await;
-            let (runtime, tools) = match assembled {
-                Ok(value) => value,
-                Err(error) => {
-                    *self.skill_catalogue.write().await = previous;
-                    return Err(error);
-                }
-            };
-            self.installed(kit, &mut state, &agent.id, runtime, tools)
-                .await?;
-            let mut current = current;
-            state.view(&mut current);
-            return Ok(CommandResult::Switch(Box::new(current)));
+            return self.reload_skills(kit, &mut state, current, &agent).await;
         }
         let (action, name) = arguments
             .split_once([':', ' '])
             .unwrap_or(("open", arguments));
-        if matches!(action, "enable" | "disable") {
-            if action == "enable" {
-                let catalogue = self.skill_catalogue.read().await;
-                let entry = catalogue.entries.get(name).ok_or("Unknown skill")?;
-                if entry.error.is_some() {
-                    return Err("This skill is unavailable; inspect it with /skills".into());
-                }
-                if !agent.skills.iter().any(|n| n == name) {
-                    agent.skills.push(name.into());
-                }
-            } else {
-                agent.skills.retain(|n| n != name);
+        match action {
+            "enable" | "disable" => {
+                self.set_skill(kit, &mut state, &mut agent, name, action == "enable")
+                    .await?;
             }
-            agent.validate()?;
-            let provider = state
-                .providers
-                .value
-                .profiles
-                .get(&agent.provider)
-                .ok_or("Unknown provider")?;
-            let (runtime, tools) = self.assemble(&agent, provider).await?;
-            state.update_agent(agent.clone())?;
-            self.installed(kit, &mut state, &agent.id, runtime, tools)
-                .await?;
-        } else if action == "use" {
-            let (name, task) = name.split_once(' ').unwrap_or((
-                name,
-                "Load the skill and explain briefly how you can help with it.",
-            ));
-            if !agent.skills.iter().any(|n| n == name)
-                || !self
-                    .skill_catalogue
-                    .read()
-                    .await
-                    .selected(&[name.into()])
-                    .is_ok_and(|selected| selected.has_entries())
-            {
-                return Err("Enable this skill for the current agent with /skills first".into());
+            "use" => return self.use_skill(&agent, name).await,
+            "open" => {}
+            _ => {
+                return Err(
+                    "Use /skills [list|reload|enable <name>|disable <name>|use <name> <task>]"
+                        .into(),
+                );
             }
-            return Ok(CommandResult::Submit(format!(
-                "Use the {name} skill. Call activate_skill with name {name:?} before applying its instructions.\n\n{task}"
-            )));
-        } else if !matches!(action, "open") {
-            return Err(
-                "Use /skills [list|reload|enable <name>|disable <name>|use <name> <task>]".into(),
-            );
         }
         let catalogue = self.skill_catalogue.read().await;
         if arguments.is_empty() || arguments == "list" {
-            let mut choices = vec![
-                ui::choice(
-                    "locations",
-                    "Skill directories and diagnostics",
-                    "Where to install skills; precedence and loading errors",
-                ),
-                ui::choice(
-                    "reload",
-                    "Reload skills",
-                    "Reread files and refresh the current agent",
-                ),
-            ];
-            for (name, entry) in &catalogue.entries {
-                let status = if entry.error.is_some() {
-                    "unavailable"
-                } else if agent.skills.contains(name) {
-                    "enabled"
-                } else {
-                    "disabled"
-                };
-                choices.push(
-                    Choice::new(format!("open:{name}"), format!("{name} · {status}"))
-                        .with_description(format!("{} · {}", entry.source, entry.description)),
-                );
-            }
-            for name in agent
-                .skills
-                .iter()
-                .filter(|name| !catalogue.entries.contains_key(*name))
-            {
-                choices.push(ui::choice(
-                    format!("disable:{name}"),
-                    format!("{name} · missing (remove)"),
-                    "No longer found in the skill directories",
-                ));
-            }
-            return Ok(ui::choices(
-                &current,
-                "skills",
-                &format!(
-                    "Skills for {} · {} discovered",
-                    agent.label,
-                    catalogue.entries.len()
-                ),
-                choices,
-            ));
+            return Ok(list(&catalogue, &current, &agent));
         }
         if arguments == "locations" {
-            let mut body =
-                "Install each skill as <directory>/<name>/SKILL.md.\nPrecedence (last wins):\n"
-                    .to_owned();
-            for root in &catalogue.roots {
-                body.push_str(&format!("  {}\n", root.display()));
-            }
-            body.push_str("\nSkills start disabled. Inspect and enable them per agent.\nOnly metadata is advertised until the model calls activate_skill.\nReferences use read_skill_reference; scripts are not automatically executed.\nSkills never override Ask/Plan/Yolo permissions. Provider-specific skill sidecars are not supported.\nReload after changing files. Existing active instructions use the new version after reload/restart.\n\n");
-            body.push_str(&catalogue.notes.join("\n"));
-            return Ok(CommandResult::Events(vec![Event::Panel {
-                conversation: current.room.as_str().into(),
-                panel: PanelSpec::new(
-                    uuid::Uuid::new_v4().to_string(),
-                    "skills",
-                    "Skill discovery",
-                    body,
-                )
-                .with_actions(vec![ui::choice("list", "Back to skills", "")])
-                .with_dismiss("close"),
-            }]));
+            return Ok(locations(&catalogue, &current));
         }
         if !catalogue.entries.contains_key(name) && action == "disable" {
             return Ok(CommandResult::Events(vec![Event::Notice {
@@ -416,6 +370,93 @@ impl Profiles {
             }]));
         }
         catalogue.detail(&current, name, agent.skills.iter().any(|n| n == name))
+    }
+
+    /// `/skills reload`: reads the skill directories again and assembles
+    /// the agents anew on what they now hold. A catalogue the current agent
+    /// cannot be assembled on is not kept.
+    async fn reload_skills(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        state: &mut State,
+        mut current: SessionConfig,
+        agent: &model::Agent,
+    ) -> Result<CommandResult, String> {
+        let next = Catalogue::load(self.workspace.clone(), self.state_dir.clone()).await?;
+        let previous = std::mem::replace(&mut *self.skill_catalogue.write().await, next);
+        let provider = state
+            .providers
+            .value
+            .profiles
+            .get(&agent.provider)
+            .ok_or("Unknown provider")?;
+        let (runtime, tools) = match self.assemble(agent, provider).await {
+            Ok(value) => value,
+            Err(error) => {
+                *self.skill_catalogue.write().await = previous;
+                return Err(error);
+            }
+        };
+        self.installed(kit, state, &agent.id, runtime, tools)
+            .await?;
+        // The other agents hold the skills as they were read before.
+        self.reinstall_others(kit, state, &agent.id, |other| !other.skills.is_empty())
+            .await;
+        state.view(&mut current);
+        Ok(CommandResult::Switch(Box::new(current)))
+    }
+
+    /// `/skills enable <name>` and `disable <name>`: gives `agent` the
+    /// skill, or takes it away, and installs the agent anew.
+    async fn set_skill(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        state: &mut State,
+        agent: &mut model::Agent,
+        name: &str,
+        enable: bool,
+    ) -> Result<(), String> {
+        if enable {
+            let catalogue = self.skill_catalogue.read().await;
+            let entry = catalogue.entries.get(name).ok_or("Unknown skill")?;
+            if entry.error.is_some() {
+                return Err("This skill is unavailable; inspect it with /skills".into());
+            }
+            if !agent.skills.iter().any(|n| n == name) {
+                agent.skills.push(name.into());
+            }
+        } else {
+            agent.skills.retain(|n| n != name);
+        }
+        agent.validate()?;
+        let provider = state
+            .providers
+            .value
+            .profiles
+            .get(&agent.provider)
+            .ok_or("Unknown provider")?;
+        let (runtime, tools) = self.assemble(agent, provider).await?;
+        state.update_agent(agent.clone())?;
+        self.installed(kit, state, &agent.id, runtime, tools).await
+    }
+
+    /// `/skills use <name> <task>`: the message that has `agent` load the
+    /// skill, which it must have enabled, then do `task`.
+    async fn use_skill(&self, agent: &model::Agent, asked: &str) -> Result<CommandResult, String> {
+        let (name, task) = asked.split_once(' ').unwrap_or((
+            asked,
+            "Load the skill and explain briefly how you can help with it.",
+        ));
+        let catalogue = self.skill_catalogue.read().await;
+        let found = catalogue.selected(&[name.into()]);
+        if !agent.skills.iter().any(|n| n == name)
+            || !found.is_ok_and(|selected| selected.has_entries())
+        {
+            return Err("Enable this skill for the current agent with /skills first".into());
+        }
+        Ok(CommandResult::Submit(format!(
+            "Use the {name} skill. Call activate_skill with name {name:?} before applying its instructions.\n\n{task}"
+        )))
     }
 }
 

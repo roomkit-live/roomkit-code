@@ -91,7 +91,7 @@ pub(super) fn parse(
         None => next_id(subscription.id, |id| profiles.contains_key(id)),
     };
     if id.is_empty() {
-        return Err("Maximum of 128 provider profiles reached".into());
+        return Err(super::model::TOO_MANY_PROVIDERS.into());
     }
     let provider = Provider {
         subscription: Some(subscription.id.into()),

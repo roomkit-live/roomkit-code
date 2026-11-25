@@ -108,9 +108,12 @@ impl Files {
     }
 
     async fn compared(&self, room: &str, before: Option<Snapshot>, after: Option<Snapshot>) {
-        let changes = before
-            .zip(after)
-            .and_then(|(before, after)| snapshot::compare(&self.root, &before, &after));
+        // Comparing reads the files that differ.
+        let changes = crate::sync::blocking(|| {
+            before
+                .zip(after)
+                .and_then(|(before, after)| snapshot::compare(&self.root, &before, &after))
+        });
         let Some(changes) = changes else {
             self.update(room, |record| record.untracked = true).await;
             return;
@@ -166,6 +169,16 @@ impl Files {
             // An unreadable list is never overwritten: keep the new effects
             // in memory only.
             *held = Some(self.load(room).await.unwrap_or_else(Record::offline));
+        } else if held.as_ref().is_some_and(|record| record.offline)
+            && let Some(mut stored) = self.load(room).await
+        {
+            // The list reads again: what happened meanwhile joins it, and it
+            // is saved from now on. One failed read no longer keeps the
+            // conversation's list in memory for the rest of the process.
+            if let Some(since) = held.take() {
+                stored.absorb(since);
+            }
+            *held = Some(stored);
         }
         let Some(record) = held.as_mut() else {
             return;

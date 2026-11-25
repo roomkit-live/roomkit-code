@@ -5,13 +5,12 @@ use super::{
     record::Mail,
 };
 use roomkit::model::{ChannelId, EventStatus, RoomEvent, TextContent};
-use roomkit::{ConversationStore, PostOptions, RoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit::{ConversationStore, PostOptions};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
 
-type Kit = RoomKit<SqliteStore>;
+use super::Kit;
 const RECEIPT: &str = "roomkit_code:session_mail_dispatch:v1";
 
 #[derive(Serialize, Deserialize)]

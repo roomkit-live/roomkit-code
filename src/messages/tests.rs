@@ -145,7 +145,7 @@ async fn delegated_sessions_are_scoped_to_the_parent_and_reply_address() -> crat
     let foreign = kit.create_room(Default::default()).await?;
     let metadata = [
         ("parent_room_id".into(), json!(parent.id)),
-        ("task_agent_id".into(), json!(crate::remote::AGENT)),
+        ("task_agent_id".into(), json!(crate::names::REMOTE_AGENT)),
         ("task_input".into(), json!("Review")),
     ]
     .into_iter()

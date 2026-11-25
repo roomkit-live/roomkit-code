@@ -11,14 +11,12 @@ use crate::{Result, storage::SessionLeases};
 use roomkit::model::{ChannelId, EventId, RoomId};
 use roomkit::turns::{ChannelCall, TurnBackend, wire::ChannelControl};
 use roomkit::{
-    ConversationStore, RedisTurnBackend, RedisTurnBackendOptions, RoomKit, TurnExecutor,
-    TurnExecutorOptions,
+    ConversationStore, RedisTurnBackend, RedisTurnBackendOptions, TurnExecutor, TurnExecutorOptions,
 };
-use roomkit_sqlite::SqliteStore;
 use serde_json::json;
 use std::sync::Arc;
 
-type Kit = RoomKit<SqliteStore>;
+use super::Kit;
 pub(super) const ADDRESS: &str = "roomkit_code:session_address:v1";
 const PREFIX: &str = "session-mail-";
 const VERB: &str = "receive_session_message";
@@ -38,6 +36,17 @@ fn digest(s: &str, len: usize) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
+/// The most a launch waits for the group's broker to take its mailbox.
+const JOIN_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How joining a session group ended.
+pub(super) enum Joined {
+    Group(Network),
+    /// The broker did not take the mailbox, for this error: the
+    /// conversation runs without the group.
+    Unreachable(String),
+}
+
 #[derive(Clone)]
 pub(super) struct Network {
     backend: RedisTurnBackend,
@@ -55,7 +64,7 @@ impl Network {
         kit: &Kit,
         room: &RoomId,
         leases: Arc<SessionLeases>,
-    ) -> Result<Self> {
+    ) -> Result<Joined> {
         let backend = RedisTurnBackend::new(
             Some(address),
             RedisTurnBackendOptions {
@@ -87,17 +96,21 @@ impl Network {
             wake,
             responses: Default::default(),
         };
-        let registration: Result<()> = async {
-            network.remember_endpoint(kit).await?;
-            network.backend.serve(executor).await?;
-            Ok(())
-        }
-        .await;
-        if let Err(e) = registration {
+        // What is kept in the project's own store failing is the launch's
+        // to report; the broker not taking the mailbox is not.
+        if let Err(error) = network.remember_endpoint(kit).await {
             network.close().await;
-            return Err(e);
+            return Err(error);
         }
-        Ok(network)
+        let served = tokio::time::timeout(JOIN_WITHIN, network.backend.serve(executor)).await;
+        let refused = match served {
+            Ok(Ok(())) => return Ok(Joined::Group(network)),
+            Ok(Err(error)) => error.to_string(),
+            Err(_) => "The session group's Redis timed out".to_owned(),
+        };
+        // Closed here, where it was opened: nothing is left half open.
+        network.close().await;
+        Ok(Joined::Unreachable(refused))
     }
 
     async fn remember_endpoint(&self, kit: &Kit) -> Result<()> {

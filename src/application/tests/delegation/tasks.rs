@@ -212,6 +212,7 @@ fn action(panel: &PanelSpec, action: &str) -> String {
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn a_running_task_is_listed_and_stopped_from_the_view() {
     let project = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();

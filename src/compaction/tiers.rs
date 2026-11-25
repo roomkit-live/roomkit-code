@@ -49,10 +49,16 @@ pub(crate) fn due(tokens: usize, ceiling: u64) -> bool {
     tokens > share(ceiling, TRIGGER)
 }
 
-/// The characters a summary's request under `ceiling` may read, at four a
-/// token: what it summarizes never overflows the model.
+/// The characters counted for a token of what a summary reads. Prose
+/// takes about four; code, paths and identifiers, which fill a coding
+/// conversation, closer to three. Counting three keeps a request of dense
+/// text within its ceiling with the room [`SUMMARY_READS`] leaves.
+const CHARS_PER_TOKEN: usize = 3;
+
+/// The characters a summary's request under `ceiling` may read: what it
+/// summarizes never overflows the model.
 pub(crate) fn summary_chars(ceiling: u64) -> usize {
-    share(ceiling, SUMMARY_READS).saturating_mul(4)
+    share(ceiling, SUMMARY_READS).saturating_mul(CHARS_PER_TOKEN)
 }
 
 /// What a compaction under `ceiling` keeps whole.
@@ -155,7 +161,7 @@ mod tests {
         assert_eq!(ceiling(Some(128_000), Some(272_000)), Some(128_000));
         assert!(!due(80_000, 100_000) && due(80_001, 100_000));
         assert_eq!(kept_budget(100_000), 30_000);
-        assert_eq!(summary_chars(100_000), 200_000);
+        assert_eq!(summary_chars(100_000), 150_000);
     }
 
     #[test]

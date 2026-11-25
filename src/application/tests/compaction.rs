@@ -51,7 +51,7 @@ async fn turn_noticing(
                         Event::Item {
                             item: Item::Message(message),
                             ..
-                        } if message.actor.as_str() == crate::application::TERMINAL => {
+                        } if message.actor.as_str() == crate::names::TERMINAL => {
                             notices.push(message.text.clone());
                         }
                         _ => {}
@@ -283,11 +283,8 @@ async fn compact_starts_at_once_and_leaves_its_line_in_the_conversation() {
         .filter(|row| row.r#type == EventType::System)
         .collect();
     assert_eq!(stored.len(), 1, "{stored:?}");
-    assert_eq!(
-        stored[0].source.channel_id.as_str(),
-        crate::application::TERMINAL
-    );
-    let terminal = ChannelId::new(crate::application::TERMINAL).unwrap();
+    assert_eq!(stored[0].source.channel_id.as_str(), crate::names::TERMINAL);
+    let terminal = ChannelId::new(crate::names::TERMINAL).unwrap();
     let only = ChannelSet::new([terminal])
         .map(Visibility::Channels)
         .unwrap();
@@ -784,9 +781,11 @@ async fn a_window_of_messages_keeps_the_rules_each_turn_and_compacted_rules_go_o
 }
 
 /// A summary the model does not write compacts nothing: the conversation is
-/// read as it is, the view says so, and the next turn tries again.
+/// read as it is, the view says why, and the next turn tries again. A second
+/// failure in a row waits before the next try, which `/compact` still asks
+/// for at once: a summary is a request of the history's size.
 #[tokio::test]
-async fn a_failed_summary_compacts_nothing_and_is_tried_again() {
+async fn a_failed_summary_compacts_nothing_and_its_next_tries_are_spaced() {
     let (root, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let mock = Mock::summarizing("An answer.", "").await;
     let (app, settings) = three_turns(root.path(), state.path(), &mock).await;
@@ -796,13 +795,19 @@ async fn a_failed_summary_compacts_nothing_and_is_tried_again() {
         .unwrap();
     let (room, agent) = (app.view.room.to_string(), app.view.agent.to_string());
     let compactions = app.profiles.resources.compactions.clone();
-    let failed = || {
+    let notice = || {
         compactions
             .notices(&room)
             .first()
-            .is_some_and(|n| n.starts_with("Compaction failed"))
+            .cloned()
+            .unwrap_or_default()
     };
+    let failed = || notice().starts_with("Compaction failed");
     until("the compaction fails", failed).await;
+    assert_eq!(
+        notice(),
+        "Compaction failed: The model wrote no summary. It is tried again at the next message."
+    );
     assert_eq!(summaries(&mock.requests.lock().unwrap()), 1);
     assert_eq!(compactions.get(&room, &agent), None, "nothing is compacted");
     turn_operation(&app, "fourth").await;
@@ -812,14 +817,37 @@ async fn a_failed_summary_compacts_nothing_and_is_tried_again() {
         "the turn tries again"
     );
     assert_eq!(compactions.get(&room, &agent), None);
+    assert_eq!(
+        notice(),
+        "Compaction failed: The model wrote no summary. It is tried again in 1 min, or now with /compact."
+    );
     *mock.summary.lock().unwrap() = SUMMARY.into();
     turn_operation(&app, "fifth").await;
     assert_eq!(
         summaries(&mock.requests.lock().unwrap()),
-        3,
-        "and the next one"
+        2,
+        "the next turn waits"
     );
+    assert_eq!(compactions.get(&room, &agent), None);
+    // Asked again by the person, it is tried at once.
+    handler(&app, &settings)
+        .handle(invoke(&app, "compact"), app.view.clone())
+        .await
+        .unwrap();
+    until("the compaction is made", || {
+        compactions.get(&room, &agent).is_some()
+    })
+    .await;
+    assert_eq!(summaries(&mock.requests.lock().unwrap()), 3);
     assert_eq!(compactions.get(&room, &agent).unwrap().summary, SUMMARY);
+    let log =
+        std::fs::read_to_string(app._storage.database.with_file_name("diagnostics.jsonl")).unwrap();
+    let recorded: Vec<&str> = log
+        .lines()
+        .filter(|line| line.contains("\"compaction_failed\""))
+        .collect();
+    assert_eq!(recorded.len(), 2, "{log}");
+    assert!(recorded[0].contains("provider_empty_response"), "{log}");
     app.close().await.unwrap();
 }
 

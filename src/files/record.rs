@@ -84,6 +84,28 @@ impl Record {
         }
     }
 
+    /// Adds what `since` holds, a record kept in memory while this one
+    /// could not be read: its changes and its reads, in the order they
+    /// came, after this one's own.
+    pub fn absorb(&mut self, since: Self) {
+        let mut changed = since.changed;
+        changed.sort_by_key(|c| c.seq);
+        let mut read = since.read;
+        read.sort_by_key(|r| r.seq);
+        for change in changed {
+            self.apply(Effect {
+                path: change.path,
+                change: change.change,
+                shell: change.shell,
+            });
+        }
+        for read in read {
+            self.read(read.path);
+        }
+        self.untracked |= since.untracked;
+        self.trimmed |= since.trimmed;
+    }
+
     pub fn apply(&mut self, effect: Effect) {
         self.seq += 1;
         let index = self.changed.iter().position(|c| c.path == effect.path);
