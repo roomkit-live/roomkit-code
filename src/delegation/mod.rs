@@ -136,7 +136,7 @@ impl Roster {
             listed.join(", ")
         );
         if self.1.load(std::sync::atomic::Ordering::Relaxed) {
-            text.push_str(r#" The remote-linux agent can run on multiple executor machines. For questions about which machines are available, call list_executors for the live inventory. When handing a task to remote-linux, set the executor field of context for required OS, local agent profile ID, labels and available RAM. Look up the exposed profile IDs, models and tools with list_executors. To use a particular agent on the worker, set context.executor.profile to its exact ID. Example context: {"executor":{"os":"linux","labels":{"role":"review"},"min_ram_mib":512}}. For a Rust test at an exact revision, set context.executor.test_commit to the full Git SHA. Ask each worker to report the verified commit, exit status and duration. For a consultation, set context.executor.consultation to true on both tasks, and give the asking task the other task_id returned by delegate_task. Both tasks need to be running at the same time. Omit constraints the task does not require."#);
+            text.push_str(r#" The remote-linux agent can run on multiple executor machines. For questions about which machines are available, call list_executors for the live inventory. When handing a task to remote-linux, set the executor field of context for required OS, local agent profile ID, labels and available RAM. Look up the exposed profile IDs, models and tools with list_executors. To update a running executor task, call send_message with to set to task:<task_id> and text. The task ID comes from delegate_task or task_status. A machine name is a placement choice. The worker reports back when its task ends. To use a particular agent on the worker, set context.executor.profile to its exact ID. Example context: {"executor":{"os":"linux","labels":{"role":"review"},"min_ram_mib":512}}. For a Rust test at an exact revision, set context.executor.test_commit to the full Git SHA. Ask each worker to report the verified commit, exit status and duration. For a consultation, set context.executor.consultation to true on both tasks, and give the asking task the other task_id returned by delegate_task. Both tasks need to be running at the same time. Omit constraints the task does not require."#);
         }
         Some(text)
     }
@@ -268,7 +268,11 @@ pub(crate) fn install(
                     .and_then(|ms| Duration::try_from_secs_f64(ms / 1000.0).ok())
                     .unwrap_or_default();
                 task.ended = Some((took, Outcome::of(text(&event, "task_status"))));
-                tasks.finished(task).await;
+                let reason = event
+                    .metadata
+                    .get("loop_end_reason")
+                    .and_then(Value::as_str);
+                tasks.finished(task, reason).await;
             }
         },
         observer("code-delegation-ended"),

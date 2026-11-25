@@ -189,7 +189,7 @@ def round_limit(root, model):
 
 
 def past_fifty_rounds(root, model):
-    # The terminal's bound of 50 rounds does not apply unattended.
+    # An unattended run continues past the engine's original 50-round default.
     code, out, err = run(root, model, "--mode", "yolo", "--prompt", "Look around for long.")
     assert code == 0, (code, err)
     assert out == ANSWER + "\n", out

@@ -106,7 +106,7 @@ pub(crate) struct Cli {
     #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
     pub require_tool_intent: Option<bool>,
     /// Rounds of tool calls one turn may run before it stops unfinished:
-    /// 50 by default, no limit with --prompt.
+    /// 200 by default, no limit with --prompt.
     #[arg(long)]
     pub max_tool_rounds: Option<u32>,
     /// Check launch options and workspace without loading profiles or connecting.
@@ -203,10 +203,8 @@ impl Default for AgentOptions {
     }
 }
 
-/// The rounds of tool calls a turn runs in the terminal when nothing sets
-/// them: the bound the engine has always applied, a point where the person
-/// sends a message to continue (HITL 1603bb98).
-pub(crate) const DEFAULT_TOOL_ROUNDS: u32 = 50;
+/// Tool-call rounds available to an interactive or executor turn by default.
+pub(crate) const DEFAULT_TOOL_ROUNDS: u32 = 200;
 /// Unattended, nobody can say to continue: a turn runs until it answers,
 /// as other harnesses' turns do (HITL 1603bb98).
 pub(crate) const UNATTENDED_TOOL_ROUNDS: u32 = u32::MAX;

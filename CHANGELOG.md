@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Agents can send follow-ups to their conversation’s running pool tasks using
+  `send_message`. The parent terminal shows a failed task’s reported stop reason.
+
+- Interactive agents and executor workers now default to 200 tool-call rounds per turn.
+
 - The pool submits each turn directly to the reserved executor instance through
   RoomKit. A task already handed to a worker is never replayed on another.
 

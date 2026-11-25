@@ -50,6 +50,11 @@ async fn attentive_worker() -> (String, Arc<Mutex<Vec<Value>>>, tokio::task::Joi
                     assert!(round < 400, "The person's message never reached the worker");
                     tokio::time::sleep(Duration::from_millis(25)).await;
                     call("list", &json!({"path": format!("./{round}")}))
+                } else if last
+                    .to_string()
+                    .contains("[Background task from review cancelled.")
+                {
+                    json!({"content": "The reviewer was cancelled."})
                 } else if last.to_string().contains(RESULT) {
                     json!({"content": RELAYED})
                 } else if last["role"] == "tool" {

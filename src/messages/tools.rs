@@ -21,11 +21,12 @@ pub(crate) const LIST_SESSIONS: &str = "list_sessions";
 type Kit = RoomKit<SqliteStore>;
 
 impl Messages {
-    pub(crate) fn tools(self: &Arc<Self>) -> Vec<Arc<dyn Tool>> {
+    pub(crate) fn tools(self: &Arc<Self>, pool_enabled: bool) -> Vec<Arc<dyn Tool>> {
         let Some(context) = self.interactive.get() else {
             return Vec::new();
         };
-        let mut tools: Vec<Arc<dyn Tool>> = vec![Arc::new(SessionTool::Send(self.clone()))];
+        let mut tools: Vec<Arc<dyn Tool>> =
+            vec![Arc::new(SessionTool::Send(self.clone(), pool_enabled))];
         if context.group_enabled {
             tools.push(Arc::new(SessionTool::List(self.clone())));
         }
@@ -41,7 +42,7 @@ impl Messages {
 }
 
 enum SessionTool {
-    Send(Arc<Messages>),
+    Send(Arc<Messages>, bool),
     List(Arc<Messages>),
 }
 
@@ -61,12 +62,21 @@ impl Tool for SessionTool {
                 "List other open sessions in your trusted session group. Use their exact to address with send_message.",
                 json!({"type":"object","properties":{},"additionalProperties":false}),
             ),
-            Self::Send(m) if m.interactive.get().is_some_and(|c| c.group_enabled) => (
-                SEND_MESSAGE,
-                "Use to and text to start an asynchronous exchange with a session from list_sessions. Use reply_to and text to answer an incoming message. Give exactly one destination. Continue working after the send receipt.",
-                json!({"type":"object","required":["text"],"additionalProperties":false,"properties":{"to":{"type":"string","description":"Recipient for a new message. Leave empty when replying."},"reply_to":{"type":"string","description":"Received message ID for a reply. Leave empty for a new message."},"text":{"type":"string","maxLength":4000}}}),
-            ),
-            Self::Send(_) => (
+            Self::Send(m, pool)
+                if *pool || m.interactive.get().is_some_and(|c| c.group_enabled) =>
+            {
+                let description = if *pool {
+                    "Send text to a running executor task in this conversation using to=task:<task_id>. Use the ID from delegate_task or task_status. For an open session use its address from list_sessions when available. To answer session mail use reply_to instead. Continue working after the send receipt."
+                } else {
+                    "Use to and text to contact a session from list_sessions. Use reply_to and text to answer incoming mail. Give exactly one destination. Continue working after the send receipt."
+                };
+                (
+                    SEND_MESSAGE,
+                    description,
+                    json!({"type":"object","required":["text"],"additionalProperties":false,"properties":{"to":{"type":"string","description":"Recipient for a new message. Leave empty when replying."},"reply_to":{"type":"string","description":"Received message ID for a reply. Leave empty for a new message."},"text":{"type":"string","maxLength":4000}}}),
+                )
+            }
+            Self::Send(..) => (
                 SEND_MESSAGE,
                 "Reply to an incoming session message using its message_id as reply_to. Include only information intended for its sender.",
                 json!({"type":"object","required":["text","reply_to"],"additionalProperties":false,"properties":{"reply_to":{"type":"string"},"text":{"type":"string","maxLength":4000}}}),
@@ -84,7 +94,7 @@ impl Tool for SessionTool {
 
     fn handler(&self, name: String, args: Metadata) -> ToolFuture {
         let messages = match self {
-            Self::Send(m) if name == SEND_MESSAGE => m.clone(),
+            Self::Send(m, _) if name == SEND_MESSAGE => m.clone(),
             Self::List(m) if name == LIST_SESSIONS => m.clone(),
             _ => return Box::pin(std::future::ready(Err(ToolError::unserved(name)))),
         };
@@ -109,7 +119,7 @@ impl Tool for SessionTool {
                     .map_err(ToolError::refused)?;
                 json!({"sessions": peers.iter().map(|p| json!({"name":p.name,"to":p.key()})).collect::<Vec<_>>()})
             } else {
-                send(&messages, &kit, &room.id, args).await?
+                send(&messages, &kit, &room, args).await?
             };
             Ok(ToolResult::Json(result))
         })
@@ -119,7 +129,7 @@ impl Tool for SessionTool {
 async fn send(
     messages: &Messages,
     kit: &Kit,
-    room: &RoomId,
+    room: &roomkit::model::Room,
     args: Metadata,
 ) -> Result<Value, ToolError> {
     let input: Input = serde_json::from_value(args.into())
@@ -129,9 +139,20 @@ async fn send(
     let to = input.to.filter(|s| !s.trim().is_empty());
     let reply_to = input.reply_to.filter(|s| !s.trim().is_empty());
     match (to, reply_to) {
-        (Some(target), None) => initiate(messages.group_for(room)?, kit, &target, input.text).await,
+        (Some(target), None) => {
+            if let Some(task) = target.strip_prefix("task:") {
+                let pool = messages.pool().ok_or_else(|| {
+                    ToolError::refused("This conversation has no active executor pool")
+                })?;
+                return pool
+                    .send_to_task(kit, room, task, &input.text)
+                    .await
+                    .map_err(ToolError::refused);
+            }
+            initiate(messages.group_for(&room.id)?, kit, &target, input.text).await
+        }
         (None, Some(id)) => {
-            let (event, mail) = reply::original(kit, room, id).await?;
+            let (event, mail) = reply::original(kit, &room.id, id).await?;
             let ack = reply::respond(
                 messages.network.get(),
                 kit,

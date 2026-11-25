@@ -174,10 +174,11 @@ async fn setup(
         _ => None,
     };
     if !settings.unattended {
-        profiles
-            .resources
-            .messages
-            .install(kit, settings.session_group.is_some());
+        profiles.resources.messages.install(
+            kit,
+            settings.session_group.is_some(),
+            profiles.pool.as_ref(),
+        );
     }
     let agent_id = profiles.initialize(kit, designated).await?;
     let channel = ConversationChannel::new(ChannelId::new(TERMINAL)?);

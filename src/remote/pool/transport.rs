@@ -29,7 +29,9 @@ impl Scheduler {
         let (worker, lease, link) = self.submit_reserved(&request, ram, &ticket).await?;
         let placement = worker.placement(profile.as_deref());
         ticket.assign(&placement, &worker.name, &link.request().turn_id);
-        self.announce(link.request(), &placement).await;
+        if super::queue::delegated_turn(link.request()) {
+            self.announce(link.request(), &placement).await;
+        }
         Ok(Arc::new(ScheduledLink {
             inner: link,
             lease,

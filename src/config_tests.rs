@@ -476,14 +476,14 @@ fn a_configured_price_is_read_and_a_wrong_one_refused() {
 }
 
 #[test]
-fn tool_rounds_default_to_the_engine_s_bound_and_survive_resume() {
+fn tool_rounds_have_an_application_default_and_survive_resume() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("settings.toml");
     let mut cli = cli(root.path());
-    assert_eq!(Settings::load(&cli).unwrap().max_tool_rounds, 50);
-    std::fs::write(&path, "[agent]\nmax_tool_rounds = 200\n").unwrap();
-    cli.config = Some(path.clone());
     assert_eq!(Settings::load(&cli).unwrap().max_tool_rounds, 200);
+    std::fs::write(&path, "[agent]\nmax_tool_rounds = 80\n").unwrap();
+    cli.config = Some(path.clone());
+    assert_eq!(Settings::load(&cli).unwrap().max_tool_rounds, 80);
     cli.max_tool_rounds = Some(400);
     assert_eq!(Settings::load(&cli).unwrap().max_tool_rounds, 400);
     // The flag reopens the session with the same bound; the file's is reread.

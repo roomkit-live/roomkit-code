@@ -48,6 +48,7 @@ pub(crate) fn emphasis(message: &Message) -> Option<roomkit_tui::render::Emphasi
 struct Interactive {
     kit: WeakRoomKit<SqliteStore>,
     group_enabled: bool,
+    pool: Option<std::sync::Weak<crate::remote::pool::Coordinator>>,
 }
 
 #[derive(Default)]
@@ -62,10 +63,16 @@ pub(crate) struct Messages {
 }
 
 impl Messages {
-    pub(crate) fn install(&self, kit: &RoomKit<SqliteStore>, group_enabled: bool) {
+    pub(crate) fn install(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        group_enabled: bool,
+        pool: Option<&Arc<crate::remote::pool::Coordinator>>,
+    ) {
         let _ = self.interactive.set(Interactive {
             kit: kit.downgrade(),
             group_enabled,
+            pool: pool.map(Arc::downgrade),
         });
     }
 
@@ -84,6 +91,10 @@ impl Messages {
         self.network
             .set(net)
             .map_err(|_| "Session network already open".into())
+    }
+
+    fn pool(&self) -> Option<Arc<crate::remote::pool::Scheduler>> {
+        self.interactive.get()?.pool.as_ref()?.upgrade()?.active()
     }
 
     fn kit(&self) -> Option<RoomKit<SqliteStore>> {

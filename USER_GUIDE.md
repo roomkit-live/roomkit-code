@@ -395,7 +395,7 @@ launch ended goes to a drainer that discards it, so their writes never fail. A
 command that times out or is cut still stops what it started. In the terminal,
 both run on until the application closes, which stops them.
 
-In the terminal, a turn runs at most 50 rounds of tool calls before it stops
+In the terminal, a turn runs at most 200 rounds of tool calls before it stops
 unfinished, and a message continues it. Unattended, nobody can, so a turn runs
 until it answers. `--max-tool-rounds N` or `[agent] max_tool_rounds` in the
 configuration file sets that bound for both; the flag is kept in the resume
@@ -776,6 +776,17 @@ inventory lists a macOS profile named `reviewer`, delegate with these arguments.
 
 If several workers expose the same profile ID with different models, use the
 execution OS or placement labels from the inventory to narrow the match.
+
+To update a running assignment, call `send_message` in its parent conversation.
+Use the task ID returned by `delegate_task` or listed by `task_status`, for
+example `{"to":"task:task-1234","text":"Also check the migration."}`. The worker
+reads the update during the same task and reports back when it ends. Queued and
+finished tasks cannot receive this message. A session group is optional for
+this operation.
+
+An executor uses its own tool-round limit. Set `--max-tool-rounds N` on the
+worker or set `[agent] max_tool_rounds` in its configuration. One round can
+include multiple tool calls. If the worker reaches the limit, its task fails.
 
 To expose several agents, configure them with `/providers` and `/agents` in
 the worker's workspace and state directory. Start one process with their IDs:

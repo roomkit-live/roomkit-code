@@ -258,17 +258,17 @@ pub(crate) async fn create(
     let policy = extensions.policy.clone();
     let tools = native_tools(root, resources, policy).await?;
     let mut tools = selected(profile, tools, (unattended, extensions.planning));
-    if let Some(inventory) = extensions.executor_inventory {
-        add_pool_tools(&mut tools, inventory, channel, profile, root, resources);
-    }
     if !unattended && channel != crate::remote::AGENT {
         tools.extend(
             resources
                 .messages
-                .tools()
+                .tools(extensions.executor_inventory.is_some())
                 .into_iter()
                 .map(|tool| (tool.definition(), tool)),
         );
+    }
+    if let Some(inventory) = extensions.executor_inventory {
+        add_pool_tools(&mut tools, inventory, channel, profile, root, resources);
     }
     let native: Vec<AiTool> = tools
         .iter()

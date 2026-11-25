@@ -4,6 +4,7 @@ mod composer;
 mod consultation;
 pub(crate) use consultation::{ANSWER_PEER, ASK_PEER, PeerTool};
 mod coordinator;
+mod followup;
 pub(crate) use cargo_test::{CARGO_TEST, CargoTest};
 pub(crate) use coordinator::Coordinator;
 mod inventory;

@@ -79,27 +79,28 @@ enum Ended<'a> {
     Unrecorded,
 }
 
+/// Describe a recorded stop without exposing provider errors or arbitrary metadata.
+pub(crate) fn stop_description(reason: &str) -> String {
+    match reason {
+        "error" => "it failed on an error".to_owned(),
+        "cancelled" => "it was interrupted".to_owned(),
+        "max_rounds" => "it reached the limit of tool rounds a turn may run".to_owned(),
+        "timeout" => "it ran out of time".to_owned(),
+        "budget_exceeded" => "it reached its token or cost budget".to_owned(),
+        "truncated" => "it was cut at the output limit or the context window".to_owned(),
+        "empty_response" => "the model answered nothing after its tool calls".to_owned(),
+        // A reason the kit names since, as it writes it: a word.
+        reason if is_word(reason) => format!("it ended early ({reason})"),
+        _ => "it ended early".to_owned(),
+    }
+}
+
 impl Ended<'_> {
     /// What the next turn reads of it, with what the application told the
     /// user of the error it saw the turn fail on, `explained`.
     fn note(&self, explained: Option<Diagnostic>) -> String {
         let how = match self {
-            Self::Recorded("error") => "it failed on an error".to_owned(),
-            Self::Recorded("cancelled") => "it was interrupted".to_owned(),
-            Self::Recorded("max_rounds") => {
-                "it reached the limit of tool rounds a turn may run".to_owned()
-            }
-            Self::Recorded("timeout") => "it ran out of time".to_owned(),
-            Self::Recorded("budget_exceeded") => "it reached its token or cost budget".to_owned(),
-            Self::Recorded("truncated") => {
-                "it was cut at the output limit or the context window".to_owned()
-            }
-            Self::Recorded("empty_response") => {
-                "the model answered nothing after its tool calls".to_owned()
-            }
-            // A reason the kit names since, as it writes it: a word.
-            Self::Recorded(reason) if is_word(reason) => format!("it ended early ({reason})"),
-            Self::Recorded(_) => "it ended early".to_owned(),
+            Self::Recorded(reason) => stop_description(reason),
             Self::Unrecorded if explained.is_some() => "it failed on an error".to_owned(),
             Self::Unrecorded => "it left no record of how it ended: one of its requests \
                                  failed, or the application stopped during it"

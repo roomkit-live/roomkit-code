@@ -189,9 +189,9 @@ impl Tasks {
 
     /// Records the task `ended`, then leaves its line in the conversation
     /// that asked for it.
-    pub(crate) async fn finished(&self, ended: Task) {
+    pub(crate) async fn finished(&self, ended: Task, reason: Option<&str>) {
         let (room, id) = (ended.parent.clone(), ended.id.clone());
-        let Some(text) = self.ended(ended) else {
+        let Some(text) = self.ended_with_reason(ended, reason) else {
             return;
         };
         self.lines
@@ -232,6 +232,10 @@ impl Tasks {
     /// else `ended` itself, whose start was not told yet. Returns what its
     /// end is told as.
     pub(crate) fn ended(&self, ended: Task) -> Option<String> {
+        self.ended_with_reason(ended, None)
+    }
+
+    fn ended_with_reason(&self, ended: Task, reason: Option<&str>) -> Option<String> {
         let (took, outcome) = ended.ended?;
         let mut board = crate::sync::lock(&self.board);
         let known = board.tasks.iter().position(|known| known.id == ended.id);
@@ -244,7 +248,12 @@ impl Tasks {
         let outcome_text = match outcome {
             Outcome::Completed => format!("completed in {} s", seconds(took)),
             Outcome::Cancelled => "cancelled".to_owned(),
-            Outcome::Failed => "failed".to_owned(),
+            Outcome::Failed => reason
+                .filter(|r| !r.is_empty() && *r != "completed")
+                .map_or_else(
+                    || "failed".to_owned(),
+                    |r| format!("failed · {}", crate::turn_ends::stop_description(r)),
+                ),
             Outcome::Interrupted => "interrupted".to_owned(),
         };
         let text = format!("Task for {} {outcome_text}", ended.agent);
@@ -554,9 +563,9 @@ mod tests {
             tasks.started(task(id, "main", &format!("main::{id}")));
         }
         let first = ended(task("a", "main", "main::a"), Outcome::Completed);
-        tasks.finished(first).await;
+        tasks.finished(first, None).await;
         let second = ended(task("b", "main", "main::b"), Outcome::Failed);
-        tasks.finished(second).await;
+        tasks.finished(second, Some("max_rounds")).await;
 
         let said: Vec<_> = tasks
             .task_lines("main")
@@ -570,7 +579,7 @@ mod tests {
             said,
             [
                 "Task for Review completed in 58 s",
-                "Task for Review failed"
+                "Task for Review failed · it reached the limit of tool rounds a turn may run"
             ]
         );
         assert!(tasks.task_lines("elsewhere").is_empty());

@@ -25,6 +25,7 @@ struct Entry {
     room: String,
     parent: String,
     task: String,
+    delegated_turn: Option<String>,
     title: String,
     req: Requirements,
     pinned: Option<String>,
@@ -32,6 +33,20 @@ struct Entry {
     reason: String,
     placement: Option<String>,
 }
+
+/// Only the original delegation can be addressed from the parent. Later
+/// private messages use the same child room and task metadata.
+pub(super) fn delegated_turn(request: &TurnRequest) -> bool {
+    let status = request
+        .context
+        .room
+        .metadata
+        .get("task_status")
+        .and_then(serde_json::Value::as_str);
+    matches!(status, Some("pending" | "in_progress"))
+        && request.event.source.channel_id == roomkit::model::ChannelId::system()
+}
+
 impl Entry {
     fn accepts(&self, w: &Worker) -> bool {
         self.pinned.as_ref().is_none_or(|name| name == &w.name) && self.req.matches(w)
@@ -78,6 +93,7 @@ impl Queue {
             room: r.room_id.to_string(),
             parent: field("parent_room_id"),
             task: field("task_id"),
+            delegated_turn: delegated_turn(r).then(|| r.turn_id.clone()),
             title: field("task_input")
                 .chars()
                 .filter(|c| !c.is_control())
@@ -107,6 +123,19 @@ impl Queue {
             .and_then(|e| e.peer.clone())
     }
 
+    /// Resolve the exact admitted turn in the calling conversation. A task
+    /// queued for a worker or already handed back cannot be steered.
+    pub(super) fn task_turn(&self, parent: &str, task: &str) -> Option<(String, String)> {
+        let state = lock(&self.state);
+        let entry = state.active.values().find(|e| {
+            e.parent == parent
+                && e.task == task
+                && e.placement.is_some()
+                && e.delegated_turn.is_some()
+        })?;
+        Some((entry.room.clone(), entry.delegated_turn.clone()?))
+    }
+
     pub(super) fn placement(&self, room: &str) -> Option<String> {
         lock(&self.state)
             .active
@@ -123,7 +152,7 @@ impl Queue {
             .values()
             .map(|e| (e, true))
             .chain(state.recent.iter().rev().map(|e| (e, false)))
-            .filter(|(e, _)| e.room == room || e.parent == room)
+            .filter(|(e, _)| e.room == room || (e.parent == room && e.delegated_turn.is_some()))
             .map(|(e, active)| e.describe(active))
             .collect()
     }
