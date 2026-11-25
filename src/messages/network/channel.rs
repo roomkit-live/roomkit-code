@@ -18,13 +18,18 @@ pub(super) struct Inbox {
     pub channel: ChannelId,
     leases: Arc<SessionLeases>,
     wake: Arc<tokio::sync::Notify>,
+    /// The group's key: with one, only what it sealed is accepted.
+    key: Option<super::seal::Key>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Envelope {
     id: EventId,
-    mail: Mail,
+    /// As it was sent: its seal is checked on it before it is read.
+    mail: Value,
+    #[serde(default)]
+    seal: Option<String>,
 }
 
 impl Inbox {
@@ -34,6 +39,7 @@ impl Inbox {
         channel: ChannelId,
         leases: Arc<SessionLeases>,
         wake: Arc<tokio::sync::Notify>,
+        key: Option<super::seal::Key>,
     ) -> Self {
         Self {
             kit,
@@ -41,6 +47,7 @@ impl Inbox {
             channel,
             leases,
             wake,
+            key,
         }
     }
     async fn accept(&self, room: &RoomId, verb: &str, arguments: Metadata) -> Result<Value> {
@@ -52,7 +59,10 @@ impl Inbox {
         if target.organization_id.is_some() || !crate::messages::writable(&kit, room, None).await? {
             return Err("Session does not accept mail".into());
         }
-        let Envelope { id, mail } = serde_json::from_value(arguments.into())?;
+        let Envelope { id, mail, seal } = serde_json::from_value(arguments.into())?;
+        // Before anything in the mail is believed, its sender included.
+        super::seal::check(self.key.as_ref(), &id, &mail, seal.as_deref())?;
+        let mail: Mail = serde_json::from_value(mail)?;
         validate(&kit, room, &self.channel, &id, &mail).await?;
         mail.write(&kit, room, id.clone(), None).await?;
         self.wake.notify_one();

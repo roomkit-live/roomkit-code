@@ -300,6 +300,14 @@ group retries its pending response with the original answer and message ID. Grou
 the group's Redis keys can participate, so use a broker restricted to trusted
 participants. An executor pool and shared project directory are optional.
 
+To tell the group's members from anyone else who can write to the broker, give
+every member the same secret of at least 32 characters in
+`ROOMKIT_SESSION_GROUP_KEY`. A session that has it seals each message it sends
+and refuses any message the key did not seal; one without it refuses sealed
+messages, so set it on all members or none. The key is never sent to the broker
+nor passed to commands. Members still trust each other: it does not tell one
+member from another.
+
 ## Input history
 
 Up/Down recalls your last 100 saved messages from the selected conversation,
