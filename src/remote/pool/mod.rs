@@ -7,6 +7,7 @@ mod coordinator;
 mod followup;
 pub(crate) use cargo_test::{CARGO_TEST, CargoTest};
 pub(crate) use coordinator::Coordinator;
+pub(crate) use followup::session_placement;
 mod inventory;
 pub(crate) use inventory::{Inventory, LIST_EXECUTORS};
 mod lease;
@@ -27,6 +28,14 @@ pub(crate) use registry::WorkerProfile;
 use std::{collections::BTreeMap, sync::Arc};
 pub(crate) use worker::{advertise, worker_failure};
 pub(crate) use worker_options::WorkerArgs;
+
+/// Only an addressed post created by the room owner may carry placement.
+fn post_target(request: &roomkit::turns::TurnRequest) -> Option<&serde_json::Value> {
+    if request.event.source.channel_id != roomkit::model::ChannelId::host() {
+        return None;
+    }
+    request.event.metadata.get("executor_target")
+}
 
 fn identifier(value: &str) -> Result<String, String> {
     if value.is_empty()
@@ -120,7 +129,7 @@ impl Requirements {
         match name {
             CARGO_TEST if asked.is_some_and(|id| id.eq_ignore_ascii_case(sha)) => Ok(()),
             CARGO_TEST => Err(format!("This task requires cargo_test with commit {sha}")),
-            LIST_EXECUTORS | "read_stored_result" => Ok(()),
+            LIST_EXECUTORS | "read_stored_result" | crate::messages::SEND_MESSAGE => Ok(()),
             _ => Err("This task is limited to testing a Git commit. Its working files are private to cargo_test.".into())
         }
     }

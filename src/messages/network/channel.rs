@@ -89,7 +89,7 @@ async fn validate(
     }
     let (original, prefix) = match &mail.kind {
         Kind::Message if valid_request(id) => return Ok(()),
-        Kind::Message => return Err("Invalid message ID".into()),
+        Kind::Message | Kind::ToSession { .. } => return Err("Invalid network message".into()),
         Kind::Reply(original) => (original, "session-reply-"),
         Kind::Notice(original) => (original, "session-notice-"),
     };

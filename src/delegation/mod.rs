@@ -57,7 +57,7 @@ pub(crate) const WORKER: &str = "You are working on a task another agent handed 
 
 /// What the agent of a task's room reads once its task ended: the person is
 /// talking to it.
-pub(crate) const AFTER_TASK: &str = "The task another agent handed you has ended and its result went back to that agent. The person is now talking to you directly in this conversation of your own; what you answer stays here.";
+pub(crate) const AFTER_TASK: &str = "The task another agent handed you has ended and its result went back to that agent. Ordinary chat stays in this conversation. If you receive addressed session correspondence, return only the requested answer using send_message with its message_id as reply_to.";
 
 /// What the agent of `room` reads about its task, if `room` is a task's.
 pub(crate) fn worker_note(room: &roomkit::model::Room) -> Option<&'static str> {
@@ -136,7 +136,7 @@ impl Roster {
             listed.join(", ")
         );
         if self.1.load(std::sync::atomic::Ordering::Relaxed) {
-            text.push_str(r#" The remote-linux agent can run on multiple executor machines. For questions about which machines are available, call list_executors for the live inventory. When handing a task to remote-linux, set the executor field of context for required OS, local agent profile ID, labels and available RAM. Look up the exposed profile IDs, models and tools with list_executors. To update a running executor task, call send_message with to set to task:<task_id> and text. The task ID comes from delegate_task or task_status. A machine name is a placement choice. The worker reports back when its task ends. To use a particular agent on the worker, set context.executor.profile to its exact ID. Example context: {"executor":{"os":"linux","labels":{"role":"review"},"min_ram_mib":512}}. For a Rust test at an exact revision, set context.executor.test_commit to the full Git SHA. Ask each worker to report the verified commit, exit status and duration. For a consultation, set context.executor.consultation to true on both tasks, and give the asking task the other task_id returned by delegate_task. Both tasks need to be running at the same time. Omit constraints the task does not require."#);
+            text.push_str(r#" The remote-linux agent can run on multiple executor machines. For questions about which machines are available, call list_executors for the live inventory. When handing a task to remote-linux, set the executor field of context for required OS, local agent profile ID, labels and available RAM. Look up the exposed profile IDs, models and tools with list_executors. To message the same worker again, copy child_room_id from delegate_task into send_message.to, or use the exact to address from list_sessions. You can continue that conversation after its task ends. The worker reports back when its task ends. To use a particular agent on the worker, set context.executor.profile to its exact ID. Example context: {"executor":{"os":"linux","labels":{"role":"review"},"min_ram_mib":512}}. For a Rust test at an exact revision, set context.executor.test_commit to the full Git SHA. Ask each worker to report the verified commit, exit status and duration. For a consultation, set context.executor.consultation to true on both tasks, and give the asking task the other task_id returned by delegate_task. Both tasks need to be running at the same time. Omit constraints the task does not require."#);
         }
         Some(text)
     }

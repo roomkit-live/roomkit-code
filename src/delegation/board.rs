@@ -195,20 +195,33 @@ impl Tasks {
             return;
         };
         self.lines
-            .write(&room, &id, format!("task-ended-{id}"), "task_ended", &text)
+            .write(
+                &room,
+                format!("task-ended-{id}"),
+                ("task_ended", serde_json::json!({"task_id":id})),
+                &text,
+            )
             .await;
         self.changes.send_replace(());
     }
 
     /// Show the selected machine, agent and model as soon as its turn is submitted.
-    pub(crate) async fn assigned(&self, room: &str, task: &str, turn: &str, placement: &str) {
+    pub(crate) async fn assigned(
+        &self,
+        room: &str,
+        task: &str,
+        target: serde_json::Value,
+        placement: &str,
+    ) {
         let text = format!("{task} assigned to {placement}");
         self.lines
             .write(
                 room,
-                task,
-                format!("task-placement-{turn}"),
-                "task_placement",
+                format!("task-placement-{task}"),
+                (
+                    "task_placement",
+                    serde_json::json!({"task_id":task, "executor_target":target}),
+                ),
                 &text,
             )
             .await;
@@ -218,7 +231,12 @@ impl Tasks {
     /// Leave the consultation visible beside the parent conversation's placements.
     pub(crate) async fn consultation(&self, parent: &str, task: &str, id: String, text: &str) {
         self.lines
-            .write(parent, task, id, "task_consultation", text)
+            .write(
+                parent,
+                id,
+                ("task_consultation", serde_json::json!({"task_id":task})),
+                text,
+            )
             .await;
         self.changes.send_replace(());
     }

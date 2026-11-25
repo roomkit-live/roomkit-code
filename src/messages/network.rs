@@ -3,7 +3,10 @@
 mod channel;
 mod recovery;
 mod response;
-use super::record::{Mail, Route};
+use super::{
+    record::{Mail, Route},
+    request::AgentRequest,
+};
 use crate::{Result, storage::SessionLeases};
 use roomkit::model::{ChannelId, EventId, RoomId};
 use roomkit::turns::{ChannelCall, TurnBackend, wire::ChannelControl};
@@ -33,13 +36,6 @@ fn digest(s: &str, len: usize) -> bool {
     s.len() == len
         && s.bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub(super) struct AgentRequest {
-    pub agent: ChannelId,
-    pub turn: String,
-    pub question: String,
 }
 
 #[derive(Clone)]

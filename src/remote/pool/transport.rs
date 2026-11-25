@@ -30,7 +30,8 @@ impl Scheduler {
         let placement = worker.placement(profile.as_deref());
         ticket.assign(&placement, &worker.name, &link.request().turn_id);
         if super::queue::delegated_turn(link.request()) {
-            self.announce(link.request(), &placement).await;
+            self.announce(link.request(), &worker.name, &placement)
+                .await;
         }
         Ok(Arc::new(ScheduledLink {
             inner: link,
@@ -103,7 +104,7 @@ impl Scheduler {
         }
     }
 
-    async fn announce(&self, request: &TurnRequest, placement: &str) {
+    async fn announce(&self, request: &TurnRequest, worker: &str, placement: &str) {
         let metadata = &request.context.room.metadata;
         if let (Some(tasks), Some(parent), Some(task)) = (
             self.tasks.upgrade(),
@@ -113,7 +114,12 @@ impl Scheduler {
             metadata.get("task_id").and_then(serde_json::Value::as_str),
         ) {
             tasks
-                .assigned(parent, task, &request.turn_id, placement)
+                .assigned(
+                    parent,
+                    task,
+                    serde_json::json!({"worker":worker, "pool":self.scope}),
+                    placement,
+                )
                 .await;
         }
     }

@@ -2,13 +2,14 @@
 use super::{
     Messages,
     directory::{group_contacts, resolve},
-    network::{AgentRequest, Network},
+    network::Network,
     record::{Kind, Mail, check_text},
     reply,
+    request::origin,
 };
 use roomkit::{
     RoomKit,
-    model::{ChannelId, EventId, Metadata, RoomId},
+    model::{Metadata, RoomId},
 };
 use roomkit_ai::{AiTool, Tool, ToolError, ToolFuture, ToolResult};
 use roomkit_sqlite::SqliteStore;
@@ -27,10 +28,30 @@ impl Messages {
         };
         let mut tools: Vec<Arc<dyn Tool>> =
             vec![Arc::new(SessionTool::Send(self.clone(), pool_enabled))];
-        if context.group_enabled {
+        if context.group_enabled || pool_enabled {
             tools.push(Arc::new(SessionTool::List(self.clone())));
         }
         tools
+    }
+
+    async fn sessions(&self, kit: &Kit, room: &roomkit::model::Room) -> Result<Value, ToolError> {
+        let mut sessions = if self.pool().is_some() {
+            super::delegated::contacts(kit, room)
+                .await
+                .map_err(|e| ToolError::refused(e.to_string()))?
+        } else {
+            Vec::new()
+        };
+        if let Ok(net) = self.group_for(&room.id) {
+            match group_contacts(net).await {
+                Ok(peers) => {
+                    sessions.extend(peers.iter().map(|p| json!({"name":p.name,"to":p.key()})))
+                }
+                Err(error) if sessions.is_empty() => return Err(ToolError::refused(error)),
+                Err(error) => return Ok(json!({"sessions":sessions,"group_error":error})),
+            }
+        }
+        Ok(json!({"sessions":sessions}))
     }
 
     fn group_for(&self, room: &RoomId) -> Result<&Network, ToolError> {
@@ -59,28 +80,19 @@ impl Tool for SessionTool {
         let (name, description, parameters) = match self {
             Self::List(_) => (
                 LIST_SESSIONS,
-                "List other open sessions in your trusted session group. Use their exact to address with send_message.",
+                "List the sessions this conversation can contact, including its delegated executor sessions. Copy the exact to address into send_message.",
                 json!({"type":"object","properties":{},"additionalProperties":false}),
             ),
             Self::Send(m, pool)
                 if *pool || m.interactive.get().is_some_and(|c| c.group_enabled) =>
             {
-                let description = if *pool {
-                    "Send text to a running executor task in this conversation using to=task:<task_id>. Use the ID from delegate_task or task_status. For an open session use its address from list_sessions when available. To answer session mail use reply_to instead. Continue working after the send receipt."
-                } else {
-                    "Use to and text to contact a session from list_sessions. Use reply_to and text to answer incoming mail. Give exactly one destination. Continue working after the send receipt."
-                };
                 (
                     SEND_MESSAGE,
-                    description,
+                    "Write to a session using its exact to address from list_sessions or the child_room_id returned by delegate_task. Supply text. For a reply use reply_to with the incoming message ID instead of to. Continue working after sending.",
                     json!({"type":"object","required":["text"],"additionalProperties":false,"properties":{"to":{"type":"string","description":"Recipient for a new message. Leave empty when replying."},"reply_to":{"type":"string","description":"Received message ID for a reply. Leave empty for a new message."},"text":{"type":"string","maxLength":4000}}}),
                 )
             }
-            Self::Send(..) => (
-                SEND_MESSAGE,
-                "Reply to an incoming session message using its message_id as reply_to. Include only information intended for its sender.",
-                json!({"type":"object","required":["text","reply_to"],"additionalProperties":false,"properties":{"reply_to":{"type":"string"},"text":{"type":"string","maxLength":4000}}}),
-            ),
+            Self::Send(..) => return reply_definition(),
         };
         AiTool {
             name: name.into(),
@@ -114,10 +126,7 @@ impl Tool for SessionTool {
                 if !args.is_empty() {
                     return Err(ToolError::refused("list_sessions takes no arguments"));
                 }
-                let peers = group_contacts(messages.group_for(&room.id)?)
-                    .await
-                    .map_err(ToolError::refused)?;
-                json!({"sessions": peers.iter().map(|p| json!({"name":p.name,"to":p.key()})).collect::<Vec<_>>()})
+                messages.sessions(&kit, &room).await?
             } else {
                 send(&messages, &kit, &room, args).await?
             };
@@ -148,6 +157,20 @@ async fn send(
                     .send_to_task(kit, room, task, &input.text)
                     .await
                     .map_err(ToolError::refused);
+            }
+            if messages.pool().is_some() && !target.starts_with("peer:") {
+                if let Ok(id) = RoomId::new(target.as_str())
+                    && let Some(child) = super::delegated::destination(kit, room, &id)
+                        .await
+                        .map_err(|e| ToolError::refused(e.to_string()))?
+                {
+                    return super::delegated::send(kit, room, child, input.text).await;
+                }
+                if messages.group_for(&room.id).is_err() {
+                    return Err(ToolError::refused(
+                        "Session unavailable. Choose an exact address from list_sessions.",
+                    ));
+                }
             }
             initiate(messages.group_for(&room.id)?, kit, &target, input.text).await
         }
@@ -187,7 +210,7 @@ async fn initiate(
                 "Recipient unavailable or ambiguous. Use list_sessions to choose an exact address.",
             )
         })?;
-    let (id, request) = origin(net, peer, &text)?;
+    let (id, request) = origin(&net.room, net.channel.as_str(), peer.as_str(), &text)?;
     let mail = Mail {
         from: net.room.clone(),
         remote: None,
@@ -202,35 +225,11 @@ async fn initiate(
     )
 }
 
-fn origin(
-    net: &Network,
-    peer: &ChannelId,
-    text: &str,
-) -> Result<(EventId, AgentRequest), ToolError> {
-    let call = roomkit_ai::current_tool_call()
-        .filter(|c| c.room_id.as_ref() == Some(&net.room) && !c.tool_call_id.is_empty())
-        .ok_or_else(|| ToolError::refused("Missing calling session"))?;
-    let agent = call
-        .channel_id
-        .ok_or_else(|| ToolError::refused("Missing calling agent"))?;
-    let turn =
-        roomkit::current_turn_id().ok_or_else(|| ToolError::refused("Missing calling turn"))?;
-    let identity = json!([
-        "agent-message",
-        net.channel,
-        agent,
-        turn,
-        call.tool_call_id,
-        peer,
-        text
-    ]);
-    let hash = crate::digest::sha256_hex(identity.to_string().as_bytes());
-    let id = EventId::new(format!("session-msg-{hash}"))
-        .map_err(|e| ToolError::refused(e.to_string()))?;
-    let request = AgentRequest {
-        agent,
-        turn,
-        question: text.to_owned(),
-    };
-    Ok((id, request))
+pub(super) fn reply_definition() -> AiTool {
+    AiTool {
+        name: SEND_MESSAGE.into(),
+        description: "Reply to an incoming session message using its message_id as reply_to. Include only information intended for its sender.".into(),
+        parameters: json!({"type":"object","required":["text","reply_to"],"additionalProperties":false,"properties":{"reply_to":{"type":"string"},"text":{"type":"string","maxLength":4000}}}),
+        changes_state:false, tags: Vec::new(), defer_loading:false,
+    }
 }

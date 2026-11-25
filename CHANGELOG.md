@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- Agents can send follow-ups to their conversation’s running pool tasks using
-  `send_message`. The parent terminal shows a failed task’s reported stop reason.
+- Agents can use `list_sessions` and `send_message` to contact a delegated executor session by its `child_room_id`, including after handback. Explicit replies return to the asking agent. A conversation turn preserves the recorded task outcome.
+
+- The parent terminal shows a failed task’s reported stop reason.
 
 - Interactive agents and executor workers now default to 200 tool-call rounds per turn.
 

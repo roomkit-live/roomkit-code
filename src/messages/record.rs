@@ -11,6 +11,11 @@ pub(super) const STREAM: &str = "roomkit_code:session_mail:v1";
 #[serde(rename_all = "snake_case")]
 pub(super) enum Kind {
     Message,
+    ToSession {
+        to: RoomId,
+        agent: ChannelId,
+        turn: String,
+    },
     Reply(EventId),
     Notice(EventId),
 }
@@ -31,8 +36,15 @@ pub(super) struct Mail {
 }
 
 impl Mail {
+    pub fn destination<'a>(&'a self, stored_in: &'a RoomId) -> &'a RoomId {
+        match &self.kind {
+            Kind::ToSession { to, .. } => to,
+            _ => stored_in,
+        }
+    }
     pub fn line(&self) -> String {
-        let kind = match self.kind {
+        let kind = match &self.kind {
+            Kind::ToSession { to, .. } => return format!("Message to @{to}\n{}", self.text),
             Kind::Message => "Message",
             Kind::Reply(_) => "Reply",
             Kind::Notice(_) => "Delivery notice",
@@ -57,6 +69,17 @@ impl Mail {
         id: EventId,
         org: Option<String>,
     ) -> crate::Result<()> {
+        self.commit(kit, dest, id, org, self.remote.is_some()).await
+    }
+
+    pub(super) async fn commit(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        dest: &RoomId,
+        id: EventId,
+        org: Option<String>,
+        single_outcome: bool,
+    ) -> crate::Result<()> {
         let mut event = SystemRow {
             room: dest.as_str(),
             id: id.as_str(),
@@ -65,10 +88,10 @@ impl Mail {
         }
         .event(&ChannelId::new(crate::application::TERMINAL)?)?;
         event.correlation_id = Some(STREAM.into());
-        // Concurrent remote outcomes for one question compete for one native
+        // Concurrent outcomes for one question compete for one native
         // commit key. Their distinct event IDs still identify historical rows.
-        event.idempotency_key = Some(match (&self.remote, &self.kind) {
-            (Some(_), Kind::Reply(original) | Kind::Notice(original)) => {
+        event.idempotency_key = Some(match (single_outcome, &self.kind) {
+            (true, Kind::Reply(original) | Kind::Notice(original)) => {
                 format!("session-outcome-{original}")
             }
             _ => id.to_string(),

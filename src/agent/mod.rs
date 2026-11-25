@@ -445,6 +445,8 @@ fn add_pool_tools(
 ) {
     use crate::remote::pool::{CARGO_TEST, CargoTest, PeerTool};
     if channel == crate::remote::AGENT {
+        let reply = crate::messages::WorkerReply;
+        tools.push((reply.definition(), Arc::new(reply)));
         for tool in [PeerTool::Ask, PeerTool::Answer] {
             tools.push((tool.definition(), Arc::new(tool)));
         }

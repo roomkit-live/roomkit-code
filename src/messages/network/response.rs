@@ -44,7 +44,7 @@ impl Network {
         }
         let original = match &mail.kind {
             Kind::Reply(id) | Kind::Notice(id) => id,
-            Kind::Message => return Err("Expected a response".into()),
+            Kind::Message | Kind::ToSession { .. } => return Err("Expected a response".into()),
         };
         let Some(response) = self.reserve_response(kit, original, mail).await? else {
             return Ok(Acknowledgement::Saved);

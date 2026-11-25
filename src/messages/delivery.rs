@@ -10,13 +10,17 @@ pub(super) type Posts = tokio::task::JoinSet<crate::Result<()>>;
 
 pub(super) async fn deliver(
     messages: &super::Messages,
-    diagnostics: &crate::diagnostics::Diagnostics,
+    diagnostics: &std::sync::Arc<crate::diagnostics::Diagnostics>,
     kit: &Kit,
     event: RoomEvent,
     mail: Mail,
     posts: &mut Posts,
 ) -> crate::Result<()> {
     use super::dispatch::Checkpoint;
+    if matches!(mail.kind, Kind::ToSession { .. }) && super::receiver::answered(kit, &event).await?
+    {
+        return Ok(());
+    }
     let net = messages.network.get();
     let checkpoint = Checkpoint::read(kit, &event).await?;
     if !matches!(checkpoint, Some(Checkpoint::Delivered))
@@ -36,12 +40,21 @@ pub(super) async fn deliver(
     super::outgoing::confirm_return(kit, &event.room_id, &mail).await?;
     match checkpoint {
         Some(Checkpoint::Delivered) => {}
-        Some(Checkpoint::Steering) => {
-            messages.uncertain_steer(kit, &event).await?;
+        Some(Checkpoint::Steering) if matches!(mail.kind, Kind::ToSession { .. }) => {
+            notice(
+                None,
+                kit,
+                &event,
+                &mail,
+                "Delivery to the running worker could not be confirmed.",
+            )
+            .await?;
         }
+        Some(Checkpoint::Steering) => messages.uncertain_steer(kit, &event).await?,
+
         Some(Checkpoint::Post(post)) => post.admit(kit, net, event, mail, posts).await?,
         None => {
-            if let Some(post) = prepare(net, kit, &event, &mail, diagnostics).await? {
+            if let Some(post) = prepare(messages, kit, &event, &mail, diagnostics).await? {
                 post.admit(kit, net, event, mail, posts).await?;
             }
         }
@@ -50,13 +63,17 @@ pub(super) async fn deliver(
 }
 
 async fn prepare(
-    net: Option<&super::network::Network>,
+    messages: &super::Messages,
     kit: &Kit,
     event: &RoomEvent,
     mail: &Mail,
-    diagnostics: &crate::diagnostics::Diagnostics,
+    diagnostics: &std::sync::Arc<crate::diagnostics::Diagnostics>,
 ) -> crate::Result<Option<super::dispatch::PendingPost>> {
     use super::dispatch::{Checkpoint, PendingPost};
+    let net = messages.network.get();
+    if let Kind::ToSession { to, .. } = &mail.kind {
+        return super::delegated::prepare(messages, kit, event, mail, to, diagnostics).await;
+    }
     let Some((agent, preferred_turn, text)) = directive(net, kit, event, mail).await? else {
         return Ok(None);
     };
@@ -87,6 +104,7 @@ async fn prepare(
         agent,
         text,
         organization: target.organization_id,
+        executor_target: None,
     };
     Checkpoint::Post(post.clone())
         .save_known(kit, event, diagnostics)
@@ -101,6 +119,7 @@ async fn directive(
     mail: &Mail,
 ) -> crate::Result<Option<(ChannelId, Option<String>, String)>> {
     match &mail.kind {
+        Kind::ToSession { .. } => Ok(None),
         Kind::Message => {
             let Some(agent) = crate::sessions::designated(kit, &event.room_id).await? else {
                 notice(net, kit, event, mail, UNDELIVERED).await?;
@@ -109,13 +128,15 @@ async fn directive(
             Ok(Some((agent, None, question_prompt(event, mail))))
         }
         Kind::Reply(id) | Kind::Notice(id) => {
-            let Some(net) = net.filter(|_| mail.remote.is_some()) else {
-                return Ok(None);
+            let request = if mail.remote.is_some() {
+                match net {
+                    Some(n) => n.agent_request(kit, id).await?,
+                    None => None,
+                }
+            } else {
+                super::request::local(kit, event, mail, id).await?
             };
-            Ok(net
-                .agent_request(kit, id)
-                .await?
-                .map(|r| (r.agent, Some(r.turn), result_prompt(mail, id, &r.question))))
+            Ok(request.map(|r| (r.agent, Some(r.turn), result_prompt(mail, id, &r.question))))
         }
     }
 }
@@ -127,7 +148,7 @@ pub(super) async fn after_post(
     mail: &Mail,
     blocked: bool,
 ) -> crate::Result<()> {
-    if !matches!(mail.kind, Kind::Message) {
+    if !matches!(mail.kind, Kind::Message | Kind::ToSession { .. }) {
         return Ok(());
     }
     if blocked {
@@ -148,7 +169,7 @@ pub(super) async fn after_post(
     }
 }
 
-async fn has_local_reply(kit: &Kit, event: &RoomEvent) -> crate::Result<bool> {
+pub(super) async fn has_local_reply(kit: &Kit, event: &RoomEvent) -> crate::Result<bool> {
     Ok(kit
         .store()
         .get_event(&super::reply::reply_id(&event.id)?)
@@ -158,7 +179,7 @@ async fn has_local_reply(kit: &Kit, event: &RoomEvent) -> crate::Result<bool> {
 
 const UNDELIVERED: &str = "The receiving session could not deliver this message to its agent.";
 
-async fn notice(
+pub(super) async fn notice(
     net: Option<&super::network::Network>,
     kit: &Kit,
     event: &RoomEvent,
@@ -197,7 +218,7 @@ fn result_prompt(mail: &Mail, request: &roomkit::model::EventId, question: &str)
     )
 }
 
-fn question_prompt(event: &RoomEvent, mail: &Mail) -> String {
+pub(super) fn question_prompt(event: &RoomEvent, mail: &Mail) -> String {
     let quoted = roomkit_core::rules::transcript::without_mark_copies(&mail.text);
     let payload = json!({"from_session":mail.from, "message":quoted, "message_id":event.id});
     format!(

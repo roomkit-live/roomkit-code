@@ -35,6 +35,9 @@ impl Messages {
         diagnostics: &std::sync::Arc<crate::diagnostics::Diagnostics>,
     ) {
         let mut posts = Posts::new();
+        while let Err(error) = recover_session_questions(kit, room).await {
+            report_unavailable(diagnostics, error.as_ref()).await;
+        }
         if let Some(net) = self.network.get().filter(|net| net.room == *room).cloned() {
             let (messages, kit) = (self.clone(), kit.clone());
             let diagnostics = diagnostics.clone();
@@ -97,7 +100,7 @@ impl Messages {
         kit: &Kit,
         room: &RoomId,
         posts: &mut Posts,
-        diagnostics: &crate::diagnostics::Diagnostics,
+        diagnostics: &std::sync::Arc<crate::diagnostics::Diagnostics>,
     ) -> crate::Result<()> {
         let state = kit.store().get_private_state(room, CURSOR).await?;
         // RoomKit assigns index zero to the first event. None includes that record.
@@ -128,7 +131,7 @@ impl Messages {
         room: &RoomId,
         after: &mut Option<u64>,
         posts: &mut Posts,
-        diagnostics: &crate::diagnostics::Diagnostics,
+        diagnostics: &std::sync::Arc<crate::diagnostics::Diagnostics>,
     ) -> crate::Result<bool> {
         while let Some(result) = posts.try_join_next() {
             result??;
@@ -160,6 +163,72 @@ impl Messages {
             *after = Some(index);
         }
         Ok(full)
+    }
+}
+
+/// Only a previous owner could have advanced this cursor or left an admitted
+/// dispatch. Its turns have stopped. Never repeat those posts after restart.
+async fn recover_session_questions(kit: &Kit, room: &RoomId) -> crate::Result<()> {
+    let cursor = kit.store().get_private_state(room, CURSOR).await?;
+    let through = cursor.and_then(|s| s.get("index")?.as_u64());
+    let mut after = None;
+    loop {
+        let rows = mail_after(kit, room, after).await?;
+        for row in &rows {
+            let past = Some(row.index) <= through;
+            if let Some(mail) =
+                Mail::read(row).filter(|m| matches!(m.kind, super::record::Kind::ToSession { .. }))
+                && (past || previously_admitted(kit, row, &mail).await?)
+                && !answered(kit, row).await?
+            {
+                super::delivery::notice(
+                    None,
+                    kit,
+                    row,
+                    &mail,
+                    "The session owner stopped before a reply was confirmed.",
+                )
+                .await?;
+            }
+            if !past {
+                return Ok(());
+            }
+            after = Some(row.index);
+        }
+        if rows.len() < usize::from(BATCH) {
+            return Ok(());
+        }
+    }
+}
+
+pub(super) async fn answered(kit: &Kit, row: &roomkit::model::RoomEvent) -> crate::Result<bool> {
+    let terminal = roomkit::model::ChannelId::new(crate::application::TERMINAL)?;
+    let key = format!("session-outcome-{}", row.id);
+    Ok(kit
+        .store()
+        .get_event_by_idempotency_key(&row.room_id, &key, Some(&terminal))
+        .await?
+        .is_some())
+}
+
+async fn previously_admitted(
+    kit: &Kit,
+    row: &roomkit::model::RoomEvent,
+    mail: &Mail,
+) -> crate::Result<bool> {
+    use super::dispatch::Checkpoint;
+    match Checkpoint::read(kit, row).await? {
+        Some(Checkpoint::Post(_)) => {
+            let key = format!("dispatch-{}", row.id);
+            let host = roomkit::model::ChannelId::host();
+            Ok(kit
+                .store()
+                .get_event_by_idempotency_key(mail.destination(&row.room_id), &key, Some(&host))
+                .await?
+                .is_some())
+        }
+        Some(Checkpoint::Steering | Checkpoint::Delivered) => Ok(true),
+        None => Ok(false),
     }
 }
 
@@ -209,6 +278,60 @@ mod tests {
     use super::*;
     use roomkit::{RoomKitOptions, model::ChannelId};
     use roomkit_sqlite::SqliteStoreOptions;
+    #[tokio::test]
+    async fn restart_closes_an_interrupted_question_once_and_leaves_new_mail_pending()
+    -> crate::Result<()> {
+        use super::super::{dispatch::Checkpoint, record::Kind};
+        use roomkit::model::EventId;
+        let dir = tempfile::tempdir()?;
+        let kit = RoomKit::new(RoomKitOptions::with_store(SqliteStore::new(
+            SqliteStoreOptions {
+                path: dir.path().join("history.sqlite3"),
+            },
+        )));
+        let parent = kit.create_room(Default::default()).await?.id;
+        let child = kit.create_room(Default::default()).await?.id;
+        let terminal = ChannelId::new(crate::application::TERMINAL)?;
+        kit.register_channel(roomkit_tui_engine::ConversationChannel::new(
+            terminal.clone(),
+        ))?;
+        kit.attach_channel(&parent, &terminal, Default::default())
+            .await?;
+        let question = Mail {
+            from: parent.clone(),
+            remote: None,
+            text: "Which revision?".into(),
+            kind: Kind::ToSession {
+                to: child,
+                agent: ChannelId::new("code")?,
+                turn: "asking-turn".into(),
+            },
+        };
+        let first = EventId::new("session-msg-admitted")?;
+        let next = EventId::new("session-msg-fresh")?;
+        question.write(&kit, &parent, first.clone(), None).await?;
+        question.write(&kit, &parent, next.clone(), None).await?;
+        let row = kit
+            .store()
+            .get_event(&first)
+            .await?
+            .ok_or("Missing question")?;
+        Checkpoint::Steering.save(&kit, &row).await?;
+        recover_session_questions(&kit, &parent).await?;
+        recover_session_questions(&kit, &parent).await?;
+        assert!(answered(&kit, &row).await?);
+        let next_row = kit
+            .store()
+            .get_event(&next)
+            .await?
+            .ok_or("Missing pending question")?;
+        assert!(!answered(&kit, &next_row).await?);
+        let notice = super::super::reply::response_id(&Kind::Notice(first))?;
+        assert!(kit.store().get_event(&notice).await?.is_some());
+        kit.close().await?;
+        Ok(())
+    }
+
     #[tokio::test]
     async fn an_idle_inbox_advances_past_unrelated_history_and_backs_off() -> crate::Result<()> {
         let dir = tempfile::tempdir()?;

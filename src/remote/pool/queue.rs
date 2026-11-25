@@ -26,6 +26,7 @@ struct Entry {
     parent: String,
     task: String,
     delegated_turn: Option<String>,
+    closed: tokio_util::sync::CancellationToken,
     title: String,
     req: Requirements,
     pinned: Option<String>,
@@ -83,9 +84,13 @@ impl Queue {
             .and_then(|t| t.executor_id.as_ref())
             .and_then(|id| id.split_once('~'))
             .map(|(name, _)| name.into());
-        let pinned = metadata
-            .get("task_context")
-            .and_then(|c| c.pointer("/executor_target/worker"))
+        let pinned = super::post_target(r)
+            .or_else(|| {
+                metadata
+                    .get("task_context")
+                    .and_then(|c| c.get("executor_target"))
+            })
+            .and_then(|target| target.get("worker"))
             .and_then(|w| w.as_str())
             .map(str::to_owned)
             .or(pinned);
@@ -93,6 +98,7 @@ impl Queue {
             room: r.room_id.to_string(),
             parent: field("parent_room_id"),
             task: field("task_id"),
+            closed: Default::default(),
             delegated_turn: delegated_turn(r).then(|| r.turn_id.clone()),
             title: field("task_input")
                 .chars()
@@ -125,7 +131,11 @@ impl Queue {
 
     /// Resolve the exact admitted turn in the calling conversation. A task
     /// queued for a worker or already handed back cannot be steered.
-    pub(super) fn task_turn(&self, parent: &str, task: &str) -> Option<(String, String)> {
+    pub(super) fn task_turn(
+        &self,
+        parent: &str,
+        task: &str,
+    ) -> Option<(String, String, tokio_util::sync::CancellationToken)> {
         let state = lock(&self.state);
         let entry = state.active.values().find(|e| {
             e.parent == parent
@@ -133,7 +143,11 @@ impl Queue {
                 && e.placement.is_some()
                 && e.delegated_turn.is_some()
         })?;
-        Some((entry.room.clone(), entry.delegated_turn.clone()?))
+        Some((
+            entry.room.clone(),
+            entry.delegated_turn.clone()?,
+            entry.closed.clone(),
+        ))
     }
 
     pub(super) fn placement(&self, room: &str) -> Option<String> {
@@ -227,6 +241,7 @@ impl Drop for Ticket {
         let Some(mut entry) = state.active.remove(&self.id) else {
             return;
         };
+        entry.closed.cancel();
         if let Some(peer) = entry.peer.take() {
             peer.closed.cancel();
         }

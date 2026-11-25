@@ -17,8 +17,12 @@ struct Request {
 }
 
 pub(in crate::application) fn install(kit: &RoomKit<SqliteStore>, gate: Gate) -> Result<()> {
-    for tool in [remote::pool::PeerTool::Ask, remote::pool::PeerTool::Answer] {
-        install_peer(kit, gate.clone(), tool)?;
+    for action in [
+        WorkerAction::Peer(remote::pool::PeerTool::Ask),
+        WorkerAction::Peer(remote::pool::PeerTool::Answer),
+        WorkerAction::Reply,
+    ] {
+        install_action(kit, gate.clone(), action)?;
     }
     install_authorization(kit, gate.clone())?;
     install_outcomes(kit, gate)
@@ -91,11 +95,39 @@ fn install_outcomes(kit: &RoomKit<SqliteStore>, gate: Gate) -> Result<()> {
     )?)
 }
 
-fn install_peer(
-    kit: &RoomKit<SqliteStore>,
-    gate: Gate,
-    tool: remote::pool::PeerTool,
-) -> Result<()> {
+#[derive(Clone, Copy)]
+enum WorkerAction {
+    Peer(remote::pool::PeerTool),
+    Reply,
+}
+impl WorkerAction {
+    fn names(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Peer(peer) => (peer.name(), peer.verb()),
+            Self::Reply => (
+                crate::messages::SEND_MESSAGE,
+                crate::messages::WorkerReply::VERB,
+            ),
+        }
+    }
+    async fn run(
+        self,
+        gate: &Gate,
+        room: &Room,
+        args: Map<String, Value>,
+    ) -> std::result::Result<Value, String> {
+        match self {
+            Self::Peer(peer) => consult(gate, room, peer, args).await,
+            Self::Reply => {
+                let kit = gate.kit.upgrade().ok_or("The conversation has closed")?;
+                crate::messages::WorkerReply::respond(&kit, room, args).await
+            }
+        }
+    }
+}
+
+fn install_action(kit: &RoomKit<SqliteStore>, gate: Gate, action: WorkerAction) -> Result<()> {
+    let (name, verb_name) = action.names();
     let verb = roomkit::turns::DeclaredVerb::new(move |args| {
         let gate = gate.clone();
         async move {
@@ -103,7 +135,7 @@ fn install_peer(
                 .ok_or("Missing worker call")?
                 .tool_call_id;
             let request = Request {
-                name: tool.name().into(),
+                name: name.into(),
                 arguments: args.clone(),
                 id,
             };
@@ -122,10 +154,10 @@ fn install_peer(
                     .reason
                     .unwrap_or_else(|| "Authorization refused".into()))
             } else {
-                consult(&gate, &room, tool, args).await
+                action.run(&gate, &room, args).await
             };
             if let Some(receipt) = receipt {
-                let outcome = remote::ToolOutcome::from_consultation(&result, refused);
+                let outcome = remote::ToolOutcome::from_owner_action(&result, refused);
                 gate.hooks
                     .finish_worker_report(&room, &receipt, outcome)
                     .await?;
@@ -133,7 +165,7 @@ fn install_peer(
             Ok(result?)
         }
     });
-    Ok(kit.declare_host_verb(tool.verb(), verb, Default::default())?)
+    Ok(kit.declare_host_verb(verb_name, verb, Default::default())?)
 }
 
 async fn consult(

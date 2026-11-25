@@ -19,10 +19,12 @@ pub(super) async fn original(
         .get_event(&id)
         .await
         .map_err(|e| ToolError::refused(e.to_string()))?
-        .filter(|e| &e.room_id == room)
         .ok_or_else(|| ToolError::refused("No such message in this session"))?;
     let mail = Mail::read(&event)
-        .filter(|m| m.kind == Kind::Message)
+        .filter(|m| {
+            matches!(m.kind, Kind::Message | Kind::ToSession { .. })
+                && m.destination(&event.room_id) == room
+        })
         .ok_or_else(|| ToolError::refused("This event does not accept a reply"))?;
     Ok((event, mail))
 }
@@ -35,7 +37,9 @@ pub(super) fn response_id(kind: &Kind) -> crate::Result<EventId> {
     match kind {
         Kind::Reply(id) => reply_id(id),
         Kind::Notice(id) => Ok(EventId::new(format!("session-notice-{id}"))?),
-        Kind::Message => Err("Expected a session reply or delivery notice".into()),
+        Kind::Message | Kind::ToSession { .. } => {
+            Err("Expected a session reply or delivery notice".into())
+        }
     }
 }
 
@@ -56,7 +60,7 @@ pub(super) async fn respond(
 ) -> crate::Result<Acknowledgement> {
     let room = kit.get_room(&event.room_id, Default::default()).await?;
     let response = Mail {
-        from: room.id.clone(),
+        from: original.destination(&event.room_id).clone(),
         text: text.into(),
         remote: None,
         kind,
@@ -81,8 +85,15 @@ pub(super) async fn respond(
         return Err("The sending session cannot receive this reply".into());
     }
     let id = response_id(&response.kind)?;
-    response
-        .write(kit, &original.from, id, room.organization_id)
-        .await?;
+    let single = matches!(original.kind, Kind::ToSession { .. });
+    if let Err(error) = response
+        .commit(kit, &original.from, id, room.organization_id, single)
+        .await
+        && !(single
+            && matches!(response.kind, Kind::Notice(_))
+            && super::delivery::has_local_reply(kit, event).await?)
+    {
+        return Err(error);
+    }
     Ok(Acknowledgement::Saved)
 }

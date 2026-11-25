@@ -8,7 +8,7 @@ use roomkit::RoomKit;
 use roomkit::model::ChannelId;
 use roomkit_sqlite::SqliteStore;
 use roomkit_tui::protocol::{ActorId, Item, Message};
-use serde_json::json;
+use serde_json::Value;
 
 use super::board::NOTICE_FOR;
 use crate::system_row::{self, SystemRow};
@@ -29,10 +29,9 @@ impl TaskLines {
     }
 
     /// Record a task notice in its parent room and show it to attached views.
-    pub async fn write(&self, room: &str, task: &str, id: String, kind: &str, text: &str) {
+    pub async fn write(&self, room: &str, id: String, about: (&str, Value), text: &str) {
         let terminal = match self.kit.get() {
             Some((kit, terminal)) => {
-                let about = (kind, json!({"task_id": task}));
                 let row = SystemRow {
                     room,
                     id: &id,

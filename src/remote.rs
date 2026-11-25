@@ -182,7 +182,11 @@ pub(crate) fn permits(tool: &str, pooled: bool) -> bool {
         || (pooled
             && matches!(
                 tool,
-                pool::LIST_EXECUTORS | pool::CARGO_TEST | pool::ASK_PEER | pool::ANSWER_PEER
+                pool::LIST_EXECUTORS
+                    | pool::CARGO_TEST
+                    | pool::ASK_PEER
+                    | pool::ANSWER_PEER
+                    | crate::messages::SEND_MESSAGE
             ))
 }
 
@@ -197,7 +201,10 @@ async fn authorize(
     }
     // The owner applies the same permission gate inside its consultation verb,
     // immediately before the exchange. Running it here too would ask twice.
-    if matches!(event.name.as_str(), pool::ASK_PEER | pool::ANSWER_PEER) {
+    if matches!(
+        event.name.as_str(),
+        pool::ASK_PEER | pool::ANSWER_PEER | crate::messages::SEND_MESSAGE
+    ) {
         return allow();
     }
     let Some(host) = roomkit::current_turn_host() else {

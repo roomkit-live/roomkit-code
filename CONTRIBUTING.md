@@ -69,7 +69,12 @@ revision there first. The test uses independent workspaces and scripted model
 endpoints, and removes the test data on exit.
 
 Run `python3 scripts/check-pool-handover.py` with the same options to exercise
-two workers. It checks explicit placement, kills the test worker that accepted
+two workers. It checks addressing one of two sessions on the same worker,
+delivery of an explicit reply after handback, and the original task status.
+The owner records session questions in its existing inbox. It steers the exact
+delegated turn or posts to the child room on its recorded worker. The worker
+uses a turn-host call to reply. The owner verifies the child room and original
+message before returning the answer. The test also checks explicit placement, kills the test worker that accepted
 an unconstrained task, and verifies that the surviving worker only handles
 new work.
 

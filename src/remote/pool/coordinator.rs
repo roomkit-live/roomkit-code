@@ -66,12 +66,15 @@ impl TurnBackend for Coordinator {
             return self.local.submit(request);
         }
         let pool = self.active();
-        let target = request
-            .context
-            .room
-            .metadata
-            .get("task_context")
-            .and_then(|c| c.get("executor_target"));
+        let post_target = super::post_target(&request);
+        let target = post_target.or_else(|| {
+            request
+                .context
+                .room
+                .metadata
+                .get("task_context")
+                .and_then(|c| c.get("executor_target"))
+        });
         if let Some(target) = target
             && !pool.as_ref().is_some_and(|p| p.accepts_target(target))
         {

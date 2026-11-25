@@ -777,12 +777,22 @@ inventory lists a macOS profile named `reviewer`, delegate with these arguments.
 If several workers expose the same profile ID with different models, use the
 execution OS or placement labels from the inventory to narrow the match.
 
-To update a running assignment, call `send_message` in its parent conversation.
-Use the task ID returned by `delegate_task` or listed by `task_status`, for
-example `{"to":"task:task-1234","text":"Also check the migration."}`. The worker
-reads the update during the same task and reports back when it ends. Queued and
-finished tasks cannot receive this message. A session group is optional for
-this operation.
+Every delegation returns a `child_room_id`. From the parent session, pass that
+value directly to `send_message`, for example
+`{"to":"api::task-1234","text":"Which migration did you review?"}`.
+Use `list_sessions` to find the same address later by the assignment text and
+status. Two tasks on one executor have separate conversations. No session group
+is required for these exchanges.
+
+The parent can continue working while it waits. A running worker receives
+the question in its current turn. After handback, the same session answers
+in a new conversation turn with its existing history and permissions. Its
+`send_message(reply_to, text)` reply reaches the parent. Ordinary chat in the
+worker session stays private, and the recorded task outcome stays unchanged.
+A queued task can receive a message once its worker starts. Both owner and
+worker need a version with session replies for this exchange. For an older
+assignment that predates saved placement, the owner needs an explicit worker
+target to continue after handback.
 
 An executor uses its own tool-round limit. Set `--max-tool-rounds N` on the
 worker or set `[agent] max_tool_rounds` in its configuration. One round can

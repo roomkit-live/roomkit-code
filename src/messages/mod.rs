@@ -1,6 +1,9 @@
 //! Interactive session messages. RoomKit owns storage, addressing and steering.
 pub(crate) mod command;
+mod delegated;
 mod delivery;
+mod worker;
+pub(crate) use worker::WorkerReply;
 mod directory;
 mod dispatch;
 mod executor;
@@ -10,6 +13,7 @@ mod receiver;
 mod recipients;
 mod record;
 mod reply;
+mod request;
 #[cfg(test)]
 mod tests;
 mod tools;

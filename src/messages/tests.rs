@@ -129,3 +129,79 @@ async fn an_unreadable_store_is_not_an_undesignated_agent() -> crate::Result<()>
     assert!(crate::sessions::designated(&kit, &room).await.is_err());
     Ok(())
 }
+
+#[tokio::test]
+async fn delegated_sessions_are_scoped_to_the_parent_and_reply_address() -> crate::Result<()> {
+    use super::record::Kind;
+    use roomkit::model::{ChannelId, RoomId};
+    use serde_json::json;
+    let dir = tempfile::tempdir()?;
+    let kit = RoomKit::new(RoomKitOptions::with_store(SqliteStore::new(
+        SqliteStoreOptions {
+            path: dir.path().join("history.sqlite3"),
+        },
+    )));
+    let parent = kit.create_room(Default::default()).await?;
+    let foreign = kit.create_room(Default::default()).await?;
+    let metadata = [
+        ("parent_room_id".into(), json!(parent.id)),
+        ("task_agent_id".into(), json!(crate::remote::AGENT)),
+        ("task_input".into(), json!("Review")),
+    ]
+    .into_iter()
+    .collect();
+    let child = kit
+        .create_room(roomkit::CreateRoomOptions {
+            metadata,
+            ..Default::default()
+        })
+        .await?;
+    let other = RoomId::new("unrelated")?;
+    assert_eq!(
+        super::delegated::contacts(&kit, &parent).await?[0]["to"],
+        json!(child.id)
+    );
+    assert!(super::delegated::contacts(&kit, &foreign).await?.is_empty());
+    assert!(
+        super::delegated::destination(&kit, &foreign, &child.id)
+            .await?
+            .is_none()
+    );
+    let question = Mail {
+        from: parent.id.clone(),
+        remote: None,
+        text: "Which branch?".into(),
+        kind: Kind::ToSession {
+            to: child.id.clone(),
+            agent: ChannelId::new("code")?,
+            turn: "asking-turn".into(),
+        },
+    };
+    let id = EventId::new("session-msg-q")?;
+    question.write(&kit, &parent.id, id.clone(), None).await?;
+    assert!(
+        reply::original(&kit, &foreign.id, id.to_string())
+            .await
+            .is_err()
+    );
+    let (row, _) = reply::original(&kit, &child.id, id.to_string()).await?;
+    let mut answer = Mail {
+        from: other,
+        remote: None,
+        text: "branch-a".into(),
+        kind: Kind::Reply(id.clone()),
+    };
+    assert!(
+        super::request::local(&kit, &row, &answer, &id)
+            .await?
+            .is_none()
+    );
+    answer.from = child.id;
+    let request = super::request::local(&kit, &row, &answer, &id)
+        .await?
+        .unwrap();
+    assert_eq!(request.turn, "asking-turn");
+    assert_eq!(request.question, "Which branch?");
+    kit.close().await?;
+    Ok(())
+}

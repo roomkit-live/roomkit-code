@@ -16,7 +16,7 @@ pub(crate) struct ToolOutcome {
 }
 
 impl ToolOutcome {
-    pub(crate) fn from_consultation(result: &Result<Value, String>, refused: bool) -> Self {
+    pub(crate) fn from_owner_action(result: &Result<Value, String>, refused: bool) -> Self {
         Self {
             result: Some(match result {
                 Ok(value) => value.clone(),

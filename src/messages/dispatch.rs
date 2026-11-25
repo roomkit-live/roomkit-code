@@ -67,6 +67,8 @@ pub(super) struct PendingPost {
     pub text: String,
     pub agent: ChannelId,
     pub organization: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_target: Option<serde_json::Value>,
 }
 
 impl PendingPost {
@@ -80,7 +82,7 @@ impl PendingPost {
         mail: Mail,
         posts: &mut Posts,
     ) -> crate::Result<()> {
-        let room = event.room_id.clone();
+        let room = mail.destination(&event.room_id).clone();
         let key = format!("dispatch-{}", event.id);
         let host = ChannelId::host();
         let store = kit.store();
@@ -92,17 +94,22 @@ impl PendingPost {
             return after_post(net, kit, &event, &mail, true).await;
         }
         let options = PostOptions {
+            metadata: self
+                .executor_target
+                .map(|target| [("executor_target".into(), target)].into_iter().collect())
+                .unwrap_or_default(),
             organization_id: self.organization,
             addressed_to: vec![self.agent],
             idempotency_key: Some(key.clone()),
             ..Default::default()
         };
+        let destination = room.clone();
         let owner = kit.clone();
         let network = net.cloned();
         let (admitted, mut result) = tokio::sync::oneshot::channel();
         posts.spawn(async move {
             match owner
-                .post(&event.room_id, TextContent::new(self.text), options)
+                .post(&destination, TextContent::new(self.text), options)
                 .await
             {
                 Ok(posted) => {
@@ -122,6 +129,11 @@ impl PendingPost {
                     | roomkit::RoomKitError::ChannelNotFound { .. }
                     | roomkit::RoomKitError::RoomClosed { .. },
                 ) => {
+                    after_post(network.as_ref(), &owner, &event, &mail, true).await?;
+                    let _ = admitted.send(Ok(()));
+                    Ok(())
+                }
+                Err(_) if matches!(mail.kind, super::record::Kind::ToSession { .. }) => {
                     after_post(network.as_ref(), &owner, &event, &mail, true).await?;
                     let _ = admitted.send(Ok(()));
                     Ok(())
