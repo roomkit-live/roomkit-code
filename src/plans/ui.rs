@@ -8,6 +8,11 @@ use roomkit_tui_engine::{CommandResult, SessionConfig};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::panel_action::Verb;
+
+/// The plans panel's own verb: follows the shown plan in the sidebar.
+const FOLLOW: &str = "follow";
+
 #[derive(Clone)]
 struct Panel {
     id: String,
@@ -92,28 +97,27 @@ impl PlanView {
     pub async fn handle(&self, view: &SessionConfig, args: &str) -> Result<CommandResult, String> {
         let scope = scope(view);
         let mut panel = self.panel.lock().await;
-        let plan = if let Some((identity, verb)) = args.split_once(':') {
+        let plan = if let Some((identity, verb)) = crate::panel_action::addressed(args) {
             let current = panel
                 .as_ref()
                 .filter(|p| p.scope == scope && p.id == identity)
                 .ok_or("This plan view has expired; reopen /plans")?;
-            if verb == "dismiss" {
-                *panel = None;
-                return Ok(CommandResult::Events(Vec::new()));
-            }
-            if verb == "list" {
-                None
-            } else if let Some(id) = verb.strip_prefix("open:") {
-                Some(id.to_owned())
-            } else if verb == "follow" {
-                let id = current.plan.as_ref().ok_or("Choose a plan first")?.clone();
-                self.store
-                    .select(&scope, &id)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                Some(id)
-            } else {
-                return Err("Unknown plan action".into());
+            match verb {
+                Verb::Dismiss => {
+                    *panel = None;
+                    return Ok(CommandResult::Events(Vec::new()));
+                }
+                Verb::List => None,
+                Verb::Open(id) => Some(id.to_owned()),
+                Verb::Own(FOLLOW) => {
+                    let id = current.plan.as_ref().ok_or("Choose a plan first")?.clone();
+                    self.store
+                        .select(&scope, &id)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    Some(id)
+                }
+                Verb::Own(_) => return Err("Unknown plan action".into()),
             }
         } else if args.is_empty() {
             None
@@ -162,9 +166,9 @@ impl PlanView {
 
     async fn render(&self, panel: &Panel) -> PanelSpec {
         let mut spec = PanelSpec::new(panel.id.clone(), "plans", "Plans", "")
-            .with_dismiss(format!("{}:dismiss", panel.id));
-        let choose = |value: String, label: String, description: String| {
-            Choice::new(format!("{}:{value}", panel.id), label).with_description(description)
+            .with_dismiss(Verb::Dismiss.to(&panel.id));
+        let choose = |verb: Verb<'_>, label: String, description: String| {
+            Choice::new(verb.to(&panel.id), label).with_description(description)
         };
         let doc = match self.store.snapshot(&panel.scope).await {
             Ok(doc) => doc,
@@ -175,7 +179,7 @@ impl PlanView {
         };
         if let Some(id) = &panel.plan {
             spec.actions
-                .push(choose("list".into(), "All plans".into(), String::new()));
+                .push(choose(Verb::List, "All plans".into(), String::new()));
             let Some(plan) = doc.plans.get(id) else {
                 spec.body = "This plan was deleted.".into();
                 return spec;
@@ -190,7 +194,7 @@ impl PlanView {
             );
             if doc.selected.as_ref() != Some(id) {
                 spec.actions.push(choose(
-                    "follow".into(),
+                    Verb::Own(FOLLOW),
                     "Follow in sidebar".into(),
                     "Keep this plan visible while you work".into(),
                 ));
@@ -204,7 +208,7 @@ impl PlanView {
             };
             for plan in doc.plans.values() {
                 spec.actions.push(choose(
-                    format!("open:{}", plan.plan_id),
+                    Verb::Open(&plan.plan_id),
                     plan.title.clone(),
                     format!(
                         "{}{}",

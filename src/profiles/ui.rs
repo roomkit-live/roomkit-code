@@ -62,7 +62,7 @@ mod forms;
 mod menus;
 mod parse;
 
-use action::Action;
+pub(super) use action::Action;
 pub(super) use forms::next_id;
 use forms::*;
 pub(super) use menus::provider_choices;
@@ -98,6 +98,34 @@ impl Profiles {
         }
     }
 
+    /// Does what `action` asks when it is one that takes the profiles' lock
+    /// itself, or reaches a service before it does; none for the others.
+    async fn unlocked(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        terminal: &ChannelId,
+        action: Action<'_>,
+        current: &SessionConfig,
+    ) -> Option<Result<CommandResult, String>> {
+        let room = current.room.as_str();
+        Some(match action {
+            Action::Delete { command, id } => {
+                self.delete(kit, terminal, (command, false), id, current.clone())
+                    .await
+            }
+            Action::ConfirmDelete { command, token } => {
+                self.delete(kit, terminal, (command, true), token, current.clone())
+                    .await
+            }
+            Action::ChatGpt(account_action) => {
+                self.state.lock().await.pending_delete = None;
+                self.accounts.handle(room, account_action).await
+            }
+            Action::UseChatGpt(account) => self.use_chatgpt(current, account).await,
+            _ => return None,
+        })
+    }
+
     /// Does what `action` asks in `current`'s conversation.
     async fn invoke(
         &self,
@@ -106,28 +134,8 @@ impl Profiles {
         action: Action<'_>,
         current: SessionConfig,
     ) -> Result<CommandResult, String> {
-        // These take the profiles' lock themselves, or reach a service
-        // before they do.
-        match action {
-            Action::Delete { command, arguments } => {
-                // The words a person types for the structured action.
-                let typed = arguments
-                    .strip_prefix("delete ")
-                    .map(|id| format!("delete:{}", id.trim()));
-                let arguments = typed.as_deref().unwrap_or(arguments);
-                return self
-                    .delete(kit, terminal, command, arguments, current)
-                    .await;
-            }
-            Action::ChatGpt(account_action) => {
-                self.state.lock().await.pending_delete = None;
-                return self
-                    .accounts
-                    .handle(current.room.as_str(), account_action)
-                    .await;
-            }
-            Action::UseChatGpt(account) => return self.use_chatgpt(&current, account).await,
-            _ => {}
+        if let Some(done) = self.unlocked(kit, terminal, action, &current).await {
+            return done;
         }
         let mut state = self.state.lock().await;
         state.pending_delete = None;
@@ -148,7 +156,10 @@ impl Profiles {
             found.cloned().ok_or("Unknown provider")
         };
         match action {
-            Action::Delete { .. } | Action::ChatGpt(_) | Action::UseChatGpt(_) => {
+            Action::Delete { .. }
+            | Action::ConfirmDelete { .. }
+            | Action::ChatGpt(_)
+            | Action::UseChatGpt(_) => {
                 Err("Unknown profile action; reopen /providers or /agents".into())
             }
             Action::Model(id) => self.model(kit, state, current, id).await,
@@ -421,7 +432,14 @@ impl Profiles {
             "ChatGPT models · choose one to create an agent",
             models
                 .into_iter()
-                .map(|m| choice(format!("model:{provider_id}:{}", m.id), m.name, m.id))
+                .map(|m| {
+                    let on = Action::NewAgentOn {
+                        provider: &provider_id,
+                        model: &m.id,
+                        typed: false,
+                    };
+                    choice(on.to_string(), m.name, m.id)
+                })
                 .collect(),
         ))
     }
