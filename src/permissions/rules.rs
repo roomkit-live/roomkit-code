@@ -50,41 +50,6 @@ const DELEGATION: Rule = Rule {
     plan: true,
     label: CHANGE,
 };
-/// A new message to another session: its agent then acts on it, in that
-/// session's own mode, which may run what this one's Plan does not. Plan
-/// does not start it; a reply, or a message to this conversation's own
-/// task, stays delegation's.
-const SESSION_MESSAGE: Rule = Rule {
-    direct: true,
-    plan: false,
-    label: CHANGE,
-};
-
-/// Whether a `send_message` call with `arguments` writes a new message to
-/// another session: neither a reply nor a message to one of the
-/// conversation's tasks, which is addressed as `task:<id>` or by its
-/// room, as `own_task` knows it. An empty string is an argument left out,
-/// as some providers send it.
-fn starts_a_session(
-    arguments: &serde_json::Map<String, serde_json::Value>,
-    own_task: &dyn Fn(&str) -> bool,
-) -> bool {
-    recipient(arguments).is_some_and(|to| !to.starts_with("task:") && !own_task(to))
-}
-
-/// Whom a `send_message` call with `arguments` writes a new message to;
-/// none for a reply.
-pub(crate) fn recipient(arguments: &serde_json::Map<String, serde_json::Value>) -> Option<&str> {
-    let given = |key: &str| {
-        arguments
-            .get(key)
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-    };
-    given("to").filter(|_| given("reply_to").is_none())
-}
-
 /// Every MCP tool, whatever its name says: servers are configured outside
 /// the application and their effects are unknown.
 const MCP: Rule = Rule {
@@ -200,39 +165,26 @@ pub(crate) fn summary(has: impl Fn(&str) -> bool) -> String {
             None => "none".into(),
         }
     };
-    let messages = if has(crate::names::SEND_MESSAGE) {
-        " In Plan, send_message only replies (reply_to) or writes to this conversation's own tasks (to: task:…); it starts no message to another session."
-    } else {
-        ""
-    };
     format!(
-        "In Ask mode these tools run without approval: {}, as does patch while it only previews. Every other tool, MCP tools included, asks for approval before it runs. In Yolo mode selected tools run without prompts. Plan permits only these tools without approval: {}, plus patch while it only previews; it also permits {}, with approval.{messages} A command hook may still refuse a call or require its approval.",
+        "In Ask mode these tools run without approval: {}, as does patch while it only previews. Every other tool, MCP tools included, asks for approval before it runs. In Yolo mode selected tools run without prompts. Plan permits only these tools without approval: {}, plus patch while it only previews; it also permits {}, with approval. A command hook may still refuse a call or require its approval.",
         names(|rule| rule.direct),
         names(|rule| rule.direct && rule.plan),
         names(|rule| !rule.direct && rule.plan),
     )
 }
 
-/// The rule for this call, or none: such a tool is blocked. `own_task`
-/// tells whether a room is one of the calling conversation's own tasks.
-pub(crate) fn rule(event: &ToolCallEvent, own_task: &dyn Fn(&str) -> bool) -> Option<Rule> {
-    rule_for(event.name.as_str(), &event.arguments, own_task)
+/// The rule for this call, or none: such a tool is blocked.
+pub(crate) fn rule(event: &ToolCallEvent) -> Option<Rule> {
+    rule_for(event.name.as_str(), &event.arguments)
 }
 
-fn rule_for(
-    name: &str,
-    arguments: &serde_json::Map<String, serde_json::Value>,
-    own_task: &dyn Fn(&str) -> bool,
-) -> Option<Rule> {
+fn rule_for(name: &str, arguments: &serde_json::Map<String, serde_json::Value>) -> Option<Rule> {
     // The tool's schema defines an omitted dry_run as true.
     if name == "patch" && arguments.get("dry_run").is_none_or(|value| value == true) {
         return Some(READ);
     }
     if name.starts_with("mcp__") {
         return Some(MCP);
-    }
-    if name == crate::names::SEND_MESSAGE && starts_a_session(arguments, own_task) {
-        return Some(SESSION_MESSAGE);
     }
     RULES
         .iter()
@@ -279,29 +231,23 @@ mod tests {
             "plan_mode_exit",
         ];
         for name in crate::profiles::model::TOOLS.iter().chain(&others) {
-            assert!(
-                rule_for(name, &Map::new(), &|_| false).is_some(),
-                "{name} has no rule"
-            );
+            assert!(rule_for(name, &Map::new()).is_some(), "{name} has no rule");
         }
     }
 
     #[test]
     fn unknown_tools_have_no_rule_and_mcp_tools_always_ask() {
-        assert_eq!(rule_for("rm_rf", &Map::new(), &|_| false), None);
-        let mcp = rule_for("mcp__files__read", &Map::new(), &|_| false).unwrap();
+        assert_eq!(rule_for("rm_rf", &Map::new()), None);
+        let mcp = rule_for("mcp__files__read", &Map::new()).unwrap();
         assert!(!mcp.direct && !mcp.plan);
     }
 
     #[test]
     fn a_patch_runs_directly_only_as_a_preview() {
         for preview in [json!({}), json!({"dry_run": true})] {
-            assert_eq!(
-                rule_for("patch", &arguments(preview), &|_| false),
-                Some(READ)
-            );
+            assert_eq!(rule_for("patch", &arguments(preview)), Some(READ));
         }
-        let applied = rule_for("patch", &arguments(json!({"dry_run": false})), &|_| false).unwrap();
+        let applied = rule_for("patch", &arguments(json!({"dry_run": false}))).unwrap();
         assert!(!applied.direct && !applied.plan);
     }
 
@@ -316,38 +262,12 @@ mod tests {
             assert!(!plan.contains(&effect), "{effect}");
         }
         for cleanup in ["process_stop", "output_forget"] {
-            let rule = rule_for(cleanup, &Map::new(), &|_| false).unwrap();
+            let rule = rule_for(cleanup, &Map::new()).unwrap();
             assert!(rule.direct && !rule.plan, "{cleanup}");
         }
         for web in ["web_fetch", "web_search"] {
-            let rule = rule_for(web, &Map::new(), &|_| false).unwrap();
+            let rule = rule_for(web, &Map::new()).unwrap();
             assert!(!rule.direct && rule.plan, "{web}");
-        }
-    }
-
-    /// Review finding: a Plan conversation's agent could have another
-    /// session, in a mode of its own, do what Plan refuses.
-    #[test]
-    fn plan_starts_no_message_to_another_session() {
-        let rule = |arguments: serde_json::Value| {
-            let arguments = arguments.as_object().unwrap();
-            rule_for(crate::names::SEND_MESSAGE, arguments, &|room| {
-                room == "main::task-1"
-            })
-            .unwrap()
-        };
-        let new = rule(json!({"to": "review", "text": "Run the migration"}));
-        assert!(new.direct && !new.plan);
-        let empty_reply = rule(json!({"to": "review", "reply_to": "", "text": "x"}));
-        assert!(!empty_reply.plan);
-        for permitted in [
-            json!({"reply_to": "session-msg-1", "text": "Done"}),
-            json!({"to": "task:3", "text": "Also check the tests"}),
-            // A task is also addressed by its room, which the policy knows.
-            json!({"to": "main::task-1", "text": "Also check the tests"}),
-        ] {
-            let rule = rule(permitted);
-            assert!(rule.direct && rule.plan);
         }
     }
 }

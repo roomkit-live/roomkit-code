@@ -49,25 +49,6 @@ pub(super) fn install(kit: &RoomKit<SqliteStore>, gate: Gate) -> Result<()> {
     Ok(())
 }
 
-/// Tells the policy of the room a `send_message` call writes to, read
-/// from the store: a task's room this launch has not seen run, one handed
-/// back or delegated before a restart, is still the conversation's own,
-/// and Plan lets its agent write to it.
-async fn adopt_recipient(gate: &Gate, event: &ToolCallEvent) {
-    if event.name != crate::names::SEND_MESSAGE {
-        return;
-    }
-    let Some(to) = crate::permissions::recipient(&event.arguments) else {
-        return;
-    };
-    let (Ok(id), Some(kit)) = (roomkit::model::RoomId::new(to), gate.kit.upgrade()) else {
-        return;
-    };
-    if let Ok(Some(room)) = roomkit::ConversationStore::get_room(kit.store(), &id).await {
-        gate.policy.adopt(&room);
-    }
-}
-
 /// Plan refuses before any hook runs; a hook's refusal stands, and its
 /// request for review reaches the approval card. A call outside a
 /// conversation has no mode and no view to approve it. A delegated task's
@@ -89,7 +70,6 @@ async fn decide(
         return block("This tool call has no conversation to approve it in.");
     }
     policy.adopt(&context.room);
-    adopt_recipient(gate, &event).await;
     if policy.plan_blocks(&event) {
         return policy.gate(channel, event).await;
     }

@@ -16,7 +16,7 @@
 
 - Connections and HTTP MCP servers that would send a credential over plain `http://` to a host outside this machine and its local network are refused when saved.
 
-- In Plan mode `send_message` only replies or writes to the conversation's own tasks, by `task:` ID or by their room: it no longer starts a message to another session, which could run what Plan refuses. A conversation no view opened no longer inherits a launch's Yolo mode.
+- A conversation no view opened no longer inherits a launch's Yolo mode.
 
 - Executor pool (beta): a task waiting for a slot survives Redis errors for 30 seconds; a worker record that does not read is left out instead of stopping the pool; a worker whose heartbeats fail says so and stops after five minutes; a lost slot cancels the worker's turn; a worker's tool result past 256 KiB is omitted from its report.
 

@@ -21,7 +21,7 @@ pub(crate) use modes::{EXIT as PLAN_EXIT, ModeTools, approve_exit};
 /// The mode tools' names.
 pub(crate) const MODE_TOOLS: [&str; 2] = [modes::ENTER, modes::EXIT];
 
-pub(crate) use rules::{recipient, summary};
+pub(crate) use rules::summary;
 
 /// What the permission gate decides on a tool call: it runs, runs with other
 /// arguments, or is refused with words the model reads.
@@ -251,25 +251,7 @@ impl Policy {
     }
 
     pub(crate) fn plan_blocks(&self, event: &ToolCallEvent) -> bool {
-        self.mode(room_of(event)) == Mode::Plan && !self.plan_allowed(event)
-    }
-
-    /// The rule for `event`, read with the rooms this policy knows: a
-    /// message to the room of one of the calling conversation's own tasks
-    /// is delegation, not a message to another session.
-    fn rule(&self, event: &ToolCallEvent) -> Option<rules::Rule> {
-        let conversation = self.conversation(room_of(event));
-        let own_task = |room: &str| {
-            self.delegated(room)
-                && conversation.is_some()
-                && self.conversation(room).map(|(root, _)| root)
-                    == conversation.as_ref().map(|(root, _)| root.clone())
-        };
-        rules::rule(event, &own_task)
-    }
-
-    fn plan_allowed(&self, event: &ToolCallEvent) -> bool {
-        self.rule(event).is_some_and(|rule| rule.plan)
+        self.mode(room_of(event)) == Mode::Plan && !plan_allowed(event)
     }
 
     /// The card for `event`, named after the agent that asks when it is a
@@ -313,7 +295,7 @@ impl Policy {
                 "Plan mode: explore and update the plan only. This action is disabled. Ask the user to switch to Ask or Yolo before implementing; do not retry or use another tool to bypass this restriction.",
             );
         }
-        let Some(rule) = self.rule(&event) else {
+        let Some(rule) = rules::rule(&event) else {
             return block("This tool has no application permission policy.");
         };
         if rule.direct && review.is_none() {
@@ -330,7 +312,7 @@ impl Policy {
         };
         match channel.ask_tool_permission(&event, request).await {
             Decision::Allow
-                if self.mode(room_of(&event)) == Mode::Plan && !self.plan_allowed(&event) =>
+                if self.mode(room_of(&event)) == Mode::Plan && !plan_allowed(&event) =>
             {
                 block(
                     "The mode changed to Plan while approval was pending; this action was not executed.",
@@ -343,6 +325,10 @@ impl Policy {
             ),
         }
     }
+}
+
+fn plan_allowed(event: &ToolCallEvent) -> bool {
+    rules::rule(event).is_some_and(|rule| rule.plan)
 }
 
 #[cfg(test)]
@@ -371,31 +357,6 @@ mod tests {
         assert_eq!((policy.depth("main"), policy.depth("main::a::b")), (0, 2));
         assert!(policy.delegated("main::a") && !policy.delegated("main"));
         assert!(!policy.delegated("other"));
-    }
-
-    /// Review finding: Plan refused a message to the conversation's own
-    /// task when it was addressed by its room, as `delegate_task` returns
-    /// it, taking it for another session.
-    #[test]
-    fn plan_lets_an_agent_write_to_its_own_task_s_room() {
-        let policy = Policy::new(Mode::Plan);
-        policy.adopt(&child("main::task-1", "main"));
-        policy.adopt(&child("other::task-9", "other"));
-        let send = |to: &str| {
-            let arguments = serde_json::json!({"to": to, "text": "x"});
-            let mut event = ToolCallEvent::new(
-                roomkit::model::ChannelId::new("code").unwrap(),
-                roomkit::model::ChannelType::AI,
-                "call",
-                crate::names::SEND_MESSAGE,
-                arguments.as_object().unwrap().clone(),
-            );
-            event.room_id = Some(RoomId::new("main").unwrap());
-            policy.plan_blocks(&event)
-        };
-        assert!(!send("main::task-1"));
-        assert!(send("other::task-9"), "another conversation's task");
-        assert!(send("review"), "another session");
     }
 
     /// A person who sets the mode from a task's room sets the conversation's.
