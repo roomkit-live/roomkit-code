@@ -135,12 +135,13 @@ async fn opencode_go_connects_with_a_pasted_key_and_edits_without_retyping_it() 
         .await;
 }
 
+#[expect(clippy::cognitive_complexity, reason = "A scenario told in one piece")]
 async fn connect_and_edit(catalogue: &Catalogue) {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let mock = Mock::start(vec![]).await;
     let settings = settings(root.path(), state.path(), &mock.base_url);
-    let app = Application::open(&settings, "fixture-key".into())
+    let app = Application::open(&settings, "fixture-key".to_owned())
         .await
         .unwrap();
 

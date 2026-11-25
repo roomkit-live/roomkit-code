@@ -578,3 +578,24 @@ fn no_look_alike_closes_the_block_of_a_project_file() {
         );
     }
 }
+
+/// An absolute path inside the workspace, which the file tools take, was
+/// refused as not a project path: the model was warned of a problem its
+/// call did not have, and the scope's rules were not found.
+#[tokio::test]
+async fn an_absolute_path_inside_the_workspace_reads_its_scope_s_rules() {
+    let (root, global) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::fs::create_dir(root.path().join("nested")).unwrap();
+    std::fs::write(root.path().join("nested/AGENTS.md"), "NESTED").unwrap();
+    let loader = Instructions::new(root.path(), global.path());
+    let absolute = root.path().join("nested/file.rs");
+    let target = loader.in_workspace(&absolute.to_string_lossy());
+    assert_eq!(target, "nested/file.rs");
+    assert_eq!(loader.in_workspace(&root.path().to_string_lossy()), ".");
+    assert_eq!(loader.in_workspace("nested"), "nested");
+    assert_eq!(loader.in_workspace("/elsewhere/file"), "/elsewhere/file");
+    let report = loader.load(vec![target], false).await;
+    assert!(report.problems.is_empty(), "{:?}", report.problems);
+    assert_eq!(report.sources.len(), 1);
+    assert_eq!(report.sources[0].text, "NESTED");
+}

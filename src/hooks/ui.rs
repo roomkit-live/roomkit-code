@@ -172,6 +172,10 @@ impl Hooks {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Debt recorded when the limit was set: split it, never grow it"
+)]
 fn specification(state: &State, panel: &Panel) -> Result<PanelSpec, String> {
     let prefix = &panel.id;
     let (title, body, actions) = if let Some(id) = &panel.hook {
@@ -203,7 +207,7 @@ fn specification(state: &State, panel: &Panel) -> Result<PanelSpec, String> {
         (
             format!("Hook · {}", entry.label()),
             format!(
-                "State: {}\nSource: {}\nEvent: {}\nMatcher: {}\nTimeout: {} s\nRuns in Plan: {}\nWorking directory: project root\n\nCommand:\n{}\n\nEnabling trusts this exact definition for this project. Commands run with your user permissions and may read or modify data. Referenced scripts remain your responsibility. Changes to the definition require review after reload.\n\nRecent executions in this session (output is not saved to diagnostics):\n{}",
+                "State: {}\nSource: {}\nEvent: {}\nMatcher: {}\nTimeout: {} s\nRuns in Plan: {}\nWorking directory: project root\n\nCommand:\n{}\n\nEnabling trusts this exact definition for this project. Commands run with your user permissions and may read or modify data. The project scripts the command launches are trusted as they read now: once one changes, the hook fails until it is reviewed again; what they run in turn remains your responsibility. Changes to the definition require review after reload.\n\nRecent executions in this session (output is not saved to diagnostics):\n{}",
                 if enabled {
                     "enabled"
                 } else {
@@ -218,7 +222,7 @@ fn specification(state: &State, panel: &Panel) -> Result<PanelSpec, String> {
                 },
                 entry.hook.timeout,
                 entry.hook.roomkit.run_in_plan,
-                bounded(&entry.hook.command, 8192),
+                super::reviewed(&entry.hook.command, 8192),
                 if receipts.is_empty() {
                     "None"
                 } else {

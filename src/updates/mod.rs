@@ -125,15 +125,14 @@ impl Updates {
             return;
         };
         let save = || -> Result<()> {
-            use std::io::Write;
-            let mut temp =
-                tempfile::NamedTempFile::new_in(path.parent().ok_or("Invalid update cache")?)?;
-            temp.write_all(&serde_json::to_vec(&Cache {
+            let cache = Cache {
                 checked_at: now(),
                 release,
-            })?)?;
-            temp.persist(path)?;
-            Ok(())
+            };
+            Ok(crate::storage::write_atomic(
+                &path,
+                &serde_json::to_vec(&cache)?,
+            )?)
         };
         let _ = save();
     }

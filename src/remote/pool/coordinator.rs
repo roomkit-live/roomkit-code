@@ -62,7 +62,7 @@ impl Coordinator {
 
 impl TurnBackend for Coordinator {
     fn submit(&self, request: TurnRequest) -> TurnFuture<'_, Result<Arc<dyn TurnLink>>> {
-        if request.channel_id.as_str() != crate::remote::AGENT {
+        if request.channel_id.as_str() != crate::names::REMOTE_AGENT {
             return self.local.submit(request);
         }
         let pool = self.active();
@@ -102,7 +102,7 @@ impl TurnBackend for Coordinator {
             | RoomDetached { channel_id, .. }
             | CommittedEvent { channel_id, .. } => channel_id,
         };
-        if channel.as_str() == crate::remote::AGENT
+        if channel.as_str() == crate::names::REMOTE_AGENT
             && let Some(pool) = self.active()
         {
             return Box::pin(async move {
@@ -128,7 +128,7 @@ impl TurnBackend for Coordinator {
         room: &'a str,
         online: Option<bool>,
     ) -> Option<TurnFuture<'a, Result<bool>>> {
-        if channel == crate::remote::AGENT
+        if channel == crate::names::REMOTE_AGENT
             && let Some(pool) = self.active()
         {
             return Some(Box::pin(async move {
@@ -149,7 +149,7 @@ impl TurnBackend for Coordinator {
                 vec![ExecutorInfo::new(
                     "code-executor-queue",
                     ExecutorInfoOptions {
-                        hosts: Some([crate::remote::AGENT.into()].into()),
+                        hosts: Some([crate::names::REMOTE_AGENT.into()].into()),
                         ..Default::default()
                     },
                 )]

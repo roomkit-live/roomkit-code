@@ -9,26 +9,24 @@ use roomkit::{ConversationStore, model::EventId};
 use serde::Deserialize;
 use serde_json::json;
 
+/// The response recorded for a message, and whether its peer acknowledged
+/// it.
 #[derive(Deserialize)]
 pub(super) struct Receipt {
-    // Earlier versions stored only {"sent":true} for an acknowledged reply.
-    response: Option<Mail>,
+    response: Mail,
     pub(super) sent: bool,
 }
 
 impl Receipt {
+    /// What is still to transmit when `requested` is asked again: the
+    /// response recorded, unless its peer already acknowledged it. A reply
+    /// that differs from the one recorded is refused; a notice gives way to
+    /// it.
     fn replay(self, requested: &Mail) -> crate::Result<Option<Mail>> {
-        match self.response {
-            Some(reserved) => {
-                if reserved != *requested && !matches!(requested.kind, Kind::Notice(_)) {
-                    return Err("A different response was already recorded for this message".into());
-                }
-                Ok((!self.sent).then_some(reserved))
-            }
-            None if self.sent && matches!(requested.kind, Kind::Notice(_)) => Ok(None),
-            None if self.sent => Ok(Some(requested.clone())), // The peer verifies the old payload.
-            None => Err("Invalid stored session response".into()),
+        if self.response != *requested && !matches!(requested.kind, Kind::Notice(_)) {
+            return Err("A different response was already recorded for this message".into());
         }
+        Ok((!self.sent).then_some(self.response))
     }
 }
 
@@ -77,7 +75,7 @@ impl Network {
         let mut entries = self.pending_responses(kit).await?;
         if let Some(value) = entries.get(original.as_str()) {
             let reserved = Receipt {
-                response: Some(serde_json::from_value(value.clone())?),
+                response: serde_json::from_value(value.clone())?,
                 sent: false,
             };
             return reserved.replay(requested);

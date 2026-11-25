@@ -82,6 +82,7 @@ async fn native_answer(
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn anthropic_profiles_discover_call_tools_compact_and_resume() {
     let native = Native::start().await;
     let root = tempfile::tempdir().unwrap();
@@ -216,7 +217,7 @@ async fn anthropic_profiles_discover_call_tools_compact_and_resume() {
     }));
     app.close().await.unwrap();
     drop(app);
-    let app = Application::open(&settings, "ignored-bootstrap-key".into())
+    let app = Application::open(&settings, "ignored-bootstrap-key".to_owned())
         .await
         .unwrap();
     assert_eq!(
@@ -241,7 +242,7 @@ async fn anthropic_automatically_leaves_room_for_reasoning_and_an_answer() {
     let mut settings = settings(root.path(), state.path(), &native.url);
     settings.provider = ProviderKind::Anthropic;
     settings.model = "claude-fable-5-2".into();
-    let app = Application::open(&settings, "native-fixture-key".into())
+    let app = Application::open(&settings, "native-fixture-key".to_owned())
         .await
         .unwrap();
     turn(&app).await;
@@ -265,7 +266,7 @@ async fn anthropic_custom_models_respect_the_image_setting() {
     let mut settings = settings(root.path(), state.path(), &native.url);
     settings.provider = ProviderKind::Anthropic;
     settings.model = "custom-gateway-model".into();
-    let mut app = Application::open(&settings, "native-fixture-key".into())
+    let mut app = Application::open(&settings, "native-fixture-key".to_owned())
         .await
         .unwrap();
     assert!(!app.view.can_attach_images);

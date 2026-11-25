@@ -53,8 +53,8 @@ which override the explicit TOML file. Project configuration and `.env` files
 are never loaded automatically as connection settings. Project `AGENTS.md`
 instructions are discovered separately as described below. These connection values initialize the project's first agent once. Thereafter,
 saved profiles take precedence so an old launch command cannot undo UI edits.
-Appearance and permission flags still apply at every launch. A supplied
-`ROOMKIT_API_KEY` is imported into the protected local connection profile.
+Appearance and permission flags still apply at every launch. A key in
+`ROOMKIT_API_KEY` is read at each launch, never copied to disk: keep it set.
 
 ```sh
 cargo run --locked -- /path/to/project --config roomkit-code.local.toml
@@ -1866,8 +1866,9 @@ For a delegated executor tool, the coordinator runs its project hooks in the coo
 ones in `.roomkit/hooks.json`. Both sources are additive, global first. No command
 runs until you inspect it and choose **Enable this hook** in `/hooks`. Approval is
 stored privately for this project and exact definition. Use **Reload configuration**
-after editing; new or changed definitions need review again. Referenced script
-contents are not pinned: only enable commands and scripts you maintain or trust.
+after editing; new or changed definitions need review again. The project scripts a
+command launches are pinned as reviewed: once one changes, the hook fails instead
+of running, until reviewed again. What those scripts run in turn is not pinned.
 Existing `.claude` and `.codex` configurations are not imported automatically.
 
 For example, put this in `.roomkit/hooks.json`:
@@ -1959,8 +1960,10 @@ Independent tool outcomes may be observed concurrently. Configuration is fixed f
 a turn, and changing enabled hooks is refused while it runs. In Plan mode, commands
 are skipped unless their definition explicitly includes
 `"roomkit": {"run_in_plan": true}`. That option allows the script itself to run with
-your user permissions; it is not a read-only sandbox. Commands inherit the host's
-environment and run at the project root, also exposed as `ROOMKIT_PROJECT_DIR`.
+your user permissions; it is not a read-only sandbox. Commands run at the project
+root, also exposed as `ROOMKIT_PROJECT_DIR`, with the environment of the shell
+tool described above: an API key exported in your shell stays out of them unless
+`--inherit-env` names it.
 
 The reusable `crates/roomkit-hooks` component bounds stdin to 1 MiB, each output
 stream to 32 KiB and each command to 1–30 seconds (default 10). Each source allows

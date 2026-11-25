@@ -68,6 +68,7 @@ pub(super) fn records(root: &Path) -> Vec<Value> {
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn hooks_span_real_tool_rounds_preserve_correlation_and_resume_without_replay() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();

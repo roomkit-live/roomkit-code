@@ -18,6 +18,10 @@ pub(super) struct Pending {
 }
 
 impl Profiles {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Debt recorded when the limit was set: split it, never grow it"
+    )]
     pub(super) async fn delete(
         &self,
         kit: &RoomKit<SqliteStore>,
@@ -154,11 +158,12 @@ impl Profiles {
         } else {
             Some(current.agent.to_string()).filter(|selected| remaining.contains(selected))
         };
+        let mut attached = false;
         let replacement = if selected {
             current.agent = ChannelId::new(next.as_deref().unwrap_or("code"))
                 .map_err(|_| "Invalid agent ID")?;
             state.ensure_slot(kit, current.agent.as_str())?;
-            self.attach(kit, &current, terminal).await?;
+            attached = self.attach(kit, &current, terminal).await?;
             match next.as_ref().and_then(|id| state.agent(id)) {
                 Some(agent) => Some(match state.providers.value.profiles.get(&agent.provider) {
                     Some(provider) => self.assemble(&agent, provider).await,
@@ -170,7 +175,9 @@ impl Profiles {
             None
         };
 
-        state.remove_agent(id, next.as_deref())?;
+        let removed = state.remove_agent(id, next.as_deref());
+        self.saved_or_detached(kit, &current, attached, removed)
+            .await?;
         state.disable(id);
         if selected {
             state.disable(current.agent.as_str());
@@ -208,50 +215,24 @@ impl Profiles {
             .filter(|agent| agent.provider == id)
             .map(|agent| format!("{} ({}), a global agent", agent.label, agent.id))
             .collect();
-        let entries = std::fs::read_dir(self.state_dir.join("projects"))
-            .map_err(|_| "Cannot inspect project profiles before deleting this provider")?;
-        for entry in entries {
-            let entry = entry.map_err(|_| "Cannot inspect project profiles")?;
-            let kind = entry
-                .file_type()
-                .map_err(|_| "Cannot inspect project profiles")?;
-            if kind.is_symlink() {
-                return Err(
-                    "A project profile directory is a symlink; cannot verify provider references"
-                        .into(),
-                );
-            }
-            if !kind.is_dir() {
-                continue;
-            }
-            let path = entry.path().join("agents.json");
-            let project = Document::<Project>::load(path.clone())
-                .map_err(|_| "Cannot read a project's agent profiles; repair them before deleting this provider")?;
-            if !matches!(project.value.schema, 4 | PROJECT_SCHEMA) {
-                return Err(format!(
-                    "{} has an unsupported version; cannot verify provider references",
-                    path.display()
-                ));
-            }
+        let projects = super::catalog::project_files(&self.state_dir.join("projects"))
+            .map_err(|error| format!("{error}; this provider's references cannot be verified"))?;
+        for project in &projects {
+            let location = if project.path() == state.project.path() {
+                "this project".to_owned()
+            } else {
+                let directory = project.path().parent().and_then(|path| path.file_name());
+                let name = directory
+                    .map(|name| name.to_string_lossy())
+                    .unwrap_or_default();
+                format!("project {}", name.chars().take(12).collect::<String>())
+            };
             for agent in project
                 .value
                 .agents
                 .values()
                 .filter(|agent| agent.provider == id)
             {
-                let location = if path == state.project.path() {
-                    "this project".into()
-                } else {
-                    format!(
-                        "project {}",
-                        entry
-                            .file_name()
-                            .to_string_lossy()
-                            .chars()
-                            .take(12)
-                            .collect::<String>()
-                    )
-                };
                 references.push(format!("{} ({}) in {location}", agent.label, agent.id));
             }
         }
@@ -269,7 +250,9 @@ impl Profiles {
 }
 
 impl State {
-    fn disable(&mut self, id: &str) {
+    /// Leaves agent `id` without a configuration: its turns are refused
+    /// until it is assembled again, as it is shown.
+    pub(super) fn disable(&mut self, id: &str) {
         if let Some(slot) = self.slots.get(id) {
             slot.disable();
         }

@@ -11,7 +11,7 @@ use roomkit::{RedisTurnBackend, RedisTurnBackendOptions, TurnExecutor, TurnExecu
 
 use crate::{Result, config::Settings, profiles::Profiles, storage::Storage};
 
-pub(crate) const AGENT: &str = "remote-linux";
+pub(crate) use crate::names::REMOTE_AGENT as AGENT;
 pub(crate) const LABEL: &str = "Remote worker";
 pub(crate) const TOOLS: &[&str] = &[
     "list",
@@ -49,6 +49,18 @@ pub(crate) fn address(saved: Option<&str>) -> Result<String> {
     };
     validate_address(&address)?;
     Ok(address)
+}
+
+/// `address` without the user and the password it may hold: what a
+/// fingerprint shown or stored is computed on. A digest of the whole URL
+/// would let its password be guessed from what the views and the rooms
+/// keep.
+pub(crate) fn without_credentials(address: &str) -> Result<String> {
+    let mut url = url::Url::parse(address).map_err(|_| "Invalid executor Redis URL")?;
+    // Neither fails on a URL with a host, which `address` checked.
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    Ok(url.into())
 }
 
 fn validate_address(address: &str) -> std::result::Result<(), String> {
@@ -94,7 +106,11 @@ pub(crate) async fn serve(
     // The worker serves no delegation or human-input tools of its own.
     settings.unattended = true;
     let storage = Storage::open(&settings.state_dir, &settings.workspace)?;
-    let profiles = Profiles::load(&settings, &storage, settings.initial_api_key(), None).await?;
+    let profiles =
+        Profiles::load(&settings, &storage, settings.initial_authentication(), None).await?;
+    // A worker has no terminal to hide a panic's message, and no one
+    // watching it either: its record goes to the diagnostic log.
+    crate::diagnostics::report_panics(profiles.diagnostics.clone());
     let backend = match &profiles.executor_inventory {
         Some(inventory) => inventory.backend.clone(),
         None => backend(group, &address(settings.executor_url.as_deref())?)?,
@@ -186,7 +202,7 @@ pub(crate) fn permits(tool: &str, pooled: bool) -> bool {
                     | pool::CARGO_TEST
                     | pool::ASK_PEER
                     | pool::ANSWER_PEER
-                    | crate::messages::SEND_MESSAGE
+                    | crate::names::SEND_MESSAGE
             ))
 }
 
@@ -203,7 +219,7 @@ async fn authorize(
     // immediately before the exchange. Running it here too would ask twice.
     if matches!(
         event.name.as_str(),
-        pool::ASK_PEER | pool::ANSWER_PEER | crate::messages::SEND_MESSAGE
+        pool::ASK_PEER | pool::ANSWER_PEER | crate::names::SEND_MESSAGE
     ) {
         return allow();
     }
@@ -241,4 +257,22 @@ fn tool_fields(event: roomkit::ToolCallEvent) -> serde_json::Map<String, serde_j
     ]
     .into_iter()
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The pool's fingerprint, shown in addresses and kept in rooms, was a
+    /// digest of the URL with its password.
+    #[test]
+    fn a_fingerprint_s_address_holds_no_credentials() -> Result<()> {
+        let public = without_credentials("rediss://user:secret@pool.example:6380/2")?;
+        assert_eq!(public, "rediss://pool.example:6380/2");
+        assert_eq!(
+            without_credentials("redis://pool.example")?,
+            without_credentials("redis://:other@pool.example")?
+        );
+        Ok(())
+    }
 }

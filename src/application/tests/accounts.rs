@@ -9,7 +9,7 @@ async fn opening_account_menus_does_not_start_login_or_change_existing_connectio
     let state = tempfile::tempdir().unwrap();
     let mock = Mock::start(vec![]).await;
     let settings = settings(root.path(), state.path(), &mock.base_url);
-    let app = Application::open(&settings, "fixture-key".into())
+    let app = Application::open(&settings, "fixture-key".to_owned())
         .await
         .unwrap();
     let before = std::fs::read(settings.state_dir.join("connections.json")).unwrap();
@@ -109,7 +109,7 @@ async fn stale_callback_forms_are_refused_without_saving_their_secret() {
     let state = tempfile::tempdir().unwrap();
     let mock = Mock::start(vec![]).await;
     let settings = settings(root.path(), state.path(), &mock.base_url);
-    let app = Application::open(&settings, "fixture-key".into())
+    let app = Application::open(&settings, "fixture-key".to_owned())
         .await
         .unwrap();
     let mut values = FormValues::new();

@@ -52,6 +52,10 @@ impl Shell {
         let _joined = self.slot.acquire().await;
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Debt recorded when the limit was set: split it, never grow it"
+    )]
     pub async fn prepare(
         self: &Arc<Self>,
         kit: &RoomKit<SqliteStore>,

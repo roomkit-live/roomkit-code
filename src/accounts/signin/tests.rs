@@ -11,6 +11,7 @@ fn authorization() -> url::Url {
 }
 
 #[test]
+#[expect(clippy::cognitive_complexity, reason = "A scenario told in one piece")]
 fn sign_in_displays_the_link_and_private_return_field_together() {
     let url = authorization();
     let form = form(&url);

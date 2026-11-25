@@ -4,7 +4,6 @@ use crate::storage::FileLease;
 use sha2::{Digest, Sha256};
 use std::{
     fs::OpenOptions,
-    io::Write,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -74,16 +73,7 @@ impl Sequence {
             .checked_add(1)
             .ok_or_else(|| std::io::Error::other("Sequence exhausted"))?
             .max(now);
-        let directory = self
-            .path
-            .parent()
-            .ok_or_else(|| std::io::Error::other("Missing sequence directory"))?;
-        let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
-        write!(temporary, "{next}")?;
-        temporary.as_file().sync_all()?;
-        temporary.persist(&self.path).map_err(|error| error.error)?;
-        #[cfg(unix)]
-        std::fs::File::open(directory)?.sync_all()?;
+        crate::storage::write_atomic(&self.path, next.to_string().as_bytes())?;
         self.last = next;
         Ok(next)
     }

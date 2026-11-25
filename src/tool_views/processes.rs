@@ -26,6 +26,11 @@ impl ToolRenderer for Processes {
             .collect()
     }
 
+    #[expect(
+        clippy::cognitive_complexity,
+        clippy::too_many_lines,
+        reason = "Debt recorded when the limit was set: split it, never grow it"
+    )]
     fn render_styled(&self, call: &ToolCall, expanded: bool) -> Vec<Line> {
         let mut lines = Vec::new();
         let limit = if expanded { 96 } else { 2 };

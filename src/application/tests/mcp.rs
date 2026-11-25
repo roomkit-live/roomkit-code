@@ -169,6 +169,7 @@ fn alive(root: &std::path::Path, id: &str) -> bool {
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn saving_mcp_connects_and_enables_tools_with_permissions_and_durable_selection() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();

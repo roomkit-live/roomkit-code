@@ -1,13 +1,12 @@
 //! Bind a session question to the agent and turn that will receive its answer.
+use super::Kit;
 use super::record::{Kind, Mail};
 use roomkit::{
-    ConversationStore, RoomKit,
+    ConversationStore,
     model::{ChannelId, EventId, RoomId},
 };
 use roomkit_ai::ToolError;
-use roomkit_sqlite::SqliteStore;
 use serde_json::json;
-type Kit = RoomKit<SqliteStore>;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(super) struct AgentRequest {

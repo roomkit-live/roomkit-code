@@ -14,7 +14,7 @@ pub(super) struct Documents {
 pub(super) async fn load(
     settings: &Settings,
     storage: &Storage,
-    api_key: String,
+    authentication: Authentication,
 ) -> Result<Documents, String> {
     let _lease = store::load_lease(&settings.state_dir).await?;
     let mcp = Document::<mcp::Servers>::load(storage.database.with_file_name("mcp.json"))?;
@@ -33,7 +33,7 @@ pub(super) async fn load(
         }
     }
     if starts_a_new_project(&documents, settings) {
-        add_first_agent(&mut documents, settings, api_key)?;
+        add_first_agent(&mut documents, settings, authentication)?;
     }
     Ok(documents)
 }
@@ -48,7 +48,7 @@ fn validate(documents: &Documents) -> Result<(), String> {
     if providers.value.schema != 1 {
         return Err("Unsupported profile file version".into());
     }
-    if providers.value.profiles.len() > 128
+    if providers.value.profiles.len() > model::MAX_PROVIDERS
         || project.value.agents.len() > catalog::MAX_AGENTS
         || global.value.agents.len() > catalog::MAX_AGENTS
     {
@@ -78,12 +78,13 @@ fn starts_a_new_project(documents: &Documents, settings: &Settings) -> bool {
         && !settings.base_url.is_empty()
 }
 
-/// The launch options' connection, saved once per workspace, and an agent
-/// with every tool on it.
+/// The launch options' connection, saved once per workspace with how it
+/// authenticates, and an agent with every tool on it. A key the launch read
+/// from the environment is saved as its variable's name, never as its value.
 fn add_first_agent(
     documents: &mut Documents,
     settings: &Settings,
-    api_key: String,
+    authentication: Authentication,
 ) -> Result<(), String> {
     let digest = crate::digest::sha256_hex(settings.workspace.as_os_str().as_encoded_bytes());
     let id = format!("imported-{}", &digest[..12]);
@@ -94,14 +95,11 @@ fn add_first_agent(
             id: id.clone(),
             label: "Imported connection".into(),
             base_url: settings.base_url.clone(),
-            authentication: if api_key.is_empty() {
-                Authentication::None
-            } else {
-                Authentication::Stored { key: api_key }
-            },
+            authentication,
             timeout_seconds: settings.provider_timeout_seconds,
         };
         provider.validate()?;
+        provider.check_credential_transport()?;
         let mut updated = documents.providers.value.clone();
         updated.profiles.insert(id.clone(), provider);
         documents.providers.save(updated)?;
@@ -166,7 +164,9 @@ mod tests {
         settings.max_output_tokens = Some(4096);
         settings.reasoning_effort = Some("low".into());
         let storage = Storage::open(&settings.state_dir, &settings.workspace).unwrap();
-        let documents = load(&settings, &storage, String::new()).await.unwrap();
+        let documents = load(&settings, &storage, Authentication::None)
+            .await
+            .unwrap();
         let agent = &documents.project.value.agents["code"];
         assert_eq!(agent.model, "fixture-model");
         assert_eq!(agent.max_output_tokens, Some(4096));
@@ -179,6 +179,30 @@ mod tests {
                 .value
                 .profiles
                 .contains_key(&agent.provider)
+        );
+    }
+
+    /// A key read from the environment was copied into the profile: a
+    /// rotated variable was then ignored, and the key lay on disk.
+    #[tokio::test]
+    async fn a_key_from_the_environment_is_saved_as_its_variable_s_name() {
+        let workspace = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let settings = settings(workspace.path(), state.path(), "http://127.0.0.1:9/v1");
+        let storage = Storage::open(&settings.state_dir, &settings.workspace).unwrap();
+        let authentication = Authentication::Environment {
+            variable: "ROOMKIT_API_KEY".into(),
+        };
+        load(&settings, &storage, authentication).await.unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(settings.state_dir.join("connections.json")).unwrap(),
+        )
+        .unwrap();
+        let connections = saved["profiles"].as_object().unwrap();
+        let connection = connections.values().next().unwrap();
+        assert_eq!(
+            connection["authentication"],
+            serde_json::json!({"kind": "environment", "variable": "ROOMKIT_API_KEY"})
         );
     }
 
@@ -196,7 +220,9 @@ mod tests {
             &settings.state_dir.join("agents.json"),
             &serde_json::json!({"schema": PROJECT_SCHEMA, "agents": {"shared": shared}}),
         );
-        let documents = load(&settings, &storage, String::new()).await.unwrap();
+        let documents = load(&settings, &storage, Authentication::None)
+            .await
+            .unwrap();
         assert!(documents.project.value.agents.is_empty());
         assert!(documents.providers.value.profiles.is_empty());
     }
@@ -215,7 +241,7 @@ mod tests {
             &settings.state_dir.join("agents.json"),
             &serde_json::json!({"schema": PROJECT_SCHEMA, "agents": {"alias": agent}}),
         );
-        let error = load(&settings, &storage, String::new()).await.err();
+        let error = load(&settings, &storage, Authentication::None).await.err();
         assert_eq!(error.as_deref(), Some("Invalid agent identity"));
     }
 }

@@ -11,6 +11,8 @@ const TITLE_SOURCE: &str = "roomkit-code-title";
 const CALL_TIMEOUT: Duration = Duration::from_millis(500);
 const POLL: Duration = Duration::from_millis(100);
 const RETRY: Duration = Duration::from_secs(1);
+/// The longest wait between two tries of a call that keeps failing.
+const RETRY_AT_MOST: Duration = Duration::from_secs(60);
 
 pub(crate) struct Endpoint {
     binary: PathBuf,
@@ -127,6 +129,11 @@ impl Reporter {
             let mut sent = Sent::default();
             let mut attempted = false;
             let mut invalid_logged = false;
+            // A call that keeps failing waits longer each time, and is
+            // recorded when its failure changes, not at each try: a socket
+            // that stays away no longer fills the log a line a second.
+            let mut retry = RETRY;
+            let mut failing: Option<&'static str> = None;
             loop {
                 if stop.is_cancelled() {
                     break;
@@ -172,15 +179,23 @@ impl Reporter {
                 };
                 attempted = true;
                 match call(&endpoint, &mut sequence, action.args(&report), &stop).await {
-                    Ok(()) => sent.applied(action, &report),
+                    Ok(()) => {
+                        sent.applied(action, &report);
+                        retry = RETRY;
+                        failing = None;
+                    }
                     Err("stopped") => break,
                     Err(code) => {
-                        diagnostic(code);
+                        if failing != Some(code) {
+                            diagnostic(code);
+                            failing = Some(code);
+                        }
                         // Reacquire authority after a restart or a partially applied report.
                         sent = Sent::default();
-                        if wait(RETRY, &stop).await {
+                        if wait(retry, &stop).await {
                             break;
                         }
+                        retry = (retry * 2).min(RETRY_AT_MOST);
                     }
                 }
             }

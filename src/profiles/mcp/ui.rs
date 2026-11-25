@@ -84,6 +84,10 @@ pub(super) fn available(id: &str, server: &McpToolProvider) -> Vec<AiTool> {
         .collect()
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Debt recorded when the limit was set: split it, never grow it"
+)]
 pub(super) async fn detail(
     state: &State,
     current: &SessionConfig,
@@ -379,6 +383,17 @@ pub(super) fn save(
             .map_err(|_| "Invalid connection timeout")?,
     };
     server.validate()?;
+    // Checked as a server is saved, not as saved ones are read.
+    if let Transport::Http {
+        url,
+        bearer_env,
+        headers,
+    } = &server.transport
+        && (bearer_env.is_some() || !headers.is_empty())
+        && crate::http_client::plaintext_to_remote(url)
+    {
+        return Err(crate::http_client::PLAINTEXT_CREDENTIAL.into());
+    }
     if id.as_ref().is_some_and(|id| id != &server.id) {
         return Err("An existing server ID cannot be renamed".into());
     }

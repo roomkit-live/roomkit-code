@@ -63,7 +63,7 @@ impl State {
 
 impl Diagnostics {
     pub fn open(path: PathBuf, debug: bool) -> std::io::Result<Arc<Self>> {
-        private_file(&path)?;
+        log_file(&path)?;
         let diagnostics = Arc::new(Self {
             path,
             instance: uuid::Uuid::new_v4().to_string(),
@@ -94,7 +94,10 @@ impl Diagnostics {
     pub fn record(&self, kind: &'static str, fields: Value, error: Option<&str>) {
         let line = self.line(kind, fields, error);
         self.locked().0.remember(line.clone());
-        let written = append(&self.path, &line);
+        // The append can wait for the log's lock, which another instance may
+        // hold: a quarter of a second at most, not on a thread the runtime
+        // needs for its other tasks.
+        let written = crate::sync::blocking(|| append(&self.path, &line));
         self.locked().0.write_failed = written.is_err();
     }
 
@@ -322,7 +325,7 @@ impl Diagnostics {
 
 /// An observer named `name`: it reads what the engine reports and decides
 /// nothing.
-fn observer(name: &str) -> HookOptions {
+pub(crate) fn observer(name: &str) -> HookOptions {
     HookOptions {
         execution: HookExecution::Async,
         name: name.into(),
@@ -352,15 +355,18 @@ fn append(path: &Path, line: &str) -> std::io::Result<()> {
     )?)?;
     // Always reopen under the lock: another instance may have rotated the
     // file since our previous record.
-    let mut file = private_file(path)?;
+    let mut file = log_file(path)?;
     if file.metadata()?.len().saturating_add(line.len() as u64) > LIMIT {
         std::fs::rename(path, path.with_extension("previous.jsonl"))?;
-        file = private_file(path)?;
+        file = log_file(path)?;
     }
     file.write_all(line.as_bytes())
 }
 
-fn private_file(path: &Path) -> std::io::Result<File> {
+/// The log at `path`, opened to append: a private regular file, created
+/// when missing. `storage::private_file` opens a state file to read and
+/// replace; a log is only ever added to.
+fn log_file(path: &Path) -> std::io::Result<File> {
     if std::fs::symlink_metadata(path).is_ok_and(|m| !m.file_type().is_file()) {
         return Err(std::io::Error::other(
             "Diagnostic log must be a regular file",

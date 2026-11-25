@@ -170,6 +170,13 @@ impl Profiles {
         inventory: Inventory,
     ) -> Result<(), String> {
         state.install(kit, id, runtime, inventory)?;
+        self.refit(state, id).await;
+        Ok(())
+    }
+
+    /// Gives the conversations this instance opened the configuration each
+    /// keeps for agent `id`, assembled anew.
+    async fn refit(&self, state: &mut State, id: &str) {
         let rooms: Vec<String> = state
             .running
             .keys()
@@ -179,7 +186,48 @@ impl Profiles {
         for room in rooms {
             self.fit(state, &room, id).await;
         }
-        Ok(())
+    }
+
+    /// Assembles anew every agent this instance assembled, other than
+    /// `current`, that `affected` holds for: what they were assembled from,
+    /// a connection, the skills or an MCP server, just changed. An agent
+    /// left as it was would keep a replaced key or endpoint until the next
+    /// launch. One that can no longer be assembled is disabled, with the
+    /// reason recorded: its turns are refused until it is shown again,
+    /// rather than run on what was replaced.
+    pub(super) async fn reinstall_others(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        state: &mut State,
+        current: &str,
+        affected: impl Fn(&Agent) -> bool,
+    ) {
+        let assembled: Vec<String> = state.tools.keys().cloned().collect();
+        for id in assembled {
+            if id == current || state.is_remote(&id) {
+                continue;
+            }
+            let Some(agent) = state.agent(&id).filter(|agent| affected(agent)) else {
+                continue;
+            };
+            let result = match state.providers.value.profiles.get(&agent.provider) {
+                Some(provider) => self.assemble(&agent, provider).await,
+                None => Err("The agent references an unknown connection".into()),
+            };
+            let result = match result {
+                Ok((runtime, inventory)) => state.put(kit, &id, runtime, inventory),
+                Err(error) => Err(error),
+            };
+            match result {
+                Ok(()) => self.refit(state, &id).await,
+                Err(_) => {
+                    state.disable(&id);
+                    let fields = serde_json::json!({"agent": id});
+                    self.diagnostics
+                        .record("agent_reinstall_failed", fields, None);
+                }
+            }
+        }
     }
 
     /// Makes `running` what `view`'s agent runs with in its conversation,

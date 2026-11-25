@@ -26,8 +26,17 @@ fn exit_status(result: std::io::Result<std::process::ExitStatus>) -> RunStatus {
     }
 }
 
-fn spawn(hook: &CommandHook, cwd: &Path) -> Result<Group, RunStatus> {
-    let child = tokio::process::Command::new("/bin/sh")
+fn spawn(hook: &CommandHook, cwd: &Path, inherit_env: &[String]) -> Result<Group, RunStatus> {
+    let mut command = tokio::process::Command::new("/bin/sh");
+    // Only the listed host variables: a hook must not read a credential the
+    // host holds in its own environment.
+    command.env_clear();
+    for name in inherit_env {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    let child = command
         .arg("-c")
         .arg(&hook.command)
         .current_dir(cwd)
@@ -108,9 +117,10 @@ async fn supervise(
 pub(super) async fn execute(
     hook: &CommandHook,
     cwd: &Path,
+    inherit_env: &[String],
     input: &[u8],
 ) -> (RunStatus, Vec<u8>, Vec<u8>) {
-    let mut group = match spawn(hook, cwd) {
+    let mut group = match spawn(hook, cwd, inherit_env) {
         Ok(group) => group,
         Err(status) => return (status, vec![], vec![]),
     };

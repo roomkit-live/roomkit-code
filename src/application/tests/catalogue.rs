@@ -120,6 +120,7 @@ async fn coding_tools_apply_structured_multifile_patch_and_create_parent_directo
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn processes_and_archives_survive_reconfiguration_are_scoped_and_close_with_application() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
@@ -555,9 +556,10 @@ async fn web_uses_anonymous_exa_and_fetch_without_reusing_the_model_credential()
         ..WebFetchPolicy::default()
     };
     resources.fetch = WebFetchTool::new().with_policy(policy).unwrap();
-    let app = Application::open_with_tools(&settings, "fixture-model-key".into(), Some(resources))
-        .await
-        .unwrap();
+    let app =
+        Application::open_with_tools(&settings, "fixture-model-key".to_owned(), Some(resources))
+            .await
+            .unwrap();
     let session = turn(&app).await;
     assert_eq!(
         tool_result(&session, "web_search")["payload"]["results"][0]["url"],

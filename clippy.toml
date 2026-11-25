@@ -1,0 +1,5 @@
+# The size a function may reach before it must be split. The functions past
+# these when the limits were set carry an #[expect] naming them as debt: the
+# list may only shrink.
+too-many-lines-threshold = 100
+cognitive-complexity-threshold = 15

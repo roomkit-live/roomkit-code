@@ -11,14 +11,12 @@ use crate::{Result, storage::SessionLeases};
 use roomkit::model::{ChannelId, EventId, RoomId};
 use roomkit::turns::{ChannelCall, TurnBackend, wire::ChannelControl};
 use roomkit::{
-    ConversationStore, RedisTurnBackend, RedisTurnBackendOptions, RoomKit, TurnExecutor,
-    TurnExecutorOptions,
+    ConversationStore, RedisTurnBackend, RedisTurnBackendOptions, TurnExecutor, TurnExecutorOptions,
 };
-use roomkit_sqlite::SqliteStore;
 use serde_json::json;
 use std::sync::Arc;
 
-type Kit = RoomKit<SqliteStore>;
+use super::Kit;
 pub(super) const ADDRESS: &str = "roomkit_code:session_address:v1";
 const PREFIX: &str = "session-mail-";
 const VERB: &str = "receive_session_message";
@@ -83,7 +81,11 @@ impl Network {
             backend,
             channel,
             room: room.clone(),
-            scope: crate::digest::sha256_hex(serde_json::to_vec(&(group, address))?),
+            // Kept in the room: computed without the URL's credentials.
+            scope: crate::digest::sha256_hex(serde_json::to_vec(&(
+                group,
+                crate::remote::without_credentials(address)?,
+            ))?),
             wake,
             responses: Default::default(),
         };

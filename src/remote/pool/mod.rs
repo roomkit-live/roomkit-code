@@ -129,7 +129,7 @@ impl Requirements {
         match name {
             CARGO_TEST if asked.is_some_and(|id| id.eq_ignore_ascii_case(sha)) => Ok(()),
             CARGO_TEST => Err(format!("This task requires cargo_test with commit {sha}")),
-            LIST_EXECUTORS | "read_stored_result" | crate::messages::SEND_MESSAGE => Ok(()),
+            LIST_EXECUTORS | "read_stored_result" | crate::names::SEND_MESSAGE => Ok(()),
             _ => Err("This task is limited to testing a Git commit. Its working files are private to cargo_test.".into())
         }
     }
@@ -168,9 +168,12 @@ impl Scheduler {
         tasks: &Arc<crate::delegation::Tasks>,
     ) -> crate::Result<Arc<Self>> {
         let address = super::address(saved_url)?;
+        // The scope is shown in addresses and kept in rooms: it is computed
+        // without the URL's credentials.
+        let public = super::without_credentials(&address)?;
         Ok(Arc::new(Self {
             group: group.into(),
-            scope: crate::digest::sha256_hex(serde_json::to_vec(&(group, &address))?),
+            scope: crate::digest::sha256_hex(serde_json::to_vec(&(group, &public))?),
             tasks: Arc::downgrade(tasks),
             inventory: Inventory::new(group, &address)?,
             address,

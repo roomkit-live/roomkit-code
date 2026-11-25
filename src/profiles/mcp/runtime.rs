@@ -49,9 +49,12 @@ impl Runtime {
                 continue;
             };
             // A reconnected server may remove tools. Never silently select new ones.
-            let tools: Vec<AiTool> = server
-                .get_tools()
-                .unwrap_or_default()
+            // A listing that fails is said: an agent assembled without the
+            // tools it selected would run without anyone knowing why.
+            let listed = server.get_tools().map_err(|_| {
+                format!("MCP server {id} did not list its tools; reconnect it in /mcp")
+            })?;
+            let tools: Vec<AiTool> = listed
                 .into_iter()
                 .filter(|tool| names.contains(&tool.name))
                 .map(|tool| AiTool {
@@ -146,12 +149,17 @@ pub(super) fn failure(error: &McpError) -> &'static str {
 
 impl Profiles {
     /// Both form saves and explicit connections use cancellable host work.
+    /// `replace_once_connected` keeps a live connection until the new one
+    /// answers, and when it does not: an HTTP endpoint's, which two clients
+    /// can reach at once. A stdio server's process is stopped first, as
+    /// before: two instances of one program may contend for what it locks.
     pub(super) fn connection_execution(
         self: &Arc<Self>,
         kit: &RoomKit<SqliteStore>,
         current: SessionConfig,
         id: String,
         connector: Option<McpToolProvider>,
+        replace_once_connected: bool,
     ) -> roomkit_tui_engine::CommandResult {
         use roomkit_tui::protocol::{Item, Message, RunOutcome};
         use roomkit_tui_engine::{CommandExecution, CommandResult};
@@ -165,8 +173,14 @@ impl Profiles {
                 if runtime.stop.is_cancelled() {
                     return Ok(RunOutcome::Interrupted);
                 }
-                let previous = runtime.connections.lock().await.remove(&id);
-                if let Some(old) = previous.and_then(|c| c.server) {
+                let mut previous = runtime.connections.lock().await.remove(&id);
+                let kept = replace_once_connected
+                    && connector.is_some()
+                    && previous
+                        .as_ref()
+                        .and_then(|c| c.server.as_ref())
+                        .is_some_and(|server| server.connected());
+                if !kept && let Some(old) = previous.take().and_then(|c| c.server) {
                     old.close().await;
                 }
                 let activate = connector.is_some();
@@ -182,23 +196,34 @@ impl Profiles {
                         tokio::select! { () = context.cancelled() => {}, () = runtime.stop.cancelled() => {} }
                     };
                     match connector.connect_until(stopped).await {
-                        Ok(()) => Connection {
-                            server: Some(connector),
-                            status: "Connected".into(),
-                        },
+                        Ok(()) => {
+                            if let Some(old) = previous.take().and_then(|c| c.server) {
+                                old.close().await;
+                            }
+                            Connection {
+                                server: Some(connector),
+                                status: "Connected".into(),
+                            }
+                        }
                         Err(cause) => {
                             let message = failure(&cause).to_string();
+                            // The connection that answered until now stays.
+                            let kept = previous.take().filter(|c| c.server.is_some());
                             if matches!(cause, McpError::Cancelled) {
                                 outcome = RunOutcome::Interrupted;
+                            } else if kept.is_some() {
+                                error = Some(format!(
+                                    "{id}: {message}. Configuration is saved; the previous connection is kept until /mcp reconnects."
+                                ));
                             } else {
                                 error = Some(format!(
                                     "{id}: {message}. Configuration is saved; open /mcp to edit or reconnect."
                                 ));
                             }
-                            Connection {
+                            kept.unwrap_or(Connection {
                                 server: None,
                                 status: message,
-                            }
+                            })
                         }
                     }
                 } else {
@@ -296,6 +321,11 @@ impl Profiles {
         }
         self.installed(kit, &mut state, &profile.id, agent, tools)
             .await?;
+        // The other agents that use this server hold its previous connection.
+        self.reinstall_others(kit, &mut state, &profile.id, |other| {
+            other.mcp.contains_key(id)
+        })
+        .await;
         Ok(note)
     }
 }

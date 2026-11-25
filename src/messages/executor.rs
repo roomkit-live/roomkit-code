@@ -70,7 +70,7 @@ async fn start(
     context: Metadata,
     text: &str,
 ) -> crate::Result<CommandResult> {
-    let agent = ChannelId::new(crate::remote::AGENT)?;
+    let agent = ChannelId::new(crate::names::REMOTE_AGENT)?;
     if let Some(error) = app
         .profiles
         .resources
@@ -185,7 +185,7 @@ fn show(row: &RoomEvent) -> CommandResult {
     };
     let mut message = Message::new(
         row.id.to_string(),
-        ActorId::new(crate::application::TERMINAL),
+        ActorId::new(crate::names::TERMINAL),
         text,
     );
     message.position = Some(RowPosition::stored(row.index, None));

@@ -41,7 +41,7 @@ impl TaskLines {
                 system_row::commit(kit, terminal, row).await;
                 terminal.to_string()
             }
-            None => crate::application::TERMINAL.to_owned(),
+            None => crate::names::TERMINAL.to_owned(),
         };
         let line = Item::Message(Message::new(id, ActorId::new(terminal), text));
         let mut recent = crate::sync::lock(&self.recent);

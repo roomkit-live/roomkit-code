@@ -11,7 +11,7 @@ pub(super) async fn discover(provider: &Provider) -> Result<Vec<(String, Option<
         return openai(provider).await;
     }
     let mut config = AnthropicConfig::new(provider.authentication.key()?, "discovery");
-    config.base_url = Some(server(provider)?.to_owned());
+    config.base_url = Some(server(provider)?);
     config.timeout = Duration::from_secs(10);
     let client =
         AnthropicAiProvider::new(config).map_err(|_| "Cannot initialize connection check")?;
@@ -69,10 +69,19 @@ async fn openai(provider: &Provider) -> Result<Vec<(String, Option<u64>)>, Strin
     accepted(listed(&json, provider.subscription())?)
 }
 
-/// The server `provider`'s models are listed from: its own.
+/// The server `provider`'s models are listed from: its own, unless a test
+/// names another for it ([`test_server`]).
+fn server(provider: &Provider) -> Result<String, String> {
+    match test_server(provider) {
+        Some(named) => named,
+        None => Ok(provider.base_url.clone()),
+    }
+}
+
+/// No server stands in for a connection's own outside the tests.
 #[cfg(not(test))]
-fn server(provider: &Provider) -> Result<&str, String> {
-    Ok(&provider.base_url)
+fn test_server(_: &Provider) -> Option<Result<String, String>> {
+    None
 }
 
 #[cfg(test)]
@@ -82,16 +91,16 @@ tokio::task_local! {
     pub(crate) static SUBSCRIPTION_SERVER: String;
 }
 
-/// The server `provider`'s models are listed from: a subscription's never
-/// its real service in a test, which names its mock server instead.
+/// A subscription's models are never listed from its real service in a
+/// test, which names its mock server instead.
 #[cfg(test)]
-fn server(provider: &Provider) -> Result<String, String> {
-    if provider.subscription().is_none() {
-        return Ok(provider.base_url.clone());
-    }
-    SUBSCRIPTION_SERVER
-        .try_with(Clone::clone)
-        .map_err(|_| "Tests list a subscription's models from their mock server".into())
+fn test_server(provider: &Provider) -> Option<Result<String, String>> {
+    provider.subscription()?;
+    Some(
+        SUBSCRIPTION_SERVER
+            .try_with(Clone::clone)
+            .map_err(|_| "Tests list a subscription's models from their mock server".into()),
+    )
 }
 
 /// The models a `GET /models` answer lists, with their reported capacity: a

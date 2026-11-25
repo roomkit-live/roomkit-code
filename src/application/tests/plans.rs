@@ -119,6 +119,7 @@ async fn entering_plan_revokes_pending_mutations_but_web_still_asks() {
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn plan_mode_uses_native_tools_blocks_effects_and_resumes_the_same_plan_in_yolo() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
@@ -295,6 +296,7 @@ async fn plan_mode_uses_native_tools_blocks_effects_and_resumes_the_same_plan_in
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn plan_views_follow_live_records_bound_long_steps_and_reject_stale_actions() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();

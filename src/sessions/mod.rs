@@ -22,6 +22,10 @@ pub(crate) use settings::{
     Running, follow_modes, forget, keep, keep_modes, kept, kept_mode, last_model,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Debt recorded when the limit was set: split it, never grow it"
+)]
 pub(crate) fn commands() -> Vec<CommandSpec> {
     [
         (
@@ -280,6 +284,10 @@ impl CommandHandler for Sessions {
 
 impl Sessions {
     /// Route a command to the part of the application that owns it.
+    #[expect(
+        clippy::cognitive_complexity,
+        reason = "Debt recorded when the limit was set: split it, never grow it"
+    )]
     async fn dispatch(
         &self,
         request: Request,
@@ -503,10 +511,11 @@ impl Sessions {
             ..Default::default()
         };
         if let Err(error) = self.kit.steer(&room, agent, update, options).await {
-            let detail = serde_json::json!({ "error": error.to_string() });
+            let error = error.to_string();
+            let fields = serde_json::json!({ "room": room.as_str() });
             self.profiles
                 .diagnostics
-                .record("mode_change_not_steered", detail, None);
+                .record("mode_change_not_steered", fields, Some(&error));
         }
     }
 
@@ -533,6 +542,23 @@ mod tests {
     use super::title;
     use roomkit::model::RoomId;
     use roomkit_tui::protocol::limits::MAX_LABEL_BYTES;
+
+    /// The commands the view lists and the arms that serve them were kept
+    /// in step by hand: one listed and served by none answered "Unknown
+    /// application command". Every listed command now has an arm.
+    #[test]
+    fn every_listed_command_is_served() {
+        let source = include_str!("mod.rs");
+        let dispatch = &source[source.find("async fn handle(").unwrap()..];
+        let dispatch = &dispatch[..dispatch.find("fn compact(").unwrap()];
+        for command in super::commands() {
+            let name = format!("\"{}\"", command.name);
+            let served = dispatch
+                .lines()
+                .any(|line| line.contains(&name) && (line.contains("=>") || line.contains('|')));
+            assert!(served, "/{} is listed and served by no arm", command.name);
+        }
+    }
 
     #[test]
     fn a_title_fits_the_label_limit_and_keeps_the_name_first() {

@@ -7,19 +7,14 @@ use super::{
     reply,
     request::origin,
 };
-use roomkit::{
-    RoomKit,
-    model::{Metadata, RoomId},
-};
+use roomkit::model::{Metadata, RoomId};
 use roomkit_ai::{AiTool, Tool, ToolError, ToolFuture, ToolResult};
-use roomkit_sqlite::SqliteStore;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-pub(crate) const SEND_MESSAGE: &str = "send_message";
-pub(crate) const LIST_SESSIONS: &str = "list_sessions";
-type Kit = RoomKit<SqliteStore>;
+use super::Kit;
+pub(crate) use crate::names::{LIST_SESSIONS, SEND_MESSAGE};
 
 impl Messages {
     pub(crate) fn tools(self: &Arc<Self>, pool_enabled: bool) -> Vec<Arc<dyn Tool>> {
@@ -58,7 +53,17 @@ impl Messages {
         self.network
             .get()
             .filter(|n| n.room == *room)
-            .ok_or_else(|| ToolError::refused("This conversation has not joined a session group"))
+            .ok_or_else(|| {
+                let unavailable = self
+                    .network_unavailable
+                    .load(std::sync::atomic::Ordering::Acquire);
+                ToolError::refused(if unavailable {
+                    "The session group could not be reached when this launch started. \
+                 Relaunch once its Redis is reachable"
+                } else {
+                    "This conversation has not joined a session group"
+                })
+            })
     }
 }
 

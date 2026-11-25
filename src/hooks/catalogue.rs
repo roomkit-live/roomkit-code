@@ -2,7 +2,7 @@
 use roomkit_hooks::{CommandHook, Configuration, Event, HookGroup};
 use std::{
     collections::BTreeSet,
-    io::{Read, Write},
+    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -13,9 +13,90 @@ pub(super) struct Entry {
     pub group: HookGroup,
     pub hook: CommandHook,
     pub source: PathBuf,
+    /// The project's scripts the command launches, each with its content's
+    /// digest as reviewed: part of what `id` identifies.
+    scripts: Vec<(PathBuf, String)>,
+}
+
+/// The most scripts of the project one command's review covers, and the
+/// largest of them read.
+const SCRIPTS: usize = 8;
+const SCRIPT_BYTES: u64 = 1_048_576;
+
+/// The programs that run the script their first plain argument names.
+const INTERPRETERS: [&str; 11] = [
+    "sh", "bash", "zsh", "dash", "python", "python3", "node", "deno", "bun", "ruby", "perl",
+];
+
+/// The project's scripts `command` launches, each with its content's
+/// digest: in each of its simple commands, the program itself when it is a
+/// file inside `workspace`, or the script an interpreter is given;
+/// `$ROOMKIT_PROJECT_DIR` reads as the workspace. A review that covered the
+/// command's text alone trusted `./check.sh` whatever the script became,
+/// and the agent can write the project's files. The files a command reads
+/// or writes are not scripts: a hook that appends to its own log must not
+/// undo its review. Other programs, on the system's path or outside the
+/// project, are not the project's to change.
+fn scripts(command: &str, workspace: &Path) -> Vec<(PathBuf, String)> {
+    let Ok(root) = workspace.canonicalize() else {
+        return Vec::new();
+    };
+    let project = workspace.to_string_lossy();
+    let resolve = |word: &str| {
+        let word = word
+            .trim_matches(|c| matches!(c, '"' | '\''))
+            .replace("${ROOMKIT_PROJECT_DIR}", &project)
+            .replace("$ROOMKIT_PROJECT_DIR", &project);
+        let path = workspace.join(&word).canonicalize().ok()?;
+        (!word.is_empty() && path.starts_with(&root)).then_some(path)
+    };
+    let mut found: Vec<(PathBuf, String)> = Vec::new();
+    for simple in command.split([';', '|', '&', '(', ')', '\n']) {
+        // Leading `NAME=value` words set the program's environment.
+        let mut words = simple
+            .split_whitespace()
+            .skip_while(|word| word.contains('=') && !word.starts_with(['.', '/', '"', '\'']));
+        let Some(program) = words.next() else {
+            continue;
+        };
+        let name = program.rsplit('/').next().unwrap_or(program);
+        let script = if INTERPRETERS.contains(&name) {
+            words.find(|word| !word.starts_with('-')).and_then(resolve)
+        } else {
+            resolve(program)
+        };
+        let Some(path) = script else {
+            continue;
+        };
+        if found.iter().any(|(known, _)| *known == path) {
+            continue;
+        }
+        if let Some(digest) = digest(&path) {
+            found.push((path, digest));
+            if found.len() == SCRIPTS {
+                break;
+            }
+        }
+    }
+    found
+}
+
+/// The digest of the regular file at `path`, within [`SCRIPT_BYTES`].
+fn digest(path: &Path) -> Option<String> {
+    let bytes = read(path, SCRIPT_BYTES).ok()??;
+    Some(crate::digest::sha256_hex(bytes))
 }
 
 impl Entry {
+    /// Whether the project's scripts the command launches still read as
+    /// they were reviewed. A hook whose script changed since does not run until
+    /// it is reviewed again.
+    pub fn scripts_unchanged(&self) -> bool {
+        self.scripts
+            .iter()
+            .all(|(path, reviewed)| digest(path).as_ref() == Some(reviewed))
+    }
+
     pub fn label(&self) -> &str {
         self.hook
             .status_message
@@ -27,6 +108,7 @@ impl Entry {
 pub(super) struct Catalogue {
     pub entries: Vec<Entry>,
     pub problems: Vec<String>,
+    workspace: PathBuf,
     pub paths: [PathBuf; 2],
     trust: PathBuf,
     pub enabled: BTreeSet<String>,
@@ -53,6 +135,7 @@ impl Catalogue {
         let mut catalogue = Self {
             entries: vec![],
             problems: vec![],
+            workspace: workspace.to_owned(),
             paths: [
                 state.join("hooks.json"),
                 workspace.join(".roomkit/hooks.json"),
@@ -75,6 +158,7 @@ impl Catalogue {
         let mut next = Self {
             entries: vec![],
             problems: vec![],
+            workspace: self.workspace.clone(),
             paths: self.paths.clone(),
             trust: self.trust.clone(),
             enabled: BTreeSet::new(),
@@ -97,9 +181,15 @@ impl Catalogue {
                     for (event, groups) in config.hooks {
                         for group in groups {
                             for hook in &group.hooks {
-                                let definition =
-                                    serde_json::to_vec(&(path, event, &group.matcher, hook))
-                                        .unwrap_or_default();
+                                let scripts = scripts(&hook.command, &self.workspace);
+                                let definition = serde_json::to_vec(&(
+                                    path,
+                                    event,
+                                    &group.matcher,
+                                    hook,
+                                    &scripts,
+                                ))
+                                .unwrap_or_default();
                                 let id = crate::digest::sha256_hex(definition);
                                 if next.entries.iter().any(|entry| entry.id == id) {
                                     continue;
@@ -110,6 +200,7 @@ impl Catalogue {
                                     group: group.clone(),
                                     hook: hook.clone(),
                                     source: path.clone(),
+                                    scripts,
                                 });
                             }
                         }
@@ -140,19 +231,10 @@ impl Catalogue {
         } else {
             next.remove(id);
         }
-        let parent = self
-            .trust
-            .parent()
-            .ok_or("Missing hook storage directory")?;
         let bytes =
             serde_json::to_vec_pretty(&next).map_err(|_| "Cannot encode hook preferences")?;
-        let mut file = tempfile::NamedTempFile::new_in(parent)
-            .map_err(|_| "Cannot create hook preferences")?;
-        file.write_all(&bytes)
-            .and_then(|()| file.as_file().sync_all())
+        crate::storage::write_atomic(&self.trust, &bytes)
             .map_err(|_| "Cannot save hook preferences")?;
-        file.persist(&self.trust)
-            .map_err(|_| "Cannot replace hook preferences")?;
         self.enabled = next;
         Ok(())
     }
@@ -201,6 +283,45 @@ mod tests {
         assert_eq!(catalogue.entries.len(), 1);
         assert!(catalogue.enabled.contains(&id));
         assert!(catalogue.problems.is_empty());
+        Ok(())
+    }
+
+    /// Review finding: trust covered the command's text, so `./check.sh`
+    /// stayed trusted whatever the agent later wrote in the script.
+    #[test]
+    fn a_review_covers_the_project_scripts_the_command_names() -> crate::Result<()> {
+        let workspace = tempfile::tempdir()?;
+        let state = tempfile::tempdir()?;
+        let private = tempfile::tempdir()?;
+        std::fs::write(workspace.path().join("check.sh"), "exit 0\n")?;
+        // A file the command reads or writes is no script of its own.
+        std::fs::write(workspace.path().join("seen.log"), "")?;
+        std::fs::write(
+            state.path().join("hooks.json"),
+            serde_json::json!({"hooks": {"PreToolUse": [{"hooks": [
+                {"type":"command", "command":"sh \"$ROOMKIT_PROJECT_DIR/check.sh\" --strict"},
+                {"type":"command", "command":"cat >/dev/null; MODE=strict ./check.sh"},
+                {"type":"command", "command":"cat check.sh >> seen.log; /bin/echo unrelated"}
+            ]}]}})
+            .to_string(),
+        )?;
+        let mut catalogue = Catalogue::load(workspace.path(), state.path(), private.path());
+        let reviewed: Vec<Entry> = catalogue.entries.clone();
+        assert_eq!(
+            reviewed.iter().map(|e| e.scripts.len()).collect::<Vec<_>>(),
+            [1, 1, 0]
+        );
+        catalogue.set_enabled(&reviewed[0].id, true)?;
+        assert!(reviewed.iter().all(Entry::scripts_unchanged));
+        std::fs::write(workspace.path().join("check.sh"), "rm -rf .\n")?;
+        // The entries a turn holds no longer run the script, and the
+        // catalogue read anew asks for another review.
+        assert!(!reviewed[0].scripts_unchanged() && !reviewed[1].scripts_unchanged());
+        assert!(reviewed[2].scripts_unchanged());
+        catalogue.reload();
+        assert_ne!(catalogue.entries[0].id, reviewed[0].id);
+        assert_eq!(catalogue.entries[2].id, reviewed[2].id);
+        assert!(catalogue.selected().is_empty());
         Ok(())
     }
 

@@ -3,7 +3,7 @@ use roomkit_tools_plans::*;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
-    io::{Read, Write},
+    io::Read,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -35,8 +35,13 @@ pub(super) struct Document {
     pub plans: BTreeMap<String, Plan>,
 }
 
-fn unavailable() -> ToolError {
-    ToolError::UnsupportedResource("Plan storage is unavailable; no plan data was displayed".into())
+/// The plans could not be read or written, for `cause`: which of the file,
+/// its directory, its permissions or its content, so the person who opens
+/// `/plans` knows what to repair. Never the file's content.
+fn unavailable(cause: &str) -> ToolError {
+    ToolError::UnsupportedResource(format!(
+        "Plan storage is unavailable: {cause}. No plan data was displayed"
+    ))
 }
 fn cancelled(token: &CancellationToken) -> Result<(), ToolError> {
     if token.is_cancelled() {
@@ -92,13 +97,15 @@ impl Plans {
         let scope = scope.clone();
         let cancel = cancel.clone();
         tokio::task::spawn_blocking(move || {
-            let _guard = this.lock.lock().map_err(|_| unavailable())?;
+            let _guard = this.lock.lock().map_err(|_| {
+                unavailable("an earlier plan operation failed while it held the storage")
+            })?;
             if this.closed.load(Ordering::SeqCst) {
                 return Err(ToolError::Cancelled);
             }
             cancelled(&cancel)?;
             let key = serde_json::to_vec(&(&scope.room_id, &scope.caller_id))
-                .map_err(|_| unavailable())?;
+                .map_err(|_| unavailable("this conversation's scope cannot be encoded"))?;
             let path = this
                 .root
                 .join(format!("{}.json", crate::digest::sha256_hex(key)));
@@ -114,7 +121,7 @@ impl Plans {
             Ok(output)
         })
         .await
-        .map_err(|_| unavailable())?
+        .map_err(|_| unavailable("the storage task stopped"))?
     }
 
     /// Plan `id` in `scope`, or with no ID the conversation's only plan:
@@ -183,19 +190,25 @@ fn validate(doc: &Document, scope: &PlanScope) -> Result<(), ToolError> {
             .as_ref()
             .is_some_and(|id| !doc.plans.contains_key(id))
     {
-        return Err(unavailable());
+        return Err(unavailable(
+            "the stored selection names a plan that is not stored",
+        ));
     }
     for (id, plan) in &doc.plans {
-        plan.validate().map_err(|_| unavailable())?;
+        plan.validate()
+            .map_err(|_| unavailable("a stored plan is not valid"))?;
         if id != &plan.plan_id {
-            return Err(unavailable());
+            return Err(unavailable("a stored plan is kept under another plan's ID"));
         }
     }
     Ok(())
 }
 
 fn load(path: &Path, scope: &PlanScope) -> Result<Document, ToolError> {
-    private_directory(path.parent().ok_or_else(unavailable)?)?;
+    private_directory(
+        path.parent()
+            .ok_or_else(|| unavailable("its file has no directory"))?,
+    )?;
     let meta = match std::fs::symlink_metadata(path) {
         Ok(meta) => meta,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -207,34 +220,37 @@ fn load(path: &Path, scope: &PlanScope) -> Result<Document, ToolError> {
                 plans: BTreeMap::new(),
             });
         }
-        Err(_) => return Err(unavailable()),
+        Err(_) => return Err(unavailable("its file cannot be inspected")),
     };
     if !meta.is_file() || meta.len() > MAX_BYTES {
-        return Err(unavailable());
+        return Err(unavailable("its file is not a regular file under 5 MiB"));
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         if meta.permissions().mode() & 0o077 != 0 {
-            return Err(unavailable());
+            return Err(unavailable("its file is readable by others (chmod 600)"));
         }
     }
     let mut bytes = Vec::new();
     std::fs::File::open(path)
-        .map_err(|_| unavailable())?
+        .map_err(|_| unavailable("its file cannot be opened"))?
         .take(MAX_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|_| unavailable())?;
+        .map_err(|_| unavailable("its file cannot be read"))?;
     if bytes.len() as u64 > MAX_BYTES {
-        return Err(unavailable());
+        return Err(unavailable("its file grew past 5 MiB"));
     }
-    let doc = serde_json::from_slice(&bytes).map_err(|_| unavailable())?;
+    let doc = serde_json::from_slice(&bytes)
+        .map_err(|_| unavailable("its file does not hold plan data"))?;
     validate(&doc, scope)?;
     Ok(doc)
 }
 
 fn save(path: &Path, doc: &Document) -> Result<(), ToolError> {
-    let parent = path.parent().ok_or_else(unavailable)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| unavailable("its file has no directory"))?;
     let mut builder = std::fs::DirBuilder::new();
     builder.recursive(true);
     #[cfg(unix)]
@@ -242,37 +258,35 @@ fn save(path: &Path, doc: &Document) -> Result<(), ToolError> {
         use std::os::unix::fs::DirBuilderExt;
         builder.mode(0o700);
     }
-    builder.create(parent).map_err(|_| unavailable())?;
+    builder
+        .create(parent)
+        .map_err(|_| unavailable("its directory cannot be created"))?;
     private_directory(parent)?;
-    let bytes = serde_json::to_vec(doc).map_err(|_| unavailable())?;
+    let bytes = serde_json::to_vec(doc).map_err(|_| unavailable("the plans cannot be encoded"))?;
     if bytes.len() as u64 > MAX_BYTES {
         return Err(ToolError::LimitExceeded("Plan scope exceeds 5 MiB".into()));
     }
-    let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(|_| unavailable())?;
-    temp.write_all(&bytes).map_err(|_| unavailable())?;
-    temp.as_file().sync_all().map_err(|_| unavailable())?;
-    temp.persist(path).map_err(|_| unavailable())?;
     // A lost receipt after replacement must be recovered with read/list.
-    std::fs::File::open(parent)
-        .and_then(|f| f.sync_all())
-        .map_err(|_| unavailable())?;
-    Ok(())
+    crate::storage::write_atomic(path, &bytes)
+        .map_err(|_| unavailable("its file cannot be written"))
 }
 
 fn private_directory(path: &Path) -> Result<(), ToolError> {
     let meta = match std::fs::symlink_metadata(path) {
         Ok(meta) => meta,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(_) => return Err(unavailable()),
+        Err(_) => return Err(unavailable("its directory cannot be inspected")),
     };
     if !meta.is_dir() {
-        return Err(unavailable());
+        return Err(unavailable("its directory is not a directory"));
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         if meta.permissions().mode() & 0o077 != 0 {
-            return Err(unavailable());
+            return Err(unavailable(
+                "its directory is readable by others (chmod 700)",
+            ));
         }
     }
     Ok(())

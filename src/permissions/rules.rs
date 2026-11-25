@@ -50,6 +50,31 @@ const DELEGATION: Rule = Rule {
     plan: true,
     label: CHANGE,
 };
+/// A new message to another session: its agent then acts on it, in that
+/// session's own mode, which may run what this one's Plan does not. Plan
+/// does not start it; a reply, or a message to this conversation's own
+/// task, stays delegation's.
+const SESSION_MESSAGE: Rule = Rule {
+    direct: true,
+    plan: false,
+    label: CHANGE,
+};
+
+/// Whether a `send_message` call with `arguments` writes a new message to
+/// another session: neither a reply nor a message to one of the
+/// conversation's tasks. An empty string is an argument left out, as some
+/// providers send it.
+fn starts_a_session(arguments: &serde_json::Map<String, serde_json::Value>) -> bool {
+    let given = |key: &str| {
+        arguments
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    };
+    given("reply_to").is_none() && given("to").is_some_and(|to| !to.starts_with("task:"))
+}
+
 /// Every MCP tool, whatever its name says: servers are configured outside
 /// the application and their effects are unknown.
 const MCP: Rule = Rule {
@@ -62,12 +87,12 @@ const MCP: Rule = Rule {
 /// `rule_for`).
 const RULES: &[(&str, Rule)] = &[
     // Asking the person changes nothing: it needs no approval, in Plan too.
-    (crate::ask_user::ASK_USER, READ),
+    (crate::names::ASK_USER, READ),
     ("activate_skill", READ),
     ("read_skill_reference", READ),
     ("find_tools", READ),
     ("list_tools", READ),
-    (crate::remote::pool::LIST_EXECUTORS, READ),
+    (crate::names::LIST_EXECUTORS, READ),
     ("list", READ),
     ("glob", READ),
     ("grep", READ),
@@ -88,10 +113,10 @@ const RULES: &[(&str, Rule)] = &[
     ("docs_list", READ),
     ("docs_search", READ),
     ("docs_read", READ),
-    (crate::remote::pool::ASK_PEER, DELEGATION),
-    (crate::remote::pool::ANSWER_PEER, DELEGATION),
-    (crate::messages::SEND_MESSAGE, DELEGATION),
-    (crate::messages::LIST_SESSIONS, READ),
+    (crate::names::ASK_PEER, DELEGATION),
+    (crate::names::ANSWER_PEER, DELEGATION),
+    (crate::names::SEND_MESSAGE, DELEGATION),
+    (crate::names::LIST_SESSIONS, READ),
     ("delegate_task", DELEGATION),
     ("task_status", DELEGATION),
     ("cancel_task", DELEGATION),
@@ -102,7 +127,7 @@ const RULES: &[(&str, Rule)] = &[
     ("write", MUTATION),
     ("edit", MUTATION),
     ("shell", COMMAND),
-    (crate::remote::pool::CARGO_TEST, COMMAND),
+    (crate::names::CARGO_TEST, COMMAND),
     ("process_start", COMMAND),
     (
         "process_write",
@@ -165,8 +190,13 @@ pub(crate) fn summary(has: impl Fn(&str) -> bool) -> String {
             None => "none".into(),
         }
     };
+    let messages = if has(crate::names::SEND_MESSAGE) {
+        " In Plan, send_message only replies (reply_to) or writes to this conversation's own tasks (to: task:…); it starts no message to another session."
+    } else {
+        ""
+    };
     format!(
-        "In Ask mode these tools run without approval: {}, as does patch while it only previews. Every other tool, MCP tools included, asks for approval before it runs. In Yolo mode selected tools run without prompts. Plan permits only these tools without approval: {}, plus patch while it only previews; it also permits {}, with approval. A command hook may still refuse a call or require its approval.",
+        "In Ask mode these tools run without approval: {}, as does patch while it only previews. Every other tool, MCP tools included, asks for approval before it runs. In Yolo mode selected tools run without prompts. Plan permits only these tools without approval: {}, plus patch while it only previews; it also permits {}, with approval.{messages} A command hook may still refuse a call or require its approval.",
         names(|rule| rule.direct),
         names(|rule| rule.direct && rule.plan),
         names(|rule| !rule.direct && rule.plan),
@@ -185,6 +215,9 @@ fn rule_for(name: &str, arguments: &serde_json::Map<String, serde_json::Value>) 
     }
     if name.starts_with("mcp__") {
         return Some(MCP);
+    }
+    if name == crate::names::SEND_MESSAGE && starts_a_session(arguments) {
+        return Some(SESSION_MESSAGE);
     }
     RULES
         .iter()
@@ -268,6 +301,27 @@ mod tests {
         for web in ["web_fetch", "web_search"] {
             let rule = rule_for(web, &Map::new()).unwrap();
             assert!(!rule.direct && rule.plan, "{web}");
+        }
+    }
+
+    /// Review finding: a Plan conversation's agent could have another
+    /// session, in a mode of its own, do what Plan refuses.
+    #[test]
+    fn plan_starts_no_message_to_another_session() {
+        let rule = |arguments: serde_json::Value| {
+            let arguments = arguments.as_object().unwrap();
+            rule_for(crate::names::SEND_MESSAGE, arguments).unwrap()
+        };
+        let new = rule(json!({"to": "review", "text": "Run the migration"}));
+        assert!(new.direct && !new.plan);
+        let empty_reply = rule(json!({"to": "review", "reply_to": "", "text": "x"}));
+        assert!(!empty_reply.plan);
+        for permitted in [
+            json!({"reply_to": "session-msg-1", "text": "Done"}),
+            json!({"to": "task:3", "text": "Also check the tests"}),
+        ] {
+            let rule = rule(permitted);
+            assert!(rule.direct && rule.plan);
         }
     }
 }

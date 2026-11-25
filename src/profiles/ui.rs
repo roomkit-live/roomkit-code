@@ -71,482 +71,637 @@ pub(super) fn choices(
     }])
 }
 
+/// What `/providers`, `/agents`, `/effort` and `/model` are asked: the
+/// command with the structured action a choice carries, or the words a
+/// person types. Read once, here: what follows matches on it.
+enum Action<'a> {
+    /// `delete:` and `confirm-delete:`, which `deletion` reads.
+    Delete {
+        command: &'a str,
+        arguments: &'a str,
+    },
+    /// An action on a ChatGPT account, which `accounts` reads.
+    ChatGpt(&'a str),
+    /// Saves the connection of a signed-in ChatGPT account.
+    UseChatGpt(&'a str),
+    EffortMenu,
+    Effort(&'a str),
+    /// `/model`, with a model's ID or nothing: an ID may hold colons, so it
+    /// is the whole argument.
+    Model(&'a str),
+    Providers,
+    OpenProvider(&'a str),
+    AddProvider,
+    EditProvider(&'a str),
+    AddSubscription(&'a str),
+    TestProvider(&'a str),
+    /// A new agent on `provider`: on the listed `model`, or on one to type
+    /// when it is empty.
+    NewAgentOn {
+        provider: &'a str,
+        model: &'a str,
+        typed: bool,
+    },
+    Agents,
+    NewAgent(&'a str),
+    AgentModels(&'a str),
+    UseModel {
+        agent: &'a str,
+        model: &'a str,
+    },
+    OpenAgent(&'a str),
+    AddAgent,
+    EditAgent(&'a str),
+    SelectAgent(&'a str),
+}
+
+impl<'a> Action<'a> {
+    /// The action `arguments` name for `command`. `list` and `delete <id>`
+    /// are the words a person types for the structured `` and `delete:<id>`.
+    fn parse(command: &'a str, arguments: &'a str) -> Result<Self, String> {
+        let arguments = arguments.trim();
+        let listed = matches!(command, "agents" | "providers");
+        if command == "model" {
+            return Ok(Self::Model(arguments));
+        }
+        if listed
+            && (arguments.starts_with("delete:")
+                || arguments.starts_with("delete ")
+                || arguments.starts_with("confirm-delete:"))
+        {
+            return Ok(Self::Delete { command, arguments });
+        }
+        if command == "providers" {
+            if let Some(action) = arguments.strip_prefix("chatgpt:") {
+                return Ok(Self::ChatGpt(action));
+            }
+            if let Some(account) = arguments.strip_prefix("chatgpt-use:") {
+                return Ok(Self::UseChatGpt(
+                    account.split(':').next().unwrap_or_default(),
+                ));
+            }
+        }
+        let mut parts = arguments.splitn(3, ':');
+        let action = parts.next().unwrap_or_default();
+        let id = parts.next().unwrap_or_default();
+        let model = parts.next().unwrap_or_default();
+        Ok(match (command, action) {
+            ("effort", "") => Self::EffortMenu,
+            ("effort", effort) => Self::Effort(effort),
+            ("providers", "" | "list") => Self::Providers,
+            ("providers", "open") => Self::OpenProvider(id),
+            ("providers", "add") => Self::AddProvider,
+            ("providers", "edit") => Self::EditProvider(id),
+            ("providers", "subscription") => Self::AddSubscription(id),
+            ("providers", "test") => Self::TestProvider(id),
+            ("providers", "model" | "typed") => Self::NewAgentOn {
+                provider: id,
+                model,
+                typed: action == "typed",
+            },
+            ("agents", "" | "list") => Self::Agents,
+            ("agents", "new") => Self::NewAgent(id),
+            ("agents", "models") => Self::AgentModels(id),
+            ("agents", "use-model") => Self::UseModel { agent: id, model },
+            ("agents", "open") => Self::OpenAgent(id),
+            ("agents", "add") => Self::AddAgent,
+            ("agents", "edit") => Self::EditAgent(id),
+            ("agents", "select") => Self::SelectAgent(id),
+            _ => return Err("Unknown profile action; reopen /providers or /agents".into()),
+        })
+    }
+
+    /// Whether the action writes the profile files or what a conversation
+    /// keeps: it then holds the cross-process edit lease. Menus, forms being
+    /// opened and model discovery do not.
+    fn mutates(&self) -> bool {
+        match self {
+            Self::SelectAgent(_) | Self::Effort(_) => true,
+            Self::Model(id) => !id.is_empty(),
+            _ => false,
+        }
+    }
+}
+
+/// What a connection's entry in `/providers` offers.
+fn provider_menu(current: &SessionConfig, id: &str, provider: &Provider) -> CommandResult {
+    let entries = if let Authentication::ChatGpt { account } = &provider.authentication {
+        vec![
+            choice(
+                format!("chatgpt:account:{account}"),
+                "Manage ChatGPT account",
+                "Choose models, sign in or sign out",
+            ),
+            choice(
+                format!("delete:{id}"),
+                "Delete provider",
+                "Remove this connection; account sign-out is separate",
+            ),
+        ]
+    } else {
+        vec![
+            choice(
+                format!("edit:{id}"),
+                "Edit connection",
+                if provider.subscription().is_some() {
+                    "Name, API key and timeout"
+                } else {
+                    "URL, authentication and timeout"
+                },
+            ),
+            choice(
+                format!("test:{id}"),
+                "Test connection and list models",
+                "Read-only GET /models; no conversation is sent",
+            ),
+            choice(
+                format!("delete:{id}"),
+                "Delete provider",
+                "Remove this shared connection if no agents use it",
+            ),
+        ]
+    };
+    choices(current, "providers", &provider.label, entries)
+}
+
+/// What an agent's entry in `/agents` offers.
+fn agent_menu(current: &SessionConfig, id: &str, agent: &Agent) -> CommandResult {
+    let entries = vec![
+        choice(
+            format!("select:{id}"),
+            "Select agent",
+            format!("{} · {}", agent.provider, agent.model),
+        ),
+        choice(
+            format!("models:{id}"),
+            "Change model",
+            "Choose among the models its connection serves",
+        ),
+        choice(
+            format!("edit:{id}"),
+            "Edit agent",
+            "Provider, model, effort, instructions and tools",
+        ),
+        choice(
+            format!("delete:{id}"),
+            "Delete agent",
+            "Remove this profile; keep conversation history",
+        ),
+    ];
+    choices(current, "agents", &agent.label, entries)
+}
+
+/// Opens the form of a new connection, or of connection `id`: its own form
+/// for a subscription with a pasted key.
+fn connection_form(
+    state: &mut State,
+    current: &SessionConfig,
+    id: Option<&str>,
+) -> Result<CommandResult, String> {
+    let existing = match id {
+        Some(id) => Some(
+            state
+                .providers
+                .value
+                .profiles
+                .get(id)
+                .ok_or("Unknown provider")?
+                .clone(),
+        ),
+        None => None,
+    };
+    let Some(existing) = existing else {
+        state.providers.value.check_room()?;
+        let form = provider_form(None, state, uuid::Uuid::new_v4().to_string());
+        return Ok(open_form(state, current, form, Target::Provider(None)));
+    };
+    if let Some(subscription) = existing.account_managed() {
+        return Err(managed_elsewhere(subscription));
+    }
+    let form_id = uuid::Uuid::new_v4().to_string();
+    let (form, target) = match existing.subscription() {
+        Some(subscription) => (
+            super::subscription_form::form(subscription, Some(&existing), form_id),
+            Target::Subscription {
+                subscription,
+                original: Some(existing.id.clone()),
+            },
+        ),
+        None => (
+            provider_form(Some(&existing), state, form_id),
+            Target::Provider(Some(existing.id.clone())),
+        ),
+    };
+    Ok(open_form(state, current, form, target))
+}
+
+/// Opens the form of a new connection to subscription `id`, one whose
+/// credential is a pasted key.
+fn subscription_form(
+    state: &mut State,
+    current: &SessionConfig,
+    id: &str,
+) -> Result<CommandResult, String> {
+    let subscription = super::subscriptions::find(id)
+        .filter(|s| matches!(s.credential, super::subscriptions::Credential::Key { .. }))
+        .ok_or("Unknown subscription")?;
+    state.providers.value.check_room()?;
+    let target = Target::Subscription {
+        subscription,
+        original: None,
+    };
+    let form = super::subscription_form::form(subscription, None, uuid::Uuid::new_v4().to_string());
+    Ok(open_form(state, current, form, target))
+}
+
+/// Opens the form of a new agent on a connection's `model`, with the
+/// capacity its server reported for it: a listed model, or one to type
+/// when `typed`.
+fn new_agent_form(
+    state: &mut State,
+    current: &SessionConfig,
+    (provider, model, reported): (&str, &str, Option<u64>),
+    typed: bool,
+) -> Result<CommandResult, String> {
+    if !state.providers.value.profiles.contains_key(provider)
+        || model.is_empty() != typed
+        || !(model.is_empty() || listable(model))
+    {
+        return Err("Invalid provider/model selection".into());
+    }
+    let on = Some((provider, model, reported));
+    let form = agent_form(None, state, uuid::Uuid::new_v4().to_string(), on)?;
+    Ok(open_form(state, current, form, Target::Agent(None)))
+}
+
+/// Opens an agent's form: a new one, or `existing`'s.
+fn edit_agent_form(
+    state: &mut State,
+    current: &SessionConfig,
+    existing: Option<&Agent>,
+) -> Result<CommandResult, String> {
+    let target = Target::Agent(existing.map(|agent| agent.id.clone()));
+    let form = agent_form(existing, state, uuid::Uuid::new_v4().to_string(), None)?;
+    Ok(open_form(state, current, form, target))
+}
+
 impl Profiles {
     pub async fn handle(
         &self,
         kit: &RoomKit<SqliteStore>,
         terminal: &ChannelId,
-        mut request: Request,
+        request: Request,
         current: SessionConfig,
     ) -> Result<CommandResult, String> {
-        // Human-readable aliases; choice values remain structured actions.
-        if let Command::Invoke { name, arguments } = &mut request.command
-            && matches!(name.as_str(), "agents" | "providers")
-        {
-            let trimmed = arguments.trim();
-            if trimmed == "list" {
-                arguments.clear();
-            } else if let Some(id) = trimmed.strip_prefix("delete ") {
-                *arguments = format!("delete:{}", id.trim());
-            }
-        }
-        if let Command::Invoke { name, arguments } = &request.command
-            && matches!(name.as_str(), "agents" | "providers")
-            && (arguments.starts_with("delete:") || arguments.starts_with("confirm-delete:"))
-        {
-            return self.delete(kit, terminal, name, arguments, current).await;
-        }
-        if let Command::Invoke { name, arguments } = &request.command
-            && name == "providers"
-            && let Some(action) = arguments.strip_prefix("chatgpt:")
-        {
-            self.state.lock().await.pending_delete = None;
-            return self.accounts.handle(current.room.as_str(), action).await;
-        }
-        if let Command::SubmitForm { name, form, values } = &request.command
-            && name == "providers"
-            && crate::accounts::callback_form_id(form)
-        {
-            return self
-                .accounts
-                .submit_callback(current.room.as_str(), form, values)
-                .await;
-        }
-        let mut state = self.state.lock().await;
-        state.pending_delete = None;
-        // Menus and model discovery do not hold the cross-process edit lease.
-        let mutating = match &request.command {
-            Command::SubmitForm { .. } => true,
-            Command::Invoke { name, arguments } => {
-                (name == "agents" && arguments.starts_with("select:"))
-                    || (matches!(name.as_str(), "effort" | "model") && !arguments.trim().is_empty())
-            }
-            _ => false,
-        };
-        let edit_lease = mutating
-            .then(|| store::edit_lease(&self.state_dir))
-            .transpose()?;
         match request.command {
             Command::Invoke { name, arguments } => {
-                state.pending = None;
-                // Refresh shared connections only when opening a menu/form,
-                // never just before saving an older form's revision.
-                state.providers.reload()?;
-                state.reload_agents()?;
-                if state.providers.value.schema != 1 {
-                    return Err("Unsupported profile file version".into());
-                }
-                // A model ID may hold colons: it is the whole argument.
-                if name == "model" {
-                    return self.model(kit, state, current, arguments.trim()).await;
-                }
-                let mut parts = arguments.trim().splitn(3, ':');
-                let action = parts.next().unwrap_or_default();
-                let id = parts.next().unwrap_or_default();
-                let model = parts.next().unwrap_or_default();
-                match (name.as_str(), action) {
-                    ("effort", "") => {
-                        state
-                            .agent(current.agent.as_str())
-                            .ok_or("Configure an agent with /agents first")?;
-                        Ok(choices(
-                            &current,
-                            "effort",
-                            "Reasoning effort · supported levels depend on the model",
-                            effort_choices(),
-                        ))
-                    }
-                    ("effort", effort) => {
-                        self.change_current(kit, &mut state, current, |agent| {
-                            agent.reasoning_effort = (effort != "default").then(|| effort.into());
-                        })
-                        .await
-                    }
-                    ("providers", "") => Ok(provider_choices(&state, &current)),
-                    ("providers", "chatgpt-use") => {
-                        let account = self
-                            .accounts
-                            .auth
-                            .accounts()
-                            .map_err(|e| e.to_string())?
-                            .into_iter()
-                            .find(|a| a.id == id)
-                            .ok_or("Unknown ChatGPT account")?;
-                        let models = self
-                            .accounts
-                            .auth
-                            .models(id)
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        if models.is_empty() {
-                            return Err("This ChatGPT account returned no available models".into());
-                        }
-                        let _edit_lease = store::edit_lease(&self.state_dir)?;
-                        state.providers.reload()?;
-                        let provider_id = format!("chatgpt-{id}");
-                        let chatgpt = &super::subscriptions::CHATGPT;
-                        let provider = Provider {
-                            subscription: None,
-                            kind: chatgpt.kind,
-                            id: provider_id.clone(),
-                            label: format!(
-                                "ChatGPT · {}",
-                                account
-                                    .email
-                                    .as_deref()
-                                    .unwrap_or("Account")
-                                    .chars()
-                                    .take(80)
-                                    .collect::<String>()
-                            ),
-                            base_url: chatgpt.base_url.into(),
-                            authentication: Authentication::ChatGpt { account: id.into() },
-                            timeout_seconds: 600,
-                        };
-                        provider.validate()?;
-                        if !state.providers.value.profiles.contains_key(&provider_id)
-                            && state.providers.value.profiles.len() >= 128
-                        {
-                            return Err("Maximum of 128 providers reached".into());
-                        }
-                        let mut providers = state.providers.value.clone();
-                        providers.profiles.insert(provider_id.clone(), provider);
-                        state.providers.save(providers)?;
-                        self.accounts.close().await;
-                        Ok(choices(
-                            &current,
-                            "providers",
-                            "ChatGPT models · choose one to create an agent",
-                            models
-                                .into_iter()
-                                .map(|m| {
-                                    choice(format!("model:{provider_id}:{}", m.id), m.name, m.id)
-                                })
-                                .collect(),
-                        ))
-                    }
-                    ("providers", "open") => {
-                        let p = state
-                            .providers
-                            .value
-                            .profiles
-                            .get(id)
-                            .ok_or("Unknown provider")?;
-                        if let Authentication::ChatGpt { account } = &p.authentication {
-                            return Ok(choices(
-                                &current,
-                                "providers",
-                                &p.label,
-                                vec![
-                                    choice(
-                                        format!("chatgpt:account:{account}"),
-                                        "Manage ChatGPT account",
-                                        "Choose models, sign in or sign out",
-                                    ),
-                                    choice(
-                                        format!("delete:{id}"),
-                                        "Delete provider",
-                                        "Remove this connection; account sign-out is separate",
-                                    ),
-                                ],
-                            ));
-                        }
-                        Ok(choices(
-                            &current,
-                            "providers",
-                            &p.label,
-                            vec![
-                                choice(
-                                    format!("edit:{id}"),
-                                    "Edit connection",
-                                    if p.subscription().is_some() {
-                                        "Name, API key and timeout"
-                                    } else {
-                                        "URL, authentication and timeout"
-                                    },
-                                ),
-                                choice(
-                                    format!("test:{id}"),
-                                    "Test connection and list models",
-                                    "Read-only GET /models; no conversation is sent",
-                                ),
-                                choice(
-                                    format!("delete:{id}"),
-                                    "Delete provider",
-                                    "Remove this shared connection if no agents use it",
-                                ),
-                            ],
-                        ))
-                    }
-                    ("providers", "add" | "edit") => {
-                        let existing = if action == "edit" {
-                            Some(
-                                state
-                                    .providers
-                                    .value
-                                    .profiles
-                                    .get(id)
-                                    .ok_or("Unknown provider")?,
-                            )
-                        } else {
-                            None
-                        };
-                        if existing.is_none() && state.providers.value.profiles.len() >= 128 {
-                            return Err("Maximum of 128 provider profiles reached".into());
-                        }
-                        if let Some(subscription) = existing.and_then(Provider::account_managed) {
-                            return Err(managed_elsewhere(subscription));
-                        }
-                        // A pasted-key subscription edits through its own form.
-                        if let Some((subscription, existing)) =
-                            existing.and_then(|p| Some((p.subscription()?, p)))
-                        {
-                            let target = Target::Subscription {
-                                subscription,
-                                original: Some(existing.id.clone()),
-                            };
-                            let form = super::subscription_form::form(
-                                subscription,
-                                Some(existing),
-                                uuid::Uuid::new_v4().to_string(),
-                            );
-                            return Ok(open_form(&mut state, &current, form, target));
-                        }
-                        let target = Target::Provider(existing.map(|p| p.id.clone()));
-                        let form =
-                            provider_form(existing, &state, uuid::Uuid::new_v4().to_string());
-                        Ok(open_form(&mut state, &current, form, target))
-                    }
-                    ("providers", "subscription") => {
-                        let subscription = super::subscriptions::find(id)
-                            .filter(|s| {
-                                matches!(s.credential, super::subscriptions::Credential::Key { .. })
-                            })
-                            .ok_or("Unknown subscription")?;
-                        if state.providers.value.profiles.len() >= 128 {
-                            return Err("Maximum of 128 provider profiles reached".into());
-                        }
-                        let target = Target::Subscription {
-                            subscription,
-                            original: None,
-                        };
-                        let form = super::subscription_form::form(
-                            subscription,
-                            None,
-                            uuid::Uuid::new_v4().to_string(),
-                        );
-                        Ok(open_form(&mut state, &current, form, target))
-                    }
-                    ("providers", "test") => {
-                        let provider = state
-                            .providers
-                            .value
-                            .profiles
-                            .get(id)
-                            .ok_or("Unknown provider")?
-                            .clone();
-                        // A listing reads a server: no profile command waits on it.
-                        drop(state);
-                        let title = "Connection successful · choose a model to create an agent";
-                        self.creation_choices(&current, &provider, title).await
-                    }
-                    // A listed model, or none to type one (`typed`).
-                    ("providers", "model" | "typed") => {
-                        if !state.providers.value.profiles.contains_key(id)
-                            || model.is_empty() != (action == "typed")
-                            || !(model.is_empty() || listable(model))
-                        {
-                            return Err("Invalid provider/model selection".into());
-                        }
-                        let form = agent_form(
-                            None,
-                            &state,
-                            uuid::Uuid::new_v4().to_string(),
-                            Some((id, model, self.reported(id, model))),
-                        )?;
-                        Ok(open_form(&mut state, &current, form, Target::Agent(None)))
-                    }
-                    ("agents", "") => Ok(agent_choices(&state, &current)),
-                    ("agents", "new") => self.new_agent(state, current, id).await,
-                    ("agents", "models") => self.agent_models(state, current, id).await,
-                    ("agents", "use-model") => {
-                        let mut agent = state.agent(id).ok_or("Unknown agent")?;
-                        if !listable(model) {
-                            return Err("Invalid agent/model selection".into());
-                        }
-                        self.switch(&mut agent, model);
-                        let target = Target::Agent(Some(agent.id.clone()));
-                        let id = uuid::Uuid::new_v4().to_string();
-                        let form = agent_form(Some(&agent), &state, id, None)?;
-                        Ok(open_form(&mut state, &current, form, target))
-                    }
-                    ("agents", "open") => {
-                        let agent = state.agent(id).ok_or("Unknown agent")?;
-                        Ok(choices(
-                            &current,
-                            "agents",
-                            &agent.label,
-                            vec![
-                                choice(
-                                    format!("select:{id}"),
-                                    "Select agent",
-                                    format!("{} · {}", agent.provider, agent.model),
-                                ),
-                                choice(
-                                    format!("models:{id}"),
-                                    "Change model",
-                                    "Choose among the models its connection serves",
-                                ),
-                                choice(
-                                    format!("edit:{id}"),
-                                    "Edit agent",
-                                    "Provider, model, effort, instructions and tools",
-                                ),
-                                choice(
-                                    format!("delete:{id}"),
-                                    "Delete agent",
-                                    "Remove this profile; keep conversation history",
-                                ),
-                            ],
-                        ))
-                    }
-                    ("agents", "add" | "edit") => {
-                        let existing = if action == "edit" {
-                            Some(state.agent(id).ok_or("Unknown agent")?)
-                        } else {
-                            None
-                        };
-                        let target = Target::Agent(existing.as_ref().map(|a| a.id.clone()));
-                        let form = agent_form(
-                            existing.as_ref(),
-                            &state,
-                            uuid::Uuid::new_v4().to_string(),
-                            None,
-                        )?;
-                        Ok(open_form(&mut state, &current, form, target))
-                    }
-                    ("agents", "select") => {
-                        let agent = state.agent(id).ok_or("Unknown agent")?.clone();
-                        let provider = state
-                            .providers
-                            .value
-                            .profiles
-                            .get(&agent.provider)
-                            .ok_or("Unknown provider")?;
-                        let (runtime, tools) = self.assemble(&agent, provider).await?;
-                        state.ensure_slot(kit, id)?;
-                        let mut next = current;
-                        next.agent = ChannelId::new(id).map_err(|_| "Invalid agent ID")?;
-                        self.attach(kit, &next, terminal).await?;
-                        state.select_agent(id)?;
-                        self.installed(kit, &mut state, id, runtime, tools).await?;
-                        // Last: a selection that fails before leaves the
-                        // conversation with the agent its view still shows.
-                        self.designate(kit, &next).await?;
-                        self.settle_in(kit, &mut state, &mut next).await;
-                        Ok(CommandResult::Switch(Box::new(next)))
-                    }
-                    _ => Err("Unknown profile action; reopen /providers or /agents".into()),
-                }
+                let action = Action::parse(&name, &arguments)?;
+                self.invoke(kit, terminal, action, current).await
+            }
+            Command::SubmitForm { name, form, values }
+                if name == "providers" && crate::accounts::callback_form_id(&form) =>
+            {
+                self.accounts
+                    .submit_callback(current.room.as_str(), &form, &values)
+                    .await
             }
             Command::SubmitForm { name, form, values } => {
-                let pending = state
-                    .pending
-                    .as_ref()
-                    .ok_or("This form is no longer open")?;
-                if pending.room != current.room.as_str()
-                    || pending.form.id != form
-                    || pending.form.command != name
-                {
-                    return Err("This form does not belong to the current view".into());
-                }
-                if values.len() != pending.form.fields.len()
-                    || pending
-                        .form
-                        .fields
-                        .iter()
-                        .any(|f| values.get(&f.name).is_none())
-                {
-                    return Err("The form fields changed; cancel and reopen it".into());
-                }
-                let target = pending.target.clone();
-                let mut next = current;
-                let mut created = None;
-                match &target {
-                    Target::Provider(original) => {
-                        let profile = parse_provider(&values, original.as_deref(), &state)?;
-                        created = original.is_none().then(|| profile.clone());
-                        self.save_connection(kit, &mut state, &next, profile)
-                            .await?;
-                    }
-                    Target::Subscription {
-                        subscription,
-                        original,
-                    } => {
-                        let profile = super::subscription_form::parse(
-                            &values,
-                            subscription,
-                            original.as_deref(),
-                            &state,
-                        )?;
-                        created = original.is_none().then(|| profile.clone());
-                        self.save_connection(kit, &mut state, &next, profile)
-                            .await?;
-                    }
-                    Target::Agent(original) => {
-                        // A provider may have been deleted while this form was open.
-                        state.providers.reload()?;
-                        let before = original
-                            .as_deref()
-                            .and_then(|id| state.agent(id))
-                            .map(|agent| conversation::own(&agent));
-                        let (profile, scope) = parse_agent(&values, original.as_deref(), &state)?;
-                        let saved = conversation::own(&profile);
-                        let provider = state
-                            .providers
-                            .value
-                            .profiles
-                            .get(&profile.provider)
-                            .ok_or("Unknown provider")?;
-                        let (runtime, tools) = self.assemble(&profile, provider).await?;
-                        state.ensure_slot(kit, &profile.id)?;
-                        next.agent = ChannelId::new(&profile.id).map_err(|_| "Invalid agent ID")?;
-                        self.attach(kit, &next, terminal).await?;
-                        state.save_agent(profile, scope)?;
-                        state.select_agent(next.agent.as_str())?;
-                        self.installed(kit, &mut state, next.agent.as_str(), runtime, tools)
-                            .await?;
-                        self.designate(kit, &next).await?;
-                        // A model or an effort set in the form is also that of
-                        // the conversation it is saved from: the person set it
-                        // here. The agent's other conversations keep theirs.
-                        if before.as_ref() != Some(&saved) {
-                            self.adopt(kit, &mut state, &next, saved).await?;
-                        }
-                    }
-                }
-                state.pending = None;
-                // A new connection the current agent does not use offers its
-                // models; one it uses, recreated, refreshes its view.
-                let current_uses = |p: &Provider| {
-                    state
-                        .agent(next.agent.as_str())
-                        .is_some_and(|a| a.provider == p.id)
-                };
-                if let Some(provider) = created.filter(|p| !current_uses(p)) {
-                    // A listing reads a server: no profile edit waits on it.
-                    drop(edit_lease);
-                    drop(state);
-                    return Ok(self.after_connecting(&next, &provider).await);
-                }
-                self.settle_in(kit, &mut state, &mut next).await;
-                Ok(CommandResult::Switch(Box::new(next)))
+                self.submit(kit, terminal, (&name, &form), &values, current)
+                    .await
             }
             _ => Err("Unsupported profile request".into()),
         }
     }
 
-    /// Saves a connection, reinstalling the current agent when it uses it.
+    /// Does what `action` asks in `current`'s conversation.
+    async fn invoke(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        terminal: &ChannelId,
+        action: Action<'_>,
+        current: SessionConfig,
+    ) -> Result<CommandResult, String> {
+        // These take the profiles' lock themselves, or reach a service
+        // before they do.
+        match action {
+            Action::Delete { command, arguments } => {
+                // The words a person types for the structured action.
+                let typed = arguments
+                    .strip_prefix("delete ")
+                    .map(|id| format!("delete:{}", id.trim()));
+                let arguments = typed.as_deref().unwrap_or(arguments);
+                return self
+                    .delete(kit, terminal, command, arguments, current)
+                    .await;
+            }
+            Action::ChatGpt(account_action) => {
+                self.state.lock().await.pending_delete = None;
+                return self
+                    .accounts
+                    .handle(current.room.as_str(), account_action)
+                    .await;
+            }
+            Action::UseChatGpt(account) => return self.use_chatgpt(&current, account).await,
+            _ => {}
+        }
+        let mut state = self.state.lock().await;
+        state.pending_delete = None;
+        let _edit_lease = action
+            .mutates()
+            .then(|| store::edit_lease(&self.state_dir))
+            .transpose()?;
+        state.pending = None;
+        // Refresh shared connections only when opening a menu/form,
+        // never just before saving an older form's revision.
+        state.providers.reload()?;
+        state.reload_agents()?;
+        if state.providers.value.schema != 1 {
+            return Err("Unsupported profile file version".into());
+        }
+        let provider = |state: &State, id: &str| {
+            let found = state.providers.value.profiles.get(id);
+            found.cloned().ok_or("Unknown provider")
+        };
+        match action {
+            Action::Delete { .. } | Action::ChatGpt(_) | Action::UseChatGpt(_) => {
+                Err("Unknown profile action; reopen /providers or /agents".into())
+            }
+            Action::Model(id) => self.model(kit, state, current, id).await,
+            Action::EffortMenu => {
+                state
+                    .agent(current.agent.as_str())
+                    .ok_or("Configure an agent with /agents first")?;
+                let title = "Reasoning effort · supported levels depend on the model";
+                Ok(choices(&current, "effort", title, effort_choices()))
+            }
+            Action::Effort(effort) => {
+                self.change_current(kit, &mut state, current, |agent| {
+                    agent.reasoning_effort = (effort != "default").then(|| effort.into());
+                })
+                .await
+            }
+            Action::Providers => Ok(provider_choices(&state, &current)),
+            Action::OpenProvider(id) => Ok(provider_menu(&current, id, &provider(&state, id)?)),
+            Action::AddProvider => connection_form(&mut state, &current, None),
+            Action::EditProvider(id) => connection_form(&mut state, &current, Some(id)),
+            Action::AddSubscription(id) => subscription_form(&mut state, &current, id),
+            Action::TestProvider(id) => {
+                let provider = provider(&state, id)?;
+                // A listing reads a server: no profile command waits on it.
+                drop(state);
+                let title = "Connection successful · choose a model to create an agent";
+                self.creation_choices(&current, &provider, title).await
+            }
+            Action::NewAgentOn {
+                provider,
+                model,
+                typed,
+            } => {
+                let reported = self.reported(provider, model);
+                let on = (provider, model, reported);
+                new_agent_form(&mut state, &current, on, typed)
+            }
+            Action::Agents => Ok(agent_choices(&state, &current)),
+            Action::NewAgent(id) => self.new_agent(state, current, id).await,
+            Action::AgentModels(id) => self.agent_models(state, current, id).await,
+            Action::UseModel { agent: id, model } => {
+                let mut agent = state.agent(id).ok_or("Unknown agent")?;
+                if !listable(model) {
+                    return Err("Invalid agent/model selection".into());
+                }
+                self.switch(&mut agent, model);
+                edit_agent_form(&mut state, &current, Some(&agent))
+            }
+            Action::OpenAgent(id) => {
+                let agent = state.agent(id).ok_or("Unknown agent")?;
+                Ok(agent_menu(&current, id, &agent))
+            }
+            Action::AddAgent => edit_agent_form(&mut state, &current, None),
+            Action::EditAgent(id) => {
+                let agent = state.agent(id).ok_or("Unknown agent")?;
+                edit_agent_form(&mut state, &current, Some(&agent))
+            }
+            Action::SelectAgent(id) => self.select(kit, terminal, &mut state, current, id).await,
+        }
+    }
+
+    /// `/agents select:<id>`: makes agent `id` the one `current`'s
+    /// conversation designates and its view shows.
+    async fn select(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        terminal: &ChannelId,
+        state: &mut State,
+        current: SessionConfig,
+        id: &str,
+    ) -> Result<CommandResult, String> {
+        let agent = state.agent(id).ok_or("Unknown agent")?.clone();
+        let provider = state
+            .providers
+            .value
+            .profiles
+            .get(&agent.provider)
+            .ok_or("Unknown provider")?;
+        let (runtime, tools) = self.assemble(&agent, provider).await?;
+        state.ensure_slot(kit, id)?;
+        let mut next = current;
+        next.agent = ChannelId::new(id).map_err(|_| "Invalid agent ID")?;
+        let attached = self.attach(kit, &next, terminal).await?;
+        let selected = state.select_agent(id);
+        self.saved_or_detached(kit, &next, attached, selected)
+            .await?;
+        self.installed(kit, state, id, runtime, tools).await?;
+        // Last: a selection that fails before leaves the
+        // conversation with the agent its view still shows.
+        self.designate(kit, &next).await?;
+        self.settle_in(kit, state, &mut next).await;
+        Ok(CommandResult::Switch(Box::new(next)))
+    }
+
+    /// Saves the form `form` of command `name`, submitted with `values`:
+    /// the one this view opened, checked against what it asked.
+    async fn submit(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        terminal: &ChannelId,
+        (name, form): (&str, &str),
+        values: &FormValues,
+        current: SessionConfig,
+    ) -> Result<CommandResult, String> {
+        let mut state = self.state.lock().await;
+        state.pending_delete = None;
+        let edit_lease = store::edit_lease(&self.state_dir)?;
+        let pending = state
+            .pending
+            .as_ref()
+            .ok_or("This form is no longer open")?;
+        if pending.room != current.room.as_str()
+            || pending.form.id != form
+            || pending.form.command != name
+        {
+            return Err("This form does not belong to the current view".into());
+        }
+        let fields = &pending.form.fields;
+        if values.len() != fields.len() || fields.iter().any(|f| values.get(&f.name).is_none()) {
+            return Err("The form fields changed; cancel and reopen it".into());
+        }
+        let target = pending.target.clone();
+        let mut next = current;
+        let mut created = None;
+        match &target {
+            Target::Provider(original) => {
+                let profile = parse_provider(values, original.as_deref(), &state)?;
+                created = original.is_none().then(|| profile.clone());
+                self.save_connection(kit, &mut state, &next, profile)
+                    .await?;
+            }
+            Target::Subscription {
+                subscription,
+                original,
+            } => {
+                let original = original.as_deref();
+                let profile =
+                    super::subscription_form::parse(values, subscription, original, &state)?;
+                created = original.is_none().then(|| profile.clone());
+                self.save_connection(kit, &mut state, &next, profile)
+                    .await?;
+            }
+            Target::Agent(original) => {
+                let original = original.as_deref();
+                self.save_agent_form(kit, terminal, &mut state, &mut next, (original, values))
+                    .await?;
+            }
+        }
+        state.pending = None;
+        // A new connection the current agent does not use offers its
+        // models; one it uses, recreated, refreshes its view.
+        let current_uses = |p: &Provider| {
+            state
+                .agent(next.agent.as_str())
+                .is_some_and(|a| a.provider == p.id)
+        };
+        if let Some(provider) = created.filter(|p| !current_uses(p)) {
+            // A listing reads a server: no profile edit waits on it.
+            drop(edit_lease);
+            drop(state);
+            return Ok(self.after_connecting(&next, &provider).await);
+        }
+        self.settle_in(kit, &mut state, &mut next).await;
+        Ok(CommandResult::Switch(Box::new(next)))
+    }
+
+    /// Saves the agent an agent form describes, `original` when it edits
+    /// one, and makes it the agent `next` shows.
+    async fn save_agent_form(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        terminal: &ChannelId,
+        state: &mut State,
+        next: &mut SessionConfig,
+        (original, values): (Option<&str>, &FormValues),
+    ) -> Result<(), String> {
+        // A provider may have been deleted while this form was open.
+        state.providers.reload()?;
+        let before = original
+            .and_then(|id| state.agent(id))
+            .map(|agent| conversation::own(&agent));
+        let (profile, scope) = parse_agent(values, original, state)?;
+        let saved = conversation::own(&profile);
+        let provider = state
+            .providers
+            .value
+            .profiles
+            .get(&profile.provider)
+            .ok_or("Unknown provider")?;
+        let (runtime, tools) = self.assemble(&profile, provider).await?;
+        state.ensure_slot(kit, &profile.id)?;
+        next.agent = ChannelId::new(&profile.id).map_err(|_| "Invalid agent ID")?;
+        let attached = self.attach(kit, next, terminal).await?;
+        let written = state
+            .save_agent(profile, scope)
+            .and_then(|()| state.select_agent(next.agent.as_str()));
+        self.saved_or_detached(kit, next, attached, written).await?;
+        self.installed(kit, state, next.agent.as_str(), runtime, tools)
+            .await?;
+        self.designate(kit, next).await?;
+        // A model or an effort set in the form is also that of
+        // the conversation it is saved from: the person set it
+        // here. The agent's other conversations keep theirs.
+        if before.as_ref() != Some(&saved) {
+            self.adopt(kit, state, next, saved).await?;
+        }
+        Ok(())
+    }
+
+    /// `/providers chatgpt-use:<account>`: saves the connection of ChatGPT
+    /// account `id`, then offers its models. The account's service lists
+    /// them before the profiles are locked: a service that does not answer
+    /// holds back neither the sidebar nor the other profile commands.
+    async fn use_chatgpt(
+        &self,
+        current: &SessionConfig,
+        id: &str,
+    ) -> Result<CommandResult, String> {
+        let account = self
+            .accounts
+            .auth
+            .accounts()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|a| a.id == id)
+            .ok_or("Unknown ChatGPT account")?;
+        let models = self
+            .accounts
+            .auth
+            .models(id)
+            .await
+            .map_err(|e| e.to_string())?;
+        if models.is_empty() {
+            return Err("This ChatGPT account returned no available models".into());
+        }
+        let provider_id = format!("chatgpt-{id}");
+        let chatgpt = &super::subscriptions::CHATGPT;
+        let email = account.email.as_deref().unwrap_or("Account");
+        let provider = Provider {
+            subscription: None,
+            kind: chatgpt.kind,
+            id: provider_id.clone(),
+            label: format!("ChatGPT · {}", email.chars().take(80).collect::<String>()),
+            base_url: chatgpt.base_url.into(),
+            authentication: Authentication::ChatGpt { account: id.into() },
+            timeout_seconds: 600,
+        };
+        provider.validate()?;
+        {
+            let mut state = self.state.lock().await;
+            state.pending_delete = None;
+            state.pending = None;
+            let _edit_lease = store::edit_lease(&self.state_dir)?;
+            state.providers.reload()?;
+            state.reload_agents()?;
+            if state.providers.value.schema != 1 {
+                return Err("Unsupported profile file version".into());
+            }
+            if !state.providers.value.profiles.contains_key(&provider_id) {
+                state.providers.value.check_room()?;
+            }
+            let mut providers = state.providers.value.clone();
+            providers.profiles.insert(provider_id.clone(), provider);
+            state.providers.save(providers)?;
+        }
+        self.accounts.close().await;
+        Ok(choices(
+            current,
+            "providers",
+            "ChatGPT models · choose one to create an agent",
+            models
+                .into_iter()
+                .map(|m| choice(format!("model:{provider_id}:{}", m.id), m.name, m.id))
+                .collect(),
+        ))
+    }
+
+    /// Saves a connection, reinstalling the agents that use it.
     async fn save_connection(
         &self,
         kit: &RoomKit<SqliteStore>,
@@ -554,6 +709,7 @@ impl Profiles {
         current: &SessionConfig,
         profile: Provider,
     ) -> Result<(), String> {
+        profile.check_credential_transport()?;
         let runtime = if let Some(agent) = state
             .agent(current.agent.as_str())
             .filter(|a| a.provider == profile.id)
@@ -562,6 +718,7 @@ impl Profiles {
         } else {
             None
         };
+        let connection = profile.id.clone();
         let mut providers = state.providers.value.clone();
         providers.profiles.insert(profile.id.clone(), profile);
         state.providers.save(providers)?;
@@ -569,6 +726,12 @@ impl Profiles {
             self.installed(kit, state, current.agent.as_str(), agent, tools)
                 .await?;
         }
+        // The other agents on this connection hold its previous key and
+        // endpoint.
+        self.reinstall_others(kit, state, current.agent.as_str(), |agent| {
+            agent.provider == connection
+        })
+        .await;
         Ok(())
     }
 }
@@ -765,6 +928,10 @@ fn provider_form(existing: Option<&Provider>, state: &State, id: String) -> Form
     )
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Debt recorded when the limit was set: split it, never grow it"
+)]
 fn agent_form(
     existing: Option<&Agent>,
     state: &State,

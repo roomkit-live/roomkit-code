@@ -90,6 +90,7 @@ async fn no_badge(rx: &mut tokio::sync::watch::Receiver<Vec<Event>>) {
 }
 
 #[tokio::test]
+#[expect(clippy::too_many_lines, reason = "A scenario told in one piece")]
 async fn monitor_observes_actual_lifecycle_filters_owners_and_rejects_old_actions() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();

@@ -8,6 +8,7 @@ import pty
 import re
 import select
 import shlex
+import signal
 import struct
 import subprocess
 import tempfile
@@ -84,17 +85,22 @@ class App:
             if select.select([self.master], [], [], 0.02)[0]:
                 self.output.extend(os.read(self.master, 65536))
 
-    def quit(self):
-        """Detach with Ctrl+D and return the lines printed after the view closed."""
+    def quit(self, signalled=None):
+        """Detach with Ctrl+D, or end with a signal, and return the lines printed after the view closed."""
         try:
-            offset = self.send("\x04")
+            offset = len(self.output)
+            if signalled is None:
+                self.send("\x04")
+            else:
+                self.process.send_signal(signalled)
             deadline = time.monotonic() + 10
             while time.monotonic() < deadline:
                 if select.select([self.master], [], [], 0.02)[0]:
                     self.output.extend(os.read(self.master, 65536))
                 elif self.process.poll() is not None:
                     break
-            assert self.process.poll() == 0, "Clean shutdown failed"
+            expected = 0 if signalled is None else 128 + signalled
+            assert self.process.poll() == expected, f"Clean shutdown failed: {self.process.poll()}"
             assert termios.tcgetattr(self.slave) == self.original
             # The report follows the terminal's restoration of the main screen.
             report = bytes(self.output[offset:]).rsplit(b"\x1b[?1049l", 1)[-1]
@@ -181,8 +187,25 @@ try:
         # Without running processes, a single Ctrl+D detaches at once.
         assert not any("background process" in line for line in lines), lines
         assert len(requests) == 3
+
+        # SIGTERM and SIGHUP close as leaving does: the agent's process is
+        # stopped, and SIGTERM still prints the report.
+        for number in (signal.SIGTERM, signal.SIGHUP):
+            del requests[:]
+            (project / "server.pid").unlink()
+            app = App([str(binary), str(project), "--state-dir", str(storage), "--base-url", url, "--model", "fixture",
+                       "--mode", "yolo", "--color", "never", "--no-animations", "--no-herdr", "--no-terminal-status"], storage)
+            app.wait("[Yolo]")
+            offset = app.send("Start the server\r")
+            app.wait("Exit fixture first.", offset)
+            pid = process_pid(app, project)
+            assert alive(pid), "The fixture process must run before the signal"
+            lines = app.quit(number)
+            assert not alive(pid), f"Signal {number} must stop the background process"
+            if number == signal.SIGTERM:
+                assert after(lines, "Stopped 1 background process:").split(" · ")[1] == SERVER, lines
 finally:
     server.shutdown()
     server.server_close()
     thread.join(timeout=5)
-print("PTY exit passed: Ctrl+D warns about running processes in the conversation and over a panel, resume command reopens the session, usage spans launches, background process stopped.")
+print("PTY exit passed: Ctrl+D warns about running processes in the conversation and over a panel, resume command reopens the session, usage spans launches, background process stopped, SIGTERM and SIGHUP close the same way.")

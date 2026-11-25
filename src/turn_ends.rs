@@ -20,7 +20,7 @@ use roomkit_tui_engine::Diagnostic;
 use serde_json::Value;
 
 /// The key of a turn's record naming how its loop ended.
-const END: &str = "loop_end_reason";
+pub(crate) const END: &str = "loop_end_reason";
 /// How a turn that answered ended.
 const COMPLETED: &str = "completed";
 

@@ -77,8 +77,10 @@ pub(crate) async fn run(settings: Settings, prompt: Prompt) -> Result<ExitCode> 
     // Listen first: a signal while the application opens keeps the message
     // from being sent, and the launch still closes what it opened.
     let signals = listen()?;
-    let api_key = settings.initial_api_key();
-    let (app, first) = open(&settings, api_key).await?;
+    let (app, first) = open(&settings, settings.initial_authentication()).await?;
+    // A panic leaves its record in the diagnostic log here too, not only
+    // where a terminal's screen hides it.
+    crate::diagnostics::report_panics(app.profiles.diagnostics.clone());
     let progress = watcher(&app, &settings, &first, prompt.json).await;
     let (client, host) = connection(QUEUE);
     let adapter = tokio::spawn(
@@ -126,8 +128,11 @@ pub(crate) async fn run(settings: Settings, prompt: Prompt) -> Result<ExitCode> 
 
 /// The application and its conversation as the launch opens it, closed again
 /// should the conversation not read.
-async fn open(settings: &Settings, api_key: String) -> Result<(Application, Snapshot)> {
-    let app = Application::open(settings, api_key).await?;
+async fn open(
+    settings: &Settings,
+    authentication: crate::profiles::model::Authentication,
+) -> Result<(Application, Snapshot)> {
+    let app = Application::open(settings, authentication).await?;
     match app.session().snapshot().await {
         Ok(snapshot) => Ok((app, snapshot)),
         Err(error) => {
@@ -268,8 +273,10 @@ fn apply(client: &Client, steps: Vec<Step>) -> Result<()> {
 }
 
 /// The signals the launch received. The first SIGINT or SIGTERM raises
-/// `pending`, which the launch reads between events to cut its turn; the
-/// next one exits at once, should the cut or the close never end.
+/// `pending`, which the launch reads between events to cut its turn. The
+/// second, which a hurried Ctrl+C often is, only says that the launch is
+/// closing: leaving then would skip the close and what it stops. The third
+/// exits at once, should the cut or the close never end.
 struct Signals {
     pending: Arc<AtomicBool>,
 }
@@ -283,11 +290,14 @@ fn listen() -> Result<Signals> {
         let (pending, received) = (pending.clone(), received.clone());
         tokio::spawn(async move {
             while signals.recv().await.is_some() {
-                if received.fetch_add(1, Ordering::SeqCst) > 0 {
-                    eprintln!("Stopped without waiting for the turn to close.");
-                    std::process::exit(i32::from(INTERRUPTED));
+                match received.fetch_add(1, Ordering::SeqCst) {
+                    0 => pending.store(true, Ordering::SeqCst),
+                    1 => eprintln!("Closing; signal once more to stop without waiting."),
+                    _ => {
+                        eprintln!("Stopped without waiting for the turn to close.");
+                        std::process::exit(i32::from(INTERRUPTED));
+                    }
                 }
-                pending.store(true, Ordering::SeqCst);
             }
         });
     }

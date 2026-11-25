@@ -139,18 +139,7 @@ impl GitHub {
                 .and_then(|v| v.to_str().ok())
                 .ok_or("Missing release download location")?;
             let url = url::Url::parse(location).map_err(|_| "Invalid release download location")?;
-            if url.scheme() != "https"
-                || !matches!(
-                    url.host_str(),
-                    Some(
-                        "release-assets.githubusercontent.com"
-                            | "objects.githubusercontent.com"
-                            | "github.com"
-                    )
-                )
-                || !url.username().is_empty()
-                || url.password().is_some()
-            {
+            if !trusted_download(&url) {
                 return Err("Untrusted release download location".into());
             }
             // Credentials stay on api.github.com; signed asset URLs need no Authorization header.
@@ -250,6 +239,23 @@ impl GitHub {
         }
         file.as_file().sync_all()?;
         Ok((file, expected))
+    }
+}
+
+/// Whether a release asset may be downloaded from `url`, where the API
+/// redirected: GitHub's asset stores over HTTPS, or this repository's own
+/// release downloads on github.com. Any other path of github.com serves
+/// what anyone uploaded there.
+fn trusted_download(url: &url::Url) -> bool {
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
+        return false;
+    }
+    match url.host_str() {
+        Some("release-assets.githubusercontent.com" | "objects.githubusercontent.com") => true,
+        Some("github.com") => url
+            .path()
+            .starts_with("/roomkit-live/roomkit-code/releases/download/"),
+        _ => false,
     }
 }
 

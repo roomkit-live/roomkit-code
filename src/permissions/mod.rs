@@ -85,6 +85,9 @@ const MAX_DELEGATION_DEPTH: usize = 16;
 #[derive(Clone)]
 pub(crate) struct Policy {
     initial: Mode,
+    /// The mode of a conversation no view opened: the launch's, or Ask in a
+    /// launch someone watches whose own mode is Yolo ([`Self::attended`]).
+    unopened: Mode,
     modes: Arc<Mutex<BTreeMap<String, Mode>>>,
     /// The room each delegated task's room was opened from (RMK-1532).
     parents: Arc<Mutex<BTreeMap<String, String>>>,
@@ -97,10 +100,22 @@ impl Policy {
     pub fn new(initial: Mode) -> Self {
         Self {
             initial,
+            unopened: initial,
             modes: Arc::default(),
             parents: Arc::default(),
             changes: Arc::new(tokio::sync::watch::channel(()).0),
         }
+    }
+
+    /// The policy of a launch someone watches, where every conversation is
+    /// given its mode as a view opens it ([`Self::open`]). A room that
+    /// reaches the gate without one was opened by no view: it does not run
+    /// without approvals because the launch was given Yolo.
+    pub(crate) fn attended(mut self) -> Self {
+        if self.initial == Mode::Yolo {
+            self.unopened = Mode::Ask;
+        }
+        self
     }
 
     /// Learns from `room`'s metadata whether the engine opened it for a
@@ -143,7 +158,8 @@ impl Policy {
     }
 
     /// The mode of `room`'s conversation; Plan, the narrowest, for a room
-    /// whose conversation is unknown, rather than the launch mode.
+    /// whose conversation is unknown, rather than the launch mode; and for
+    /// a conversation no view opened, [`Self::attended`]'s.
     pub(crate) fn mode(&self, room: &str) -> Mode {
         let Some((conversation, _)) = self.conversation(room) else {
             return Mode::Plan;
@@ -151,7 +167,7 @@ impl Policy {
         crate::sync::lock(&self.modes)
             .get(&conversation)
             .copied()
-            .unwrap_or(self.initial)
+            .unwrap_or(self.unopened)
     }
 
     pub fn state(&self, room: &str) -> ModeState {

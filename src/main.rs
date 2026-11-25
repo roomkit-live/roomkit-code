@@ -22,6 +22,7 @@ mod images;
 mod instructions;
 mod logo;
 mod messages;
+mod names;
 mod permissions;
 mod plans;
 mod processes;
@@ -82,6 +83,5 @@ async fn launch() -> Result<ExitCode> {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         return Err("Interactive mode requires a terminal; use --help for options".into());
     }
-    application::run(settings).await?;
-    Ok(ExitCode::SUCCESS)
+    application::run(settings).await
 }

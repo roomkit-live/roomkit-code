@@ -25,10 +25,6 @@ use super::Compactions;
 /// its last row holds.
 const LATEST_ROWS: u64 = 16;
 
-/// The key of a turn's record that says how the turn ended: the engine
-/// writes the record, with what the turn measured, on the turn's last row.
-const TURN_END: &str = "loop_end_reason";
-
 /// What a compaction left, as estimated when it was made.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Estimate {
@@ -97,7 +93,7 @@ impl Compactions {
         // A store that cannot be read says nothing: no view is told an
         // estimate that a measure may have replaced.
         let rows = latest(self.journal.kit()?, room, agent).await?;
-        let ended = |row: &RoomEvent| row.metadata.contains_key(TURN_END);
+        let ended = |row: &RoomEvent| row.metadata.contains_key(crate::turn_ends::END);
         if rows
             .iter()
             .any(|row| row.index > estimate.after && ended(row))

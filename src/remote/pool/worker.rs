@@ -8,6 +8,9 @@ use crate::Result;
 use std::time::Duration;
 use tokio::{task::JoinHandle, time::sleep};
 
+/// How long a worker's heartbeats may fail before it stops.
+const UNREACHABLE_FOR: Duration = Duration::from_secs(5 * 60);
+
 pub(crate) struct Presence {
     heartbeat: JoinHandle<String>,
     registry: Registry,
@@ -71,6 +74,7 @@ pub(crate) async fn advertise(
     let registry_copy = registry.clone();
     let heartbeat = tokio::spawn(async move {
         let mut sampled = tokio::time::Instant::now();
+        let mut unreachable: Option<tokio::time::Instant> = None;
         loop {
             sleep(Duration::from_secs(2)).await;
             if sampled.elapsed() >= Duration::from_secs(30) {
@@ -80,8 +84,28 @@ pub(crate) async fn advertise(
                 sampled = tokio::time::Instant::now();
             }
             worker.metrics = sampler.read().await;
-            if matches!(registry.publish(&worker).await, Ok(false)) {
-                return format!("Worker name {} was taken by another instance", worker.name);
+            match registry.publish(&worker).await {
+                Ok(true) => {
+                    if unreachable.take().is_some() {
+                        eprintln!("Executor pool reached again: this worker is listed.");
+                    }
+                }
+                Ok(false) => {
+                    return format!("Worker name {} was taken by another instance", worker.name);
+                }
+                // The pool lists a worker as offline ten seconds after its
+                // last heartbeat: one that cannot publish says so, then
+                // stops rather than serve nobody without end.
+                Err(error) => match unreachable {
+                    None => {
+                        eprintln!("{error}: this worker is not listed until it is reached again.");
+                        unreachable = Some(tokio::time::Instant::now());
+                    }
+                    Some(since) if since.elapsed() >= UNREACHABLE_FOR => {
+                        return format!("{error} for {} minutes", UNREACHABLE_FOR.as_secs() / 60);
+                    }
+                    Some(_) => {}
+                },
             }
         }
     });

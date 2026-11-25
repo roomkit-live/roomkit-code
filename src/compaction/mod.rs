@@ -32,7 +32,6 @@ use roomkit_tui::protocol::Item;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    io::Write,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -107,6 +106,12 @@ pub(crate) struct Compactions {
     fitted: Mutex<HashMap<(String, String), bool>>,
     /// The conversations whose next turn compacts, by room and agent.
     forced: Mutex<HashSet<(String, String)>>,
+    /// The summaries that failed in a row, by room and agent: how many, and
+    /// when the next may be tried.
+    failures: Mutex<HashMap<(String, String), (u32, Instant)>>,
+    /// Where a failed summary's cause is recorded, once the application
+    /// gave it.
+    diagnostics: std::sync::OnceLock<Arc<crate::diagnostics::Diagnostics>>,
     /// The project snapshot each agent's latest turn read, by room and agent.
     snapshots: Mutex<HashMap<(String, String), String>>,
     /// The latest notice of each room, and when it came.
@@ -125,6 +130,21 @@ pub(crate) struct Compactions {
     /// carries; none before `carry`.
     recorded: std::sync::OnceLock<Recorded>,
     changes: Arc<watch::Sender<()>>,
+}
+
+/// What the second failed summary in a row waits before the next.
+const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(60);
+/// The longest a summary waits after those that failed.
+const RETRY_AT_MOST: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+/// What the next summary waits after `failures` in a row.
+fn retry_wait(failures: u32) -> std::time::Duration {
+    match failures {
+        0 | 1 => std::time::Duration::ZERO,
+        more => RETRY_AFTER
+            .saturating_mul(2u32.saturating_pow(more - 2))
+            .min(RETRY_AT_MOST),
+    }
 }
 
 /// What `/compact` did.
@@ -150,6 +170,8 @@ impl Compactions {
             bounded: Mutex::default(),
             fitted: Mutex::default(),
             forced: Mutex::default(),
+            failures: Mutex::default(),
+            diagnostics: std::sync::OnceLock::new(),
             snapshots: Mutex::default(),
             notices: Mutex::default(),
             runs: Arc::new(runs::Runs::new(changes.clone())),
@@ -240,7 +262,9 @@ impl Compactions {
     /// `agent`'s compaction in `room`, read from its file the first time.
     pub fn get(&self, room: &str, agent: &str) -> Option<Compacted> {
         let mut rooms = crate::sync::lock(&self.rooms);
-        let record = rooms.entry(room.into()).or_insert_with(|| self.read(room));
+        let record = rooms
+            .entry(room.into())
+            .or_insert_with(|| crate::sync::blocking(|| self.read(room)));
         record.agents.get(agent).cloned()
     }
 
@@ -260,10 +284,10 @@ impl Compactions {
         let from = compacted.from;
         crate::sync::lock(&self.rooms)
             .entry(room.into())
-            .or_insert_with(|| self.read(room))
+            .or_insert_with(|| crate::sync::blocking(|| self.read(room)))
             .agents
             .insert(agent.into(), compacted);
-        let unsaved = self.save(room).is_err();
+        let unsaved = crate::sync::blocking(|| self.save(room)).is_err();
         let told = line::Told {
             room,
             agent,
@@ -297,6 +321,61 @@ impl Compactions {
         self.changes.send_replace(());
     }
 
+    /// A failed summary's cause is recorded in `diagnostics`.
+    pub fn report_to(&self, diagnostics: Arc<crate::diagnostics::Diagnostics>) {
+        let _ = self.diagnostics.set(diagnostics);
+    }
+
+    /// The summary of `agent`'s conversation in `room` failed: the views
+    /// say why, the diagnostics record the cause, and the next one waits.
+    /// The first failure is tried again at the next message; each one after
+    /// it waits twice as long as the one before, from [`RETRY_AFTER`] up to
+    /// [`RETRY_AT_MOST`]: a summary is a request of the history's size, and
+    /// a refused credential or a history past the model's window fails the
+    /// same way every time.
+    fn failed(&self, (room, agent): (&str, &str), failure: &summary::Failure) {
+        let key = (room.to_owned(), agent.to_owned());
+        let wait = {
+            let mut failures = crate::sync::lock(&self.failures);
+            let (count, until) = failures.entry(key).or_insert((0, Instant::now()));
+            *count += 1;
+            let wait = retry_wait(*count);
+            *until = Instant::now() + wait;
+            wait
+        };
+        let next = if wait.is_zero() {
+            "It is tried again at the next message.".to_owned()
+        } else {
+            format!(
+                "It is tried again in {} min, or now with /compact.",
+                wait.as_secs().div_ceil(60)
+            )
+        };
+        self.notice(
+            room,
+            &format!("Compaction failed: {} {next}", failure.reason()),
+        );
+        if let Some(diagnostics) = self.diagnostics.get() {
+            let fields = serde_json::json!({
+                "room": room, "agent": agent, "retry_in_seconds": wait.as_secs(),
+            });
+            diagnostics.record("compaction_failed", fields, Some(failure.error()));
+        }
+    }
+
+    /// A summary of `agent`'s conversation in `room` was written.
+    fn succeeded(&self, room: &str, agent: &str) {
+        crate::sync::lock(&self.failures).remove(&(room.into(), agent.into()));
+    }
+
+    /// Whether the next summary of `agent`'s conversation in `room` waits
+    /// after those that failed.
+    fn waits(&self, room: &str, agent: &str) -> bool {
+        crate::sync::lock(&self.failures)
+            .get(&(room.into(), agent.into()))
+            .is_some_and(|(_, until)| Instant::now() < *until)
+    }
+
     /// Asks `agent`'s next turn in `room` to compact; false when its memory
     /// does not compact.
     pub fn force(&self, room: &str, agent: &str) -> bool {
@@ -325,6 +404,10 @@ impl Compactions {
             return Requested::Unbounded;
         }
         let key = (room.to_owned(), agent.to_owned());
+        // Asked by the person: tried now, whatever failed before.
+        if let Some((_, until)) = crate::sync::lock(&self.failures).get_mut(&key) {
+            *until = Instant::now();
+        }
         let set = crate::sync::lock(&self.forced).insert(key.clone());
         match self.runs.ask(room, agent) {
             runs::Asked::Running => {
@@ -413,6 +496,11 @@ impl Compactions {
         }
         let (Some(compactor), Some(kit)) = (self.runs.compactor(room, agent), self.journal.kit())
         else {
+            // Asked by the person: it never ends without a word.
+            self.notice(
+                room,
+                "Nothing compacted: this conversation's agent is not ready to compact here",
+            );
             return;
         };
         let from = self.get(room, agent).map_or(0, |compacted| compacted.from);
@@ -474,9 +562,10 @@ impl Compactions {
         self.dir.join(format!("{}.json", &digest[..32]))
     }
 
-    /// `room`'s record; none when it has no file, or one that cannot be read,
-    /// which the next compaction replaces: the conversation then compacts
-    /// again once it passes its tier.
+    /// `room`'s record; none when it has no file. One that cannot be read
+    /// is set aside under another name, not replaced by the next
+    /// compaction, and the views and the diagnostics say so: the
+    /// conversation then compacts again once it passes its tier.
     fn read(&self, room: &str) -> Record {
         let path = self.path(room);
         let read = || -> std::io::Result<Record> {
@@ -486,7 +575,23 @@ impl Compactions {
             }
             Ok(serde_json::from_reader(std::io::BufReader::new(file))?)
         };
-        read().unwrap_or_default()
+        match read() {
+            Ok(record) => record,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Record::default(),
+            Err(_) => {
+                let aside = path.with_extension("json.unreadable");
+                let kept = std::fs::rename(&path, &aside).is_ok();
+                self.notice(
+                    room,
+                    "This conversation's saved summary could not be read: it starts again from its whole history",
+                );
+                if let Some(diagnostics) = self.diagnostics.get() {
+                    let fields = serde_json::json!({"room": room, "set_aside": kept});
+                    diagnostics.record("compaction_record_unreadable", fields, None);
+                }
+                Record::default()
+            }
+        }
     }
 
     /// Writes `room`'s record as it then stands, outside the rooms' lock:
@@ -513,11 +618,7 @@ impl Compactions {
             builder.mode(0o700);
         }
         builder.create(&self.dir)?;
-        let mut temp = tempfile::NamedTempFile::new_in(&self.dir)?;
-        temp.write_all(&serde_json::to_vec(record)?)?;
-        temp.as_file().sync_all()?;
-        temp.persist(self.path(room))?;
-        Ok(())
+        crate::storage::write_atomic(&self.path(room), &serde_json::to_vec(record)?)
     }
 }
 

@@ -333,7 +333,7 @@ async fn a_task_s_agent_is_told_to_put_its_question_in_its_result() {
     let project = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let ask = json!({"questions": [{"question": "Which branch?", "options": [{"label": "main"}, {"label": "dev"}]}]});
-    let worker = (crate::ask_user::ASK_USER, ask);
+    let worker = (crate::names::ASK_USER, ask);
     let (base, requests, server) = serving(task_for("review"), worker).await;
     let settings = settings(project.path(), state.path(), &base);
     with_a_reviewer(&settings).await;

@@ -171,3 +171,26 @@ async fn github_fixture_checks_pair_size_integrity_and_never_follows_untrusted_r
     assert!(missing.validate().is_err());
     task.abort();
 }
+
+/// Review finding: any path of github.com was accepted after a redirect,
+/// where anyone can publish a file.
+#[test]
+fn a_download_follows_only_github_s_asset_stores_and_this_repository_s_releases() {
+    let trusted = |url: &str| trusted_download(&url::Url::parse(url).unwrap());
+    assert!(trusted(
+        "https://release-assets.githubusercontent.com/github-production-release-asset/1/x"
+    ));
+    assert!(trusted("https://objects.githubusercontent.com/any/path"));
+    assert!(trusted(
+        "https://github.com/roomkit-live/roomkit-code/releases/download/v1.0.0/roomkit-code"
+    ));
+    for refused in [
+        "https://github.com/someone/else/releases/download/v1.0.0/roomkit-code",
+        "https://github.com/roomkit-live/roomkit-code/raw/main/file",
+        "http://objects.githubusercontent.com/any/path",
+        "https://user@objects.githubusercontent.com/any/path",
+        "https://example.com/roomkit-live/roomkit-code/releases/download/v1/x",
+    ] {
+        assert!(!trusted(refused), "{refused}");
+    }
+}

@@ -1,13 +1,16 @@
 //! Route correspondence to the recipient's model and explicit results back to the asking agent.
 use super::record::{Kind, Mail};
-use roomkit::model::{ChannelId, InjectMessage, RoomEvent};
-use roomkit::{ConversationStore, RoomKit, SteerOptions};
-use roomkit_sqlite::SqliteStore;
+use roomkit::ConversationStore;
+use roomkit::model::{ChannelId, RoomEvent};
 use serde_json::json;
 
-type Kit = RoomKit<SqliteStore>;
+use super::Kit;
 pub(super) type Posts = tokio::task::JoinSet<crate::Result<()>>;
 
+#[expect(
+    clippy::cognitive_complexity,
+    reason = "Debt recorded when the limit was set: split it, never grow it"
+)]
 pub(super) async fn deliver(
     messages: &super::Messages,
     diagnostics: &std::sync::Arc<crate::diagnostics::Diagnostics>,
@@ -50,7 +53,16 @@ pub(super) async fn deliver(
             )
             .await?;
         }
-        Some(Checkpoint::Steering) => messages.uncertain_steer(kit, &event).await?,
+        Some(Checkpoint::Steering) => {
+            messages.uncertain_steer(kit, &event).await?;
+            // The session that asked is told too: it would otherwise wait
+            // for an answer to a question nobody may have read.
+            if matches!(mail.kind, Kind::Message) {
+                const UNCONFIRMED: &str =
+                    "Delivery to the receiving session's agent could not be confirmed.";
+                notice(net, kit, &event, &mail, UNCONFIRMED).await?;
+            }
+        }
 
         Some(Checkpoint::Post(post)) => post.admit(kit, net, event, mail, posts).await?,
         None => {
@@ -234,18 +246,15 @@ async fn steer(
     text: &str,
     organization: Option<String>,
 ) -> crate::Result<bool> {
-    let room = &event.room_id;
-    let directive = InjectMessage {
-        role: "assistant".into(),
-        content: text.to_owned(),
-    };
     // Prefer the turn which asked when several turns share this room and agent.
-    for turn_id in preferred_turn.into_iter().map(Some).chain([None]) {
-        let options = SteerOptions {
-            organization_id: organization.clone(),
-            turn_id,
+    for turn in preferred_turn.into_iter().map(Some).chain([None]) {
+        let to = super::RunningTurn {
+            room: &event.room_id,
+            agent,
+            turn,
+            organization: organization.clone(),
         };
-        if kit.steer(room, agent, directive.clone(), options).await? > 0 {
+        if super::inject(kit, to, text.to_owned()).await? > 0 {
             return Ok(true);
         }
     }

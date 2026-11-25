@@ -113,6 +113,9 @@ struct State {
 
 pub(crate) struct Hooks {
     workspace: PathBuf,
+    /// The host variables a hook command starts with: those of the agent's
+    /// shell.
+    inherit_env: Vec<String>,
     policy: crate::permissions::Policy,
     diagnostics: Arc<crate::diagnostics::Diagnostics>,
     state: Mutex<State>,
@@ -139,6 +142,7 @@ impl Hooks {
     ) -> Arc<Self> {
         Arc::new(Self {
             workspace: settings.workspace.clone(),
+            inherit_env: crate::command_env::command_env(&settings.inherit_env).inherit_env,
             policy,
             diagnostics,
             state: Mutex::new(State {
@@ -320,6 +324,11 @@ impl Hooks {
         self.dispatch(kind, &event.name, &context).await;
     }
 
+    #[expect(
+        clippy::cognitive_complexity,
+        clippy::too_many_lines,
+        reason = "Debt recorded when the limit was set: split it, never grow it"
+    )]
     async fn dispatch(&self, event: HookEvent, matcher: &str, context: &Context) -> Decision {
         let room = context.payload["session_id"].as_str().unwrap_or_default();
         let mut decision = Decision::Continue;
@@ -367,8 +376,26 @@ impl Hooks {
                 event,
                 started: start,
             };
+            // The review covered the project's scripts the command launches
+            // as they then read: one changed since fails as a hook that
+            // could not start, until `/hooks` reviews it again.
+            let reviewed = entry.clone();
+            let unchanged = tokio::task::spawn_blocking(move || reviewed.scripts_unchanged())
+                .await
+                .unwrap_or(false);
             let report = tokio::select! {
-                report = roomkit_hooks::run(&entry.hook, &self.workspace, &payload) => report,
+                report = async {
+                    if unchanged {
+                        roomkit_hooks::run(&entry.hook, &self.workspace, &self.inherit_env, &payload).await
+                    } else {
+                        Report {
+                            status: RunStatus::Failed,
+                            stdout: String::new(),
+                            stderr: "A project script this hook runs changed since it was reviewed; review it again in /hooks".into(),
+                            elapsed: start.elapsed(),
+                        }
+                    }
+                } => report,
                 () = self.stopping.cancelled(), if !matches!(event, HookEvent::SessionEnd | HookEvent::TurnEnd) => Report {
                     status: RunStatus::Cancelled, stdout: String::new(), stderr: String::new(), elapsed: start.elapsed(),
                 },
@@ -547,6 +574,27 @@ fn bounded(text: &str, limit: usize) -> String {
         .collect();
     text.truncate(text.floor_char_boundary(limit.min(text.len())));
     text
+}
+
+/// At most `limit` bytes of a command as it is reviewed: every control
+/// character other than a newline or a tab shown as its escape, `\u{1b}`
+/// for one, rather than left out. A command read without them is not the
+/// command that runs: an escape sequence could hide part of it from the
+/// person who enables it.
+fn reviewed(command: &str, limit: usize) -> String {
+    let mut shown = String::new();
+    for c in command.chars() {
+        if c.is_control() && !matches!(c, '\n' | '\t') {
+            shown.extend(c.escape_unicode());
+        } else {
+            shown.push(c);
+        }
+        if shown.len() >= limit {
+            break;
+        }
+    }
+    shown.truncate(shown.floor_char_boundary(limit.min(shown.len())));
+    shown
 }
 
 #[derive(Debug)]
@@ -728,6 +776,16 @@ mod tests {
         reason = "Invalid fixtures fail the test"
     )]
     use super::*;
+
+    #[test]
+    fn a_reviewed_command_shows_its_control_characters() {
+        assert_eq!(reviewed("echo ok\n\tdone", 100), "echo ok\n\tdone");
+        assert_eq!(
+            reviewed("echo safe\u{1b}[2K\rrm -rf .", 100),
+            "echo safe\\u{1b}[2K\\u{d}rm -rf ."
+        );
+        assert_eq!(reviewed(&"é".repeat(10), 5), "éé");
+    }
     use clap::Parser;
 
     fn answered(result: Value, copy: Value) -> ToolCallEvent {
