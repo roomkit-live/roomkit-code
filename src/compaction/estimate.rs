@@ -107,21 +107,19 @@ impl Compactions {
     /// Forgets `estimate` of `agent`'s conversation in `room`, on disk too.
     /// A compaction made meanwhile keeps its own.
     fn forget(&self, room: &str, agent: &str, estimate: &Estimate) {
-        {
-            let mut rooms = crate::sync::lock(&self.rooms);
-            let compacted = rooms
-                .get_mut(room)
-                .and_then(|record| record.agents.get_mut(agent));
-            match compacted {
-                Some(compacted) if compacted.estimate.as_ref() == Some(estimate) => {
-                    compacted.estimate = None;
-                }
-                _ => return,
+        let forgotten = self.with((room, agent), |compacted| match compacted {
+            Some(compacted) if compacted.estimate.as_ref() == Some(estimate) => {
+                compacted.estimate = None;
+                true
             }
+            _ => false,
+        });
+        if !forgotten {
+            return;
         }
         // Forgotten for this launch if not on disk: the next one reads the
         // agent's rows again.
-        let _ = self.save(room);
+        let _ = self.store.save(room);
     }
 }
 
@@ -223,7 +221,7 @@ mod tests {
             }
         };
         // Both changes are made while the file is held; both writes wait.
-        let saving = crate::sync::lock(&compactions.saving);
+        let saving = compactions.store.hold_saves();
         let (forgetting, older) = (compactions.clone(), made(0).estimate.unwrap());
         let forget = std::thread::spawn(move || forgetting.forget("room", "code", &older));
         until(&|| compactions.get("room", "code").unwrap().estimate.is_none());

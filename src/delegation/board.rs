@@ -3,135 +3,50 @@
 //! its sidebar and `/tasks` show. A task does not outlive the application:
 //! closing it ends every task the engine runs, and a later launch lists it
 //! from its room (`history`).
+//!
+//! One lock holds the board, so that a task's start or end, its notice and
+//! the figures' version change together. What each part of it does is its
+//! own, without a lock: the tasks ([`list`]), and the figures read of
+//! them ([`figures`]).
+
+mod figures;
+mod list;
+mod task;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use roomkit_tui::protocol::ConversationCost;
 use tokio::sync::watch;
 
 use super::spending::Spent;
+pub(crate) use task::{Outcome, Task};
 
 /// How long a view shows a task's latest notice again whenever it is sent its
 /// live events, as a compaction's.
 pub(super) const NOTICE_FOR: Duration = Duration::from_secs(10);
 
-/// How many characters of a task its notice quotes.
-const TASK_PREVIEW: usize = 60;
-
-/// How a task ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Outcome {
-    Completed,
-    Cancelled,
-    Failed,
-    /// Its launch ended without recording how it ended: a crash.
-    Interrupted,
-}
-
-impl Outcome {
-    /// The engine's `task_status` of an ended task.
-    pub(crate) fn of(status: &str) -> Self {
-        match status {
-            "completed" => Self::Completed,
-            "cancelled" => Self::Cancelled,
-            _ => Self::Failed,
-        }
-    }
-
-    /// How a task its room records ended: one still marked as running ended
-    /// with a launch that could not say so.
-    pub(crate) fn recorded(status: &str) -> Self {
-        match status {
-            "completed" => Self::Completed,
-            "failed" => Self::Failed,
-            "cancelled" => Self::Cancelled,
-            _ => Self::Interrupted,
-        }
-    }
-}
-
-/// A task an agent handed over, as this application saw it start and end.
-#[derive(Clone, Debug)]
-pub(crate) struct Task {
-    pub(crate) id: String,
-    /// The room of the agent that handed it over: a conversation, or the room
-    /// of the task that handed it on.
-    pub(crate) parent: String,
-    /// The worker's room.
-    pub(crate) room: String,
-    /// The worker's label, else its ID.
-    pub(crate) agent: String,
-    /// The worker's ID.
-    pub(crate) agent_id: String,
-    /// Shared: the views copy the tasks they show on every refresh.
-    pub(crate) input: Arc<str>,
-    pub(crate) started: Instant,
-    /// How long it ran and how it ended, once it did.
-    pub(crate) ended: Option<(Duration, Outcome)>,
-    /// What its worker consumed, read once it ended (`spending`).
-    pub(crate) spent: Option<Spent>,
-}
-
-impl Task {
-    pub(crate) fn running(&self) -> bool {
-        self.ended.is_none()
-    }
-
-    /// Whether it was stopped or its launch ended before all it used could
-    /// be recorded: a request under way may be billed all the same.
-    pub(crate) fn cut_short(&self) -> bool {
-        matches!(
-            self.ended,
-            Some((_, Outcome::Interrupted | Outcome::Cancelled))
-        )
-    }
-
-    /// Its state in a few words: "running 42 s", "completed in 58 s".
-    pub(crate) fn state(&self) -> String {
-        match self.ended {
-            None => format!("running {} s", seconds(self.started.elapsed())),
-            Some((took, Outcome::Completed)) => format!("completed in {} s", seconds(took)),
-            Some((took, Outcome::Cancelled)) => format!("cancelled after {} s", seconds(took)),
-            Some((took, Outcome::Failed)) => format!("failed after {} s", seconds(took)),
-            Some((_, Outcome::Interrupted)) => "interrupted".to_owned(),
-        }
-    }
-
-    /// Its state and what it consumed, once that is known: "completed in
-    /// 58 s · 58k tokens · ≈ $0.61".
-    pub(crate) fn summary(&self) -> String {
-        match &self.spent {
-            Some(spent) => format!("{} · {}", self.state(), spent.text()),
-            None => self.state(),
-        }
-    }
-
-    /// The task on one line, cut at [`TASK_PREVIEW`] characters.
-    pub(crate) fn preview(&self) -> String {
-        preview(&self.input)
-    }
-}
-
 #[derive(Default)]
 struct Board {
     /// Each conversation's latest notice, by the room it is shown in.
     notices: HashMap<String, (Instant, String)>,
-    /// In the order they started.
-    tasks: Vec<Task>,
+    /// The tasks, in the order they started.
+    tasks: list::List,
     /// The conversations whose earlier tasks were read from the store.
     restored: HashSet<String>,
     /// The agent shown in each conversation, for a view that returns to it.
     leads: HashMap<String, String>,
-    /// Counts what changes a conversation's figures: a task started or ended,
-    /// a turn recorded.
-    version: u64,
-    /// What each conversation's own agent cost, as of a `version`.
-    own_costs: HashMap<String, (u64, Option<ConversationCost>)>,
-    /// The turns recorded in each room since launch: a reading of a task's
-    /// figures begun before one in its room is stale.
-    readings: HashMap<String, u64>,
+    /// What tells that a conversation's figures changed, and what was read
+    /// of them.
+    figures: figures::Figures,
+}
+
+impl Board {
+    /// Shows `text` in `room`'s status line for a few seconds.
+    fn tell(&mut self, room: &str, text: String) {
+        self.notices.insert(room.to_owned(), (Instant::now(), text));
+    }
 }
 
 /// The tasks agents handed over, the notices they left, and the `/tasks`
@@ -155,26 +70,21 @@ impl Default for Tasks {
 }
 
 impl Tasks {
-    /// Records `task` started. A task already recorded stays ended: the hooks
-    /// run apart, and a quick task's end can be told first, without the task
-    /// it was given, which its start then fills in.
+    fn board(&self) -> std::sync::MutexGuard<'_, Board> {
+        crate::sync::lock(&self.board)
+    }
+
+    /// Records `task` started. A task already recorded stays ended
+    /// ([`list::List::start`]).
     pub(crate) fn started(&self, task: Task) {
-        let mut board = crate::sync::lock(&self.board);
-        if let Some(known) = board.tasks.iter_mut().find(|known| known.id == task.id) {
-            if known.input.is_empty() {
-                known.input = task.input;
+        let room = task.parent.clone();
+        {
+            let mut board = self.board();
+            if let Some(text) = board.tasks.start(task) {
+                board.tell(&room, text);
+                board.figures.changed();
             }
-            drop(board);
-            self.changes.send_replace(());
-            return;
         }
-        let text = format!("Task for {} started: {}", task.agent, task.preview());
-        board
-            .notices
-            .insert(task.parent.clone(), (Instant::now(), text));
-        board.tasks.push(task);
-        board.version += 1;
-        drop(board);
         self.changes.send_replace(());
     }
 
@@ -254,36 +164,14 @@ impl Tasks {
     }
 
     fn ended_with_reason(&self, ended: Task, reason: Option<&str>) -> Option<String> {
-        let (took, outcome) = ended.ended?;
-        let mut board = crate::sync::lock(&self.board);
-        let known = board.tasks.iter().position(|known| known.id == ended.id);
-        // An end that says nothing of how long the task ran is measured
-        // from the start recorded.
-        let took = match known {
-            Some(index) if took.is_zero() => board.tasks[index].started.elapsed(),
-            _ => took,
+        let room = ended.parent.clone();
+        let text = {
+            let mut board = self.board();
+            let text = board.tasks.end(ended, reason)?;
+            board.tell(&room, text.clone());
+            board.figures.changed();
+            text
         };
-        let outcome_text = match outcome {
-            Outcome::Completed => format!("completed in {} s", seconds(took)),
-            Outcome::Cancelled => "cancelled".to_owned(),
-            Outcome::Failed => reason
-                .filter(|r| !r.is_empty() && *r != "completed")
-                .map_or_else(
-                    || "failed".to_owned(),
-                    |r| format!("failed · {}", crate::turn_ends::stop_description(r)),
-                ),
-            Outcome::Interrupted => "interrupted".to_owned(),
-        };
-        let text = format!("Task for {} {outcome_text}", ended.agent);
-        board
-            .notices
-            .insert(ended.parent.clone(), (Instant::now(), text.clone()));
-        match known {
-            Some(index) => board.tasks[index].ended = Some((took, outcome)),
-            None => board.tasks.push(ended),
-        }
-        board.version += 1;
-        drop(board);
         self.changes.send_replace(());
         Some(text)
     }
@@ -291,32 +179,24 @@ impl Tasks {
     /// Whether the earlier tasks of `room` are yet to be read: true for its
     /// first view alone.
     pub(crate) fn restoring(&self, room: &str) -> bool {
-        crate::sync::lock(&self.board)
-            .restored
-            .insert(room.to_owned())
+        self.board().restored.insert(room.to_owned())
     }
 
     /// Lists `tasks`, which earlier launches ran, telling no one: a task the
     /// hooks already reported stays as they told it.
     pub(crate) fn restored(&self, tasks: Vec<Task>) {
-        let mut board = crate::sync::lock(&self.board);
-        for task in tasks {
-            if !board.tasks.iter().any(|known| known.id == task.id) {
-                board.tasks.push(task);
-            }
-        }
+        self.board().tasks.restore(tasks);
     }
 
     /// The tasks of `room` could not all be read: its next view tries again.
     pub(crate) fn unread(&self, room: &str) {
-        crate::sync::lock(&self.board).restored.remove(room);
+        self.board().restored.remove(room);
     }
 
     /// Where readings of `room`'s figures stand: [`Self::keep_spent`] keeps
     /// one only while no turn was recorded there since.
     pub(crate) fn reading(&self, room: &str) -> u64 {
-        let board = crate::sync::lock(&self.board);
-        board.readings.get(room).copied().unwrap_or_default()
+        self.board().figures.reading(room)
     }
 
     /// Keeps what task `id`'s worker consumed, read from its room at
@@ -324,63 +204,47 @@ impl Tasks {
     /// and the next view reads the room again. Nothing changes on screen but
     /// what the view that read it is about to show.
     pub(crate) fn keep_spent(&self, id: &str, spent: Spent, reading: u64) {
-        let mut board = crate::sync::lock(&self.board);
-        let Some(index) = board.tasks.iter().position(|task| task.id == id) else {
-            return;
-        };
-        let room = &board.tasks[index].room;
-        if board.readings.get(room).copied().unwrap_or_default() != reading {
-            return;
+        let mut board = self.board();
+        let current = board
+            .tasks
+            .room_of(id)
+            .map(|room| board.figures.reading(room));
+        if current == Some(reading) {
+            board.tasks.keep_spent(id, spent);
         }
-        board.tasks[index].spent = Some(spent);
     }
 
     /// Shows `text` in `room`'s status line for a few seconds.
     pub(crate) fn tell(&self, room: &str, text: String) {
-        crate::sync::lock(&self.board)
-            .notices
-            .insert(room.to_owned(), (Instant::now(), text));
+        self.board().tell(room, text);
     }
 
     /// The latest notice of `room` while it is recent.
     pub(crate) fn notices(&self, room: &str) -> Vec<String> {
-        crate::sync::lock(&self.board)
-            .notices
-            .get(room)
-            .filter(|(at, _)| at.elapsed() < NOTICE_FOR)
-            .map(|(_, text)| text.clone())
-            .into_iter()
-            .collect()
+        let board = self.board();
+        let recent = board.notices.get(room);
+        let recent = recent.filter(|(at, _)| at.elapsed() < NOTICE_FOR);
+        recent.map(|(_, text)| text.clone()).into_iter().collect()
     }
 
     /// The tasks handed over in `room`, and those their workers handed on,
     /// each after the task that handed it on, with how deep it was handed on
     /// (0 for a task of `room`).
     pub(crate) fn of(&self, room: &str) -> Vec<(usize, Task)> {
-        let board = crate::sync::lock(&self.board);
-        let mut listed = Vec::new();
-        descend(&board.tasks, room, 0, &mut listed);
-        listed
+        self.board().tasks.of(room)
     }
 
     /// The conversation `room` belongs to: `room` itself, unless it is a
-    /// task's. The depth bound only guards against a cycle.
+    /// task's.
     pub(crate) fn root_of(&self, room: &str) -> String {
-        let board = crate::sync::lock(&self.board);
-        let mut current = room;
-        for _ in 0..=crate::delegation::MAX_DEPTH {
-            match board.tasks.iter().find(|task| task.room == current) {
-                Some(task) => current = &task.parent,
-                None => break,
-            }
-        }
-        current.to_owned()
+        self.board().tasks.root_of(room)
     }
 
     /// The tasks of the conversation `room` belongs to, whichever of its
     /// rooms a view shows.
     pub(crate) fn family(&self, room: &str) -> Vec<(usize, Task)> {
-        self.of(&self.root_of(room))
+        let board = self.board();
+        board.tasks.of(&board.tasks.root_of(room))
     }
 
     /// The task `id` if the conversation of `room` lists it.
@@ -393,44 +257,25 @@ impl Tasks {
 
     /// A running task on the same channel, handed out by the same parent.
     pub(crate) fn running_peer(&self, caller: &Task, id: &str) -> Option<Task> {
-        crate::sync::lock(&self.board)
-            .tasks
-            .iter()
-            .find(|t| {
-                t.id == id
-                    && t.id != caller.id
-                    && t.parent == caller.parent
-                    && t.agent_id == caller.agent_id
-                    && t.running()
-            })
-            .cloned()
+        self.board().tasks.running_peer(caller, id)
     }
 
     /// The task that runs in `room`, if one does.
     pub(crate) fn running_in(&self, room: &str) -> Option<Task> {
-        crate::sync::lock(&self.board)
-            .tasks
-            .iter()
-            .find(|task| task.room == room && task.running())
-            .cloned()
+        self.board().tasks.running_in(room)
     }
 
     /// The agent working on a task right now, if `agent` is: assembling it
     /// again would replace the loop its turn runs in.
     pub(crate) fn agent_running(&self, agent: &str) -> bool {
-        crate::sync::lock(&self.board)
-            .tasks
-            .iter()
-            .any(|task| task.agent_id == agent && task.running())
+        self.board().tasks.agent_running(agent)
     }
 
     /// Notes the agent a view shows in `room`, for a view returning to it.
     pub(crate) fn viewing(&self, room: &str, agent: &str) {
-        let root = self.root_of(room);
-        if root == room {
-            crate::sync::lock(&self.board)
-                .leads
-                .insert(root, agent.to_owned());
+        let mut board = self.board();
+        if board.tasks.root_of(room) == room {
+            board.leads.insert(room.to_owned(), agent.to_owned());
         }
     }
 
@@ -438,17 +283,11 @@ impl Tasks {
     /// can still answer in, is read again, and the conversation's figures
     /// change.
     pub(crate) fn consumed(&self, room: &str) {
-        let mut board = crate::sync::lock(&self.board);
-        board.version += 1;
-        *board.readings.entry(room.to_owned()).or_default() += 1;
-        for task in board
-            .tasks
-            .iter_mut()
-            .filter(|t| t.room == room && !t.running())
         {
-            task.spent = None;
+            let mut board = self.board();
+            board.figures.recorded_in(room);
+            board.tasks.forget_spent_in(room);
         }
-        drop(board);
         self.changes.send_replace(());
     }
 
@@ -462,36 +301,28 @@ impl Tasks {
 
     /// The agent the view of conversation `root` last showed.
     pub(crate) fn lead_of(&self, root: &str) -> Option<String> {
-        crate::sync::lock(&self.board).leads.get(root).cloned()
+        self.board().leads.get(root).cloned()
     }
 
     /// Counts what changes a conversation's figures: a task started or
     /// ended, a turn recorded.
     pub(crate) fn version(&self) -> u64 {
-        crate::sync::lock(&self.board).version
+        self.board().figures.version()
     }
 
     /// What conversation `root`'s own agent cost, as read at `version`.
     pub(crate) fn own_cost(&self, root: &str, version: u64) -> Option<Option<ConversationCost>> {
-        let board = crate::sync::lock(&self.board);
-        let (kept, cost) = board.own_costs.get(root)?;
-        (*kept == version).then(|| cost.clone())
+        self.board().figures.own_cost(root, version)
     }
 
     pub(crate) fn keep_own_cost(&self, root: &str, version: u64, cost: Option<ConversationCost>) {
-        crate::sync::lock(&self.board)
-            .own_costs
-            .insert(root.to_owned(), (version, cost));
+        self.board().figures.keep_own_cost(root, version, cost);
     }
 
     /// How many tasks run, in every conversation: closing the application
     /// ends them all.
     pub(crate) fn running(&self) -> usize {
-        crate::sync::lock(&self.board)
-            .tasks
-            .iter()
-            .filter(|task| task.running())
-            .count()
+        self.board().tasks.running()
     }
 
     pub(crate) fn subscribe(&self) -> watch::Receiver<()> {
@@ -499,284 +330,5 @@ impl Tasks {
     }
 }
 
-/// Lists in `listed` the tasks handed over in `room`, each followed by those
-/// its worker handed on. The engine refuses a task past a few rooms deep;
-/// the bound only guards against a cycle.
-fn descend(tasks: &[Task], room: &str, depth: usize, listed: &mut Vec<(usize, Task)>) {
-    if depth > crate::delegation::MAX_DEPTH {
-        return;
-    }
-    for task in tasks.iter().filter(|task| task.parent == room) {
-        listed.push((depth, task.clone()));
-        descend(tasks, &task.room, depth + 1, listed);
-    }
-}
-
-/// `task` on one line, cut at [`TASK_PREVIEW`] characters.
-fn preview(task: &str) -> String {
-    let line = task.split_whitespace().collect::<Vec<_>>().join(" ");
-    if line.chars().count() <= TASK_PREVIEW {
-        return line;
-    }
-    let cut: String = line.chars().take(TASK_PREVIEW - 1).collect();
-    format!("{cut}…")
-}
-
-/// `took` in whole seconds, at least 1.
-fn seconds(took: Duration) -> u64 {
-    took.as_secs_f64().round().max(1.0) as u64
-}
-
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::unwrap_used, reason = "A broken fixture fails the test")]
-    use super::*;
-
-    fn task(id: &str, parent: &str, room: &str) -> Task {
-        Task {
-            id: id.into(),
-            parent: parent.into(),
-            room: room.into(),
-            agent: "Review".into(),
-            agent_id: "review".into(),
-            input: format!("Task {id}").into(),
-            started: Instant::now(),
-            ended: None,
-            spent: None,
-        }
-    }
-
-    fn ended(mut task: Task, outcome: Outcome) -> Task {
-        task.ended = Some((Duration::from_millis(58_400), outcome));
-        task
-    }
-
-    #[test]
-    fn consultation_only_reaches_a_running_sibling_on_the_same_channel() {
-        let tasks = Tasks::default();
-        let caller = task("caller", "parent", "caller-room");
-        let mut other_agent = task("local", "parent", "local-room");
-        other_agent.agent_id = "other-agent".into();
-        for task in [
-            caller.clone(),
-            task("peer", "parent", "peer-room"),
-            task("unrelated", "another-parent", "other-room"),
-            task("nested", "peer-room", "nested-room"),
-            other_agent,
-        ] {
-            tasks.started(task);
-        }
-        let peer = tasks.running_peer(&caller, "peer").unwrap();
-        for id in ["caller", "nested", "unrelated", "local", "unknown"] {
-            assert!(tasks.running_peer(&caller, id).is_none());
-        }
-        tasks.ended(ended(peer, Outcome::Completed));
-        assert!(tasks.running_peer(&caller, "peer").is_none());
-    }
-
-    #[tokio::test]
-    async fn each_task_ended_lately_keeps_its_line() {
-        let tasks = Tasks::default();
-        for id in ["a", "b"] {
-            tasks.started(task(id, "main", &format!("main::{id}")));
-        }
-        let first = ended(task("a", "main", "main::a"), Outcome::Completed);
-        tasks.finished(first, None).await;
-        let second = ended(task("b", "main", "main::b"), Outcome::Failed);
-        tasks.finished(second, Some("max_rounds")).await;
-
-        let said: Vec<_> = tasks
-            .task_lines("main")
-            .into_iter()
-            .filter_map(|line| match line {
-                roomkit_tui::protocol::Item::Message(message) => Some(message.text),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            said,
-            [
-                "Task for Review completed in 58 s",
-                "Task for Review failed · it reached the limit of tool rounds a turn may run"
-            ]
-        );
-        assert!(tasks.task_lines("elsewhere").is_empty());
-    }
-
-    #[test]
-    fn a_notice_quotes_a_task_on_one_short_line() {
-        let long = "Review\n the diff ".repeat(20);
-        let line = preview(&long);
-        assert_eq!(line.chars().count(), TASK_PREVIEW);
-        assert!(line.starts_with("Review the diff Review") && line.ends_with('…'));
-        assert_eq!(preview("Review  the\ndiff"), "Review the diff");
-        assert_eq!(seconds(Duration::from_millis(1_400)), 1);
-        assert_eq!(seconds(Duration::from_millis(200)), 1);
-    }
-
-    /// A conversation lists its tasks and those their workers handed on, each
-    /// under the task that handed it on; another conversation's stay out.
-    #[test]
-    fn a_conversation_lists_its_tasks_and_those_handed_on() {
-        let tasks = Tasks::default();
-        tasks.started(task("a", "main", "main::a"));
-        tasks.started(task("other", "second", "second::x"));
-        tasks.started(task("b", "main", "main::b"));
-        tasks.started(task("a1", "main::a", "main::a::a1"));
-        let listed: Vec<(usize, String)> = tasks
-            .of("main")
-            .into_iter()
-            .map(|(depth, task)| (depth, task.id))
-            .collect();
-        assert_eq!(listed, [(0, "a".into()), (1, "a1".into()), (0, "b".into())]);
-        assert!(tasks.find("main", "a1").is_some());
-        assert!(tasks.find("main", "other").is_none());
-        assert_eq!(tasks.running(), 4);
-    }
-
-    /// A task's end replaces its state and leaves a notice; an end told before
-    /// its start records the task, and the late start leaves it ended.
-    #[test]
-    fn a_task_ends_once_whichever_hook_is_told_first() {
-        let tasks = Tasks::default();
-        tasks.started(task("a", "main", "main::a"));
-        assert_eq!(tasks.notices("main"), ["Task for Review started: Task a"]);
-        tasks.ended(ended(task("a", "main", "main::a"), Outcome::Completed));
-        assert_eq!(tasks.notices("main"), ["Task for Review completed in 58 s"]);
-        let a = tasks.find("main", "a").unwrap();
-        assert_eq!(a.state(), "completed in 58 s");
-
-        let mut told = ended(task("quick", "main", "main::q"), Outcome::Cancelled);
-        told.input = "".into();
-        tasks.ended(told);
-        tasks.started(task("quick", "main", "main::q"));
-        assert_eq!(tasks.notices("main"), ["Task for Review cancelled"]);
-        let quick = tasks.find("main", "quick").unwrap();
-        assert_eq!(quick.state(), "cancelled after 58 s");
-        assert_eq!(&*quick.input, "Task quick");
-        assert_eq!(tasks.running(), 0);
-    }
-
-    /// A room says how its task ended; a status that is no end means the
-    /// launch that ran it could not say so.
-    #[test]
-    fn a_room_s_status_reads_as_how_its_task_ended() {
-        assert_eq!(Outcome::recorded("completed"), Outcome::Completed);
-        assert_eq!(Outcome::recorded("failed"), Outcome::Failed);
-        assert_eq!(Outcome::recorded("cancelled"), Outcome::Cancelled);
-        assert_eq!(Outcome::recorded("in_progress"), Outcome::Interrupted);
-        assert_eq!(Outcome::recorded("pending"), Outcome::Interrupted);
-    }
-
-    /// What the hooks told stands: a task read back from its room adds only
-    /// what they did not.
-    #[test]
-    fn a_restored_task_never_replaces_one_the_hooks_told() {
-        let tasks = Tasks::default();
-        tasks.started(task("live", "main", "main::l"));
-        tasks.restored(vec![
-            ended(task("live", "main", "main::l"), Outcome::Failed),
-            ended(task("old", "main", "main::o"), Outcome::Completed),
-        ]);
-        let listed: Vec<(String, bool)> = tasks
-            .of("main")
-            .into_iter()
-            .map(|(_, task)| (task.id.clone(), task.running()))
-            .collect();
-        assert_eq!(listed, [("live".into(), true), ("old".into(), false)]);
-        assert!(tasks.restoring("main"));
-        assert!(!tasks.restoring("main"));
-    }
-
-    /// Whichever of its rooms a view shows, a conversation lists the same
-    /// tasks, and knows the agent to show when returning to it.
-    #[test]
-    fn a_task_s_room_belongs_to_its_conversation() {
-        let tasks = Tasks::default();
-        tasks.started(task("a", "main", "main::a"));
-        tasks.started(task("a1", "main::a", "main::a::a1"));
-        tasks.started(task("other", "second", "second::x"));
-        assert_eq!(tasks.root_of("main::a::a1"), "main");
-        assert_eq!(tasks.root_of("main"), "main");
-        assert_eq!(tasks.root_of("unknown"), "unknown");
-        let ids = |room: &str| -> Vec<String> {
-            tasks.family(room).into_iter().map(|(_, t)| t.id).collect()
-        };
-        assert_eq!(ids("main::a"), ["a", "a1"]);
-        assert_eq!(ids("main"), ["a", "a1"]);
-        assert!(tasks.find("main::a", "a1").is_some());
-        assert!(tasks.find("main::a", "other").is_none());
-
-        tasks.viewing("main", "code");
-        assert_eq!(
-            tasks.conversation_of("main::a", "review"),
-            ("main".to_owned(), "code".to_owned())
-        );
-        assert_eq!(
-            tasks.conversation_of("second", "review"),
-            ("second".to_owned(), "review".to_owned())
-        );
-    }
-
-    /// A turn recorded in a task's room, whoever started it, is read again.
-    #[test]
-    fn a_task_s_figures_are_read_again_once_a_turn_is_recorded_there() {
-        let spent = || super::Spent {
-            usage: crate::exit_summary::Usage::for_tests(10, 1),
-            cost: None,
-        };
-        let tasks = Tasks::default();
-        tasks.ended(ended(task("a", "main", "main::a"), Outcome::Completed));
-        tasks.ended(ended(task("b", "main", "main::b"), Outcome::Completed));
-        tasks.keep_spent("a", spent(), tasks.reading("main::a"));
-        tasks.keep_spent("b", spent(), tasks.reading("main::b"));
-        let read = |id: &str| tasks.find("main", id).unwrap().spent.is_some();
-        let before = tasks.version();
-        tasks.consumed("main::a");
-        assert!(!read("a") && read("b"));
-        assert!(
-            tasks.version() > before,
-            "The conversation's figures changed"
-        );
-    }
-
-    /// A reading begun before a turn was recorded misses that turn: it is
-    /// not kept, and the next view reads the room again.
-    #[test]
-    fn a_task_s_figures_read_before_a_new_turn_are_not_kept() {
-        let tasks = Tasks::default();
-        let spent = || super::Spent {
-            usage: crate::exit_summary::Usage::for_tests(10, 1),
-            cost: None,
-        };
-        tasks.ended(ended(task("a", "main", "main::a"), Outcome::Completed));
-        tasks.ended(ended(task("b", "main", "main::b"), Outcome::Completed));
-        let (a, b) = (tasks.reading("main::a"), tasks.reading("main::b"));
-        tasks.consumed("main::a");
-        tasks.keep_spent("a", spent(), a);
-        tasks.keep_spent("b", spent(), b);
-        let read = |id: &str| tasks.find("main", id).unwrap().spent.is_some();
-        // A turn in another task's room leaves this reading as it is.
-        assert!(!read("a") && read("b"));
-    }
-
-    /// A read that failed is tried again by the conversation's next view.
-    #[test]
-    fn a_conversation_whose_tasks_could_not_be_read_is_read_again() {
-        let tasks = Tasks::default();
-        assert!(tasks.restoring("main"));
-        tasks.unread("main");
-        assert!(tasks.restoring("main"));
-        assert!(!tasks.restoring("main"));
-    }
-
-    /// An agent at work keeps the assembled agent its turn runs in.
-    #[test]
-    fn an_agent_on_a_task_is_known_until_the_task_ends() {
-        let tasks = Tasks::default();
-        tasks.started(task("a", "main", "main::a"));
-        assert!(tasks.agent_running("review") && !tasks.agent_running("code"));
-        tasks.ended(ended(task("a", "main", "main::a"), Outcome::Completed));
-        assert!(!tasks.agent_running("review"));
-    }
-}
+mod tests;
