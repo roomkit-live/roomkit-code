@@ -1,6 +1,8 @@
 #![expect(clippy::unwrap_used, reason = "fixture failures must fail the test")]
 
 use super::*;
+use clap::Parser;
+use roomkit_tui::{SelectionMode, Theme};
 
 fn cli(root: &std::path::Path) -> Cli {
     Cli::try_parse_from([
