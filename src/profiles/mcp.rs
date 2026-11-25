@@ -2,11 +2,13 @@
 //! host: it names the selected tools `mcp__<server>__<tool>`, serves only those,
 //! and closes the servers. The protocol and each stdio server's process group are
 //! roomkit-mcp's; there is no application tool implementation here.
+mod action;
 mod config;
 mod runtime;
 mod ui;
 
 use super::*;
+use action::Action;
 pub(super) use config::Servers;
 pub(crate) use config::valid_id;
 use roomkit_tui::protocol::{Command, Request};
@@ -15,27 +17,6 @@ pub(crate) use runtime::McpTools;
 pub(super) use runtime::Runtime;
 pub(super) use ui::Pending;
 
-/// The first word of `/mcp`'s arguments: what it is asked to do.
-fn action_of(arguments: &str) -> &str {
-    arguments
-        .trim()
-        .split([':', ' '])
-        .find(|part| !part.is_empty())
-        .unwrap_or("list")
-}
-
-/// Whether `command` writes the profile files.
-fn mutating(command: &Command) -> bool {
-    match command {
-        Command::SubmitForm { .. } => true,
-        Command::Invoke { arguments, .. } => matches!(
-            action_of(arguments),
-            "confirm-delete" | "enable" | "disable" | "toggle"
-        ),
-        _ => false,
-    }
-}
-
 impl Profiles {
     pub async fn mcp(
         self: &Arc<Self>,
@@ -43,89 +24,103 @@ impl Profiles {
         request: Request,
         current: SessionConfig,
     ) -> Result<CommandResult, String> {
+        // A submitted form saves a server, then connects it.
+        let arguments = match request.command {
+            Command::Invoke { arguments, .. } => arguments,
+            Command::SubmitForm { form, values, .. } => {
+                let mut state = self.state.lock().await;
+                let _lease = store::edit_lease(&self.state_dir)?;
+                let (server, connector) =
+                    ui::save(&mut state, &current, &form, &values, &self.workspace)?;
+                let http = server.transport.is_http();
+                let connector = Some(connector);
+                return Ok(self.connection_execution(kit, current, server.id, connector, http));
+            }
+            _ => return Err("Unsupported MCP request".into()),
+        };
+        let action = Action::parse(&arguments)?;
         let mut state = self.state.lock().await;
         // Only what writes the profile files holds the cross-process edit
         // lease: a menu left open here must not block an edit elsewhere.
-        let _lease = mutating(&request.command)
+        let _lease = action
+            .mutates()
             .then(|| store::edit_lease(&self.state_dir))
             .transpose()?;
-        if let Command::SubmitForm { form, values, .. } = request.command {
-            let (server, connector) =
-                ui::save(&mut state, &current, &form, &values, &self.workspace)?;
-            let http = server.transport.is_http();
-            return Ok(self.connection_execution(kit, current, server.id, Some(connector), http));
-        }
-        let Command::Invoke { arguments, .. } = request.command else {
-            return Err("Unsupported MCP request".into());
-        };
-        let arguments = arguments.trim();
-        let parts = arguments
-            .split([':', ' '])
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>();
-        let action = parts.first().copied().unwrap_or("list");
-        let id = parts.get(1).copied().unwrap_or_default();
-        if action == "confirm-delete" {
-            let revision = parts.get(2).copied().unwrap_or_default();
-            return self.delete_server(&mut state, &current, id, revision).await;
+        if let Action::ConfirmDelete { id, token } = action {
+            return self.delete_server(&mut state, &current, id, token).await;
         }
         state.pending_mcp = None;
         // Closing the panel reads nothing: a damaged mcp.json must not keep
         // it open.
-        if action == "close" {
+        if action == Action::Close {
             return Ok(CommandResult::Events(Vec::new()));
         }
         state.mcp.reload()?;
         state.mcp.value.validate()?;
         state.reload_agents()?;
-        if action == "list" {
-            return Ok(ui::list(&state, &current, &self.mcp_runtime).await);
-        }
-        if matches!(action, "add" | "add-http") {
-            return ui::form(&mut state, &current, None, action == "add-http");
-        }
-        let server = state
-            .mcp
-            .value
-            .servers
-            .get(id)
-            .ok_or("Unknown MCP server; open /mcp")?
-            .clone();
+        let server = |state: &State, id: &str| {
+            let found = state.mcp.value.servers.get(id).cloned();
+            found.ok_or("Unknown MCP server; open /mcp")
+        };
+        let runtime = &self.mcp_runtime;
         match action {
-            "show" | "tools" => {
-                ui::detail(
-                    &state,
-                    &current,
-                    &self.mcp_runtime,
-                    &server,
-                    parts.get(2).and_then(|v| v.parse().ok()).unwrap_or(0),
-                    action == "tools",
-                )
-                .await
+            Action::Close | Action::ConfirmDelete { .. } => Ok(CommandResult::Events(Vec::new())),
+            Action::List => Ok(ui::list(&state, &current, runtime).await),
+            Action::Add => ui::form(&mut state, &current, None, false),
+            Action::AddHttp => ui::form(&mut state, &current, None, true),
+            Action::Show(id) => {
+                let server = server(&state, id)?;
+                ui::detail(&state, &current, runtime, &server, 0, false).await
             }
-            "edit" => ui::form(
-                &mut state,
-                &current,
-                Some(&server),
-                server.transport.is_http(),
-            ),
-            "delete" => {
+            Action::Tools { id, page } => {
+                let server = server(&state, id)?;
+                ui::detail(&state, &current, runtime, &server, page, true).await
+            }
+            Action::Edit(id) => {
+                let server = server(&state, id)?;
+                let http = server.transport.is_http();
+                ui::form(&mut state, &current, Some(&server), http)
+            }
+            Action::Delete(id) => {
+                let server = server(&state, id)?;
                 self.refuse_while_held(id).await?;
                 ui::confirm_delete(&mut state, &current, &server)
             }
-            "connect" | "disconnect" => {
-                self.reconnect(kit, current, &server, action == "connect")
+            Action::Connect(id) | Action::Disconnect(id) => {
+                let server = server(&state, id)?;
+                let connect = matches!(action, Action::Connect(_));
+                self.reconnect(kit, current, &server, connect).await
+            }
+            Action::Enable(id) => {
+                let server = server(&state, id)?;
+                self.select_tools(kit, &mut state, &current, &server, Selection::All)
                     .await
             }
-            "enable" | "disable" | "toggle" => {
-                self.select_tools(kit, &mut state, &current, &server, &parts)
+            Action::Disable(id) => {
+                let server = server(&state, id)?;
+                self.select_tools(kit, &mut state, &current, &server, Selection::None)
                     .await
             }
-            _ => {
-                Err("Use /mcp to configure servers, connect and select tools for this agent".into())
+            Action::Toggle { id, tool, page } => {
+                let server = server(&state, id)?;
+                let selection = Selection::Toggle { tool, page };
+                self.select_tools(kit, &mut state, &current, &server, selection)
+                    .await
             }
         }
     }
+}
+
+/// Which of a server's tools the current agent is to be served.
+#[derive(Clone, Copy)]
+enum Selection<'a> {
+    All,
+    None,
+    /// One tool, on or off; the tools are then shown again from `page`.
+    Toggle {
+        tool: &'a str,
+        page: usize,
+    },
 }
 
 impl Profiles {
@@ -190,19 +185,16 @@ impl Profiles {
         state: &mut State,
         current: &SessionConfig,
         server: &config::Server,
-        parts: &[&str],
+        selection: Selection<'_>,
     ) -> Result<CommandResult, String> {
-        let (action, id) = (
-            parts.first().copied().unwrap_or_default(),
-            server.id.as_str(),
-        );
+        let id = server.id.as_str();
         state.pending = None;
         state.pending_delete = None;
         let mut agent = state
             .agent(current.agent.as_str())
             .ok_or("Configure an agent first")?
             .clone();
-        if action == "disable" {
+        if let Selection::None = selection {
             agent.mcp.insert(id.into(), Vec::new());
         } else {
             let connections = self.mcp_runtime.connections.lock().await;
@@ -212,21 +204,20 @@ impl Profiles {
                 .filter(|s| s.connected())
                 .ok_or("Connect the server before selecting its tools")?;
             let available = ui::available(id, live);
-            if action == "enable" {
-                let all = available.iter().map(|t| t.name.clone()).collect();
-                agent.mcp.insert(id.into(), all);
-            } else {
-                let name = parts.get(2).copied().ok_or("Choose an MCP tool")?;
-                if !available.iter().any(|t| t.name == name) {
+            if let Selection::Toggle { tool, .. } = selection {
+                if !available.iter().any(|t| t.name == tool) {
                     return Err("Tool is no longer available".into());
                 }
                 let names = agent.mcp.entry(id.into()).or_default();
-                if names.iter().any(|n| n == name) {
-                    names.retain(|n| n != name);
+                if names.iter().any(|n| n == tool) {
+                    names.retain(|n| n != tool);
                 } else {
-                    names.push(name.into());
+                    names.push(tool.into());
                     names.sort();
                 }
+            } else {
+                let all = available.iter().map(|t| t.name.clone()).collect();
+                agent.mcp.insert(id.into(), all);
             }
         }
         agent.validate()?;
@@ -243,8 +234,10 @@ impl Profiles {
         let selected = agent.mcp.get(id).map_or(0, Vec::len);
         let fields = serde_json::json!({"agent": agent.id, "server": id, "tools": selected});
         self.diagnostics.record("mcp_selection", fields, None);
-        let page = parts.get(3).and_then(|p| p.parse().ok()).unwrap_or(0);
-        let toggled = action == "toggle";
+        let (page, toggled) = match selection {
+            Selection::Toggle { page, .. } => (page, true),
+            _ => (0, false),
+        };
         ui::detail(state, current, &self.mcp_runtime, server, page, toggled).await
     }
 }
@@ -283,7 +276,7 @@ pub(super) async fn sidebar(
                 } else {
                     SidebarTone::Warning
                 })
-                .with_action(super::sidebar::action("mcp", format!("show:{id}"))),
+                .with_action(super::sidebar::action("mcp", Action::Show(id).to_string())),
         );
     }
     if entries.is_empty() {
