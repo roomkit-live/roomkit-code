@@ -2,6 +2,7 @@ use super::super::ui::choice;
 use super::super::*;
 use super::{
     Runtime,
+    action::Action,
     config::{Server, Transport},
 };
 use roomkit_mcp::McpToolProvider;
@@ -31,7 +32,7 @@ fn panel(
         conversation: current.room.as_str().into(),
         panel: PanelSpec::new(uuid::Uuid::new_v4().to_string(), "mcp", title, body)
             .with_actions(actions)
-            .with_dismiss("close"),
+            .with_dismiss(Action::Close.to_string()),
     }])
 }
 pub(super) async fn list(
@@ -43,12 +44,12 @@ pub(super) async fn list(
     let agent = state.agent(current.agent.as_str());
     let mut actions = vec![
         choice(
-            "add",
+            Action::Add.to_string(),
             "Add a stdio server",
             "Save to connect and enable tools for the current agent",
         ),
         choice(
-            "add-http",
+            Action::AddHttp.to_string(),
             "Add an HTTP server",
             "Configure a Streamable HTTP endpoint and optional credentials",
         ),
@@ -60,7 +61,7 @@ pub(super) async fn list(
             .and_then(|a| a.mcp.get(id))
             .map_or(0, Vec::len);
         actions.push(choice(
-            format!("show:{id}"),
+            Action::Show(id).to_string(),
             id,
             format!("{status} · {selected} tools selected for this agent"),
         ));
@@ -115,7 +116,12 @@ pub(super) async fn detail(
             .take(30)
             .map(|tool| {
                 choice(
-                    format!("toggle:{id}:{}:{offset}", tool.name),
+                    Action::Toggle {
+                        id,
+                        tool: &tool.name,
+                        page: offset,
+                    }
+                    .to_string(),
                     format!(
                         "[{}] {}",
                         if names.contains(&tool.name) {
@@ -130,17 +136,28 @@ pub(super) async fn detail(
             })
             .chain((offset > 0).then(|| {
                 choice(
-                    format!("tools:{id}:{}", offset.saturating_sub(30)),
+                    Action::Tools {
+                        id,
+                        page: offset.saturating_sub(30),
+                    }
+                    .to_string(),
                     "Previous page",
                     "",
                 )
             }))
-            .chain(
-                (offset + 30 < tools.len())
-                    .then(|| choice(format!("tools:{id}:{}", offset + 30), "Next page", "")),
-            )
+            .chain((offset + 30 < tools.len()).then(|| {
+                choice(
+                    Action::Tools {
+                        id,
+                        page: offset + 30,
+                    }
+                    .to_string(),
+                    "Next page",
+                    "",
+                )
+            }))
             .chain(std::iter::once(choice(
-                format!("show:{id}"),
+                Action::Show(id).to_string(),
                 "Back to server",
                 "",
             )))
@@ -194,30 +211,30 @@ pub(super) async fn detail(
     let mut actions = if live.is_some() {
         vec![
             choice(
-                format!("tools:{id}"),
+                Action::Tools { id, page: 0 }.to_string(),
                 "Choose tools for this agent",
                 "Inspect and enable individual tools",
             ),
             choice(
-                format!("enable:{id}"),
+                Action::Enable(id).to_string(),
                 "Enable all current tools for this agent",
                 "Snapshots the discovered names; maximum 64 across all servers",
             ),
             choice(
-                format!("disconnect:{id}"),
+                Action::Disconnect(id).to_string(),
                 "Disconnect",
                 "Close the connection and release its process or HTTP session",
             ),
         ]
     } else {
         vec![choice(
-            format!("connect:{id}"),
+            Action::Connect(id).to_string(),
             "Connect",
             "Connect and discover available tools · Esc cancels",
         )]
     };
     actions.push(choice(
-        format!("edit:{id}"),
+        Action::Edit(id).to_string(),
         "Edit connection",
         "Save to reconnect; existing tool selections are preserved",
     ));
@@ -225,7 +242,7 @@ pub(super) async fn detail(
         actions.insert(
             1,
             choice(
-                format!("disconnect:{id}"),
+                Action::Disconnect(id).to_string(),
                 "Release disconnected server",
                 "Release connection resources before editing or deleting",
             ),
@@ -233,20 +250,20 @@ pub(super) async fn detail(
     }
     if !names.is_empty() {
         actions.push(choice(
-            format!("disable:{id}"),
+            Action::Disable(id).to_string(),
             "Disable all tools for this agent",
             "Keep the connection for other configured agents",
         ));
     }
     if live.is_none() {
         actions.push(choice(
-            format!("delete:{id}"),
+            Action::Delete(id).to_string(),
             "Delete configuration…",
             "Requires removing selections from all agents first",
         ));
     }
-    actions.push(choice(format!("show:{id}"), "Refresh status", ""));
-    actions.push(choice("list", "Back to servers", ""));
+    actions.push(choice(Action::Show(id).to_string(), "Refresh status", ""));
+    actions.push(choice(Action::List.to_string(), "Back to servers", ""));
     Ok(panel(current, format!("MCP · {id}"), body, actions))
 }
 
@@ -435,11 +452,15 @@ pub(super) fn confirm_delete(
         "Removes the saved connection configuration. The server itself is kept.".into(),
         vec![
             choice(
-                format!("confirm-delete:{}:{token}", server.id),
+                Action::ConfirmDelete {
+                    id: &server.id,
+                    token: &token,
+                }
+                .to_string(),
                 "Delete configuration",
                 "",
             ),
-            choice("list", "Cancel", ""),
+            choice(Action::List.to_string(), "Cancel", ""),
         ],
     ))
 }

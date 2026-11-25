@@ -92,7 +92,11 @@ impl Network {
             backend,
             channel,
             room: room.clone(),
-            scope: crate::digest::sha256_hex(serde_json::to_vec(&(group, address))?),
+            // Kept in the room: computed without the URL's credentials.
+            scope: crate::digest::sha256_hex(serde_json::to_vec(&(
+                group,
+                crate::remote::without_credentials(address)?,
+            ))?),
             wake,
             responses: Default::default(),
         };

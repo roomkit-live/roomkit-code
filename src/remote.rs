@@ -51,6 +51,18 @@ pub(crate) fn address(saved: Option<&str>) -> Result<String> {
     Ok(address)
 }
 
+/// `address` without the user and the password it may hold: what a
+/// fingerprint shown or stored is computed on. A digest of the whole URL
+/// would let its password be guessed from what the views and the rooms
+/// keep.
+pub(crate) fn without_credentials(address: &str) -> Result<String> {
+    let mut url = url::Url::parse(address).map_err(|_| "Invalid executor Redis URL")?;
+    // Neither fails on a URL with a host, which `address` checked.
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    Ok(url.into())
+}
+
 fn validate_address(address: &str) -> std::result::Result<(), String> {
     let url = url::Url::parse(address).map_err(|_| "Invalid executor Redis URL")?;
     if !matches!(url.scheme(), "redis" | "rediss") || url.host().is_none() {
@@ -265,4 +277,22 @@ fn tool_fields(event: roomkit::ToolCallEvent) -> serde_json::Map<String, serde_j
     ]
     .into_iter()
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The pool's fingerprint, shown in addresses and kept in rooms, was a
+    /// digest of the URL with its password.
+    #[test]
+    fn a_fingerprint_s_address_holds_no_credentials() -> Result<()> {
+        let public = without_credentials("rediss://user:secret@pool.example:6380/2")?;
+        assert_eq!(public, "rediss://pool.example:6380/2");
+        assert_eq!(
+            without_credentials("redis://pool.example")?,
+            without_credentials("redis://:other@pool.example")?
+        );
+        Ok(())
+    }
 }

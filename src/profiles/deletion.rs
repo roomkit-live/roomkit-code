@@ -2,7 +2,7 @@
 
 use super::*;
 use roomkit_tui_engine::CommandResult;
-use ui::{choice, choices};
+use ui::{Action, choice, choices};
 
 pub(super) struct Pending {
     token: String,
@@ -26,14 +26,13 @@ impl Profiles {
         &self,
         kit: &RoomKit<SqliteStore>,
         terminal: &ChannelId,
-        command: &str,
-        arguments: &str,
+        (command, confirmed): (&str, bool),
+        id: &str,
         current: SessionConfig,
     ) -> Result<CommandResult, String> {
-        let (action, id) = arguments.split_once(':').ok_or("Invalid delete action")?;
         let mut state = self.state.lock().await;
         state.pending = None;
-        if action == "confirm-delete" {
+        if confirmed {
             let pending = state
                 .pending_delete
                 .take()
@@ -126,13 +125,23 @@ impl Profiles {
             global_revision: state.global.revision(),
             global: command == "agents" && state.scope(id) == Some(catalog::Scope::Global),
         });
+        // Both are read back by the command they are offered in.
+        let cancel = if command == "agents" {
+            Action::OpenAgent(id)
+        } else {
+            Action::OpenProvider(id)
+        };
+        let confirm = Action::ConfirmDelete {
+            command,
+            token: &token,
+        };
         Ok(choices(
             &current,
             command,
             &format!("Delete {label} ({id})?"),
             vec![
-                choice(format!("open:{id}"), "Cancel", "Keep this profile"),
-                choice(format!("confirm-delete:{token}"), "Delete", description),
+                choice(cancel.to_string(), "Cancel", "Keep this profile"),
+                choice(confirm.to_string(), "Delete", description),
             ],
         ))
     }

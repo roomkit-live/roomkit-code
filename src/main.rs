@@ -23,6 +23,7 @@ mod instructions;
 mod logo;
 mod messages;
 mod names;
+mod panel_action;
 mod permissions;
 mod plans;
 mod processes;
@@ -52,7 +53,10 @@ async fn main() -> ExitCode {
     match launch().await {
         Ok(code) => code,
         Err(error) => {
-            eprintln!("roomkit-code: {error}");
+            // The terminal may be gone: a failed write must not turn the
+            // error into a panic.
+            use std::io::Write;
+            let _ = writeln!(std::io::stderr(), "roomkit-code: {error}");
             ExitCode::FAILURE
         }
     }

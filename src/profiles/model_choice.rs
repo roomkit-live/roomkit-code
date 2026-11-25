@@ -5,7 +5,7 @@ use roomkit_tui::protocol::{Choice, Event};
 use roomkit_tui_engine::CommandResult;
 
 use super::discovery::discover;
-use super::ui::{choice, choices};
+use super::ui::{Action, choice, choices};
 use super::*;
 
 /// One model a connection serves: its ID, the name it is shown by, and its
@@ -90,7 +90,12 @@ impl Profiles {
             .into_iter()
             .map(|m| {
                 choice(
-                    format!("model:{}:{}", provider.id, m.id),
+                    Action::NewAgentOn {
+                        provider: &provider.id,
+                        model: &m.id,
+                        typed: false,
+                    }
+                    .to_string(),
                     m.name,
                     m.capacity.map_or_else(
                         || "Create agent with this model".into(),
@@ -124,7 +129,7 @@ impl Profiles {
             }
             let entries = connections
                 .values()
-                .map(|p| choice(format!("new:{}", p.id), &p.label, &p.id))
+                .map(|p| choice(Action::NewAgent(&p.id).to_string(), &p.label, &p.id))
                 .collect();
             return Ok(choices(
                 &current,
@@ -172,7 +177,11 @@ impl Profiles {
             served
                 .into_iter()
                 .map(|m| {
-                    let value = format!("use-model:{}:{}", agent.id, m.id);
+                    let value = Action::UseModel {
+                        agent: &agent.id,
+                        model: &m.id,
+                    }
+                    .to_string();
                     listed_choice(value, m, &agent.model)
                 })
                 .collect(),
@@ -244,7 +253,12 @@ impl Profiles {
 /// no model, to type one its list does not show.
 fn typed_model(id: &str) -> Choice {
     choice(
-        format!("typed:{id}"),
+        Action::NewAgentOn {
+            provider: id,
+            model: "",
+            typed: true,
+        }
+        .to_string(),
         "Type a model ID",
         "For a model this list does not show",
     )

@@ -168,9 +168,12 @@ impl Scheduler {
         tasks: &Arc<crate::delegation::Tasks>,
     ) -> crate::Result<Arc<Self>> {
         let address = super::address(saved_url)?;
+        // The scope is shown in addresses and kept in rooms: it is computed
+        // without the URL's credentials.
+        let public = super::without_credentials(&address)?;
         Ok(Arc::new(Self {
             group: group.into(),
-            scope: crate::digest::sha256_hex(serde_json::to_vec(&(group, &address))?),
+            scope: crate::digest::sha256_hex(serde_json::to_vec(&(group, &public))?),
             tasks: Arc::downgrade(tasks),
             inventory: Inventory::new(group, &address)?,
             address,
