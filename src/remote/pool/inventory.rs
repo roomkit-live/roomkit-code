@@ -37,13 +37,19 @@ impl Inventory {
     }
 
     pub(super) async fn rows(&self) -> Result<Vec<Row>, String> {
+        Ok(self.listing().await?.0)
+    }
+
+    /// The workers' rows, and how many records did not read and are left
+    /// out of them.
+    async fn listing(&self) -> Result<(Vec<Row>, usize), String> {
         tokio::time::timeout(std::time::Duration::from_secs(3), self.sample())
             .await
             .map_err(|_| "Redis did not answer within three seconds")?
     }
 
-    async fn sample(&self) -> Result<Vec<Row>, String> {
-        let (executors, rows) = tokio::try_join!(
+    async fn sample(&self) -> Result<(Vec<Row>, usize), String> {
+        let (executors, (rows, unread)) = tokio::try_join!(
             async {
                 self.backend.executors().await.map_err(|_| {
                     "Cannot reach the executor pool: its workers could not be listed".to_owned()
@@ -56,21 +62,28 @@ impl Inventory {
             .filter(|executor| executor.online)
             .map(|executor| executor.executor_id)
             .collect();
-        Ok(rows
+        let rows = rows
             .into_iter()
             .map(|mut row| {
                 row.serving = serving.contains(&row.worker.instance);
                 row
             })
-            .collect())
+            .collect();
+        Ok((rows, unread))
     }
 
     async fn lines(&self) -> Result<Vec<String>, String> {
-        let rows = self.rows().await?;
+        let (rows, unread) = self.listing().await?;
+        // A record left out is said, to the person and the model: a worker
+        // that seems to be missing is there, in a record this version does
+        // not read.
+        let left_out = (unread > 0)
+            .then(|| format!("{unread} worker record(s) could not be read and are left out."));
         if rows.is_empty() {
-            return Ok(vec!["No workers registered.".into()]);
+            let none = "No workers registered.".to_owned();
+            return Ok(std::iter::once(none).chain(left_out).collect());
         }
-        let mut lines = Vec::new();
+        let mut lines: Vec<String> = left_out.into_iter().collect();
         for row in rows {
             lines.push(describe(&row));
             if let Some(checkout) = &row.worker.checkout {

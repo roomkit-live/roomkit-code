@@ -324,6 +324,27 @@ impl Hooks {
         self.dispatch(kind, &event.name, &context).await;
     }
 
+    /// Runs `entry`'s command on `payload`, unless a project script it
+    /// launches changed since it was reviewed: it then fails as a hook that
+    /// could not start, until `/hooks` reviews it again.
+    async fn run_reviewed(&self, entry: &catalogue::Entry, payload: &Value) -> Report {
+        let started = std::time::Instant::now();
+        let reviewed = entry.clone();
+        let unchanged = tokio::task::spawn_blocking(move || reviewed.scripts_unchanged())
+            .await
+            .unwrap_or(false);
+        if unchanged {
+            return roomkit_hooks::run(&entry.hook, &self.workspace, &self.inherit_env, payload)
+                .await;
+        }
+        Report {
+            status: RunStatus::Failed,
+            stdout: String::new(),
+            stderr: "A project script this hook runs changed since it was reviewed; review it again in /hooks".into(),
+            elapsed: started.elapsed(),
+        }
+    }
+
     #[expect(
         clippy::cognitive_complexity,
         clippy::too_many_lines,
@@ -376,26 +397,8 @@ impl Hooks {
                 event,
                 started: start,
             };
-            // The review covered the project's scripts the command launches
-            // as they then read: one changed since fails as a hook that
-            // could not start, until `/hooks` reviews it again.
-            let reviewed = entry.clone();
-            let unchanged = tokio::task::spawn_blocking(move || reviewed.scripts_unchanged())
-                .await
-                .unwrap_or(false);
             let report = tokio::select! {
-                report = async {
-                    if unchanged {
-                        roomkit_hooks::run(&entry.hook, &self.workspace, &self.inherit_env, &payload).await
-                    } else {
-                        Report {
-                            status: RunStatus::Failed,
-                            stdout: String::new(),
-                            stderr: "A project script this hook runs changed since it was reviewed; review it again in /hooks".into(),
-                            elapsed: start.elapsed(),
-                        }
-                    }
-                } => report,
+                report = self.run_reviewed(entry, &payload) => report,
                 () = self.stopping.cancelled(), if !matches!(event, HookEvent::SessionEnd | HookEvent::TurnEnd) => Report {
                     status: RunStatus::Cancelled, stdout: String::new(), stderr: String::new(), elapsed: start.elapsed(),
                 },

@@ -272,7 +272,7 @@ fn apply(client: &Client, steps: Vec<Step>) -> Result<()> {
     Ok(())
 }
 
-/// The signals the launch received. The first SIGINT or SIGTERM raises
+/// The signals the launch received. The first SIGINT, SIGTERM or SIGHUP raises
 /// `pending`, which the launch reads between events to cut its turn. The
 /// second, which a hurried Ctrl+C often is, only says that the launch is
 /// closing: leaving then would skip the close and what it stops. The third
@@ -281,20 +281,33 @@ struct Signals {
     pending: Arc<AtomicBool>,
 }
 
+/// Writes `line` to the standard error, whatever became of it.
+fn say(line: &str) {
+    use std::io::Write;
+    let _ = writeln!(std::io::stderr(), "{line}");
+}
+
 fn listen() -> Result<Signals> {
     use tokio::signal::unix::{SignalKind, signal};
     let pending = Arc::new(AtomicBool::new(false));
     let received = Arc::new(AtomicU32::new(0));
-    for kind in [SignalKind::interrupt(), SignalKind::terminate()] {
+    let kinds = [
+        SignalKind::interrupt(),
+        SignalKind::terminate(),
+        SignalKind::hangup(),
+    ];
+    for kind in kinds {
         let mut signals = signal(kind)?;
         let (pending, received) = (pending.clone(), received.clone());
         tokio::spawn(async move {
             while signals.recv().await.is_some() {
                 match received.fetch_add(1, Ordering::SeqCst) {
                     0 => pending.store(true, Ordering::SeqCst),
-                    1 => eprintln!("Closing; signal once more to stop without waiting."),
+                    // The terminal may be gone: a failed write must not
+                    // panic here.
+                    1 => say("Closing; signal once more to stop without waiting."),
                     _ => {
-                        eprintln!("Stopped without waiting for the turn to close.");
+                        say("Stopped without waiting for the turn to close.");
                         std::process::exit(i32::from(INTERRUPTED));
                     }
                 }

@@ -59,15 +59,38 @@ class Model(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+def take_terminal():
+    """Make the child a session leader whose controlling terminal is its stdin."""
+    os.setsid()
+    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+
 class App:
-    def __init__(self, argv, storage):
+    def __init__(self, argv, storage, controlling=False):
         self.master, self.slave = pty.openpty()
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 48, 160, 0, 0))
         self.original = termios.tcgetattr(self.slave)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
         env.update({"TERM": "xterm-256color", "HOME": str(storage / "home"), "XDG_DATA_HOME": str(storage / "data")})
-        self.process = subprocess.Popen(argv, stdin=self.slave, stdout=self.slave, stderr=self.slave, start_new_session=True, env=env)
+        # As its controlling terminal, which a real one is, closing the PTY's
+        # master hangs the application up. The other checks keep it a plain
+        # PTY: the system revokes a controlling terminal when its session
+        # ends, and its restored settings could no longer be read.
+        session = {"preexec_fn": take_terminal} if controlling else {"start_new_session": True}
+        self.process = subprocess.Popen(argv, stdin=self.slave, stdout=self.slave, stderr=self.slave, env=env, **session)
         self.output = bytearray()
+
+    def close_terminal(self):
+        """Close the terminal under the application, as closing its window does, and wait for it to end."""
+        os.close(self.slave)
+        os.close(self.master)
+        try:
+            self.process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=5)
+            raise AssertionError("The application outlived its terminal")
+        assert self.process.returncode == 128 + signal.SIGHUP, self.process.returncode
 
     def send(self, data):
         offset = len(self.output)
@@ -188,18 +211,24 @@ try:
         assert not any("background process" in line for line in lines), lines
         assert len(requests) == 3
 
-        # SIGTERM and SIGHUP close as leaving does: the agent's process is
+        # SIGTERM, SIGHUP on a live terminal, and the terminal closing under
+        # the application all close as leaving does: the agent's process is
         # stopped, and SIGTERM still prints the report.
-        for number in (signal.SIGTERM, signal.SIGHUP):
+        for number in (signal.SIGTERM, signal.SIGHUP, None):
             del requests[:]
             (project / "server.pid").unlink()
             app = App([str(binary), str(project), "--state-dir", str(storage), "--base-url", url, "--model", "fixture",
-                       "--mode", "yolo", "--color", "never", "--no-animations", "--no-herdr", "--no-terminal-status"], storage)
+                       "--mode", "yolo", "--color", "never", "--no-animations", "--no-herdr", "--no-terminal-status"], storage,
+                      controlling=number is None)
             app.wait("[Yolo]")
             offset = app.send("Start the server\r")
             app.wait("Exit fixture first.", offset)
             pid = process_pid(app, project)
             assert alive(pid), "The fixture process must run before the signal"
+            if number is None:
+                app.close_terminal()
+                assert not alive(pid), "A closed terminal must stop the background process"
+                continue
             lines = app.quit(number)
             assert not alive(pid), f"Signal {number} must stop the background process"
             if number == signal.SIGTERM:
@@ -208,4 +237,4 @@ finally:
     server.shutdown()
     server.server_close()
     thread.join(timeout=5)
-print("PTY exit passed: Ctrl+D warns about running processes in the conversation and over a panel, resume command reopens the session, usage spans launches, background process stopped, SIGTERM and SIGHUP close the same way.")
+print("PTY exit passed: Ctrl+D warns about running processes in the conversation and over a panel, resume command reopens the session, usage spans launches, background process stopped, SIGTERM, SIGHUP and a closed terminal close the same way.")

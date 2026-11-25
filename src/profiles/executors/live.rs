@@ -213,6 +213,10 @@ pub(super) async fn save(
         set_declaration(kit, enabled)?;
     }
     if let Err(error) = document.save(saved) {
+        // The pool opened for this edit is not kept open for nothing.
+        if let Some(next) = change.and_then(|change| change.next) {
+            let _ = next.close().await;
+        }
         if let Some(enabled) = toggled {
             set_declaration(kit, !enabled)?;
         }

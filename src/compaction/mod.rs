@@ -563,9 +563,10 @@ impl Compactions {
     }
 
     /// `room`'s record; none when it has no file. One that cannot be read
-    /// is set aside under another name, not replaced by the next
-    /// compaction, and the views and the diagnostics say so: the
-    /// conversation then compacts again once it passes its tier.
+    /// is said so, in the views and the diagnostics, and the conversation
+    /// compacts again once it passes its tier; one whose content is damaged
+    /// is first set aside under another name, not replaced by the next
+    /// compaction.
     fn read(&self, room: &str) -> Record {
         let path = self.path(room);
         let read = || -> std::io::Result<Record> {
@@ -575,23 +576,28 @@ impl Compactions {
             }
             Ok(serde_json::from_reader(std::io::BufReader::new(file))?)
         };
-        match read() {
-            Ok(record) => record,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Record::default(),
-            Err(_) => {
-                let aside = path.with_extension("json.unreadable");
-                let kept = std::fs::rename(&path, &aside).is_ok();
-                self.notice(
-                    room,
-                    "This conversation's saved summary could not be read: it starts again from its whole history",
-                );
-                if let Some(diagnostics) = self.diagnostics.get() {
-                    let fields = serde_json::json!({"room": room, "set_aside": kept});
-                    diagnostics.record("compaction_record_unreadable", fields, None);
-                }
-                Record::default()
-            }
+        let error = match read() {
+            Ok(record) => return record,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Record::default(),
+            Err(error) => error,
+        };
+        // Only a file whose content does not read is set aside. One the
+        // system refused this time is left where it is.
+        let damaged = matches!(
+            error.kind(),
+            std::io::ErrorKind::InvalidData | std::io::ErrorKind::UnexpectedEof
+        ) || error.get_ref().is_some();
+        let set_aside =
+            damaged && std::fs::rename(&path, path.with_extension("json.unreadable")).is_ok();
+        self.notice(
+            room,
+            "This conversation's saved summary could not be read: it starts again from its whole history",
+        );
+        if let Some(diagnostics) = self.diagnostics.get() {
+            let fields = serde_json::json!({"room": room, "set_aside": set_aside});
+            diagnostics.record("compaction_record_unreadable", fields, None);
         }
+        Record::default()
     }
 
     /// Writes `room`'s record as it then stands, outside the rooms' lock:

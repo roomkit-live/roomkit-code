@@ -53,16 +53,10 @@ pub(super) async fn deliver(
             )
             .await?;
         }
-        Some(Checkpoint::Steering) => {
-            messages.uncertain_steer(kit, &event).await?;
-            // The session that asked is told too: it would otherwise wait
-            // for an answer to a question nobody may have read.
-            if matches!(mail.kind, Kind::Message) {
-                const UNCONFIRMED: &str =
-                    "Delivery to the receiving session's agent could not be confirmed.";
-                notice(net, kit, &event, &mail, UNCONFIRMED).await?;
-            }
-        }
+        // The asking session is not told: a notice and a reply exclude each
+        // other, so one sent here would refuse the answer of an agent that
+        // did read the question.
+        Some(Checkpoint::Steering) => messages.uncertain_steer(kit, &event).await?,
 
         Some(Checkpoint::Post(post)) => post.admit(kit, net, event, mail, posts).await?,
         None => {

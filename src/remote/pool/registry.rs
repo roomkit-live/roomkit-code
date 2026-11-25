@@ -230,7 +230,9 @@ impl Registry {
             )
             .await;
     }
-    pub async fn rows(&self) -> Result<Vec<Row>> {
+    /// The workers' rows, and how many records did not read and are left
+    /// out.
+    pub async fn rows(&self) -> Result<(Vec<Row>, usize)> {
         let rows: Vec<(String, u64, u16)> = self
             .query(
                 redis::cmd("EVAL")
@@ -240,10 +242,13 @@ impl Registry {
                     .arg(&self.prefix),
             )
             .await?;
-        Ok(rows
+        let recorded = rows.len();
+        let rows: Vec<Row> = rows
             .into_iter()
             .filter_map(|(record, age, used)| row(&record, age, used))
-            .collect())
+            .collect();
+        let unread = recorded - rows.len();
+        Ok((rows, unread))
     }
     pub async fn claim(&self, w: &Worker, turn: &str, ram: u64) -> Result<bool> {
         self.query(

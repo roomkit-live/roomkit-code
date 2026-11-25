@@ -36,6 +36,17 @@ fn digest(s: &str, len: usize) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
+/// The most a launch waits for the group's broker to take its mailbox.
+const JOIN_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How joining a session group ended.
+pub(super) enum Joined {
+    Group(Network),
+    /// The broker did not take the mailbox, for this error: the
+    /// conversation runs without the group.
+    Unreachable(String),
+}
+
 #[derive(Clone)]
 pub(super) struct Network {
     backend: RedisTurnBackend,
@@ -53,7 +64,7 @@ impl Network {
         kit: &Kit,
         room: &RoomId,
         leases: Arc<SessionLeases>,
-    ) -> Result<Self> {
+    ) -> Result<Joined> {
         let backend = RedisTurnBackend::new(
             Some(address),
             RedisTurnBackendOptions {
@@ -81,25 +92,25 @@ impl Network {
             backend,
             channel,
             room: room.clone(),
-            // Kept in the room: computed without the URL's credentials.
-            scope: crate::digest::sha256_hex(serde_json::to_vec(&(
-                group,
-                crate::remote::without_credentials(address)?,
-            ))?),
+            scope: crate::digest::sha256_hex(serde_json::to_vec(&(group, address))?),
             wake,
             responses: Default::default(),
         };
-        let registration: Result<()> = async {
-            network.remember_endpoint(kit).await?;
-            network.backend.serve(executor).await?;
-            Ok(())
-        }
-        .await;
-        if let Err(e) = registration {
+        // What is kept in the project's own store failing is the launch's
+        // to report; the broker not taking the mailbox is not.
+        if let Err(error) = network.remember_endpoint(kit).await {
             network.close().await;
-            return Err(e);
+            return Err(error);
         }
-        Ok(network)
+        let served = tokio::time::timeout(JOIN_WITHIN, network.backend.serve(executor)).await;
+        let refused = match served {
+            Ok(Ok(())) => return Ok(Joined::Group(network)),
+            Ok(Err(error)) => error.to_string(),
+            Err(_) => "The session group's Redis timed out".to_owned(),
+        };
+        // Closed here, where it was opened: nothing is left half open.
+        network.close().await;
+        Ok(Joined::Unreachable(refused))
     }
 
     async fn remember_endpoint(&self, kit: &Kit) -> Result<()> {

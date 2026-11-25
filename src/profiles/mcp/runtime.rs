@@ -147,6 +147,93 @@ pub(super) fn failure(error: &McpError) -> &'static str {
     }
 }
 
+/// How opening a server's connection, or closing it, ended.
+struct Attempt {
+    /// What the runtime holds for the server from now on: the new
+    /// connection, the previous one kept when the new one failed, or none.
+    connection: Connection,
+    /// The new connection answered: a kept previous one is no success.
+    connected: bool,
+    /// What the diagnostics record of the attempt.
+    status: String,
+    error: Option<String>,
+    outcome: roomkit_tui::protocol::RunOutcome,
+}
+
+impl Attempt {
+    fn disconnected() -> Self {
+        Self {
+            connection: Connection {
+                server: None,
+                status: "Disconnected".into(),
+            },
+            connected: false,
+            status: "Disconnected".into(),
+            error: None,
+            outcome: roomkit_tui::protocol::RunOutcome::Completed,
+        }
+    }
+
+    /// Connects `connector` for server `id` until `stopped`. `previous`,
+    /// a connection kept open meanwhile, is closed once the new one
+    /// answers, and stays the server's when it does not.
+    async fn connect(
+        id: &str,
+        connector: McpToolProvider,
+        previous: Option<Connection>,
+        stopped: impl Future<Output = ()> + Send,
+    ) -> Self {
+        use roomkit_tui::protocol::RunOutcome;
+        match connector.connect_until(stopped).await {
+            Ok(()) => {
+                if let Some(old) = previous.and_then(|c| c.server) {
+                    old.close().await;
+                }
+                Self {
+                    connection: Connection {
+                        server: Some(connector),
+                        status: "Connected".into(),
+                    },
+                    connected: true,
+                    status: "Connected".into(),
+                    error: None,
+                    outcome: RunOutcome::Completed,
+                }
+            }
+            Err(cause) => {
+                let message = failure(&cause).to_string();
+                let kept = previous.filter(|c| c.server.is_some());
+                let cancelled = matches!(cause, McpError::Cancelled);
+                let next = if kept.is_some() {
+                    "the previous connection is kept until /mcp reconnects"
+                } else {
+                    "open /mcp to edit or reconnect"
+                };
+                let status = if kept.is_some() {
+                    format!("{message} · previous connection kept")
+                } else {
+                    message.clone()
+                };
+                Self {
+                    connection: kept.unwrap_or(Connection {
+                        server: None,
+                        status: message.clone(),
+                    }),
+                    connected: false,
+                    status,
+                    error: (!cancelled)
+                        .then(|| format!("{id}: {message}. Configuration is saved; {next}.")),
+                    outcome: if cancelled {
+                        RunOutcome::Interrupted
+                    } else {
+                        RunOutcome::Completed
+                    },
+                }
+            }
+        }
+    }
+}
+
 impl Profiles {
     /// Both form saves and explicit connections use cancellable host work.
     /// `replace_once_connected` keeps a live connection until the new one
@@ -184,58 +271,27 @@ impl Profiles {
                     old.close().await;
                 }
                 let activate = connector.is_some();
-                let mut error = None;
-                let mut outcome = RunOutcome::Completed;
-                let connection = if let Some(connector) = connector {
-                    profiles.diagnostics.record(
-                        "mcp_connecting",
-                        serde_json::json!({"server":id}),
-                        None,
-                    );
-                    let stopped = async {
-                        tokio::select! { () = context.cancelled() => {}, () = runtime.stop.cancelled() => {} }
-                    };
-                    match connector.connect_until(stopped).await {
-                        Ok(()) => {
-                            if let Some(old) = previous.take().and_then(|c| c.server) {
-                                old.close().await;
-                            }
-                            Connection {
-                                server: Some(connector),
-                                status: "Connected".into(),
-                            }
-                        }
-                        Err(cause) => {
-                            let message = failure(&cause).to_string();
-                            // The connection that answered until now stays.
-                            let kept = previous.take().filter(|c| c.server.is_some());
-                            if matches!(cause, McpError::Cancelled) {
-                                outcome = RunOutcome::Interrupted;
-                            } else if kept.is_some() {
-                                error = Some(format!(
-                                    "{id}: {message}. Configuration is saved; the previous connection is kept until /mcp reconnects."
-                                ));
-                            } else {
-                                error = Some(format!(
-                                    "{id}: {message}. Configuration is saved; open /mcp to edit or reconnect."
-                                ));
-                            }
-                            kept.unwrap_or(Connection {
-                                server: None,
-                                status: message,
-                            })
-                        }
+                let attempt = match connector {
+                    Some(connector) => {
+                        let fields = serde_json::json!({"server":id});
+                        profiles.diagnostics.record("mcp_connecting", fields, None);
+                        let stopped = async {
+                            tokio::select! { () = context.cancelled() => {}, () = runtime.stop.cancelled() => {} }
+                        };
+                        Attempt::connect(&id, connector, previous.take(), stopped).await
                     }
-                } else {
-                    Connection {
-                        server: None,
-                        status: "Disconnected".into(),
-                    }
+                    None => Attempt::disconnected(),
                 };
-                let connected = connection.server.is_some();
+                let Attempt {
+                    connection,
+                    connected,
+                    status,
+                    error,
+                    outcome,
+                } = attempt;
                 profiles.diagnostics.record(
                     "mcp_connection",
-                    serde_json::json!({"server":id,"status":connection.status()}),
+                    serde_json::json!({"server":id,"status":status}),
                     None,
                 );
                 runtime

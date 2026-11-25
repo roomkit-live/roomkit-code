@@ -207,7 +207,7 @@ fn specification(state: &State, panel: &Panel) -> Result<PanelSpec, String> {
         (
             format!("Hook · {}", entry.label()),
             format!(
-                "State: {}\nSource: {}\nEvent: {}\nMatcher: {}\nTimeout: {} s\nRuns in Plan: {}\nWorking directory: project root\n\nCommand:\n{}\n\nEnabling trusts this exact definition for this project. Commands run with your user permissions and may read or modify data. The project scripts the command launches are trusted as they read now: once one changes, the hook fails until it is reviewed again; what they run in turn remains your responsibility. Changes to the definition require review after reload.\n\nRecent executions in this session (output is not saved to diagnostics):\n{}",
+                "State: {}\nSource: {}\nEvent: {}\nMatcher: {}\nTimeout: {} s\nRuns in Plan: {}\nWorking directory: project root\n\nCommand:\n{}\n\nEnabling trusts this exact definition for this project. Commands run with your user permissions and may read or modify data. {}\nChanges to the definition require review after reload.\n\nRecent executions in this session (output is not saved to diagnostics):\n{}",
                 if enabled {
                     "enabled"
                 } else {
@@ -223,6 +223,7 @@ fn specification(state: &State, panel: &Panel) -> Result<PanelSpec, String> {
                 entry.hook.timeout,
                 entry.hook.roomkit.run_in_plan,
                 super::reviewed(&entry.hook.command, 8192),
+                pinned_scripts(entry),
                 if receipts.is_empty() {
                     "None"
                 } else {
@@ -305,4 +306,18 @@ fn specification(state: &State, panel: &Panel) -> Result<PanelSpec, String> {
     Ok(PanelSpec::new(panel.id.clone(), "hooks", title, body)
         .with_actions(actions)
         .with_dismiss(format!("{prefix}:dismiss")))
+}
+
+/// What the review of `entry` says of the scripts its command runs: those
+/// of the project it found, which are trusted as they read now, and that
+/// nothing else the command runs is.
+fn pinned_scripts(entry: &super::catalogue::Entry) -> String {
+    let pinned = entry.pinned();
+    if pinned.is_empty() {
+        return "No project script was found in this command: the review covers its text only, and whatever it runs remains your responsibility.".into();
+    }
+    format!(
+        "Project scripts trusted as they read now: {}. Once one changes, the hook fails until it is reviewed again. Anything else the command or these scripts run remains your responsibility.",
+        pinned.join(", ")
+    )
 }

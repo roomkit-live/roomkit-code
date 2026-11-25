@@ -352,8 +352,19 @@ async fn abandon(
 /// Events the terminal and the engine may queue for each other.
 const QUEUE: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 
+/// How long a view whose host closed on a signal is given to return and
+/// restore the terminal before the launch closes without it.
+const VIEW_RETURNS: std::time::Duration = std::time::Duration::from_secs(2);
+
 pub(crate) async fn run(settings: Settings) -> Result<std::process::ExitCode> {
+    // Listen first: a signal while the application opens still closes what
+    // it opened.
+    let signals = signals::listen()?;
     let app = Application::open(&settings, settings.initial_authentication()).await?;
+    if let Some(signal) = signals.received() {
+        app.close().await?;
+        return Ok(signal.exit_code());
+    }
     // Refuse an invalid attachment before entering alternate-screen mode.
     if let Err(error) = app.session().snapshot().await {
         let _ = app.close().await;
@@ -367,17 +378,6 @@ pub(crate) async fn run(settings: Settings) -> Result<std::process::ExitCode> {
         app.session()
             .run_with_commands(host, app.router(&settings.workspace)),
     );
-    // A request to end (SIGTERM, or SIGHUP when the terminal closes) closes
-    // the view's host: the view returns and the close below runs as it does
-    // when the user leaves.
-    let signals = match signals::listen(adapter.abort_handle()) {
-        Ok(signals) => signals,
-        Err(error) => {
-            adapter.abort();
-            let _ = app.close().await;
-            return Err(error);
-        }
-    };
     let renderers = crate::tool_views::renderers(&settings.workspace);
     // The final observation outlives the view: it names the conversation to resume.
     let observer = roomkit_tui::SessionObserver::default();
@@ -390,15 +390,15 @@ pub(crate) async fn run(settings: Settings) -> Result<std::process::ExitCode> {
         app.profiles.resources.processes.clone(),
     );
     let view = observer.clone();
-    let terminal = tokio::task::spawn_blocking(move || {
+    let mut terminal = tokio::task::spawn_blocking(move || {
         roomkit_tui::run_with_observer(client, renderers, settings.ui, view)
-    })
-    .await;
+    });
+    let returned = until_left(&mut terminal, &adapter.abort_handle(), &signals).await;
     integrations.freeze();
     let attached = adapter.await;
     let received = signals.received();
-    // A closed terminal takes no report: writing to it fails.
-    let printed = received != Some(signals::Signal::Hangup);
+    // A closed terminal, or one the view still holds, takes no report.
+    let printed = returned.is_some() && received != Some(signals::Signal::Hangup);
     let summary = summarize(&app, observer.latest(), &resume).await;
     if printed {
         summary.print_conversation();
@@ -409,14 +409,43 @@ pub(crate) async fn run(settings: Settings) -> Result<std::process::ExitCode> {
         report(&app, &summary, closed.is_ok());
     }
     let Some(signal) = received else {
-        terminal??;
+        // Without a signal the view returned.
+        if let Some(returned) = returned {
+            returned??;
+        }
         attached??;
         closed?;
         return Ok(std::process::ExitCode::SUCCESS);
     };
     // The signal cut the view and its host: only the close can still fail.
     closed?;
+    if returned.is_none() {
+        signal.exit();
+    }
     Ok(signal.exit_code())
+}
+
+/// What the view's thread returned.
+type Returned =
+    std::result::Result<std::io::Result<roomkit_tui::ExitReason>, tokio::task::JoinError>;
+
+/// Waits for the view to return, which it does when the user leaves. On a
+/// signal its host is closed, which makes a view on a live terminal return
+/// and restore it: it is given a moment for that, whichever the signal, as
+/// SIGHUP can come with the terminal still there. A view whose terminal is
+/// gone may never return: none then, and the close does not depend on it.
+async fn until_left(
+    terminal: &mut tokio::task::JoinHandle<std::io::Result<roomkit_tui::ExitReason>>,
+    host: &tokio::task::AbortHandle,
+    signals: &signals::Signals,
+) -> Option<Returned> {
+    tokio::select! {
+        returned = &mut *terminal => Some(returned),
+        _ = signals.wait() => {
+            host.abort();
+            tokio::time::timeout(VIEW_RETURNS, terminal).await.ok()
+        }
+    }
 }
 
 /// The processes closing stopped, then a line when internal errors occurred.

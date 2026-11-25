@@ -1866,9 +1866,10 @@ For a delegated executor tool, the coordinator runs its project hooks in the coo
 ones in `.roomkit/hooks.json`. Both sources are additive, global first. No command
 runs until you inspect it and choose **Enable this hook** in `/hooks`. Approval is
 stored privately for this project and exact definition. Use **Reload configuration**
-after editing; new or changed definitions need review again. The project scripts a
-command launches are pinned as reviewed: once one changes, the hook fails instead
-of running, until reviewed again. What those scripts run in turn is not pinned.
+after editing; new or changed definitions need review again. The review panel lists
+the project scripts it found in the command (`./check.sh`, `sh tools/run.sh`): once
+one changes, the hook fails until reviewed again. Nothing else the command runs is
+pinned, such as what `make` or those scripts run in turn.
 Existing `.claude` and `.codex` configurations are not imported automatically.
 
 For example, put this in `.roomkit/hooks.json`:

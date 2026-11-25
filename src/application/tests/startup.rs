@@ -74,6 +74,12 @@ async fn a_launch_opens_without_the_session_group_it_cannot_reach() {
     // Nothing listens on the discard port.
     settings.executor_url = Some("redis://127.0.0.1:9".into());
     let app = Application::open(&settings, String::new()).await.unwrap();
+    // The conversation says so as it opens, not only its session tools.
+    let opened = app.session().snapshot().await.unwrap();
+    let told = opened.items.iter().any(|item| {
+        matches!(item, Item::Message(m) if m.text.starts_with("Session group team could not be reached"))
+    });
+    assert!(told, "{:?}", opened.items);
     turn(&app).await;
     let log =
         std::fs::read_to_string(app._storage.database.with_file_name("diagnostics.jsonl")).unwrap();

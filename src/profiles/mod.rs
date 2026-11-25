@@ -202,12 +202,7 @@ impl Profiles {
         };
         let skill_catalogue =
             skills::Catalogue::load(settings.workspace.clone(), settings.state_dir.clone()).await?;
-        let policy = crate::permissions::Policy::new(settings.mode);
-        let policy = if settings.unattended {
-            policy
-        } else {
-            policy.attended()
-        };
+        let policy = crate::permissions::Policy::of_launch(settings.mode, settings.unattended);
         let instructions = resources.instructions.clone();
         let compactions = resources.compactions.clone();
         let files = resources.files.clone();

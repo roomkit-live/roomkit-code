@@ -13,9 +13,19 @@ pub(super) struct Entry {
     pub group: HookGroup,
     pub hook: CommandHook,
     pub source: PathBuf,
-    /// The project's scripts the command launches, each with its content's
-    /// digest as reviewed: part of what `id` identifies.
-    scripts: Vec<(PathBuf, String)>,
+    /// The project's scripts the command launches, as reviewed: part of
+    /// what `id` identifies when there is any.
+    scripts: Vec<Script>,
+}
+
+/// One project script a hook's command launches.
+#[derive(Clone)]
+struct Script {
+    path: PathBuf,
+    /// Its path within the project, as the review panel lists it.
+    shown: String,
+    /// Its content's digest when it was reviewed.
+    digest: String,
 }
 
 /// The most scripts of the project one command's review covers, and the
@@ -28,51 +38,102 @@ const INTERPRETERS: [&str; 11] = [
     "sh", "bash", "zsh", "dash", "python", "python3", "node", "deno", "bun", "ruby", "perl",
 ];
 
-/// The project's scripts `command` launches, each with its content's
-/// digest: in each of its simple commands, the program itself when it is a
-/// file inside `workspace`, or the script an interpreter is given;
-/// `$ROOMKIT_PROJECT_DIR` reads as the workspace. A review that covered the
-/// command's text alone trusted `./check.sh` whatever the script became,
-/// and the agent can write the project's files. The files a command reads
-/// or writes are not scripts: a hook that appends to its own log must not
-/// undo its review. Other programs, on the system's path or outside the
-/// project, are not the project's to change.
-fn scripts(command: &str, workspace: &Path) -> Vec<(PathBuf, String)> {
+/// The words that run the command that follows them.
+const WRAPPERS: [&str; 7] = ["exec", "command", "nohup", "time", "env", "nice", "timeout"];
+
+/// `word` as the shell hands it to the program: without its quotes, and
+/// `$ROOMKIT_PROJECT_DIR` read as `project`.
+fn unquoted(word: &str, project: &str) -> String {
+    word.replace(['"', '\''], "")
+        .replace("${ROOMKIT_PROJECT_DIR}", project)
+        .replace("$ROOMKIT_PROJECT_DIR", project)
+}
+
+/// The words of one simple command from its program on: past the leading
+/// `NAME=value` words and the wrappers that run what follows them, with
+/// their options, and `timeout`'s duration.
+fn program<'w, 'a>(words: &'w [&'a str]) -> &'w [&'a str] {
+    let assignment = |word: &str| word.contains('=') && !word.starts_with(['.', '/', '"', '\'']);
+    let mut at = 0;
+    loop {
+        while words.get(at).is_some_and(|word| assignment(word)) {
+            at += 1;
+        }
+        let Some(word) = words.get(at) else {
+            return &[];
+        };
+        if !WRAPPERS.contains(word) {
+            return &words[at..];
+        }
+        at += 1;
+        while words.get(at).is_some_and(|word| word.starts_with('-')) {
+            // `nice -n 5` and `timeout -s KILL` take a value.
+            let takes_value = matches!(words[at], "-n" | "-s" | "-k");
+            at += 1 + usize::from(takes_value);
+        }
+        if *word == "timeout" {
+            at += 1;
+        }
+    }
+}
+
+/// The project's scripts `command` launches, each with the path it is shown
+/// by and its content's digest: in each of its simple commands, the
+/// program itself when it is a file inside `workspace`, or the script an
+/// interpreter is given, read past the words that only run what follows
+/// (`exec`, `env`, `timeout 5`…) and from the directory an earlier `cd`
+/// moved to; `$ROOMKIT_PROJECT_DIR` reads as the workspace. A review that
+/// covered the command's text alone trusted `./check.sh` whatever the
+/// script became, and the agent can write the project's files.
+///
+/// This reads a command's words, not the shell's grammar: a script named
+/// through another variable, a function or a tool that runs others (`make`)
+/// is not found, and the review panel lists what was. The files a command
+/// reads or writes are not scripts: a hook that appends to its own log must
+/// not undo its review.
+fn scripts(command: &str, workspace: &Path) -> Vec<Script> {
     let Ok(root) = workspace.canonicalize() else {
         return Vec::new();
     };
     let project = workspace.to_string_lossy();
-    let resolve = |word: &str| {
-        let word = word
-            .trim_matches(|c| matches!(c, '"' | '\''))
-            .replace("${ROOMKIT_PROJECT_DIR}", &project)
-            .replace("$ROOMKIT_PROJECT_DIR", &project);
-        let path = workspace.join(&word).canonicalize().ok()?;
-        (!word.is_empty() && path.starts_with(&root)).then_some(path)
-    };
-    let mut found: Vec<(PathBuf, String)> = Vec::new();
+    let mut directory = workspace.to_owned();
+    let mut found: Vec<Script> = Vec::new();
     for simple in command.split([';', '|', '&', '(', ')', '\n']) {
-        // Leading `NAME=value` words set the program's environment.
-        let mut words = simple
-            .split_whitespace()
-            .skip_while(|word| word.contains('=') && !word.starts_with(['.', '/', '"', '\'']));
-        let Some(program) = words.next() else {
+        let words: Vec<&str> = simple.split_whitespace().collect();
+        let words = program(&words);
+        let Some(first) = words.first() else {
             continue;
         };
-        let name = program.rsplit('/').next().unwrap_or(program);
+        let inside = |word: &str, from: &Path| {
+            let path = from.join(unquoted(word, &project)).canonicalize().ok()?;
+            path.starts_with(&root).then_some(path)
+        };
+        if *first == "cd" {
+            if let Some(moved) = words.get(1).and_then(|to| inside(to, &directory)) {
+                directory = moved;
+            }
+            continue;
+        }
+        let name = first.rsplit('/').next().unwrap_or(first);
         let script = if INTERPRETERS.contains(&name) {
-            words.find(|word| !word.starts_with('-')).and_then(resolve)
+            let given = words[1..].iter().find(|word| !word.starts_with('-'));
+            given.and_then(|word| inside(word, &directory))
         } else {
-            resolve(program)
+            inside(first, &directory)
         };
         let Some(path) = script else {
             continue;
         };
-        if found.iter().any(|(known, _)| *known == path) {
+        if found.iter().any(|known| known.path == path) {
             continue;
         }
         if let Some(digest) = digest(&path) {
-            found.push((path, digest));
+            let shown = path.strip_prefix(&root).unwrap_or(&path);
+            found.push(Script {
+                shown: shown.to_string_lossy().into_owned(),
+                path,
+                digest,
+            });
             if found.len() == SCRIPTS {
                 break;
             }
@@ -94,7 +155,16 @@ impl Entry {
     pub fn scripts_unchanged(&self) -> bool {
         self.scripts
             .iter()
-            .all(|(path, reviewed)| digest(path).as_ref() == Some(reviewed))
+            .all(|script| digest(&script.path).as_ref() == Some(&script.digest))
+    }
+
+    /// The project scripts this hook's review covers, by their path within
+    /// the project.
+    pub fn pinned(&self) -> Vec<&str> {
+        self.scripts
+            .iter()
+            .map(|script| script.shown.as_str())
+            .collect()
     }
 
     pub fn label(&self) -> &str {
@@ -182,13 +252,19 @@ impl Catalogue {
                         for group in groups {
                             for hook in &group.hooks {
                                 let scripts = scripts(&hook.command, &self.workspace);
-                                let definition = serde_json::to_vec(&(
-                                    path,
-                                    event,
-                                    &group.matcher,
-                                    hook,
-                                    &scripts,
-                                ))
+                                let pinned: Vec<(&str, &str)> = scripts
+                                    .iter()
+                                    .map(|script| (script.shown.as_str(), script.digest.as_str()))
+                                    .collect();
+                                let described = (path, event, &group.matcher, hook);
+                                // A hook that launches no project script is
+                                // identified as it was before scripts were
+                                // read: the trust given it then still holds.
+                                let definition = if pinned.is_empty() {
+                                    serde_json::to_vec(&described)
+                                } else {
+                                    serde_json::to_vec(&(described, &pinned))
+                                }
                                 .unwrap_or_default();
                                 let id = crate::digest::sha256_hex(definition);
                                 if next.entries.iter().any(|entry| entry.id == id) {
@@ -296,21 +372,44 @@ mod tests {
         std::fs::write(workspace.path().join("check.sh"), "exit 0\n")?;
         // A file the command reads or writes is no script of its own.
         std::fs::write(workspace.path().join("seen.log"), "")?;
+        std::fs::create_dir(workspace.path().join("tools"))?;
+        std::fs::write(workspace.path().join("tools/run.sh"), "exit 0\n")?;
         std::fs::write(
             state.path().join("hooks.json"),
             serde_json::json!({"hooks": {"PreToolUse": [{"hooks": [
                 {"type":"command", "command":"sh \"$ROOMKIT_PROJECT_DIR/check.sh\" --strict"},
                 {"type":"command", "command":"cat >/dev/null; MODE=strict ./check.sh"},
-                {"type":"command", "command":"cat check.sh >> seen.log; /bin/echo unrelated"}
+                {"type":"command", "command":"cat check.sh >> seen.log; /bin/echo unrelated"},
+                {"type":"command", "command":"timeout 5 ./check.sh"},
+                {"type":"command", "command":"exec env MODE=x \"$ROOMKIT_PROJECT_DIR\"/check.sh"},
+                {"type":"command", "command":"cd tools && ./run.sh"}
             ]}]}})
             .to_string(),
         )?;
         let mut catalogue = Catalogue::load(workspace.path(), state.path(), private.path());
         let reviewed: Vec<Entry> = catalogue.entries.clone();
+        let pinned: Vec<Vec<&str>> = reviewed.iter().map(Entry::pinned).collect();
         assert_eq!(
-            reviewed.iter().map(|e| e.scripts.len()).collect::<Vec<_>>(),
-            [1, 1, 0]
+            pinned,
+            [
+                vec!["check.sh"],
+                vec!["check.sh"],
+                vec![],
+                vec!["check.sh"],
+                vec!["check.sh"],
+                vec!["tools/run.sh"]
+            ]
         );
+        // A hook that launches no project script keeps the identifier it had
+        // before scripts were read: the trust already given it holds.
+        let unpinned = &reviewed[2];
+        let before = serde_json::to_vec(&(
+            &unpinned.source,
+            unpinned.event,
+            &unpinned.group.matcher,
+            &unpinned.hook,
+        ))?;
+        assert_eq!(unpinned.id, crate::digest::sha256_hex(before));
         catalogue.set_enabled(&reviewed[0].id, true)?;
         assert!(reviewed.iter().all(Entry::scripts_unchanged));
         std::fs::write(workspace.path().join("check.sh"), "rm -rf .\n")?;

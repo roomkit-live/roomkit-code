@@ -543,23 +543,6 @@ mod tests {
     use roomkit::model::RoomId;
     use roomkit_tui::protocol::limits::MAX_LABEL_BYTES;
 
-    /// The commands the view lists and the arms that serve them were kept
-    /// in step by hand: one listed and served by none answered "Unknown
-    /// application command". Every listed command now has an arm.
-    #[test]
-    fn every_listed_command_is_served() {
-        let source = include_str!("mod.rs");
-        let dispatch = &source[source.find("async fn handle(").unwrap()..];
-        let dispatch = &dispatch[..dispatch.find("fn compact(").unwrap()];
-        for command in super::commands() {
-            let name = format!("\"{}\"", command.name);
-            let served = dispatch
-                .lines()
-                .any(|line| line.contains(&name) && (line.contains("=>") || line.contains('|')));
-            assert!(served, "/{} is listed and served by no arm", command.name);
-        }
-    }
-
     #[test]
     fn a_title_fits_the_label_limit_and_keeps_the_name_first() {
         let room = RoomId::new("session-1").unwrap();

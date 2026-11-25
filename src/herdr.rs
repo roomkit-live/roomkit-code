@@ -103,6 +103,35 @@ pub(crate) fn valid_resume(args: &[String]) -> bool {
             .all(|arg| !arg.contains('\'') && !arg.chars().any(char::is_control))
 }
 
+/// The tries of a call that keeps failing: each waits longer than the one
+/// before, and a failure is recorded when it changes, not at each try, so a
+/// socket that stays away does not fill the log a line a second.
+struct Retries {
+    pause: Duration,
+    failing: Option<&'static str>,
+}
+
+impl Default for Retries {
+    fn default() -> Self {
+        Self {
+            pause: RETRY,
+            failing: None,
+        }
+    }
+}
+
+impl Retries {
+    /// A try failed with `code`: whether it is the first to fail so, and
+    /// how long to wait before the next.
+    fn failed(&mut self, code: &'static str) -> (bool, Duration) {
+        let first = self.failing != Some(code);
+        self.failing = Some(code);
+        let pause = self.pause;
+        self.pause = (pause * 2).min(RETRY_AT_MOST);
+        (first, pause)
+    }
+}
+
 pub(crate) struct Reporter {
     freeze: CancellationToken,
     release: oneshot::Sender<()>,
@@ -129,11 +158,7 @@ impl Reporter {
             let mut sent = Sent::default();
             let mut attempted = false;
             let mut invalid_logged = false;
-            // A call that keeps failing waits longer each time, and is
-            // recorded when its failure changes, not at each try: a socket
-            // that stays away no longer fills the log a line a second.
-            let mut retry = RETRY;
-            let mut failing: Option<&'static str> = None;
+            let mut retries = Retries::default();
             loop {
                 if stop.is_cancelled() {
                     break;
@@ -181,21 +206,19 @@ impl Reporter {
                 match call(&endpoint, &mut sequence, action.args(&report), &stop).await {
                     Ok(()) => {
                         sent.applied(action, &report);
-                        retry = RETRY;
-                        failing = None;
+                        retries = Retries::default();
                     }
                     Err("stopped") => break,
                     Err(code) => {
-                        if failing != Some(code) {
+                        let (first, pause) = retries.failed(code);
+                        if first {
                             diagnostic(code);
-                            failing = Some(code);
                         }
                         // Reacquire authority after a restart or a partially applied report.
                         sent = Sent::default();
-                        if wait(retry, &stop).await {
+                        if wait(pause, &stop).await {
                             break;
                         }
-                        retry = (retry * 2).min(RETRY_AT_MOST);
                     }
                 }
             }

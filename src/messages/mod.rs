@@ -89,9 +89,6 @@ pub(crate) async fn inject(
     kit.steer(to.room, to.agent, directive, options).await
 }
 
-/// The most a launch waits to join its session group.
-const JOIN_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
-
 struct Interactive {
     kit: WeakRoomKit<SqliteStore>,
     group_enabled: bool,
@@ -126,10 +123,11 @@ impl Messages {
     }
 
     /// Joins the launch's session group. A group whose address is not
-    /// valid refuses the launch. One whose broker cannot be reached does
-    /// not: the conversation opens without it, its local work unaffected,
-    /// the diagnostics record why, and the session tools say that the group
-    /// was not joined.
+    /// valid, or whose record this project's store does not take, refuses
+    /// the launch. One whose broker cannot be reached does not: the
+    /// conversation opens without it, its local work unaffected, and says
+    /// so; the diagnostics record why, and the session tools refuse with
+    /// the reason.
     pub(crate) async fn open_network(
         &self,
         settings: &crate::config::Settings,
@@ -142,25 +140,42 @@ impl Messages {
             return Ok(());
         };
         let address = crate::remote::address(settings.executor_url.as_deref())?;
-        let opening = network::Network::open(group, &address, kit, room, leases);
-        let opened = match tokio::time::timeout(JOIN_WITHIN, opening).await {
-            Ok(opened) => opened,
-            Err(_) => Err("The session group's Redis timed out".into()),
-        };
-        match opened {
-            Ok(net) => self
-                .network
-                .set(net)
-                .map_err(|_| "Session network already open".into()),
-            Err(error) => {
-                let error = error.to_string();
-                let fields = serde_json::json!({});
-                diagnostics.record("session_group_unavailable", fields, Some(&error));
-                self.network_unavailable
-                    .store(true, std::sync::atomic::Ordering::Release);
-                Ok(())
+        let error = match network::Network::open(group, &address, kit, room, leases).await? {
+            network::Joined::Group(net) => {
+                return self
+                    .network
+                    .set(net)
+                    .map_err(|_| "Session network already open".into());
             }
+            network::Joined::Unreachable(error) => error,
+        };
+        diagnostics.record(
+            "session_group_unavailable",
+            serde_json::json!({}),
+            Some(&error),
+        );
+        self.network_unavailable
+            .store(true, std::sync::atomic::Ordering::Release);
+        // Said in the conversation as it opens, not only when a session
+        // tool is first used.
+        let text = format!(
+            "Session group {group} could not be reached: this conversation runs without it. Relaunch once its Redis is reachable."
+        );
+        let id = format!(
+            "session-group-unavailable-{}",
+            uuid::Uuid::new_v4().simple()
+        );
+        let row = crate::system_row::SystemRow {
+            room: room.as_str(),
+            id: &id,
+            text: &text,
+            about: ("session_group_unavailable", serde_json::json!(group)),
+        };
+        let terminal = roomkit::model::ChannelId::new(crate::names::TERMINAL)?;
+        if let Ok(stored) = row.store(kit, &terminal).await {
+            self.show(&stored, text);
         }
+        Ok(())
     }
 
     fn pool(&self) -> Option<Arc<crate::remote::pool::Scheduler>> {
