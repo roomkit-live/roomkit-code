@@ -45,14 +45,16 @@ with `ROOMKIT_RELEASE_BUILD=1`, and exercises its installer. macOS builds receiv
 an ad-hoc signature before checksums are calculated. Developer ID signing and
 notarization are not configured; do not describe these binaries as notarized.
 
-Assets are named `roomkit-code-vX.Y.Z-<target>`, with one `.sha256` file per binary.
+Assets are named `roomkit-code-vX.Y.Z-<target>`, with one `.sha256` file per binary
+and one `.sha256.minisig` signature per checksum file.
 The draft also includes `install.sh`, `LICENSE`, `README.md`, `USER_GUIDE.md` and
 `SECURITY.md`. Extra files, missing targets, empty binaries or invalid checksums
 prevent draft creation. No local configuration or build directory is uploaded.
 
 ## Publish
 
-Review the workflow results, notes and all four binary/checksum pairs. Check
+Review the workflow results, notes and all four binaries with their checksum and
+signature. Check
 installation on Linux and macOS and confirm that the documented minimum systems
 and signing limitations still apply. Publish the draft in GitHub, or explicitly:
 
@@ -63,6 +65,28 @@ gh release edit v0.1.3 --repo roomkit-live/roomkit-code --draft=false --latest
 Do not replace published binaries or move a published tag. Ship a new version
 for corrections. The updater keeps the previous binary for rollback, but cannot
 undo application-data migrations.
+
+## The release key
+
+The draft job signs each checksum file with [minisign](https://jedisct1.github.io/minisign/)
+and checks the signatures against `src/updates/release-key.pub` before it creates
+the draft. Without the key's secrets the job fails: a release is not published
+unsigned.
+
+Create the key once, on a trusted machine, and keep its secret half out of the
+repository:
+
+```sh
+minisign -G -p release-key.pub -s release-key.minisign
+```
+
+- Put the second line of `release-key.pub` in `src/updates/release-key.pub`, and
+  the same line in `install.sh` as `release_key='…'`. A test compares the two.
+- Store the whole content of `release-key.minisign` as the repository Actions
+  secret `MINISIGN_SECRET_KEY`, and its password as `MINISIGN_PASSWORD`.
+- Keep an offline copy of the secret key. Replacing the key means shipping a
+  release, signed with the previous key, whose updater embeds the new one:
+  installed versions accept only the key they were built with.
 
 ## Failures and retries
 

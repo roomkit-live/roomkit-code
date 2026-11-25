@@ -1,7 +1,10 @@
 #!/bin/sh
-# Install a published, checksummed release; no Rust, sudo or shell-profile edits.
+# Install a published, signed release; no Rust, sudo or shell-profile edits.
 set -eu
 repo=roomkit-live/roomkit-code
+# The public half of the key that signs each release's checksum file: the
+# line of src/updates/release-key.pub, which the updater embeds.
+release_key='UNSET'
 fail() { printf '%s\n' "$*" >&2; exit 1; }
 case "$(uname -s)" in Linux) os=unknown-linux-gnu ;; Darwin) os=apple-darwin ;; *) fail 'Supported platforms: Linux and macOS' ;; esac
 case "$(uname -m)" in x86_64|amd64) arch=x86_64 ;; aarch64|arm64) arch=aarch64 ;; *) fail 'Unsupported CPU architecture' ;; esac
@@ -24,12 +27,21 @@ printf '%s\n' "$version" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\
 asset="roomkit-code-v$version-$arch-$os"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
+# The signature is checked where minisign is installed. The updater inside
+# the binary always checks it.
+signature=
+if command -v minisign >/dev/null 2>&1; then signature="$asset.sha256.minisig"; fi
 if "$use_gh"; then
-    GH_HOST=github.com gh release download "v$version" --repo "$repo" --pattern "$asset" --pattern "$asset.sha256" --dir "$work"
+    GH_HOST=github.com gh release download "v$version" --repo "$repo" --pattern "$asset" --pattern "$asset.sha256" ${signature:+--pattern "$signature"} --dir "$work"
 else
-    for name in "$asset" "$asset.sha256"; do
+    for name in "$asset" "$asset.sha256" $signature; do
         curl --proto '=https' --proto-redir '=https' -fsSL --connect-timeout 5 --max-time 180 --max-filesize 268435456 "https://github.com/$repo/releases/download/v$version/$name" -o "$work/$name" || fail 'Release download failed. Private repository: use gh auth login first.'
     done
+fi
+if [ -n "$signature" ]; then
+    minisign -V -q -P "$release_key" -m "$work/$asset.sha256" -x "$work/$signature" >/dev/null 2>&1 || fail 'Release signature verification failed; nothing installed'
+else
+    printf 'minisign is not installed: the release signature was not checked, only the checksum published beside the binary. Install minisign to check it.\n' >&2
 fi
 read -r expected filename < "$work/$asset.sha256"
 [ "$filename" = "$asset" ] || fail 'Checksum filename mismatch'

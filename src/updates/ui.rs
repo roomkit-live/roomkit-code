@@ -170,7 +170,7 @@ impl Updates {
                             opening.body = NO_UPDATE.into();
                             Ok(None)
                         } else {
-                            opening.body = format!("Current: v{CURRENT}\nAvailable: {}\nPlatform: {TARGET}\nDownload: {} bytes\nDestination: {}\n\nThe binary will be verified with the release SHA-256 checksum.\nYour conversation will continue; the new version takes effect on next launch.\n\nRelease notes: https://github.com/roomkit-live/roomkit-code/releases/tag/{}", release.tag_name, release.asset(false)?.size, installation.bin.display(), release.tag_name);
+                            opening.body = format!("Current: v{CURRENT}\nAvailable: {}\nPlatform: {TARGET}\nDownload: {} bytes\nDestination: {}\n\nThe binary will be verified with the release's signed SHA-256 checksum.\nYour conversation will continue; the new version takes effect on next launch.\n\nRelease notes: https://github.com/roomkit-live/roomkit-code/releases/tag/{}", release.tag_name, release.asset(false)?.size, installation.bin.display(), release.tag_name);
                             Ok(Some(Action::Install(release)))
                         }
                     }

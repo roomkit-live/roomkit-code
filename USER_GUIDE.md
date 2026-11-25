@@ -2089,8 +2089,10 @@ installer uses `sha256sum` on Linux or `shasum` on macOS, verifies the binary's
 SHA-256 and version, and installs in `~/.local/bin`. Override this with
 `ROOMKIT_CODE_BIN_DIR=/your/bin`. It never invokes sudo or edits shell profiles;
 add the displayed directory to PATH if necessary. An existing unrelated binary
-is not overwritten. Checksums detect corruption; they are published in the same
-GitHub release and are not an independent signature or proof of authorship.
+is not overwritten. Each checksum file is signed with the project's minisign key
+(`src/updates/release-key.pub`). The updater always checks that signature; the
+installer checks it when `minisign` is installed, and otherwise says that it
+only compared the checksum, which detects corruption and proves no authorship.
 
 Start `roomkit-code /path/to/project`. Configure a provider with `/providers`
 and an agent with `/agents`. The welcome screen shows the running version.
