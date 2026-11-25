@@ -16,6 +16,13 @@ use roomkit_tui_engine::{CommandResult, SessionConfig};
 use super::{Outcome, Task, Tasks, render};
 use crate::sessions::{self, Sessions};
 
+use crate::panel_action::Verb;
+
+/// The tasks panel's own verbs: stops the shown task, and `room:<id>`
+/// opens a task's conversation.
+pub(super) const STOP: &str = "stop";
+pub(super) const ROOM: &str = "room:";
+
 /// The command that opens the panel.
 pub(crate) const COMMAND: &str = "tasks";
 
@@ -111,7 +118,7 @@ async fn requested(
     arguments: &str,
 ) -> Result<Option<Open>, String> {
     let room = current.room.as_str();
-    let Some((id, action)) = arguments.split_once(':') else {
+    let Some((id, verb)) = crate::panel_action::addressed(arguments) else {
         let selected = (!arguments.is_empty()).then(|| arguments.to_owned());
         if let Some(id) = &selected
             && tasks.find(room, id).is_none()
@@ -130,7 +137,7 @@ async fn requested(
         .get()
         .filter(|open| open.id == id && shown_in(open, current))
         .ok_or("This task action belongs to an older view")?;
-    act(kit, tasks, current, open, action).await
+    act(kit, tasks, current, open, verb).await
 }
 
 fn cycle_direction(arguments: &str) -> Option<bool> {
@@ -143,8 +150,11 @@ fn cycle_direction(arguments: &str) -> Option<bool> {
 
 /// The task whose room the panel's action `<panel>:room:<id>` opens.
 fn room_action(tasks: &Tasks, current: &SessionConfig, arguments: &str) -> Option<String> {
-    let (id, action) = arguments.split_once(':')?;
-    let task = action.strip_prefix("room:")?;
+    let (id, verb) = crate::panel_action::addressed(arguments)?;
+    let Verb::Own(action) = verb else {
+        return None;
+    };
+    let task = action.strip_prefix(ROOM)?;
     let open = tasks.panel.get().filter(|open| open.id == id)?;
     shown_in(&open, current).then(|| task.to_owned())
 }
@@ -155,13 +165,13 @@ async fn act(
     tasks: &Tasks,
     current: &SessionConfig,
     mut open: Open,
-    action: &str,
+    verb: Verb<'_>,
 ) -> Result<Option<Open>, String> {
     let room = current.room.as_str();
-    match action {
-        "dismiss" => return Ok(None),
-        "list" => open.selected = None,
-        "stop" => {
+    match verb {
+        Verb::Dismiss => return Ok(None),
+        Verb::List => open.selected = None,
+        Verb::Own(STOP) => {
             let task = open
                 .selected
                 .as_deref()
@@ -169,8 +179,8 @@ async fn act(
                 .ok_or("This conversation has no such task")?;
             stop(kit, tasks, current, task).await?;
         }
-        _ => {
-            let id = action.strip_prefix("open:").ok_or("Unknown task action")?;
+        Verb::Own(_) => return Err("Unknown task action".into()),
+        Verb::Open(id) => {
             if tasks.find(room, id).is_none() {
                 return Err("This conversation has no such task".into());
             }

@@ -13,6 +13,8 @@ use roomkit_tui::protocol::{
 use super::panel::{COMMAND, Open};
 use super::{Task, Tasks};
 
+use crate::panel_action::Verb;
+
 /// How many ended tasks the sidebar lists under those that run.
 const ENDED_LISTED: usize = 3;
 
@@ -35,7 +37,7 @@ pub(super) async fn panel(
     organization: Option<String>,
 ) -> PanelSpec {
     let spec = PanelSpec::new(open.id.clone(), COMMAND, "Tasks · this conversation", "")
-        .with_dismiss(format!("{}:dismiss", open.id));
+        .with_dismiss(Verb::Dismiss.to(&open.id));
     let mut spec = match &open.selected {
         None => list(spec, tasks, open),
         Some(id) => detail(spec, kit, tasks, open, id, organization).await,
@@ -56,8 +58,8 @@ fn back_to_conversation(tasks: &Tasks, room: &str) -> Option<Choice> {
     })
 }
 
-fn action(open: &Open, value: &str, label: &str, description: &str) -> Choice {
-    Choice::new(format!("{}:{value}", open.id), label).with_description(description)
+fn action(open: &Open, verb: Verb<'_>, label: &str, description: &str) -> Choice {
+    Choice::new(verb.to(&open.id), label).with_description(description)
 }
 
 /// The conversation's tasks, at most [`LISTED`]: those that run, then the
@@ -78,9 +80,9 @@ fn list(mut spec: PanelSpec, tasks: &Tasks, open: &Open) -> PanelSpec {
         let label = format!("{indent}{agent} · {}", task.summary());
         spec.body
             .push_str(&format!("{label}\n{indent}  {}\n", task.preview()));
-        let value = format!("open:{}", task.id);
+        let verb = Verb::Open(&task.id);
         spec.actions
-            .push(action(open, &value, &label, &task.preview()));
+            .push(action(open, verb, &label, &task.preview()));
     }
     match listed.len() - shown.len() {
         0 => {}
@@ -142,7 +144,7 @@ async fn detail(
     organization: Option<String>,
 ) -> PanelSpec {
     spec.actions
-        .push(action(open, "list", "Back to task list", ""));
+        .push(action(open, Verb::List, "Back to task list", ""));
     let Some(task) = tasks.find(&open.room, id) else {
         spec.body = "This task is no longer listed.".into();
         return spec;
@@ -155,14 +157,19 @@ async fn detail(
     spec.body.push_str(&conversation.await);
     if task.room != open.room {
         let description = "Move to its room, where you can follow it and write to its agent";
-        let value = format!("room:{}", task.id);
+        let value = format!("{}{}", super::panel::ROOM, task.id);
+        let verb = Verb::Own(&value);
         spec.actions
-            .push(action(open, &value, "Open its conversation", description));
+            .push(action(open, verb, "Open its conversation", description));
     }
     if task.running() {
         let description = "Cancel this task; its agent stops working on it";
-        spec.actions
-            .push(action(open, "stop", "Stop task", description));
+        spec.actions.push(action(
+            open,
+            Verb::Own(super::panel::STOP),
+            "Stop task",
+            description,
+        ));
     }
     spec
 }

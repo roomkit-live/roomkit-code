@@ -11,6 +11,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::{Job, Processes};
 
+use crate::panel_action::Verb;
+
 const PAGE: u64 = 4096;
 const GONE: &str = "Process is no longer available to this view";
 
@@ -45,9 +47,9 @@ impl Processes {
         arguments: &str,
     ) -> Result<CommandResult, String> {
         let jobs = self.jobs(kit, viewer, current).await;
-        let mut panel = match arguments.split_once(':') {
+        let mut panel = match crate::panel_action::addressed(arguments) {
             None => open(current, arguments, &jobs)?,
-            Some((id, action)) => match self.act(current, id, action, &jobs).await? {
+            Some((id, verb)) => match self.act(current, id, verb, &jobs).await? {
                 Some(panel) => panel,
                 None => return Ok(CommandResult::Events(Vec::new())),
             },
@@ -69,7 +71,7 @@ impl Processes {
         &self,
         current: &SessionConfig,
         id: &str,
-        action: &str,
+        verb: Verb<'_>,
         jobs: &[Job],
     ) -> Result<Option<Panel>, String> {
         let mut panel = self
@@ -80,19 +82,19 @@ impl Processes {
         if id != panel.id || !panel.belongs_to(current) {
             return Err("This process action belongs to an older view".into());
         }
-        if action == "dismiss" {
-            self.panel.send_replace(None);
-            return Ok(None);
-        }
-        if action == "list" {
-            panel.select(None);
-        } else if let Some(id) = action.strip_prefix("open:") {
-            if !listed(jobs, id) {
-                return Err(GONE.into());
+        match verb {
+            Verb::Dismiss => {
+                self.panel.send_replace(None);
+                return Ok(None);
             }
-            panel.select(Some(id.into()));
-        } else {
-            self.act_on_selected(&mut panel, action, jobs).await?;
+            Verb::List => panel.select(None),
+            Verb::Open(id) => {
+                if !listed(jobs, id) {
+                    return Err(GONE.into());
+                }
+                panel.select(Some(id.into()));
+            }
+            Verb::Own(action) => self.act_on_selected(&mut panel, action, jobs).await?,
         }
         Ok(Some(panel))
     }
@@ -154,13 +156,13 @@ impl Processes {
             "Background processes · current application",
             "",
         )
-        .with_dismiss(format!("{}:dismiss", panel.id));
+        .with_dismiss(Verb::Dismiss.to(&panel.id));
         let Some(id) = &panel.selected else {
             list(&mut spec, panel, jobs);
             return spec;
         };
         spec.actions
-            .push(choice(panel, "list", "Back to process list", ""));
+            .push(choice(panel, Verb::List, "Back to process list", ""));
         let Some(job) = jobs.iter().find(|j| &j.process.status.process_id == id) else {
             spec.body = "Process is no longer retained or accessible.".into();
             return spec;
@@ -228,8 +230,8 @@ fn listed(jobs: &[Job], id: &str) -> bool {
 }
 
 /// The choice that sends `value` back to `panel`.
-fn choice(panel: &Panel, value: &str, label: &str, description: &str) -> Choice {
-    Choice::new(format!("{}:{value}", panel.id), label).with_description(description)
+fn choice(panel: &Panel, verb: Verb<'_>, label: &str, description: &str) -> Choice {
+    Choice::new(verb.to(&panel.id), label).with_description(description)
 }
 
 /// The running processes of `jobs`, each with the choice that opens it.
@@ -262,7 +264,7 @@ fn list(spec: &mut PanelSpec, panel: &Panel, jobs: &[Job]) {
         ));
         spec.actions.push(choice(
             panel,
-            &format!("open:{}", p.status.process_id),
+            Verb::Open(&p.status.process_id),
             &format!("{}  {command}", p.status.process_id),
             &description,
         ));
@@ -302,14 +304,14 @@ fn job_actions(panel: &Panel, job: &Job) -> Vec<Choice> {
         actions.push(if job.process.status.state == ProcessState::Running {
             choice(
                 panel,
-                "stop",
+                Verb::Own("stop"),
                 "Stop process",
                 "Terminate this command and its process group",
             )
         } else {
             choice(
                 panel,
-                "forget",
+                Verb::Own("forget"),
                 "Forget completed process",
                 "Remove its retained process record",
             )
@@ -321,7 +323,7 @@ fn job_actions(panel: &Panel, job: &Job) -> Vec<Choice> {
         ("next", "Next output page"),
         ("tail", "Follow latest output"),
     ] {
-        actions.push(choice(panel, value, label, ""));
+        actions.push(choice(panel, Verb::Own(value), label, ""));
     }
     actions
 }
