@@ -357,6 +357,9 @@ const QUEUE: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 /// restore the terminal before the launch closes without it.
 const VIEW_RETURNS: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// How long the SIGHUP of a terminal the view just failed on is waited for.
+const HANGUP_FOLLOWS: std::time::Duration = std::time::Duration::from_millis(500);
+
 pub(crate) async fn run(settings: Settings) -> Result<std::process::ExitCode> {
     // Listen first: a signal while the application opens still closes what
     // it opened.
@@ -395,11 +398,14 @@ pub(crate) async fn run(settings: Settings) -> Result<std::process::ExitCode> {
         roomkit_tui::run_with_observer(client, renderers, settings.ui, view)
     });
     let returned = until_left(&mut terminal, &adapter.abort_handle(), &signals).await;
+    let left = matches!(&returned, Some(Ok(Ok(_))));
     integrations.freeze();
     let attached = adapter.await;
     let received = signals.received();
-    // A closed terminal, or one the view still holds, takes no report.
-    let printed = returned.is_some() && received != Some(signals::Signal::Hangup);
+    // Only a view that returned as it should left a terminal to write the
+    // report to: writing to one that failed, or that is gone, would panic
+    // before anything is closed.
+    let printed = left && received != Some(signals::Signal::Hangup);
     let summary = summarize(&app, observer.latest(), &resume).await;
     if printed {
         summary.print_conversation();
@@ -449,13 +455,20 @@ async fn until_left(
     host: &tokio::task::AbortHandle,
     signals: &signals::Signals,
 ) -> Option<Returned> {
-    tokio::select! {
-        returned = &mut *terminal => Some(returned),
+    let returned = tokio::select! {
+        returned = &mut *terminal => returned,
         _ = signals.wait() => {
             host.abort();
-            tokio::time::timeout(VIEW_RETURNS, terminal).await.ok()
+            return tokio::time::timeout(VIEW_RETURNS, terminal).await.ok();
         }
+    };
+    // A closed terminal can show first as the view failing to read or draw,
+    // a moment before its SIGHUP is handled: the signal is given that
+    // moment, so that the launch ends as hung up, not as a failed view.
+    if !matches!(&returned, Ok(Ok(_))) {
+        let _ = tokio::time::timeout(HANGUP_FOLLOWS, signals.wait()).await;
     }
+    Some(returned)
 }
 
 /// The processes closing stopped, then a line when internal errors occurred.
