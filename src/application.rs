@@ -16,6 +16,7 @@ mod gate;
 pub(crate) mod headless;
 mod integrations;
 mod signals;
+pub(crate) use signals::hangup_ignored;
 
 use crate::names::TERMINAL;
 
@@ -418,10 +419,19 @@ pub(crate) async fn run(settings: Settings) -> Result<std::process::ExitCode> {
         return Ok(std::process::ExitCode::SUCCESS);
     };
     // The signal cut the view and its host: only the close can still fail.
-    closed?;
     if returned.is_none() {
+        // The view's thread may never end, and the runtime would wait for
+        // it: a close that failed is recorded, then the process exits all
+        // the same, rather than stay for ever.
+        if let Err(error) = &closed {
+            let error = error.to_string();
+            let fields = serde_json::json!({});
+            let diagnostics = &app.profiles.diagnostics;
+            diagnostics.record("application_close_failed", fields, Some(&error));
+        }
         signal.exit();
     }
+    closed?;
     Ok(signal.exit_code())
 }
 

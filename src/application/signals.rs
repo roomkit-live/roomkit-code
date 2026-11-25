@@ -122,3 +122,20 @@ pub(super) fn listen() -> Result<Signals> {
     }
     Ok(Signals { first: received })
 }
+
+/// Whether this process was started with SIGHUP ignored, as `nohup` starts
+/// it: a launch nobody watches then goes on when its terminal closes, and
+/// listening for the signal would undo that, a handler taking the place of
+/// the ignore. Asked before any handler is installed.
+///
+/// The standard library reads no signal's disposition, and the application
+/// forbids unsafe code. A child inherits an ignored signal, and only that:
+/// a shell that sends itself SIGHUP lives to answer when it is ignored.
+pub(crate) fn hangup_ignored() -> bool {
+    let probe = std::process::Command::new("/bin/sh")
+        .args(["-c", "kill -HUP $$; echo ignored"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output();
+    probe.is_ok_and(|output| output.stdout.starts_with(b"ignored"))
+}

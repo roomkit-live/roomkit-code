@@ -650,6 +650,34 @@ mod tests {
 
     const TOOK: Duration = Duration::from_secs(3);
 
+    /// A record whose content does not read is set aside, not replaced by
+    /// the next compaction; one the system refused this time stays where it
+    /// is.
+    #[cfg(unix)]
+    #[test]
+    fn only_a_damaged_record_is_set_aside() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let compactions = Compactions::new(dir.path());
+        let damaged = compactions.path("damaged");
+        std::fs::write(&damaged, "{not a record").unwrap();
+        assert_eq!(compactions.get("damaged", "code"), None);
+        assert!(!damaged.exists());
+        assert!(damaged.with_extension("json.unreadable").exists());
+        assert!(compactions.notices("damaged")[0].contains("could not be read"));
+
+        let refused = compactions.path("refused");
+        std::fs::write(&refused, "{}").unwrap();
+        std::fs::set_permissions(&refused, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::File::open(&refused).is_ok() {
+            // Permissions do not hold for this user, root for one.
+            return;
+        }
+        assert_eq!(compactions.get("refused", "code"), None);
+        assert!(refused.exists(), "a record the system refused stays");
+        assert!(!refused.with_extension("json.unreadable").exists());
+    }
+
     #[tokio::test]
     async fn a_compaction_is_kept_on_disk_privately_and_read_back() {
         let dir = tempfile::tempdir().unwrap();

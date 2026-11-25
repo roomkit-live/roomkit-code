@@ -153,7 +153,14 @@ async fn run(
         },
     )?;
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-    let mut hangup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
+    // A worker started under `nohup` keeps serving when its terminal closes.
+    let mut hangup = if crate::application::hangup_ignored() {
+        None
+    } else {
+        Some(tokio::signal::unix::signal(
+            tokio::signal::unix::SignalKind::hangup(),
+        )?)
+    };
     backend.serve(executor.clone()).await?;
     let mut presence = match args {
         Some(args) => {
@@ -174,7 +181,7 @@ async fn run(
         result = tokio::signal::ctrl_c() => result,
         _ = terminate.recv() => Ok(()),
         // A worker started from a terminal that closes retires as well.
-        _ = hangup.recv() => Ok(()),
+        _ = hung_up(&mut hangup) => Ok(()),
         error = pool::worker_failure(&mut presence) => Err(std::io::Error::other(error)),
     };
     if let Some(p) = presence {
@@ -182,6 +189,16 @@ async fn run(
     }
     executor.close().await;
     Ok(stopped?)
+}
+
+/// Waits for SIGHUP on `signals`; for ever when it is not listened for.
+async fn hung_up(signals: &mut Option<tokio::signal::unix::Signal>) {
+    match signals {
+        Some(signals) => {
+            signals.recv().await;
+        }
+        None => std::future::pending().await,
+    }
 }
 
 pub(crate) fn permits(tool: &str, pooled: bool) -> bool {

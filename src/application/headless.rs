@@ -272,7 +272,8 @@ fn apply(client: &Client, steps: Vec<Step>) -> Result<()> {
     Ok(())
 }
 
-/// The signals the launch received. The first SIGINT, SIGTERM or SIGHUP raises
+/// The signals the launch received. The first SIGINT, SIGTERM or SIGHUP,
+/// unless the launch was started with SIGHUP ignored, raises
 /// `pending`, which the launch reads between events to cut its turn. The
 /// second, which a hurried Ctrl+C often is, only says that the launch is
 /// closing: leaving then would skip the close and what it stops. The third
@@ -291,12 +292,10 @@ fn listen() -> Result<Signals> {
     use tokio::signal::unix::{SignalKind, signal};
     let pending = Arc::new(AtomicBool::new(false));
     let received = Arc::new(AtomicU32::new(0));
-    let kinds = [
-        SignalKind::interrupt(),
-        SignalKind::terminate(),
-        SignalKind::hangup(),
-    ];
-    for kind in kinds {
+    // Under `nohup` the launch goes on when its terminal closes.
+    let hangup = (!super::hangup_ignored()).then(SignalKind::hangup);
+    let kinds = [SignalKind::interrupt(), SignalKind::terminate()];
+    for kind in kinds.into_iter().chain(hangup) {
         let mut signals = signal(kind)?;
         let (pending, received) = (pending.clone(), received.clone());
         tokio::spawn(async move {

@@ -148,6 +148,17 @@ fn row(record: &str, age: u64, used: u16) -> Option<Row> {
     })
 }
 
+/// The rows of the `records` that read, and how many did not.
+fn listed(records: Vec<(String, u64, u16)>) -> (Vec<Row>, usize) {
+    let recorded = records.len();
+    let rows: Vec<Row> = records
+        .into_iter()
+        .filter_map(|(record, age, used)| row(&record, age, used))
+        .collect();
+    let unread = recorded - rows.len();
+    (rows, unread)
+}
+
 #[derive(Clone)]
 pub(super) struct Registry {
     client: redis::Client,
@@ -242,13 +253,7 @@ impl Registry {
                     .arg(&self.prefix),
             )
             .await?;
-        let recorded = rows.len();
-        let rows: Vec<Row> = rows
-            .into_iter()
-            .filter_map(|(record, age, used)| row(&record, age, used))
-            .collect();
-        let unread = recorded - rows.len();
-        Ok((rows, unread))
+        Ok(listed(rows))
     }
     pub async fn claim(&self, w: &Worker, turn: &str, ram: u64) -> Result<bool> {
         self.query(
@@ -297,6 +302,9 @@ mod tests {
             "arch": "aarch64", "labels": {}, "slots": 2,
             "metrics": serde_json::to_value(Metrics::default()).unwrap_or_default(),
         });
+        // The listing counts what it left out, for the inventory to say.
+        let (rows, unread) = listed(vec![("not json".into(), 1, 0), (record.to_string(), 4, 1)]);
+        assert_eq!((rows.len(), unread), (1, 1));
         let listed = row(&record.to_string(), 4, 1);
         assert_eq!(
             listed.map(|row| (row.worker.name, row.age, row.used)),

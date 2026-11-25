@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Closing the terminal or sending SIGTERM or SIGHUP to an interactive launch now closes it as leaving does, a signal received while it opens included: the agent's processes are stopped, and SIGTERM prints the exit report. A third signal exits at once. `--prompt` launches and workers close on SIGHUP too, and in `--prompt` the second signal no longer skips the close.
+- Closing the terminal or sending SIGTERM or SIGHUP to an interactive launch now closes it as leaving does, a signal received while it opens included: the agent's processes are stopped, and SIGTERM prints the exit report. A third signal exits at once. `--prompt` launches and workers close on SIGHUP too, unless they were started with it ignored, as under `nohup`; in `--prompt` the second signal no longer skips the close.
 
 - Command hooks start with the shell tool's filtered environment, not the whole one: an API key exported in your shell stays out of them unless `--inherit-env` names it. A hook's review now covers the project scripts found in its command, which the review panel lists: once one changes, the hook fails until it is reviewed again in `/hooks`. An enabled hook that launches such a script needs one review after this update; the others stay enabled. The review panel shows a command's control characters instead of leaving them out.
 

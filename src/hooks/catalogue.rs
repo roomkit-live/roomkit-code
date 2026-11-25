@@ -97,49 +97,66 @@ fn scripts(command: &str, workspace: &Path) -> Vec<Script> {
     };
     let project = workspace.to_string_lossy();
     let mut directory = workspace.to_owned();
+    // The directory each open subshell was entered from: a `cd` inside
+    // `( … )` ends with it.
+    let mut entered: Vec<PathBuf> = Vec::new();
     let mut found: Vec<Script> = Vec::new();
-    for simple in command.split([';', '|', '&', '(', ')', '\n']) {
-        let words: Vec<&str> = simple.split_whitespace().collect();
-        let words = program(&words);
-        let Some(first) = words.first() else {
-            continue;
+    let mut rest = command;
+    while !rest.is_empty() && found.len() < SCRIPTS {
+        let end = rest.find([';', '|', '&', '(', ')', '\n']);
+        let (simple, separator) = match end {
+            Some(end) => (&rest[..end], rest[end..].chars().next()),
+            None => (rest, None),
         };
-        let inside = |word: &str, from: &Path| {
-            let path = from.join(unquoted(word, &project)).canonicalize().ok()?;
-            path.starts_with(&root).then_some(path)
-        };
-        if *first == "cd" {
-            if let Some(moved) = words.get(1).and_then(|to| inside(to, &directory)) {
-                directory = moved;
-            }
-            continue;
-        }
-        let name = first.rsplit('/').next().unwrap_or(first);
-        let script = if INTERPRETERS.contains(&name) {
-            let given = words[1..].iter().find(|word| !word.starts_with('-'));
-            given.and_then(|word| inside(word, &directory))
-        } else {
-            inside(first, &directory)
-        };
-        let Some(path) = script else {
-            continue;
-        };
-        if found.iter().any(|known| known.path == path) {
-            continue;
-        }
-        if let Some(digest) = digest(&path) {
+        rest = end.map_or("", |end| &rest[end + 1..]);
+        let launched = launched(simple, &mut directory, (&root, &project));
+        if let Some(path) = launched.filter(|path| found.iter().all(|known| known.path != *path))
+            && let Some(digest) = digest(&path)
+        {
             let shown = path.strip_prefix(&root).unwrap_or(&path);
             found.push(Script {
                 shown: shown.to_string_lossy().into_owned(),
                 path,
                 digest,
             });
-            if found.len() == SCRIPTS {
-                break;
-            }
+        }
+        match separator {
+            Some('(') => entered.push(directory.clone()),
+            Some(')') => directory = entered.pop().unwrap_or_else(|| workspace.to_owned()),
+            _ => {}
         }
     }
     found
+}
+
+/// The project script the simple command `simple` launches from
+/// `directory`, if any; a `cd` moves `directory` instead. `root` is the
+/// project's resolved directory and `project` the one its variable reads.
+fn launched(
+    simple: &str,
+    directory: &mut PathBuf,
+    (root, project): (&Path, &str),
+) -> Option<PathBuf> {
+    let words: Vec<&str> = simple.split_whitespace().collect();
+    let words = program(&words);
+    let first = words.first()?;
+    let inside = |word: &str, from: &Path| {
+        let path = from.join(unquoted(word, project)).canonicalize().ok()?;
+        path.starts_with(root).then_some(path)
+    };
+    if *first == "cd" {
+        if let Some(moved) = words.get(1).and_then(|to| inside(to, directory)) {
+            *directory = moved;
+        }
+        return None;
+    }
+    let name = first.rsplit('/').next().unwrap_or(first);
+    if INTERPRETERS.contains(&name) {
+        let given = words[1..].iter().find(|word| !word.starts_with('-'));
+        given.and_then(|word| inside(word, directory))
+    } else {
+        inside(first, directory)
+    }
 }
 
 /// The digest of the regular file at `path`, within [`SCRIPT_BYTES`].
@@ -382,7 +399,8 @@ mod tests {
                 {"type":"command", "command":"cat check.sh >> seen.log; /bin/echo unrelated"},
                 {"type":"command", "command":"timeout 5 ./check.sh"},
                 {"type":"command", "command":"exec env MODE=x \"$ROOMKIT_PROJECT_DIR\"/check.sh"},
-                {"type":"command", "command":"cd tools && ./run.sh"}
+                {"type":"command", "command":"cd tools && ./run.sh", "timeout": 5},
+                {"type":"command", "command":"(cd tools && ./run.sh); ./check.sh", "timeout": 5}
             ]}]}})
             .to_string(),
         )?;
@@ -397,7 +415,9 @@ mod tests {
                 vec![],
                 vec!["check.sh"],
                 vec!["check.sh"],
-                vec!["tools/run.sh"]
+                vec!["tools/run.sh"],
+                // A `cd` in a subshell ends with it.
+                vec!["tools/run.sh", "check.sh"]
             ]
         );
         // A hook that launches no project script keeps the identifier it had
