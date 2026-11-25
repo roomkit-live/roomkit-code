@@ -1,6 +1,9 @@
 //! Application discovery roots and per-agent selection; parsing and activation
 //! belong to roomkit-ai. No skill is made available without a host selection.
+mod action;
+
 use super::*;
+use action::Action;
 use roomkit_ai::{CopyOptions, SkillMetadata, SkillRegistry};
 use roomkit_tui::protocol::{Choice, Event, PanelSpec};
 use roomkit_tui_engine::CommandResult;
@@ -207,13 +210,13 @@ impl Catalogue {
             }
             if enabled {
                 actions.push(ui::choice(
-                    format!("use:{name}"),
+                    Action::Use { name, task: None }.to_string(),
                     "Use in this conversation",
                     "Ask this agent to load the skill",
                 ));
             } else {
                 actions.push(ui::choice(
-                    format!("enable:{name}"),
+                    Action::Enable(name).to_string(),
                     "Enable for this agent",
                     "Allow the model to select these instructions when relevant",
                 ));
@@ -221,12 +224,12 @@ impl Catalogue {
         }
         if enabled {
             actions.push(ui::choice(
-                format!("disable:{name}"),
+                Action::Disable(name).to_string(),
                 "Disable for this agent",
                 "Remove from future model requests; earlier conversation text remains",
             ));
         }
-        actions.push(ui::choice("list", "Back to skills", ""));
+        actions.push(ui::choice(Action::List.to_string(), "Back to skills", ""));
         Ok(CommandResult::Events(vec![Event::Panel {
             conversation: current.room.as_str().into(),
             panel: PanelSpec::new(
@@ -236,7 +239,7 @@ impl Catalogue {
                 body,
             )
             .with_actions(actions)
-            .with_dismiss("close"),
+            .with_dismiss(Action::Close.to_string()),
         }]))
     }
 }
@@ -246,12 +249,12 @@ impl Catalogue {
 fn list(catalogue: &Catalogue, current: &SessionConfig, agent: &model::Agent) -> CommandResult {
     let mut choices = vec![
         ui::choice(
-            "locations",
+            Action::Locations.to_string(),
             "Skill directories and diagnostics",
             "Where to install skills; precedence and loading errors",
         ),
         ui::choice(
-            "reload",
+            Action::Reload.to_string(),
             "Reload skills",
             "Reread files and refresh the current agent",
         ),
@@ -265,7 +268,7 @@ fn list(catalogue: &Catalogue, current: &SessionConfig, agent: &model::Agent) ->
             "disabled"
         };
         choices.push(
-            Choice::new(format!("open:{name}"), format!("{name} · {status}"))
+            Choice::new(Action::Open(name).to_string(), format!("{name} · {status}"))
                 .with_description(format!("{} · {}", entry.source, entry.description)),
         );
     }
@@ -275,7 +278,7 @@ fn list(catalogue: &Catalogue, current: &SessionConfig, agent: &model::Agent) ->
         .filter(|name| !catalogue.entries.contains_key(*name));
     for name in missing {
         choices.push(ui::choice(
-            format!("disable:{name}"),
+            Action::Disable(name).to_string(),
             format!("{name} · missing (remove)"),
             "No longer found in the skill directories",
         ));
@@ -306,8 +309,12 @@ fn locations(catalogue: &Catalogue, current: &SessionConfig) -> CommandResult {
             "Skill discovery",
             body,
         )
-        .with_actions(vec![ui::choice("list", "Back to skills", "")])
-        .with_dismiss("close"),
+        .with_actions(vec![ui::choice(
+            Action::List.to_string(),
+            "Back to skills",
+            "",
+        )])
+        .with_dismiss(Action::Close.to_string()),
     }])
 }
 
@@ -318,8 +325,14 @@ impl Profiles {
         current: SessionConfig,
         arguments: &str,
     ) -> Result<CommandResult, String> {
+        let action = Action::parse(arguments)?;
         let mut state = self.state.lock().await;
-        let _lease = store::edit_lease(&self.state_dir)?;
+        // Only what writes the profile files or replaces the skills read
+        // holds the cross-process edit lease.
+        let _lease = action
+            .mutates()
+            .then(|| store::edit_lease(&self.state_dir))
+            .transpose()?;
         // Preserve revisions of already issued forms; a skill edit invalidates them.
         state.pending = None;
         state.pending_delete = None;
@@ -332,38 +345,28 @@ impl Profiles {
             .agent(current.agent.as_str())
             .ok_or("Configure an agent with /agents first")?
             .clone();
-        let arguments = arguments.trim();
-        if arguments == "close" {
-            return Ok(CommandResult::Events(Vec::new()));
-        }
-        if arguments == "reload" {
-            return self.reload_skills(kit, &mut state, current, &agent).await;
-        }
-        let (action, name) = arguments
-            .split_once([':', ' '])
-            .unwrap_or(("open", arguments));
-        match action {
-            "enable" | "disable" => {
-                self.set_skill(kit, &mut state, &mut agent, name, action == "enable")
+        let name = match action {
+            Action::Close => return Ok(CommandResult::Events(Vec::new())),
+            Action::Reload => return self.reload_skills(kit, &mut state, current, &agent).await,
+            Action::Use { name, task } => return self.use_skill(&agent, name, task).await,
+            Action::List => {
+                let catalogue = self.skill_catalogue.read().await;
+                return Ok(list(&catalogue, &current, &agent));
+            }
+            Action::Locations => {
+                let catalogue = self.skill_catalogue.read().await;
+                return Ok(locations(&catalogue, &current));
+            }
+            Action::Enable(name) | Action::Disable(name) => {
+                let enable = matches!(action, Action::Enable(_));
+                self.set_skill(kit, &mut state, &mut agent, name, enable)
                     .await?;
+                name
             }
-            "use" => return self.use_skill(&agent, name).await,
-            "open" => {}
-            _ => {
-                return Err(
-                    "Use /skills [list|reload|enable <name>|disable <name>|use <name> <task>]"
-                        .into(),
-                );
-            }
-        }
+            Action::Open(name) => name,
+        };
         let catalogue = self.skill_catalogue.read().await;
-        if arguments.is_empty() || arguments == "list" {
-            return Ok(list(&catalogue, &current, &agent));
-        }
-        if arguments == "locations" {
-            return Ok(locations(&catalogue, &current));
-        }
-        if !catalogue.entries.contains_key(name) && action == "disable" {
+        if !catalogue.entries.contains_key(name) && matches!(action, Action::Disable(_)) {
             return Ok(CommandResult::Events(vec![Event::Notice {
                 conversation: current.room.as_str().into(),
                 text: format!("Removed missing skill {name} from this agent"),
@@ -442,11 +445,13 @@ impl Profiles {
 
     /// `/skills use <name> <task>`: the message that has `agent` load the
     /// skill, which it must have enabled, then do `task`.
-    async fn use_skill(&self, agent: &model::Agent, asked: &str) -> Result<CommandResult, String> {
-        let (name, task) = asked.split_once(' ').unwrap_or((
-            asked,
-            "Load the skill and explain briefly how you can help with it.",
-        ));
+    async fn use_skill(
+        &self,
+        agent: &model::Agent,
+        name: &str,
+        task: Option<&str>,
+    ) -> Result<CommandResult, String> {
+        let task = task.unwrap_or("Load the skill and explain briefly how you can help with it.");
         let catalogue = self.skill_catalogue.read().await;
         let found = catalogue.selected(&[name.into()]);
         if !agent.skills.iter().any(|n| n == name)
