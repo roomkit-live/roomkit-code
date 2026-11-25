@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The executor pool's and the session group's fingerprints are computed without the Redis URL's user and password. A fingerprint is shown in executor addresses and kept in rooms, where a digest of the whole URL let its password be guessed. Delegated executor sessions and session addresses recorded before this change are not continued under a URL that holds credentials: start them anew.
+
 - Closing the terminal or sending SIGTERM or SIGHUP to an interactive launch now closes it as leaving does, a signal received while it opens included: the agent's processes are stopped, and SIGTERM prints the exit report. A third signal exits at once. `--prompt` launches and workers close on SIGHUP too, unless they were started with it ignored, as under `nohup`; in `--prompt` the second signal no longer skips the close.
 
 - Command hooks start with the shell tool's filtered environment, not the whole one: an API key exported in your shell stays out of them unless `--inherit-env` names it. A hook's review now covers the project scripts found in its command, which the review panel lists: once one changes, the hook fails until it is reviewed again in `/hooks`. An enabled hook that launches such a script needs one review after this update; the others stay enabled. The review panel shows a command's control characters instead of leaving them out.
