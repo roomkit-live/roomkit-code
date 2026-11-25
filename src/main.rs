@@ -23,6 +23,7 @@ mod instructions;
 mod logo;
 mod messages;
 mod names;
+mod panel_action;
 mod permissions;
 mod plans;
 mod processes;
