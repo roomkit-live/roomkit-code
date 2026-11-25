@@ -140,7 +140,9 @@ impl Messages {
             return Ok(());
         };
         let address = crate::remote::address(settings.executor_url.as_deref())?;
-        let error = match network::Network::open(group, &address, kit, room, leases).await? {
+        let key = network::seal::Key::from_environment(group)?;
+        let opened = network::Network::open(group, &address, kit, room, leases, key).await?;
+        let error = match opened {
             network::Joined::Group(net) => {
                 return self
                     .network

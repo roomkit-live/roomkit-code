@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Session groups (beta) can authenticate their members: with the same secret of at least 32 characters in `ROOMKIT_SESSION_GROUP_KEY` on every member, each message between sessions is sealed, and a message the key did not seal is refused. Without the variable a group works as before, open to anyone who can write to its Redis.
+
 - The executor pool's and the session group's fingerprints are computed without the Redis URL's user and password. A fingerprint is shown in executor addresses and kept in rooms, where a digest of the whole URL let its password be guessed. Delegated executor sessions and session addresses recorded before this change are not continued under a URL that holds credentials: start them anew.
 
 - Closing the terminal or sending SIGTERM or SIGHUP to an interactive launch now closes it as leaving does, a signal received while it opens included: the agent's processes are stopped, and SIGTERM prints the exit report. A third signal exits at once. `--prompt` launches and workers close on SIGHUP too, unless they were started with it ignored, as under `nohup`; in `--prompt` the second signal no longer skips the close.

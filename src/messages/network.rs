@@ -3,6 +3,7 @@
 mod channel;
 mod recovery;
 mod response;
+pub(in crate::messages) mod seal;
 use super::{
     record::{Mail, Route},
     request::AgentRequest,
@@ -54,6 +55,8 @@ pub(super) struct Network {
     pub channel: ChannelId,
     scope: String,
     pub wake: Arc<tokio::sync::Notify>,
+    /// The group's key, which seals what this session sends.
+    key: Option<seal::Key>,
     responses: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -64,6 +67,7 @@ impl Network {
         kit: &Kit,
         room: &RoomId,
         leases: Arc<SessionLeases>,
+        key: Option<seal::Key>,
     ) -> Result<Joined> {
         let backend = RedisTurnBackend::new(
             Some(address),
@@ -80,6 +84,7 @@ impl Network {
             channel.clone(),
             leases,
             wake.clone(),
+            key.clone(),
         );
         let executor = TurnExecutor::new(
             move |id| std::future::ready(Ok((id == inbox.channel).then(|| inbox.clone()))),
@@ -98,6 +103,7 @@ impl Network {
                 crate::remote::without_credentials(address)?,
             ))?),
             wake,
+            key,
             responses: Default::default(),
         };
         // What is kept in the project's own store failing is the launch's
@@ -236,8 +242,15 @@ impl Network {
             from: from.clone(),
             to: to.clone(),
         });
-        call.arguments = [("id".into(), json!(id)), ("mail".into(), json!(wire))]
+        let wire = json!(wire);
+        let seal = self
+            .key
+            .as_ref()
+            .map(|key| key.seal(id, &wire))
+            .transpose()?;
+        call.arguments = [("id".into(), json!(id)), ("mail".into(), wire)]
             .into_iter()
+            .chain(seal.map(|seal| ("seal".into(), json!(seal))))
             .collect();
         let response = self
             .backend
