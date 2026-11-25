@@ -25,12 +25,16 @@ pub(super) fn provider_menu(
     let entries = if let Authentication::ChatGpt { account } = &provider.authentication {
         vec![
             choice(
-                format!("chatgpt:account:{account}"),
+                Action::ChatGpt(&format!("account:{account}")).to_string(),
                 "Manage ChatGPT account",
                 "Choose models, sign in or sign out",
             ),
             choice(
-                format!("delete:{id}"),
+                Action::Delete {
+                    command: "providers",
+                    id,
+                }
+                .to_string(),
                 "Delete provider",
                 "Remove this connection; account sign-out is separate",
             ),
@@ -38,7 +42,7 @@ pub(super) fn provider_menu(
     } else {
         vec![
             choice(
-                format!("edit:{id}"),
+                Action::EditProvider(id).to_string(),
                 "Edit connection",
                 if provider.subscription().is_some() {
                     "Name, API key and timeout"
@@ -47,12 +51,16 @@ pub(super) fn provider_menu(
                 },
             ),
             choice(
-                format!("test:{id}"),
+                Action::TestProvider(id).to_string(),
                 "Test connection and list models",
                 "Read-only GET /models; no conversation is sent",
             ),
             choice(
-                format!("delete:{id}"),
+                Action::Delete {
+                    command: "providers",
+                    id,
+                }
+                .to_string(),
                 "Delete provider",
                 "Remove this shared connection if no agents use it",
             ),
@@ -65,22 +73,26 @@ pub(super) fn provider_menu(
 pub(super) fn agent_menu(current: &SessionConfig, id: &str, agent: &Agent) -> CommandResult {
     let entries = vec![
         choice(
-            format!("select:{id}"),
+            Action::SelectAgent(id).to_string(),
             "Select agent",
             format!("{} · {}", agent.provider, agent.model),
         ),
         choice(
-            format!("models:{id}"),
+            Action::AgentModels(id).to_string(),
             "Change model",
             "Choose among the models its connection serves",
         ),
         choice(
-            format!("edit:{id}"),
+            Action::EditAgent(id).to_string(),
             "Edit agent",
             "Provider, model, effort, instructions and tools",
         ),
         choice(
-            format!("delete:{id}"),
+            Action::Delete {
+                command: "agents",
+                id,
+            }
+            .to_string(),
             "Delete agent",
             "Remove this profile; keep conversation history",
         ),
@@ -93,7 +105,7 @@ pub(in crate::profiles) fn provider_choices(
     current: &SessionConfig,
 ) -> CommandResult {
     let mut entries = vec![choice(
-        "add",
+        Action::AddProvider.to_string(),
         "+ Add provider",
         "OpenAI-compatible or Anthropic connection",
     )];
@@ -103,7 +115,7 @@ pub(in crate::profiles) fn provider_choices(
     }));
     entries.extend(state.providers.value.profiles.values().map(|p| {
         choice(
-            format!("open:{}", p.id),
+            Action::OpenProvider(&p.id).to_string(),
             &p.label,
             format!("{} · {}", p.id, p.base_url),
         )
@@ -123,7 +135,7 @@ pub(super) fn agent_choices(state: &State, current: &SessionConfig) -> CommandRe
     )];
     for (agent, scope) in state.agents() {
         entries.push(choice(
-            format!("open:{}", agent.id),
+            Action::OpenAgent(&agent.id).to_string(),
             format!(
                 "{}{}",
                 if current.agent.as_str() == agent.id {
