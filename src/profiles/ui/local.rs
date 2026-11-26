@@ -72,7 +72,7 @@ impl Destination {
             entries.push(choice(
                 self.arg("use", &file.id()),
                 &file.name,
-                format!("{} · installed", file.repo),
+                format!("{} · {} · installed", file.repo, &file.revision[..12]),
             ));
         }
         if let Self::New(id) = self {

@@ -126,7 +126,12 @@ async fn gguf_search_download_retry_select_and_offline_resume() {
                     let app = Application::open(&config, String::new()).await.unwrap();
                     assert_eq!(app.view.model.as_ref().unwrap().model, id);
                     let offline = model(&app, "").await;
-                    assert!(offered(&offline).1.iter().any(|c| c.value == *selected));
+                    assert!(
+                        offered(&offline)
+                            .1
+                            .iter()
+                            .any(|c| c.value == *selected && c.description.contains(&REV[..12]))
+                    );
                     assert!(matches!(
                         model(&app, selected).await,
                         CommandResult::Switch(_)
