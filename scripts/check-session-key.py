@@ -84,6 +84,9 @@ def case(binary, broker, label, sender_key, receiver_key, told, refusal):
 
         receiver, receiver_state = open_session("review", model.server_port, receiver_key)
         sender, _ = open_session("api", idle.server_port, sender_key)
+        # Each says as it opens whether its group is sealed.
+        for terminal, key in ((receiver, receiver_key), (sender, sender_key)):
+            terminal.wait("messages are sealed with" if key else "is open: whoever can write", 0)
         sender.send(f"@review {model.tag}", told)
         delivered = model.received.wait(15 if refusal is None else 1)
         assert delivered == (refusal is None), f"{label}: delivered={delivered}"

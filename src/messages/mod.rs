@@ -142,13 +142,24 @@ impl Messages {
         let address = crate::remote::address(settings.executor_url.as_deref())?;
         let key = network::seal::Key::from_environment(group)?;
         let guard = network::seal::Guard::new(key, diagnostics.clone());
+        let sealed = guard.sealed();
         let opened = network::Network::open(group, &address, kit, room, leases, guard).await?;
         let error = match opened {
             network::Joined::Group(net) => {
-                return self
-                    .network
+                self.network
                     .set(net)
-                    .map_err(|_| "Session network already open".into());
+                    .map_err(|_| "Session network already open")?;
+                let variable = network::seal::VARIABLE;
+                let text = if sealed {
+                    format!("Session group {group}: messages are sealed with {variable}.")
+                } else {
+                    format!(
+                        "Session group {group} is open: whoever can write to its Redis can message this session. Set {variable} on every member to seal it."
+                    )
+                };
+                return self
+                    .tell(kit, room, "session_group_joined", group, text)
+                    .await;
             }
             network::Joined::Unreachable(error) => error,
         };
@@ -159,20 +170,35 @@ impl Messages {
         );
         self.network_unavailable
             .store(true, std::sync::atomic::Ordering::Release);
-        // Said in the conversation as it opens, not only when a session
-        // tool is first used.
         let text = format!(
             "Session group {group} could not be reached: this conversation runs without it. Relaunch once its Redis is reachable."
         );
+        self.tell(kit, room, "session_group_unavailable", group, text)
+            .await
+    }
+
+    /// Says `text` about session group `group` in `room`'s conversation as
+    /// it opens, not only when a session tool is first used; `about` names
+    /// what it says. A row the store refuses is not shown, and does not
+    /// stop the launch.
+    async fn tell(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        room: &RoomId,
+        about: &'static str,
+        group: &str,
+        text: String,
+    ) -> crate::Result<()> {
         let id = format!(
-            "session-group-unavailable-{}",
+            "{}-{}",
+            about.replace('_', "-"),
             uuid::Uuid::new_v4().simple()
         );
         let row = crate::system_row::SystemRow {
             room: room.as_str(),
             id: &id,
             text: &text,
-            about: ("session_group_unavailable", serde_json::json!(group)),
+            about: (about, serde_json::json!(group)),
         };
         let terminal = roomkit::model::ChannelId::new(crate::names::TERMINAL)?;
         if let Ok(stored) = row.store(kit, &terminal).await {

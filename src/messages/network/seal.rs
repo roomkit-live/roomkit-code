@@ -257,7 +257,7 @@ impl Guard {
     }
 
     /// Whether this session seals what it sends.
-    pub(super) fn sealed(&self) -> bool {
+    pub(in crate::messages) fn sealed(&self) -> bool {
         self.key.is_some()
     }
 }

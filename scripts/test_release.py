@@ -165,9 +165,9 @@ sys.exit(0 if pathlib.Path(value("-x")).read_text().startswith("SECRET") else 1)
         installer = (Path(__file__).resolve().parent.parent / "install.sh").read_text()
         self.assertIn(f"release_key='{self.key.read_text().strip()}'", installer)
 
-    def test_the_manual_check_in_security_md_names_the_repository_key(self):
-        security = (Path(__file__).resolve().parent.parent / "SECURITY.md").read_text()
-        self.assertIn(f"-P {self.key.read_text().strip()}\n", security)
+    def test_the_guide_s_manual_check_names_the_repository_key(self):
+        guide = (Path(__file__).resolve().parent.parent / "USER_GUIDE.md").read_text()
+        self.assertIn(f"-P {self.key.read_text().strip()}\n", guide)
 
 
 class DependencyAccessTests(unittest.TestCase):

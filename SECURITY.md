@@ -37,20 +37,5 @@ binaries currently use ad-hoc code signing, without
 Apple Developer ID signing or notarization. Download only from this repository's
 GitHub releases.
 
-`install.sh` itself comes from the release it installs and is not signed: who
-could replace a binary could replace it too. To trust only the key, download
-the binary, its `.sha256` file and its `.sha256.minisig` file from the release,
-then check them before running anything:
-
-```sh
-minisign -Vm roomkit-code-vX.Y.Z-TARGET.sha256 -P RWSxO7fsDP+u4csK1pHZ2lwcpWCmOmBhgT0Wu5OlCxx6aEwsEe1FDtlK
-sha256sum -c roomkit-code-vX.Y.Z-TARGET.sha256
-```
-
-A signature proves where a release comes from, not that it is the latest: a
-signature does not expire and a withdrawn release cannot be revoked. The
-updater refuses a release older than the installed one, but an older signed
-release that is still newer, served as the latest, would be offered.
-
 Updates are activated only after explicit confirmation. A binary rollback does
 not undo application-data migrations; follow the release notes before updating.
