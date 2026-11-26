@@ -130,6 +130,10 @@ impl Diagnostics {
         if let Some(error) = error {
             let diagnostic = Diagnostic::classify(error);
             fields["code"] = json!(diagnostic.code);
+            if let Some((needed, capacity)) = diagnostic.context_tokens {
+                fields["request_tokens"] = json!(needed);
+                fields["context_capacity"] = json!(capacity);
+            }
             fields["summary"] = json!(diagnostic.summary);
             if let Some(status) = diagnostic.http_status {
                 fields["http_status"] = json!(status);

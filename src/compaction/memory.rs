@@ -141,12 +141,17 @@ impl<P: AiProvider> TieredMemory<P> {
         measured: &Measured,
         (newest, forced): (u64, bool),
     ) -> Option<Compacted> {
+        let local_capacity = (self.provider.name()
+            == crate::providers::ProviderKind::LlamaCpp.name())
+        .then_some(self.ceiling);
         let cut = self.cut((events, agent), measured, (newest, forced));
         if cut == 0 {
             if forced {
-                self.compactions.notice(
-                    room,
+                self.compactions.capacity_notice(
+                    (room, agent),
                     "Nothing to compact yet: the conversation is too short",
+                    measured.now(compacted),
+                    local_capacity,
                 );
             }
             return None;
@@ -169,7 +174,8 @@ impl<P: AiProvider> TieredMemory<P> {
                 if forced {
                     self.compactions.force(room, agent);
                 }
-                self.compactions.failed((room, agent), &failure);
+                self.compactions
+                    .failed((room, agent), &failure, local_capacity);
                 return None;
             }
         };
@@ -197,7 +203,12 @@ impl<P: AiProvider> TieredMemory<P> {
         made.estimate = Some(left.await);
         let told = (sizes, began.elapsed(), cut_short);
         self.compactions
-            .record((room, agent), (made.clone(), summarized), told)
+            .record(
+                (room, agent),
+                (made.clone(), summarized),
+                told,
+                local_capacity,
+            )
             .await;
         Some(made)
     }

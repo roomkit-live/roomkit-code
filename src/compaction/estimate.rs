@@ -180,12 +180,12 @@ mod tests {
         let told = ((1, 1), Duration::ZERO, false);
         let first = compacted(40_000);
         compactions
-            .record(("room", "code"), (first.clone(), 2), told)
+            .record(("room", "code"), (first.clone(), 2), told, None)
             .await;
         // A second compaction, recorded before the first one's is forgotten.
         let second = compacted(30_000);
         compactions
-            .record(("room", "code"), (second.clone(), 2), told)
+            .record(("room", "code"), (second.clone(), 2), told, None)
             .await;
         compactions.forget("room", "code", first.estimate.as_ref().unwrap());
         assert_eq!(compactions.get("room", "code"), Some(second.clone()));
@@ -211,7 +211,7 @@ mod tests {
             ..compacted(1_000 + k)
         };
         compactions
-            .record(("room", "code"), (made(0), 2), told)
+            .record(("room", "code"), (made(0), 2), told, None)
             .await;
         let until = |done: &dyn Fn() -> bool| {
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -227,7 +227,9 @@ mod tests {
         until(&|| compactions.get("room", "code").unwrap().estimate.is_none());
         let recording = compactions.clone();
         let record = tokio::spawn(async move {
-            recording.record(("room", "code"), (made(1), 2), told).await;
+            recording
+                .record(("room", "code"), (made(1), 2), told, None)
+                .await;
         });
         until(&|| compactions.get("room", "code").unwrap().summary == "Summary 1");
         drop(saving);

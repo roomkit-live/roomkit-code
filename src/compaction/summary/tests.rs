@@ -240,3 +240,15 @@ fn the_summary_s_message_carries_what_the_application_recorded() {
         "{carried}"
     );
 }
+
+#[test]
+fn a_refused_local_summary_tells_how_to_change_its_context() {
+    let failure = super::Failure::Provider(
+        "llamacpp (400): request (7200 tokens) exceeds the available context size (6000 tokens)"
+            .into(),
+    );
+    assert_eq!(
+        failure.recovery(Some(6000), std::time::Duration::from_secs(60)),
+        "The summary request needs 7200 tokens. The server context limit is 6000 tokens. In /agents, select this model and raise Context capacity, then run /compact again."
+    );
+}

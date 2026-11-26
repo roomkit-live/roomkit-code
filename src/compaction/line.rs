@@ -34,12 +34,22 @@ pub(super) struct Told<'a> {
     pub summarized: usize,
     /// The estimated request before and after it.
     pub sizes: (usize, usize),
+    /// Configured window for a managed local server.
+    pub local_capacity: Option<u64>,
     pub took: Duration,
     /// Whether its record could not be saved.
     pub unsaved: bool,
     /// Whether its summary's end is missing: the model ran out of output
     /// room, or wrote more than a summary keeps.
     pub cut: bool,
+}
+
+pub(super) fn capacity_warning(after: usize, capacity: Option<u64>) -> Option<String> {
+    let capacity = capacity?;
+    (after as u64 >= capacity).then(|| format!(
+        "Estimated request still needs {after} tokens against a {capacity}-token context. {} or reduce enabled tools.",
+        crate::local_models::CONTEXT_HINT
+    ))
 }
 
 impl Journal {
@@ -108,6 +118,10 @@ fn text(told: &Told<'_>) -> String {
         tokens(after),
         duration(told.took)
     );
+    if let Some(warning) = capacity_warning(after, told.local_capacity) {
+        text.push_str(" · ");
+        text.push_str(&warning);
+    }
     if told.cut {
         text.push_str(" · summary cut at the model's output limit: its end is missing");
     }
@@ -150,10 +164,22 @@ mod tests {
             from: 40,
             summarized: 42,
             sizes: (180_400, 39_600),
+            local_capacity: None,
             took: Duration::from_millis(12_400),
             unsaved: false,
             cut: false,
         };
+        let full = Told {
+            sizes: (17_123, 17_020),
+            local_capacity: Some(16_384),
+            ..told
+        };
+        assert!(text(&full).contains("still needs 17020 tokens against a 16384-token context. In /agents, select this model and raise Context capacity"));
+        let fits = Told {
+            local_capacity: Some(32_000),
+            ..full
+        };
+        assert!(capacity_warning(fits.sizes.1, fits.local_capacity).is_none());
         let cut = Told { cut: true, ..told };
         assert!(
             text(&cut)

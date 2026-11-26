@@ -56,6 +56,7 @@ async fn a_compaction_is_kept_on_disk_privately_and_read_back() {
             ("room", "code"),
             (compacted(40), 12),
             ((90_000, 31_000), TOOK, false),
+            None,
         )
         .await;
     assert_eq!(compactions.get("room", "code"), Some(compacted(40)));
@@ -91,7 +92,12 @@ async fn an_unreadable_record_is_none_and_the_next_compaction_replaces_it() {
     std::fs::write(compactions.path("room"), "not json").unwrap();
     assert_eq!(compactions.get("room", "code"), None);
     compactions
-        .record(("room", "code"), (compacted(7), 12), ((1, 1), TOOK, false))
+        .record(
+            ("room", "code"),
+            (compacted(7), 12),
+            ((1, 1), TOOK, false),
+            None,
+        )
         .await;
     let reopened = Compactions::new(dir.path());
     assert_eq!(reopened.get("room", "code"), Some(compacted(7)));
@@ -119,4 +125,38 @@ fn only_an_agent_whose_memory_compacts_can_be_asked_to() {
     assert!(!compactions.take_forced("room", "code"));
     compactions.set_bounded("code", false);
     assert!(!compactions.bounded("room", "code"));
+}
+
+#[tokio::test]
+async fn compaction_that_still_fills_the_local_window_is_shown_and_logged() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("diagnostics.jsonl");
+    let compactions = Compactions::new(&dir.path().join("compactions"));
+    compactions.report_to(crate::diagnostics::Diagnostics::open(path.clone(), false).unwrap());
+    compactions
+        .record(
+            ("room", "code"),
+            (compacted(40), 2),
+            ((17_123, 17_020), TOOK, false),
+            Some(16_384),
+        )
+        .await;
+    let warning = "17020 tokens against a 16384-token context";
+    assert!(
+        matches!(compactions.lines("room"), Some(Item::Message(line)) if line.text.contains(warning))
+    );
+    assert!(
+        compactions
+            .notices("room")
+            .iter()
+            .any(|text| text.contains(warning))
+    );
+    let log = std::fs::read_to_string(path).unwrap();
+    let entry = log
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|entry| entry["event"] == "compaction_over_capacity")
+        .unwrap();
+    assert_eq!(entry["estimated_request_tokens"], 17_020);
+    assert_eq!(entry["context_capacity"], 16_384);
 }

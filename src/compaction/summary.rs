@@ -38,10 +38,41 @@ pub(super) enum Failure {
 impl Failure {
     /// What the views say of it: the classification of a provider's error,
     /// never its text, which can hold what the provider was sent.
-    pub(super) fn reason(&self) -> &'static str {
-        match self {
-            Self::Provider(error) => roomkit_tui_engine::Diagnostic::classify(error).summary,
+    pub(super) fn recovery(
+        &self,
+        local_capacity: Option<u64>,
+        wait: std::time::Duration,
+    ) -> String {
+        let reason = match self {
+            Self::Provider(error) => {
+                let diagnostic = roomkit_tui_engine::Diagnostic::classify(error);
+                if diagnostic.code == "context_limit"
+                    && let Some(limit) = local_capacity
+                {
+                    let size = match diagnostic.context_tokens {
+                        Some((needed, capacity)) => format!(
+                            "The summary request needs {needed} tokens. The server context limit is {capacity} tokens."
+                        ),
+                        None => format!(
+                            "The summary request exceeds the configured context limit of {limit} tokens."
+                        ),
+                    };
+                    return format!(
+                        "{size} {}, then run /compact again.",
+                        crate::local_models::CONTEXT_HINT
+                    );
+                }
+                diagnostic.summary
+            }
             Self::Empty => "The model wrote no summary.",
+        };
+        if wait.is_zero() {
+            format!("{reason} It is tried again at the next message.")
+        } else {
+            format!(
+                "{reason} It is tried again in {} min, or now with /compact.",
+                wait.as_secs().div_ceil(60)
+            )
         }
     }
 

@@ -39,10 +39,11 @@ impl State {
             // Match the engine's usage identity, including Responses over OAuth.
             let mut model = ModelInfo::new(kind.name(), &profile.model)
                 .with_effort(profile.reasoning_effort.as_deref().unwrap_or("default"));
-            if kind == crate::providers::ProviderKind::LlamaCpp
-                && let Some(label) = crate::local_models::display_name(&profile.model)
-            {
-                model = model.with_display_name(label);
+            if kind == crate::providers::ProviderKind::LlamaCpp {
+                model.context_limit_hint = Some("/agents → select model + Context capacity".into());
+                if let Some(label) = crate::local_models::display_name(&profile.model) {
+                    model = model.with_display_name(label);
+                }
             }
             view.model = Some(model);
             view.context_capacity = profile.context_window.or_else(|| {

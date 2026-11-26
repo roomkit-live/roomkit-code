@@ -122,6 +122,10 @@ async fn gguf_search_download_retry_select_and_offline_resume() {
             let id = format!("hf://example/coder@{REV}/{FIRST}");
             assert_eq!(view.model.as_ref().unwrap().model, id);
             assert_eq!(view.model.as_ref().unwrap().label(), "example · Q6_K");
+            assert_eq!(
+                view.model.as_ref().unwrap().context_limit_hint.as_deref(),
+                Some("/agents → select model + Context capacity")
+            );
             app.view = *view;
             let path = cache_dir.join("models--example--coder/snapshots").join(REV);
             assert_eq!(std::fs::read(path.join(LAST)).unwrap(), b"two");

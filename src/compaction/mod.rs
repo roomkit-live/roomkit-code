@@ -219,6 +219,7 @@ impl Compactions {
         (room, agent): (&str, &str),
         (compacted, summarized): (Compacted, usize),
         (sizes, took, cut): ((usize, usize), Duration, bool),
+        local_capacity: Option<u64>,
     ) {
         let Some(_writing) = self.begin_record().await else {
             return;
@@ -232,6 +233,7 @@ impl Compactions {
             from,
             summarized,
             sizes,
+            local_capacity,
             took,
             unsaved,
             cut,
@@ -244,7 +246,25 @@ impl Compactions {
         } else {
             "Conversation compacted"
         };
-        self.notice(room, notice);
+        self.capacity_notice((room, agent), notice, sizes.1, local_capacity);
+    }
+
+    fn capacity_notice(
+        &self,
+        (room, agent): (&str, &str),
+        notice: &str,
+        estimated: usize,
+        local_capacity: Option<u64>,
+    ) {
+        if let Some(warning) = line::capacity_warning(estimated, local_capacity) {
+            self.notice(room, &format!("{notice}. {warning}"));
+            if let Some(log) = self.diagnostics.get() {
+                let fields = serde_json::json!({"room":room, "agent":agent, "estimated_request_tokens": estimated, "context_capacity":local_capacity});
+                log.record("compaction_over_capacity", fields, None);
+            }
+        } else {
+            self.notice(room, notice);
+        }
     }
 
     /// Admits a record until shutdown begins, keeping it alive through commit.
@@ -267,19 +287,19 @@ impl Compactions {
     /// The summary of `agent`'s conversation in `room` failed: the views
     /// say why, the diagnostics record the cause, and the next one waits
     /// ([`asked::Asked::failed`]).
-    fn failed(&self, (room, agent): (&str, &str), failure: &summary::Failure) {
+    fn failed(
+        &self,
+        (room, agent): (&str, &str),
+        failure: &summary::Failure,
+        local_capacity: Option<u64>,
+    ) {
         let wait = self.asked.failed(room, agent);
-        let next = if wait.is_zero() {
-            "It is tried again at the next message.".to_owned()
-        } else {
-            format!(
-                "It is tried again in {} min, or now with /compact.",
-                wait.as_secs().div_ceil(60)
-            )
-        };
         self.notice(
             room,
-            &format!("Compaction failed: {} {next}", failure.reason()),
+            &format!(
+                "Compaction failed: {}",
+                failure.recovery(local_capacity, wait)
+            ),
         );
         if let Some(diagnostics) = self.diagnostics.get() {
             let fields = serde_json::json!({

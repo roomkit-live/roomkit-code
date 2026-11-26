@@ -30,7 +30,12 @@ async fn close_waits_for_the_timeline_commit_and_its_delivery_cursor() {
     let writing = compactions.clone();
     let record = tokio::spawn(async move {
         writing
-            .record(("room", "code"), (compacted(7), 12), ((1, 1), TOOK, false))
+            .record(
+                ("room", "code"),
+                (compacted(7), 12),
+                ((1, 1), TOOK, false),
+                None,
+            )
             .await;
     });
     crate::sync::lock(&compactions.tasks).push(record);
@@ -121,7 +126,12 @@ async fn a_summary_finishing_after_close_records_nothing() {
     let compactions = Compactions::new(dir.path());
     compactions.close().await;
     compactions
-        .record(("room", "code"), (compacted(7), 12), ((1, 1), TOOK, false))
+        .record(
+            ("room", "code"),
+            (compacted(7), 12),
+            ((1, 1), TOOK, false),
+            None,
+        )
         .await;
     assert_eq!(compactions.get("room", "code"), None);
     assert!(!compactions.path("room").exists());

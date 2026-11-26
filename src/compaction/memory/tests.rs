@@ -129,7 +129,7 @@ async fn a_compaction_after_a_relaunch_carries_the_previous_snapshot_and_rest() 
     };
     let told = ((1, 1), std::time::Duration::ZERO, false);
     Compactions::new(dir.path())
-        .record(("room", "code"), (previous, 1), told)
+        .record(("room", "code"), (previous, 1), told, None)
         .await;
     let relaunched = Arc::new(Compactions::new(dir.path()));
     let provider = ScriptedProvider::new([ScriptedRound::answering("They talked.")]);
@@ -203,4 +203,34 @@ async fn a_history_longer_than_a_summary_reads_is_summarized_in_parts() {
         }
     }
     assert_eq!(made.summary, format!("Summary {}.", requests.len()));
+}
+
+#[tokio::test]
+async fn a_local_window_filled_by_fixed_input_warns_even_with_nothing_to_compact() {
+    use roomkit_providers_llamacpp::{LlamaCpp, LlamaCppConfig};
+    let dir = tempfile::tempdir().unwrap();
+    let compactions = Arc::new(Compactions::new(dir.path()));
+    let local = LlamaCpp::new(LlamaCppConfig::new("fixture")).unwrap();
+    let memory = TieredMemory::new(local, (16_384, "code"), compactions.clone());
+    let measured = Measured {
+        fixed: 17_020,
+        costs: vec![],
+        last: None,
+    };
+    let result = memory
+        .compact(
+            ("room", "code"),
+            None,
+            &mut Vec::new(),
+            &measured,
+            (0, true),
+        )
+        .await;
+    assert!(result.is_none());
+    let warnings = compactions.notices("room").join(" ");
+    assert!(
+        warnings.contains("17020 tokens against a 16384-token context")
+            && warnings.contains("/agents"),
+        "{warnings}"
+    );
 }

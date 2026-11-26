@@ -362,3 +362,44 @@ async fn an_answer_the_provider_cannot_read_is_told_as_an_invalid_response() {
     assert!(log.contains("provider_malformed"), "{log}");
     assert!(!log.contains("engine_failed"), "{log}");
 }
+
+#[tokio::test]
+async fn llama_context_refusal_names_the_limits_in_the_view_and_diagnostics() {
+    let router = Router::new().route("/v1/chat/completions", post(|| async {
+        (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error":{
+            "type":"exceed_context_size_error", "code":400, "n_prompt_tokens":17969, "n_ctx":16384,
+            "message":"request (17969 tokens) exceeds the available context size (16384 tokens), try increasing it"
+        }})))
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let root = tempfile::tempdir().unwrap();
+    let storage = tempfile::tempdir().unwrap();
+    let app = Application::open(
+        &settings(root.path(), storage.path(), &base),
+        SECRET.to_owned(),
+    )
+    .await
+    .unwrap();
+    let events = submit(&app, "local-overflow").await;
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::ContextExceeded { .. })),
+        "{events:?}"
+    );
+    assert!(events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("17969") && text.contains("16384") && text.contains("context limit"))));
+    app.close().await.unwrap();
+    server.abort();
+    let log =
+        std::fs::read_to_string(app._storage.database.with_file_name("diagnostics.jsonl")).unwrap();
+    let entry = log
+        .lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+        .find(|v| v["code"] == "context_limit")
+        .unwrap();
+    assert_eq!(entry["request_tokens"], 17969);
+    assert_eq!(entry["context_capacity"], 16384);
+    assert!(!log.contains(SECRET));
+}
