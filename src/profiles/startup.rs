@@ -75,7 +75,10 @@ fn starts_a_new_project(documents: &Documents, settings: &Settings) -> bool {
     documents.project.revision().is_none()
         && documents.project.value.agents.is_empty()
         && documents.global.value.agents.is_empty()
-        && !settings.model.is_empty()
+        && match settings.provider {
+            crate::providers::ProviderKind::LlamaCpp => !settings.model.is_empty(),
+            _ => !settings.base_url.is_empty(),
+        }
 }
 
 /// The launch options' connection, saved once per workspace with how it
