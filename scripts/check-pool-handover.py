@@ -31,6 +31,7 @@ class Model(StreamingModel):
         return self.worker_reply(name, messages)
 
     def owner_reply(self, messages, last, content):
+        self.server.owner_inputs.append(content)
         if last["role"] == "tool":
             if last.get("tool_call_id") == "delegate-followup":
                 self.server.task = json.loads(content)["task_id"]
@@ -70,19 +71,16 @@ class Model(StreamingModel):
                 return {"content": "Owner got the live answer."}
             if "The finding was amber." in result:
                 return {"content": "Owner got the original reviewer's answer."}
-        opening = "[Background task from remote-linux "
-        if opening in content:
-            self.server.owner_inputs.append(content)
-            # Two hand-backs can reach one turn, as when the capped task's
-            # failure is still being told when the next task's result comes:
-            # the latest is the one answered.
-            latest = content[content.rindex(opening):]
-            if "Included the requested finding." in latest:
+        # Each hand-back opens a turn of its own: one handed to a running
+        # turn would read as a participant's words, its mark a copy, and the
+        # wait for its answer fails (RoomKit RMK-2146).
+        if "[Background task from remote-linux " in content:
+            if "Included the requested finding." in content:
                 return {"content": "Owner received the revised finding."}
-            if latest.startswith(opening + "failed: "):
+            if "[Background task from remote-linux failed: " in content:
                 return {"content": "Owner observed worker loss."}
             for worker in ("macbook", "linux"):
-                if f"Proof from {worker}." in latest:
+                if f"Proof from {worker}." in content:
                     return {"content": f"Owner received proof from {worker}."}
             return {"content": "Unexpected task result."}
         prompts = ("Start a review that accepts updates", "Pass the finding to my worker",
@@ -216,8 +214,8 @@ def run(options):
         try:
             term.wait("Owner received proof from macbook.", offset)
         except AssertionError:
-            # This wait failed now and then in CI only: what the owner's
-            # model was given tells why.
+            # What the owner's model was given tells why: two hand-backs
+            # in one turn showed here before RoomKit RMK-2146.
             for given in server.owner_inputs[-3:]:
                 print("Owner was given:", json.dumps(given[:1500]), flush=True)
             raise
