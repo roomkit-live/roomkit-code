@@ -44,7 +44,9 @@ pub(super) fn provider_menu(
             choice(
                 Action::EditProvider(id).to_string(),
                 "Edit connection",
-                if provider.subscription().is_some() {
+                if provider.kind == ProviderKind::LlamaCpp {
+                    "Local model connection"
+                } else if provider.subscription().is_some() {
                     "Name, API key and timeout"
                 } else {
                     "URL, authentication and timeout"
@@ -52,8 +54,16 @@ pub(super) fn provider_menu(
             ),
             choice(
                 Action::TestProvider(id).to_string(),
-                "Test connection and list models",
-                "Read-only GET /models; no conversation is sent",
+                if provider.kind == ProviderKind::LlamaCpp {
+                    "Choose a local model"
+                } else {
+                    "Test connection and list models"
+                },
+                if provider.kind == ProviderKind::LlamaCpp {
+                    "Browse cached GGUF files or search Hugging Face"
+                } else {
+                    "Read-only GET /models; no conversation is sent"
+                },
             ),
             choice(
                 Action::Delete {
@@ -107,7 +117,7 @@ pub(in crate::profiles) fn provider_choices(
     let mut entries = vec![choice(
         Action::AddProvider.to_string(),
         "+ Add provider",
-        "OpenAI-compatible or Anthropic connection",
+        "Local llama.cpp, OpenAI-compatible or Anthropic",
     )];
     entries.extend(super::subscriptions::ALL.iter().map(|subscription| {
         let offer = &subscription.offer;

@@ -19,6 +19,8 @@ pub(crate) enum ProviderKind {
     #[value(name = "openai")]
     OpenAi,
     Anthropic,
+    #[value(name = "llamacpp")]
+    LlamaCpp,
 }
 
 impl ProviderKind {
@@ -26,6 +28,7 @@ impl ProviderKind {
         match self {
             Self::OpenAi => "openai",
             Self::Anthropic => "anthropic",
+            Self::LlamaCpp => "llamacpp",
         }
     }
 
@@ -33,12 +36,13 @@ impl ProviderKind {
         match self {
             Self::OpenAi => "OpenAIAIProvider",
             Self::Anthropic => "AnthropicAIProvider",
+            Self::LlamaCpp => "llamacpp",
         }
     }
 
     pub fn default_url(self) -> &'static str {
         match self {
-            Self::OpenAi => "",
+            Self::OpenAi | Self::LlamaCpp => "",
             Self::Anthropic => "https://api.anthropic.com",
         }
     }
@@ -47,6 +51,7 @@ impl ProviderKind {
         match self {
             Self::OpenAi => OpenAiAiProvider::available_models(),
             Self::Anthropic => AnthropicAiProvider::available_models(),
+            Self::LlamaCpp => Vec::new(),
         }
     }
 }
@@ -55,6 +60,7 @@ impl ProviderKind {
 #[derive(Clone)]
 pub(crate) enum CodeProvider {
     OpenAi(OpenAiAiProvider),
+    Local(crate::local_models::Local),
     Anthropic { provider: Anthropic, vision: bool },
 }
 
@@ -62,6 +68,7 @@ impl AiProvider for CodeProvider {
     fn name(&self) -> &str {
         match self {
             Self::OpenAi(p) => p.name(),
+            Self::Local(p) => p.inner.name(),
             Self::Anthropic { provider: p, .. } => p.inner.name(),
         }
     }
@@ -69,6 +76,7 @@ impl AiProvider for CodeProvider {
     fn model_name(&self) -> &str {
         match self {
             Self::OpenAi(p) => p.model_name(),
+            Self::Local(p) => &p.model,
             Self::Anthropic { provider: p, .. } => p.inner.model_name(),
         }
     }
@@ -76,6 +84,7 @@ impl AiProvider for CodeProvider {
     fn catalog_entry(&self) -> Option<ModelInfo> {
         match self {
             Self::OpenAi(p) => p.catalog_entry(),
+            Self::Local(p) => p.inner.catalog_entry(),
             Self::Anthropic { provider: p, .. } => p.inner.catalog_entry(),
         }
     }
@@ -83,6 +92,7 @@ impl AiProvider for CodeProvider {
     fn supports_vision(&self) -> bool {
         match self {
             Self::OpenAi(p) => p.supports_vision(),
+            Self::Local(_) => false,
             // The agent setting explicitly enables images, even for a gateway alias.
             Self::Anthropic { vision, .. } => *vision,
         }
@@ -91,6 +101,7 @@ impl AiProvider for CodeProvider {
     fn supports_deferred_tools(&self) -> bool {
         match self {
             Self::OpenAi(p) => p.supports_deferred_tools(),
+            Self::Local(p) => p.inner.supports_deferred_tools(),
             Self::Anthropic { provider: p, .. } => p.inner.supports_deferred_tools(),
         }
     }
@@ -106,6 +117,7 @@ impl AiProvider for CodeProvider {
     fn supports_response_schema(&self) -> bool {
         match self {
             Self::OpenAi(p) => p.supports_response_schema(),
+            Self::Local(p) => p.inner.supports_response_schema(),
             Self::Anthropic { provider: p, .. } => p.inner.supports_response_schema(),
         }
     }
@@ -113,6 +125,7 @@ impl AiProvider for CodeProvider {
     fn supports_response_schema_with_tools(&self) -> bool {
         match self {
             Self::OpenAi(p) => p.supports_response_schema_with_tools(),
+            Self::Local(p) => p.inner.supports_response_schema_with_tools(),
             Self::Anthropic { provider: p, .. } => p.inner.supports_response_schema_with_tools(),
         }
     }
@@ -120,6 +133,7 @@ impl AiProvider for CodeProvider {
     async fn list_models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
         match self {
             Self::OpenAi(p) => p.list_models().await,
+            Self::Local(p) => p.list_models().await,
             Self::Anthropic { provider: p, .. } => p.inner.list_models().await,
         }
     }
@@ -127,6 +141,7 @@ impl AiProvider for CodeProvider {
     async fn generate(&self, context: &AiContext) -> Result<AiResponse, ProviderError> {
         match self {
             Self::OpenAi(p) => p.generate(context).await,
+            Self::Local(p) => p.generate(context).await,
             Self::Anthropic { provider: p, .. } => p.generate(context).await,
         }
     }
@@ -134,6 +149,7 @@ impl AiProvider for CodeProvider {
     fn generate_stream<'a>(&'a self, context: &'a AiContext) -> TextStream<'a> {
         match self {
             Self::OpenAi(p) => p.generate_stream(context),
+            Self::Local(p) => p.generate_stream(context),
             Self::Anthropic { provider: p, .. } => p.generate_stream(context),
         }
     }
@@ -141,6 +157,7 @@ impl AiProvider for CodeProvider {
     fn generate_structured_stream<'a>(&'a self, context: &'a AiContext) -> ProviderStream<'a> {
         match self {
             Self::OpenAi(p) => p.generate_structured_stream(context),
+            Self::Local(p) => p.generate_structured_stream(context),
             Self::Anthropic { provider: p, .. } => p.generate_structured_stream(context),
         }
     }

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Run GGUF models through the managed llama.cpp provider. The model picker can search public Hugging Face repositories, download a quantization and select cached files offline. CodeLALA uses a separate, versioned OVH runtime.
+
 - Releases are signed. Each checksum file is signed with the project's minisign key where the release is built, and the updater installs nothing whose checksum that key did not sign. `install.sh` checks the signature when `minisign` is installed and says when it could not. Versions published before this one are unsigned: the updater of this version does not install them, and an unsigned latest release that is not newer reads as no update rather than as an error. A refused signature says why (another key, an old algorithm, a forged file). The user guide shows how to check a release by hand without trusting `install.sh`, and what a signature does not prove.
 
 - The result of a delegated task that ends while the agent is still telling another task's result now waits its own turn, and the agent reads it as the application's notice of that task. It was handed to the running answer as words of a participant, with the mark of the task's result neutralised as a copy: when two delegated tasks ended close together, the agent read the second one's outcome as something a participant said.

@@ -213,6 +213,15 @@ impl Provider {
                 "Use a short provider name and an ID containing letters, digits, - or _".into(),
             );
         }
+        if self.kind == crate::providers::ProviderKind::LlamaCpp {
+            if !self.base_url.is_empty()
+                || !matches!(self.authentication, Authentication::None)
+                || self.subscription.is_some()
+            {
+                return Err("Local llama.cpp requires an empty URL and no authentication".into());
+            }
+            return self.validate_timeout();
+        }
         let url = url::Url::parse(&self.base_url).map_err(|_| "Invalid provider URL")?;
         if self.base_url.len() > 2048
             || !matches!(url.scheme(), "http" | "https")
@@ -224,9 +233,7 @@ impl Provider {
         {
             return Err("Use an HTTP(S) API root without credentials, query or fragment".into());
         }
-        if !(1..=86_400).contains(&self.timeout_seconds) {
-            return Err("Timeout must be between 1 and 86400 seconds".into());
-        }
+        self.validate_timeout()?;
         self.validate_subscription()?;
         match &self.authentication {
             Authentication::ChatGpt { account } if uuid::Uuid::parse_str(account).is_err() => {
@@ -274,6 +281,13 @@ impl Provider {
                 .as_deref()
                 .and_then(super::subscriptions::find),
         }
+    }
+
+    fn validate_timeout(&self) -> Result<(), String> {
+        if !(1..=86_400).contains(&self.timeout_seconds) {
+            return Err("Timeout must be between 1 and 86400 seconds".into());
+        }
+        Ok(())
     }
 
     /// A subscription's connection reaches only its service, with the kind

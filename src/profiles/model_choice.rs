@@ -5,8 +5,10 @@ use roomkit_tui::protocol::{Choice, Event};
 use roomkit_tui_engine::CommandResult;
 
 use super::discovery::discover;
+use super::ui::local::Destination;
 use super::ui::{Action, choice, choices};
 use super::*;
+use crate::providers::ProviderKind;
 
 /// One model a connection serves: its ID, the name it is shown by, and its
 /// reported capacity when its server tells it.
@@ -85,6 +87,9 @@ impl Profiles {
         provider: &Provider,
         title: &str,
     ) -> Result<CommandResult, String> {
+        if provider.kind == ProviderKind::LlamaCpp {
+            return Destination::New(provider.id.clone()).menu(current);
+        }
         let served = self.served(provider).await?;
         let entries = served
             .into_iter()
@@ -166,6 +171,9 @@ impl Profiles {
             .clone();
         // A listing reads a server: the other profile commands do not wait on it.
         drop(state);
+        if provider.kind == ProviderKind::LlamaCpp {
+            return Destination::Edit(id.to_owned()).menu(&current);
+        }
         let served = self
             .served(&provider)
             .await
@@ -233,6 +241,9 @@ impl Profiles {
             .clone();
         // A listing reads a server: the other profile commands do not wait on it.
         drop(state);
+        if provider.kind == ProviderKind::LlamaCpp {
+            return Destination::Current.menu(&current);
+        }
         let served = self
             .served(&provider)
             .await

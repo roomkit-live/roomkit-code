@@ -16,7 +16,7 @@ impl State {
         // The agent as it runs in the view's conversation.
         let agent = self.running_agent(view.room.as_str(), view.agent.as_str());
         let served = self.tools.contains_key(view.agent.as_str());
-        view.can_attach_images = served && agent.as_ref().is_some_and(|a| a.vision);
+        view.can_attach_images = false;
         view.actor_names = self
             .agents()
             .into_iter()
@@ -34,6 +34,8 @@ impl State {
                 .get(&profile.provider)
                 .map(|p| p.kind)
                 .unwrap_or_default();
+            view.can_attach_images =
+                served && profile.vision && kind != crate::providers::ProviderKind::LlamaCpp;
             // Match the engine's usage identity, including Responses over OAuth.
             view.model = Some(
                 ModelInfo::new(kind.name(), profile.model.clone()).with_effort(
@@ -43,7 +45,10 @@ impl State {
                         .unwrap_or_else(|| "default".into()),
                 ),
             );
-            view.context_capacity = profile.context_window;
+            view.context_capacity = profile.context_window.or_else(|| {
+                (kind == crate::providers::ProviderKind::LlamaCpp)
+                    .then_some(crate::local_models::DEFAULT_CONTEXT.into())
+            });
             view.pricing = self.pricing(&profile);
         } else {
             view.model = None;

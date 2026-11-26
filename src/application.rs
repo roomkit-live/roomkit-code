@@ -91,6 +91,7 @@ impl Application {
                 .diagnostics
                 .record("application_closing", fields, None);
         };
+        self.profiles.local_models.cancel_preparation();
         self.profiles.resources.messages.close().await;
         step("updates");
         self.services.updates.close().await;
@@ -111,6 +112,7 @@ impl Application {
         // Closing cancels running shell calls: the agents' slots record what
         // they changed as they close, before the engine closes its store.
         let engine = self.kit.close().await;
+        self.profiles.local_models.close().await;
         step("hooks");
         self.services.hooks.close().await;
         step("tools");
@@ -332,6 +334,7 @@ async fn abandon(
     profiles
         .diagnostics
         .record("application_start_failed", fields, Some(error));
+    profiles.local_models.cancel_preparation();
     profiles.resources.messages.close().await;
     profiles.resources.compactions.close().await;
     if let Some(services) = services {
@@ -346,6 +349,7 @@ async fn abandon(
         services.sessions.close();
     }
     profiles.mcp_runtime.close().await;
+    profiles.local_models.close().await;
     let _ = profiles.resources.close(false).await;
     profiles.diagnostics.close().await;
 }

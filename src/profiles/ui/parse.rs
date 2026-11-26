@@ -71,7 +71,8 @@ pub(super) fn parse_provider(
             .map_or(ProviderKind::OpenAi, |p| p.kind),
         "openai" => ProviderKind::OpenAi,
         "anthropic" => ProviderKind::Anthropic,
-        _ => return Err("Choose OpenAI-compatible or Anthropic".into()),
+        "llamacpp" => ProviderKind::LlamaCpp,
+        _ => return Err("Choose a provider type from the list".into()),
     };
     let url = value(values, "url").trim().trim_end_matches('/');
     let provider = Provider {
@@ -158,6 +159,16 @@ pub(super) fn parse_agent(
                 .map(String::from)
                 .collect(),
         };
+    if profile.vision
+        && state
+            .providers
+            .value
+            .profiles
+            .get(&profile.provider)
+            .is_some_and(|p| p.kind == ProviderKind::LlamaCpp)
+    {
+        return Err("Local GGUF agents currently require image input to be disabled".into());
+    }
     profile.validate()?;
     Ok((profile, scope))
 }

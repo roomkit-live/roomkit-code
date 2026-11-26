@@ -11,6 +11,10 @@ impl Profiles {
         provider: &Provider,
     ) -> Result<CodeProvider, String> {
         match provider.kind {
+            ProviderKind::LlamaCpp => self
+                .local_models
+                .provider(profile, provider, &self.workspace)
+                .map(CodeProvider::Local),
             ProviderKind::OpenAi => OpenAiAiProvider::new(self.openai_config(profile, provider)?)
                 .map(CodeProvider::OpenAi)
                 .map_err(|_| "Cannot initialize the OpenAI connection".into()),

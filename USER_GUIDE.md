@@ -525,6 +525,14 @@ These files contain counters, not conversation content or resume arguments.
 
 ## Providers and agents
 
+### Local GGUF models
+
+In **/providers**, add a connection of type **Local llama.cpp**, leave the URL empty and choose **No key**. Select a cached model or **Search Hugging Face**. Enter a search term or an exact public repository, then choose the GGUF file by quantization and size. The sidebar shows download progress. After an interruption, selecting the same file resumes the transfer when the server supports byte ranges. The application verifies each downloaded file against its SHA-256 and saves all shards in the Hugging Face Hub cache. **/model** lists installed models offline and selects one for the current conversation.
+
+A fresh project can also start with `--provider llamacpp --model /path/to/model.gguf` or `--provider llamacpp --model owner/repository:Q4_K_M`. Each local server listens on loopback. Local agents default to a 16,384-token context. Choose a model that supports tool calls and a context size that fits the machine.
+
+CodeLALA v1 and Olala v1 mini use a dedicated OVH llama.cpp build. On first use, Code builds a pinned source revision with Git, CMake and a C++ compiler. Linux builds use CUDA when its toolkit and an NVIDIA device are available. The executable lives under the user's RoomKit Code data directory in `runtimes/ovh-llama.cpp/<revision>/bin/`. Code launches it by absolute path. To supply a compatible build yourself, set `ROOMKIT_LLAMA_BINARY` to the absolute path of its `llama-server`.
+
 **/providers** manages connections shared across your projects. Add a name, provider type, API
 base URL, timeout and authentication: no key, a stored key, or a named environment
 variable. Stored keys live in a private local file (0600), not an OS keychain;

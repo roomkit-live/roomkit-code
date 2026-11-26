@@ -126,6 +126,23 @@ pub(in crate::profiles) fn next_id(prefix: &str, occupied: impl Fn(&str) -> bool
         .unwrap_or_default()
 }
 
+fn provider_type(kind: ProviderKind) -> FormField {
+    field(
+        "kind",
+        "Provider type",
+        kind.value(),
+        "The API protocol this connection uses",
+        true,
+        FieldKind::Choice {
+            choices: vec![
+                choice("openai", "OpenAI-compatible", "Chat Completions"),
+                choice("anthropic", "Anthropic", "Native Messages API"),
+                choice("llamacpp", "Local llama.cpp", "Run a GGUF on this computer"),
+            ],
+        },
+    )
+}
+
 pub(super) fn provider_form(existing: Option<&Provider>, state: &State, id: String) -> FormSpec {
     let default = Provider {
         subscription: None,
@@ -166,24 +183,12 @@ pub(super) fn provider_form(existing: Option<&Provider>, state: &State, id: Stri
                 true,
                 FieldKind::Text,
             ),
-            field(
-                "kind",
-                "Provider type",
-                p.kind.value(),
-                "The API protocol this connection uses",
-                true,
-                FieldKind::Choice {
-                    choices: vec![
-                        choice("openai", "OpenAI-compatible", "Chat Completions"),
-                        choice("anthropic", "Anthropic", "Native Messages API"),
-                    ],
-                },
-            ),
+            provider_type(p.kind),
             field(
                 "url",
                 "API base URL",
                 &p.base_url,
-                "OpenAI: include /v1 when required. Anthropic: empty uses https://api.anthropic.com",
+                "Leave empty for local llama.cpp or default Anthropic. Include /v1 for OpenAI-compatible servers when required.",
                 false,
                 FieldKind::Text,
             ),

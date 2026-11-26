@@ -12,7 +12,8 @@ an implementation plan, edit files and run tests with the model you choose.
 ## What it does
 
 - **Choose your provider:** Anthropic Messages, OpenAI-compatible endpoints,
-  ChatGPT sign-in or OpenCode Go. Configure connections and agents in the app.
+  ChatGPT sign-in, OpenCode Go or local GGUF models with llama.cpp. Configure
+  connections and agents in the app.
 - **Control changes:** Ask requests approval for writes and commands; Plan is
   for investigation and planning; Yolo allows the agent to act without those
   prompts. These permissions are not an operating-system sandbox.
@@ -66,6 +67,12 @@ roomkit-code /path/to/project
 
 ChatGPT sign-in shows a browser link and a private field for the return URL.
 You can open the link on your laptop when RoomKit Code runs on a remote machine.
+To run a local model, select **Local llama.cpp** in `/providers`, then search Hugging Face from the model picker. For a new project with a GGUF already on disk:
+
+```sh
+roomkit-code /path/to/project --provider llamacpp --model /path/to/model.gguf
+```
+
 For a local OpenAI-compatible server, you can also start with:
 
 ```sh

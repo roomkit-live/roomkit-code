@@ -63,6 +63,9 @@ impl Settings {
     /// is the one used. Saved profiles remain authoritative thereafter.
     pub fn initial_authentication(&self) -> crate::profiles::model::Authentication {
         use crate::profiles::model::Authentication;
+        if self.provider == crate::providers::ProviderKind::LlamaCpp {
+            return Authentication::None;
+        }
         let mut variables = vec!["ROOMKIT_API_KEY"];
         if self.provider == crate::providers::ProviderKind::Anthropic {
             variables.push("ANTHROPIC_API_KEY");
@@ -182,7 +185,11 @@ impl FirstAgent {
         if base_url.is_empty() && !model.is_empty() {
             base_url = provider.default_url().into();
         }
-        if base_url.is_empty() != model.is_empty() {
+        if provider == crate::providers::ProviderKind::LlamaCpp {
+            if !base_url.is_empty() {
+                return Err("Managed llama.cpp chooses its own local address".into());
+            }
+        } else if base_url.is_empty() != model.is_empty() {
             return Err(
                 "Supply both a base URL and model, or configure them with /providers and /agents"
                     .into(),

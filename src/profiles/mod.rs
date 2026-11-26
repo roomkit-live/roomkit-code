@@ -71,6 +71,7 @@ pub(crate) struct Profiles {
     /// The context capacity each connection's server reported for its
     /// models in its latest listing, by connection and model.
     reported: std::sync::Mutex<std::collections::HashMap<(String, String), u64>>,
+    pub(crate) local_models: crate::local_models::LocalModels,
     state: Mutex<State>,
 }
 
@@ -127,7 +128,11 @@ fn ceiling(profile: &Agent, kind: crate::providers::ProviderKind) -> Option<u64>
         .find(|entry| entry.id == profile.model);
     let window = profile
         .context_window
-        .or_else(|| listed.as_ref().and_then(|entry| entry.context_window));
+        .or_else(|| listed.as_ref().and_then(|entry| entry.context_window))
+        .or_else(|| {
+            (kind == crate::providers::ProviderKind::LlamaCpp)
+                .then_some(crate::local_models::DEFAULT_CONTEXT.into())
+        });
     let price = listed
         .and_then(|entry| entry.pricing)
         .and_then(|pricing| pricing.long_context_threshold_tokens);
@@ -224,6 +229,7 @@ impl Profiles {
             crate::remote::pool::Inventory::for_worker(settings).map_err(|e| e.to_string())?;
         Ok(Arc::new(Self {
             pool,
+            local_models: Default::default(),
             executor_inventory,
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),

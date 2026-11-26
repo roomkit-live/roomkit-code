@@ -21,6 +21,7 @@ enum Target {
         original: Option<String>,
     },
     Agent(Option<String>),
+    Hub(local::Destination),
 }
 
 pub(super) fn choice(
@@ -59,6 +60,7 @@ pub(super) fn choices(
 
 mod action;
 mod forms;
+pub(in crate::profiles) mod local;
 mod menus;
 mod parse;
 
@@ -80,6 +82,9 @@ impl Profiles {
     ) -> Result<CommandResult, String> {
         match request.command {
             Command::Invoke { name, arguments } => {
+                if let Some(args) = arguments.strip_prefix("gguf ") {
+                    return self.local_action(kit, current, &name, args).await;
+                }
                 let action = Action::parse(&name, &arguments)?;
                 self.invoke(kit, terminal, action, current).await
             }
@@ -281,6 +286,12 @@ impl Profiles {
         let mut next = current;
         let mut created = None;
         match &target {
+            Target::Hub(dest) => {
+                state.pending = None;
+                drop(edit_lease);
+                drop(state);
+                return dest.search(&next, value(values, "query").trim()).await;
+            }
             Target::Provider(original) => {
                 let profile = parse_provider(values, original.as_deref(), &state)?;
                 created = original.is_none().then(|| profile.clone());

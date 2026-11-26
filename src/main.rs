@@ -20,6 +20,7 @@ mod hooks;
 mod http_client;
 mod images;
 mod instructions;
+mod local_models;
 mod logo;
 mod messages;
 mod names;

@@ -32,6 +32,7 @@ struct Sources {
     plans: watch::Receiver<()>,
     files: watch::Receiver<()>,
     updates: watch::Receiver<()>,
+    downloads: watch::Receiver<std::collections::HashMap<String, String>>,
     hooks: watch::Receiver<()>,
     /// A mode set by a mode tool, outside `/mode`.
     modes: watch::Receiver<()>,
@@ -61,6 +62,7 @@ pub(super) fn subscribe(
         plans: sessions.profiles.resources.plans.subscribe(),
         files: sessions.profiles.resources.files.subscribe(),
         updates: sessions.services.updates.changes.subscribe(),
+        downloads: sessions.profiles.local_models.changes.subscribe(),
         hooks: sessions.services.hooks.changes.subscribe(),
         modes: sessions.policy.changes.subscribe(),
         compactions: sessions.profiles.resources.compactions.subscribe(),
@@ -144,6 +146,15 @@ async fn events(
         sidebar.sections.push(section);
     }
     sidebar.sections.push(services.updates.sidebar());
+    if let Some(note) = sources.downloads.borrow_and_update().get(room) {
+        use roomkit_tui::protocol::{SidebarContent, SidebarEntry, SidebarSection};
+        sidebar.sections.push(SidebarSection::new(
+            "Model download",
+            SidebarContent::Entries {
+                entries: vec![SidebarEntry::new(note.clone())],
+            },
+        ));
+    }
     events.push(Event::SidebarChanged {
         conversation: current.room.as_str().into(),
         sidebar: Some(sidebar),
@@ -156,13 +167,13 @@ impl Sources {
     /// false once a source is gone.
     async fn changed(&mut self, poll: Option<Duration>) -> bool {
         tokio::select! {
+            changed = transfer_changed(&mut self.downloads, &mut self.updates) => changed,
             changed = self.messages.changed() => changed.is_ok(),
             changed = self.processes.changed() => changed.is_ok(),
             changed = self.accounts.changed() => changed.is_ok(),
             changed = self.sidebar.changed() => changed.is_ok(),
             changed = self.plans.changed() => changed.is_ok(),
             changed = self.files.changed() => changed.is_ok(),
-            changed = self.updates.changed() => changed.is_ok(),
             changed = self.hooks.changed() => changed.is_ok(),
             changed = self.modes.changed() => changed.is_ok(),
             changed = self.compactions.changed() => changed.is_ok(),
@@ -172,5 +183,16 @@ impl Sources {
             // redraws the TUI.
             () = tokio::time::sleep(poll.unwrap_or(POLL)), if poll.is_some() => true,
         }
+    }
+}
+
+/// The application update and local model transfers can both change the sidebar.
+async fn transfer_changed(
+    models: &mut watch::Receiver<std::collections::HashMap<String, String>>,
+    updates: &mut watch::Receiver<()>,
+) -> bool {
+    tokio::select! {
+        change=models.changed()=>change.is_ok(),
+        change=updates.changed()=>change.is_ok(),
     }
 }

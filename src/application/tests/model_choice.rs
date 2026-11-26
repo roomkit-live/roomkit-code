@@ -1,5 +1,6 @@
 //! Choosing a model among those a connection serves: after adding the
 //! connection, and for the current agent with `/model`.
+mod gguf;
 use super::*;
 use roomkit_tui::protocol::Choice;
 use roomkit_tui_engine::CommandResult;
