@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Releases are signed. Each checksum file is signed with the project's minisign key where the release is built, and the updater installs nothing whose checksum that key did not sign. `install.sh` checks the signature when `minisign` is installed and says when it could not. Versions published before this one are unsigned: the updater of this version does not install them.
+- Releases are signed. Each checksum file is signed with the project's minisign key where the release is built, and the updater installs nothing whose checksum that key did not sign. `install.sh` checks the signature when `minisign` is installed and says when it could not. Versions published before this one are unsigned: the updater of this version does not install them, and an unsigned latest release that is not newer reads as no update rather than as an error. A refused signature says why (another key, an old algorithm, a forged file). `SECURITY.md` shows how to check a release by hand without trusting `install.sh`, and what a signature does not prove.
 
 - Built on RoomKit Rust b0ccf3d9 with roomkit-providers e917c18, roomkit-tools 8c34e02 and roomkit-tui ca6810c. The engine no longer holds the turn backend on Redis: the executor pool and session groups take it from roomkit-providers (`roomkit-providers-redis`), where it moved as it was. Their configuration is unchanged. With this engine, the notice of a delegated task that did not complete tells the agent that asked for it why, in one code of a closed list: `failed: an error ended it (error)` where it read `failed.`
 

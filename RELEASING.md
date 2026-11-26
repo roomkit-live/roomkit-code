@@ -82,11 +82,17 @@ minisign -G -p release-key.pub -s release-key.minisign
 
 - Put the second line of `release-key.pub` in `src/updates/release-key.pub`, and
   the same line in `install.sh` as `release_key='…'`. A test compares the two.
-- Store the whole content of `release-key.minisign` as the repository Actions
-  secret `MINISIGN_SECRET_KEY`, and its password as `MINISIGN_PASSWORD`.
+- Store the whole content of `release-key.minisign` as the secret
+  `MINISIGN_SECRET_KEY` of the `release` environment (**Settings →
+  Environments**), and its password as `MINISIGN_PASSWORD`. Restrict the
+  environment's deployments to `v*` tags and require a reviewer: a repository
+  secret can be read by any workflow pushed on a branch. The draft job is the
+  only one that names the environment, and its signing step the only one that
+  reads the secrets.
 - Keep an offline copy of the secret key. Replacing the key means shipping a
   release, signed with the previous key, whose updater embeds the new one:
-  installed versions accept only the key they were built with.
+  installed versions accept only the key they were built with, and one that
+  skips that release must be installed again with `install.sh`.
 
 ## Failures and retries
 
@@ -95,8 +101,10 @@ unpublished. Fix the underlying issue, then rerun the workflow for the existing
 tag using **Run workflow**, or:
 
 ```sh
-gh workflow run release.yml --repo roomkit-live/roomkit-code -f tag=v0.1.3
+gh workflow run release.yml --repo roomkit-live/roomkit-code --ref v0.1.3 -f tag=v0.1.3
 ```
+
+Run it from the tag (`--ref`): the `release` environment admits only `v*` tags.
 
 If a draft already exists, inspect it before proceeding. The workflow refuses
 to overwrite an existing release, including a draft; finish publication only

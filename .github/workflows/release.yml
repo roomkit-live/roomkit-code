@@ -115,6 +115,9 @@ jobs:
   draft:
     needs: [source, build, audit]
     runs-on: ubuntu-22.04
+    # The signing key's secrets belong to this environment, which admits
+    # release tags only: a workflow pushed on a branch cannot read them.
+    environment: release
     permissions:
       contents: write
     steps:
@@ -131,17 +134,20 @@ jobs:
           pattern: release-*
           path: dist
           merge-multiple: true
+      - name: Install minisign
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends minisign
+      - name: Check the tag is unchanged before signing for it
+        run: python3 scripts/release.py source "$RELEASE_TAG"
+      # Only this step holds the key's secrets.
       - name: Sign each checksum file with the release key
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: python3 scripts/release.py sign "$RELEASE_TAG"
+      - name: Validate the complete asset set
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends minisign
-          python3 scripts/release.py sign "$RELEASE_TAG"
-      - name: Validate the unchanged tag and complete asset set
-        run: |
-          python3 scripts/release.py source "$RELEASE_TAG"
           python3 scripts/release.py assets "$RELEASE_TAG"
           python3 scripts/release.py signatures "$RELEASE_TAG"
           python3 scripts/release.py notes "$RELEASE_TAG" > "$RUNNER_TEMP/release-notes.md"
