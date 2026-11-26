@@ -12,6 +12,33 @@ pub(in crate::profiles) enum Destination {
     Edit(String),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum AfterDownload {
+    Use,
+    Cache,
+}
+
+impl AfterDownload {
+    fn search(self) -> &'static str {
+        match self {
+            Self::Use => "search",
+            Self::Cache => "background-search",
+        }
+    }
+    fn repo(self) -> &'static str {
+        match self {
+            Self::Use => "repo",
+            Self::Cache => "background-repo",
+        }
+    }
+    fn select(self) -> &'static str {
+        match self {
+            Self::Use => "use",
+            Self::Cache => "download",
+        }
+    }
+}
+
 impl Destination {
     fn command(&self) -> &'static str {
         match self {
@@ -68,6 +95,11 @@ impl Destination {
             "Search Hugging Face",
             "Find GGUF models and choose a file to download",
         )];
+        entries.push(choice(
+            self.arg("background-search", ""),
+            "Download in background",
+            "Find a GGUF on Hugging Face and keep working with the current model",
+        ));
         for file in crate::sync::blocking(|| Cache::locate().map(|c| c.models()))? {
             entries.push(choice(
                 self.arg("use", &file.id()),
@@ -99,18 +131,19 @@ impl Destination {
         &self,
         current: &SessionConfig,
         query: &str,
+        after: AfterDownload,
     ) -> Result<CommandResult, String> {
         let hub = Hub::public()?;
         if crate::local_models::hub::valid_repo(query) {
-            return self.files(current, &hub, query).await;
+            return self.files(current, &hub, query, after).await;
         }
         let repos = hub.search(query).await?;
         let mut entries: Vec<_> = repos
             .into_iter()
-            .map(|r| choice(self.arg("repo", &r), r, "Choose a GGUF file"))
+            .map(|r| choice(self.arg(after.repo(), &r), r, "Choose a GGUF file"))
             .collect();
         entries.push(choice(
-            self.arg("search", ""),
+            self.arg(after.search(), ""),
             "Search again",
             "Enter a model name or owner/repository",
         ));
@@ -127,6 +160,7 @@ impl Destination {
         current: &SessionConfig,
         hub: &Hub,
         repo: &str,
+        after: AfterDownload,
     ) -> Result<CommandResult, String> {
         let cache = Cache::locate()?;
         let variants = hub.variants(repo, None).await?;
@@ -138,17 +172,26 @@ impl Destination {
         {
             let status = if cache.installed(&model.first) {
                 "installed"
+            } else if after == AfterDownload::Cache {
+                "download in background"
             } else {
                 "download and use"
             };
             entries.push(choice(
-                self.arg("use", &model.first.id()),
+                self.arg(after.select(), &model.first.id()),
                 model.first.name,
                 format!("{:.2} GB · {status}", model.size as f64 / 1e9),
             ));
         }
+        if after == AfterDownload::Use {
+            entries.push(choice(
+                self.arg("background-repo", repo),
+                "Download in background",
+                "Choose a file to cache while you work",
+            ));
+        }
         entries.push(choice(
-            self.arg("search", ""),
+            self.arg(after.search(), ""),
             "Search again",
             "Choose another repository",
         ));
@@ -172,7 +215,12 @@ impl Profiles {
             let mut state = self.state.lock().await;
             let provider = dest.check(&state, &current)?;
             state.pending = None;
-            if verb == "search" {
+            if matches!(verb, "search" | "background-search") {
+                let after = if verb == "search" {
+                    AfterDownload::Use
+                } else {
+                    AfterDownload::Cache
+                };
                 let form = FormSpec::new(
                     uuid::Uuid::new_v4().to_string(),
                     dest.command(),
@@ -186,18 +234,50 @@ impl Profiles {
                         FieldKind::Text,
                     )],
                 );
-                return Ok(open_form(&mut state, &current, form, Target::Hub(dest)));
+                return Ok(open_form(
+                    &mut state,
+                    &current,
+                    form,
+                    Target::Hub(dest, after),
+                ));
             }
             provider
         };
         match verb {
-            "repo" => dest.files(&current, &Hub::public()?, value).await,
+            "repo" => {
+                dest.files(&current, &Hub::public()?, value, AfterDownload::Use)
+                    .await
+            }
+            "background-repo" => {
+                dest.files(&current, &Hub::public()?, value, AfterDownload::Cache)
+                    .await
+            }
+            "download" => self.cache_local(&current, value),
             "use" => {
                 self.select_local(kit, current, dest, &provider, value)
                     .await
             }
             _ => Err("Unknown GGUF selection".into()),
         }
+    }
+
+    fn cache_local(&self, current: &SessionConfig, id: &str) -> Result<CommandResult, String> {
+        let file = selection(id)?;
+        let cache = Cache::locate()?;
+        let text = if cache.installed(&file) {
+            format!("{} is already installed.", file.name)
+        } else {
+            let text = format!(
+                "Downloading {} in the background. Use /downloads to follow progress.",
+                file.name
+            );
+            self.local_models.downloads.start(cache, file, true)?;
+            text
+        };
+        Ok(CommandResult::Events(vec![Event::Notice {
+            conversation: current.room.as_str().into(),
+            text,
+        }]))
     }
 
     async fn select_local(
@@ -208,34 +288,13 @@ impl Profiles {
         provider: &str,
         id: &str,
     ) -> Result<CommandResult, String> {
-        if id.len() > 256 {
-            return Err("Model identifier is too long".into());
-        }
-        let file = ModelFile::parse(id).ok_or("Invalid GGUF selection")?;
+        let file = selection(id)?;
         let cache = Cache::locate()?;
         if !cache.installed(&file) {
-            let progress = self.local_models.progress(current.room.as_str());
-            progress.show(format!("Preparing {}", file.name));
-            let hub = Hub::public()?;
-            let model = hub
-                .variants(&file.repo, Some(&file.revision))
-                .await?
-                .into_iter()
-                .find(|v| v.first == file)
-                .ok_or("The chosen GGUF is unavailable")?;
-            let percent = std::sync::atomic::AtomicU64::new(u64::MAX);
-            cache
-                .download(&hub, &model, |done| {
-                    let value = done.saturating_mul(100) / model.size;
-                    if percent.swap(value, std::sync::atomic::Ordering::Relaxed) != value {
-                        progress.show(format!(
-                            "{} · {value}% ({:.2}/{:.2} GB)",
-                            file.name,
-                            done as f64 / 1e9,
-                            model.size as f64 / 1e9
-                        ));
-                    }
-                })
+            self.local_models
+                .downloads
+                .start(cache, file, false)?
+                .wait()
                 .await?;
         }
         let mut state = self.state.lock().await;
@@ -262,4 +321,11 @@ impl Profiles {
             }
         }
     }
+}
+
+fn selection(id: &str) -> Result<ModelFile, String> {
+    if id.len() > 256 {
+        return Err("Model identifier is too long".into());
+    }
+    ModelFile::parse(id).ok_or_else(|| "Invalid GGUF selection".into())
 }

@@ -527,7 +527,11 @@ These files contain counters, not conversation content or resume arguments.
 
 ### Local GGUF models
 
-In **/providers**, add a connection of type **Local llama.cpp**, leave the URL empty and choose **No key**. Select a cached model or **Search Hugging Face**. Enter a search term or an exact public repository, then choose the GGUF file by quantization and size. The sidebar shows download progress. After an interruption, selecting the same file resumes the transfer when the server supports byte ranges. The application verifies each downloaded file against its SHA-256 and saves all shards in the Hugging Face Hub cache. **/model** lists installed models offline and selects one for the current conversation.
+In **/providers**, add a connection of type **Local llama.cpp**, leave the URL empty and choose **No key**. Select a cached model or **Search Hugging Face**. Enter a search term or an exact public repository, then choose the GGUF file by quantization and size.
+
+To keep chatting with the current model, choose **Download in background** in the GGUF picker and select a file. Open **/downloads** or the sidebar (**F7** on wide terminals) to see the progress bar, percentage, bytes received and completion or failure. A background download continues across conversations while the application is open. Select the installed file when you want to use it.
+
+After an interruption, selecting the same file resumes the transfer when the server supports byte ranges. The application verifies each downloaded file against its SHA-256 and saves all shards in the Hugging Face Hub cache. **/model** lists installed models offline. The sidebar and footer show the model name and quantization. The saved profile retains the model repository, revision and filename for Hub selections.
 
 A fresh project can also start with `--provider llamacpp --model /path/to/model.gguf` or `--provider llamacpp --model owner/repository:Q4_K_M`. Each local server listens on loopback. Local agents default to a 16,384-token context. Choose a model that supports tool calls and a context size that fits the machine.
 

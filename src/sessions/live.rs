@@ -32,7 +32,7 @@ struct Sources {
     plans: watch::Receiver<()>,
     files: watch::Receiver<()>,
     updates: watch::Receiver<()>,
-    downloads: watch::Receiver<std::collections::HashMap<String, String>>,
+    downloads: watch::Receiver<()>,
     hooks: watch::Receiver<()>,
     /// A mode set by a mode tool, outside `/mode`.
     modes: watch::Receiver<()>,
@@ -62,7 +62,7 @@ pub(super) fn subscribe(
         plans: sessions.profiles.resources.plans.subscribe(),
         files: sessions.profiles.resources.files.subscribe(),
         updates: sessions.services.updates.changes.subscribe(),
-        downloads: sessions.profiles.local_models.changes.subscribe(),
+        downloads: sessions.profiles.local_models.downloads.changes.subscribe(),
         hooks: sessions.services.hooks.changes.subscribe(),
         modes: sessions.policy.changes.subscribe(),
         compactions: sessions.profiles.resources.compactions.subscribe(),
@@ -146,14 +146,13 @@ async fn events(
         sidebar.sections.push(section);
     }
     sidebar.sections.push(services.updates.sidebar());
-    if let Some(note) = sources.downloads.borrow_and_update().get(room) {
-        use roomkit_tui::protocol::{SidebarContent, SidebarEntry, SidebarSection};
-        sidebar.sections.push(SidebarSection::new(
-            "Model download",
-            SidebarContent::Entries {
-                entries: vec![SidebarEntry::new(note.clone())],
-            },
-        ));
+    let downloads = &profiles.local_models.downloads;
+    events.push(Event::PanelUpdated {
+        conversation: current.room.as_str().into(),
+        panel: downloads.panel(),
+    });
+    if let Some(section) = downloads.sidebar() {
+        sidebar.sections.insert(0, section);
     }
     events.push(Event::SidebarChanged {
         conversation: current.room.as_str().into(),
@@ -188,7 +187,7 @@ impl Sources {
 
 /// The application update and local model transfers can both change the sidebar.
 async fn transfer_changed(
-    models: &mut watch::Receiver<std::collections::HashMap<String, String>>,
+    models: &mut watch::Receiver<()>,
     updates: &mut watch::Receiver<()>,
 ) -> bool {
     tokio::select! {

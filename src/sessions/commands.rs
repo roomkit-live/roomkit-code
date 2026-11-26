@@ -43,6 +43,11 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             "<command>",
         ),
         (
+            "downloads",
+            "Show model download progress and recent results",
+            "",
+        ),
+        (
             "model",
             "Choose the current agent's model among its connection's",
             "[model-id]",

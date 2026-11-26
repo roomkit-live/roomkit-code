@@ -37,14 +37,14 @@ impl State {
             view.can_attach_images =
                 served && profile.vision && kind != crate::providers::ProviderKind::LlamaCpp;
             // Match the engine's usage identity, including Responses over OAuth.
-            view.model = Some(
-                ModelInfo::new(kind.name(), profile.model.clone()).with_effort(
-                    profile
-                        .reasoning_effort
-                        .clone()
-                        .unwrap_or_else(|| "default".into()),
-                ),
-            );
+            let mut model = ModelInfo::new(kind.name(), &profile.model)
+                .with_effort(profile.reasoning_effort.as_deref().unwrap_or("default"));
+            if kind == crate::providers::ProviderKind::LlamaCpp
+                && let Some(label) = crate::local_models::display_name(&profile.model)
+            {
+                model = model.with_display_name(label);
+            }
+            view.model = Some(model);
             view.context_capacity = profile.context_window.or_else(|| {
                 (kind == crate::providers::ProviderKind::LlamaCpp)
                     .then_some(crate::local_models::DEFAULT_CONTEXT.into())

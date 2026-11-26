@@ -90,7 +90,7 @@ impl Progress {
         self.agent = Some(snapshot.selected_agent.clone());
         let mut settings = Vec::new();
         if let Some(model) = &snapshot.model {
-            settings.push(format!("model: {}", model.model));
+            settings.push(format!("model: {}", model.label()));
         }
         if let Some(provider) = &self.provider {
             settings.push(format!("provider: {provider}"));

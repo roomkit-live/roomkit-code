@@ -1,6 +1,9 @@
 //! Local model selection, download progress and shared llama.cpp runtimes.
 pub(crate) mod cache;
+mod downloads;
 pub(crate) mod hub;
+mod label;
+pub(crate) use label::display_name;
 mod provider;
 mod runtime;
 mod transfer;
@@ -14,7 +17,6 @@ use std::{
     path::Path,
     sync::{Arc, Mutex, Weak},
 };
-use tokio::sync::watch;
 
 pub(crate) const DEFAULT_CONTEXT: u32 = 16_384;
 
@@ -25,7 +27,7 @@ pub(crate) struct LocalModels {
     active: ActiveServer,
     stop: tokio_util::sync::CancellationToken,
     servers: Mutex<HashMap<String, Weak<LlamaCpp>>>,
-    pub changes: watch::Sender<HashMap<String, String>>,
+    pub downloads: Arc<downloads::Downloads>,
 }
 
 impl LocalModels {
@@ -70,41 +72,14 @@ impl LocalModels {
 
     pub fn cancel_preparation(&self) {
         self.stop.cancel();
+        self.downloads.stop();
     }
 
     pub async fn close(&self) {
+        self.downloads.join().await;
         if let Some(server) = self.active.write().await.take() {
             server.close().await;
         }
-    }
-
-    pub fn progress<'a>(&'a self, room: &'a str) -> Progress<'a> {
-        Progress { models: self, room }
-    }
-}
-
-pub(crate) struct Progress<'a> {
-    models: &'a LocalModels,
-    room: &'a str,
-}
-
-impl Progress<'_> {
-    pub fn show(&self, note: String) {
-        self.models.changes.send_if_modified(|all| {
-            if all.get(self.room) == Some(&note) {
-                return false;
-            }
-            all.insert(self.room.into(), note);
-            true
-        });
-    }
-}
-
-impl Drop for Progress<'_> {
-    fn drop(&mut self) {
-        self.models
-            .changes
-            .send_if_modified(|all| all.remove(self.room).is_some());
     }
 }
 

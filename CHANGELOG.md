@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Run GGUF models through the managed llama.cpp provider. The model picker can search public Hugging Face repositories, download a quantization and select cached files offline. CodeLALA uses a separate, versioned OVH runtime.
+- Run GGUF models through the managed llama.cpp provider. The model picker can search public Hugging Face repositories, download a quantization in the background with a sidebar progress bar, and select cached files offline. The sidebar and footer show the model name and quantization. CodeLALA uses a separate, versioned OVH runtime.
 
 - Releases are signed. Each checksum file is signed with the project's minisign key where the release is built, and the updater installs nothing whose checksum that key did not sign. `install.sh` checks the signature when `minisign` is installed and says when it could not. Versions published before this one are unsigned: the updater of this version does not install them, and an unsigned latest release that is not newer reads as no update rather than as an error. A refused signature says why (another key, an old algorithm, a forged file). The user guide shows how to check a release by hand without trusting `install.sh`, and what a signature does not prove.
 

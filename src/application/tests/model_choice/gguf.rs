@@ -10,7 +10,17 @@ const REV: &str = "1234567890123456789012345678901234567890";
 const FIRST: &str = "quant/example-Q6_K-00001-of-00002.gguf";
 const LAST: &str = "quant/example-Q6_K-00002-of-00002.gguf";
 
-async fn hub(bad: Arc<AtomicBool>) -> (url::Url, tokio::task::JoinHandle<()>) {
+#[derive(Default)]
+struct Gate {
+    requests: std::sync::atomic::AtomicUsize,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+async fn hub(
+    bad: Arc<AtomicBool>,
+    gate: Option<Arc<Gate>>,
+) -> (url::Url, tokio::task::JoinHandle<()>) {
     let repo = || async {
         let siblings: Vec<_> = [(FIRST, b"one"), (LAST, b"two")]
             .iter()
@@ -39,6 +49,11 @@ async fn hub(bad: Arc<AtomicBool>) -> (url::Url, tokio::task::JoinHandle<()>) {
         .route(
             &format!("/example/coder/resolve/{REV}/{LAST}"),
             get(move || async move {
+                if let Some(gate) = gate {
+                    gate.requests.fetch_add(1, Ordering::Relaxed);
+                    gate.entered.notify_one();
+                    gate.release.notified().await;
+                }
                 if bad.load(Ordering::Relaxed) {
                     "bad"
                 } else {
@@ -61,7 +76,7 @@ async fn hub(bad: Arc<AtomicBool>) -> (url::Url, tokio::task::JoinHandle<()>) {
 #[tokio::test]
 async fn gguf_search_download_retry_select_and_offline_resume() {
     let bad = Arc::new(AtomicBool::new(true));
-    let (url, server) = hub(bad.clone()).await;
+    let (url, server) = hub(bad.clone(), None).await;
     let cache = tempfile::tempdir().unwrap();
     let cache_dir = cache.path().join("hub");
     crate::local_models::TEST_HUB
@@ -97,7 +112,7 @@ async fn gguf_search_download_retry_select_and_offline_resume() {
             assert!(failure.to_string().contains("SHA-256"));
             assert_eq!(
                 offered(&model(&app, "").await).1.len(),
-                1,
+                2,
                 "no partial model"
             );
             bad.store(false, Ordering::Relaxed);
@@ -106,6 +121,7 @@ async fn gguf_search_download_retry_select_and_offline_resume() {
             };
             let id = format!("hf://example/coder@{REV}/{FIRST}");
             assert_eq!(view.model.as_ref().unwrap().model, id);
+            assert_eq!(view.model.as_ref().unwrap().label(), "example · Q6_K");
             app.view = *view;
             let path = cache_dir.join("models--example--coder/snapshots").join(REV);
             assert_eq!(std::fs::read(path.join(LAST)).unwrap(), b"two");
@@ -177,3 +193,5 @@ async fn check_agent_forms(app: &Application, id: &str) {
     assert_eq!(edit["id"], "code");
     assert_eq!(edit["model"], id);
 }
+
+mod background;

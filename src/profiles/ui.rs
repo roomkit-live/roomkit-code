@@ -21,7 +21,7 @@ enum Target {
         original: Option<String>,
     },
     Agent(Option<String>),
-    Hub(local::Destination),
+    Hub(local::Destination, local::AfterDownload),
 }
 
 pub(super) fn choice(
@@ -286,11 +286,13 @@ impl Profiles {
         let mut next = current;
         let mut created = None;
         match &target {
-            Target::Hub(dest) => {
+            Target::Hub(dest, after) => {
                 state.pending = None;
                 drop(edit_lease);
                 drop(state);
-                return dest.search(&next, value(values, "query").trim()).await;
+                return dest
+                    .search(&next, value(values, "query").trim(), *after)
+                    .await;
             }
             Target::Provider(original) => {
                 let profile = parse_provider(values, original.as_deref(), &state)?;
