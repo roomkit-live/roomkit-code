@@ -70,13 +70,19 @@ class Model(StreamingModel):
                 return {"content": "Owner got the live answer."}
             if "The finding was amber." in result:
                 return {"content": "Owner got the original reviewer's answer."}
-        if "[Background task from remote-linux " in content:
-            if "Included the requested finding." in content:
+        opening = "[Background task from remote-linux "
+        if opening in content:
+            self.server.owner_inputs.append(content)
+            # Two hand-backs can reach one turn, as when the capped task's
+            # failure is still being told when the next task's result comes:
+            # the latest is the one answered.
+            latest = content[content.rindex(opening):]
+            if "Included the requested finding." in latest:
                 return {"content": "Owner received the revised finding."}
-            if "[Background task from remote-linux failed: " in content:
+            if latest.startswith(opening + "failed: "):
                 return {"content": "Owner observed worker loss."}
             for worker in ("macbook", "linux"):
-                if f"Proof from {worker}." in content:
+                if f"Proof from {worker}." in latest:
                     return {"content": f"Owner received proof from {worker}."}
             return {"content": "Unexpected task result."}
         prompts = ("Start a review that accepts updates", "Pass the finding to my worker",
@@ -172,6 +178,7 @@ def run(options):
         server.release_review = threading.Event()
         stack.callback(server.release_review.set)
         server.attempts = []
+        server.owner_inputs = []
         server.accepted = threading.Event()
         server.release = threading.Event()
         stack.callback(server.release.set)
@@ -206,7 +213,14 @@ def run(options):
         print("PASS The parent terminal received the reason the worker stopped.", flush=True)
         # Both workers expose the same profile. Only the chosen one may receive this task.
         offset = start_from_composer(term, "Confirm placement")
-        term.wait("Owner received proof from macbook.", offset)
+        try:
+            term.wait("Owner received proof from macbook.", offset)
+        except AssertionError:
+            # This wait failed now and then in CI only: what the owner's
+            # model was given tells why.
+            for given in server.owner_inputs[-3:]:
+                print("Owner was given:", json.dumps(given[:1500]), flush=True)
+            raise
         # The resumed coordinator has no in-memory worker queue or previous turn.
         os.write(term.master, b"\x04")
         assert term.proc.wait(15) == 0
