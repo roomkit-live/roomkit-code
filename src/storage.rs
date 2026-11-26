@@ -219,6 +219,11 @@ impl SessionLeases {
 /// to a private temporary file beside it, flushed, renamed over it, then
 /// its directory flushed, without which a crash can undo the rename. The
 /// one way a state file is written.
+///
+/// Once renamed, the file is replaced: a directory that refuses to be
+/// flushed (some network and FUSE file systems do) makes the rename less
+/// durable, not undone, so it is no failure of the write. Reporting one
+/// would have callers keep a revision the file no longer has.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let directory = path
@@ -229,7 +234,7 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     temporary.as_file().sync_all()?;
     temporary.persist(path).map_err(|error| error.error)?;
     #[cfg(unix)]
-    File::open(directory)?.sync_all()?;
+    let _ = File::open(directory).and_then(|directory| directory.sync_all());
     Ok(())
 }
 

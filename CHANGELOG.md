@@ -26,7 +26,7 @@
 
 - A conversation no view opened no longer inherits a launch's Yolo mode.
 
-- Executor pool (beta): a task waiting for a slot survives Redis errors for 30 seconds; a worker record that does not read is left out instead of stopping the pool; a worker whose heartbeats fail says so and stops after five minutes; a lost slot cancels the worker's turn; a worker's tool result past 256 KiB is omitted from its report.
+- Executor pool (beta): a task waiting for a slot survives Redis errors for 30 seconds; a worker record that does not read, one that is not JSON included, is left out instead of stopping the pool, and its worker replaces it when it registers again; a worker whose heartbeats fail says so and stops after five minutes; a lost slot cancels the worker's turn; a worker's tool result past 256 KiB is omitted from its report.
 
 - Updates follow a download redirect to github.com only for this repository's releases.
 
