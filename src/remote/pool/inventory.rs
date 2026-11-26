@@ -8,7 +8,7 @@ pub(crate) use crate::names::LIST_EXECUTORS;
 #[derive(Clone)]
 pub(crate) struct Inventory {
     pub(super) registry: Registry,
-    pub(crate) backend: roomkit::RedisTurnBackend,
+    pub(crate) backend: roomkit_providers_redis::RedisTurnBackend,
 }
 
 impl Inventory {

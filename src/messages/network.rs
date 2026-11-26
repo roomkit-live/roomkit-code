@@ -11,9 +11,8 @@ use super::{
 use crate::{Result, storage::SessionLeases};
 use roomkit::model::{ChannelId, EventId, RoomId};
 use roomkit::turns::{ChannelCall, TurnBackend, wire::ChannelControl};
-use roomkit::{
-    ConversationStore, RedisTurnBackend, RedisTurnBackendOptions, TurnExecutor, TurnExecutorOptions,
-};
+use roomkit::{ConversationStore, TurnExecutor, TurnExecutorOptions};
+use roomkit_providers_redis::{RedisTurnBackend, RedisTurnBackendOptions};
 use serde_json::json;
 use std::sync::Arc;
 

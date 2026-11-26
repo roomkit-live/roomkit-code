@@ -7,7 +7,8 @@ pub(crate) use outcomes::{OUTCOME, REPORT_LIFETIME, ToolOutcome};
 use std::sync::Arc;
 
 use roomkit::turns::TurnBackendHandle;
-use roomkit::{RedisTurnBackend, RedisTurnBackendOptions, TurnExecutor, TurnExecutorOptions};
+use roomkit::{TurnExecutor, TurnExecutorOptions};
+use roomkit_providers_redis::{RedisTurnBackend, RedisTurnBackendOptions};
 
 use crate::{Result, config::Settings, profiles::Profiles, storage::Storage};
 
