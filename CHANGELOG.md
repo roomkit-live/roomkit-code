@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Built on RoomKit Rust b0ccf3d9 with roomkit-providers e917c18, roomkit-tools 8c34e02 and roomkit-tui ca6810c. The engine no longer holds the turn backend on Redis: the executor pool and session groups take it from roomkit-providers (`roomkit-providers-redis`), where it moved as it was. Their configuration is unchanged.
+- Built on RoomKit Rust b0ccf3d9 with roomkit-providers e917c18, roomkit-tools 8c34e02 and roomkit-tui ca6810c. The engine no longer holds the turn backend on Redis: the executor pool and session groups take it from roomkit-providers (`roomkit-providers-redis`), where it moved as it was. Their configuration is unchanged. With this engine, the notice of a delegated task that did not complete tells the agent that asked for it why, in one code of a closed list: `failed: an error ended it (error)` where it read `failed.`
 
 - Session groups (beta) can authenticate their members: with the same secret of at least 32 characters in `ROOMKIT_SESSION_GROUP_KEY` on every member, each message between sessions is sealed, and a message the key did not seal is refused. Without the variable a group works as before, open to anyone who can write to its Redis.
 

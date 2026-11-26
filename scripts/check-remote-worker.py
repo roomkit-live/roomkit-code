@@ -40,7 +40,7 @@ class Model(StreamingModel):
             if notice.startswith("[Background task from remote-linux "):
                 if " cancelled." in notice:
                     return {"content": "Worker cancellation received."}
-                if " failed." in notice:
+                if " failed: " in notice:
                     return {"content": "Worker failure received."}
                 if "Worker observed Plan refusal" in content:
                     return {"content": "Plan refusal received."}

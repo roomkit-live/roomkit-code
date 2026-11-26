@@ -73,7 +73,7 @@ class Model(StreamingModel):
         if "[Background task from remote-linux " in content:
             if "Included the requested finding." in content:
                 return {"content": "Owner received the revised finding."}
-            if " failed." in content:
+            if "[Background task from remote-linux failed: " in content:
                 return {"content": "Owner observed worker loss."}
             for worker in ("macbook", "linux"):
                 if f"Proof from {worker}." in content:
