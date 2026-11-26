@@ -31,6 +31,7 @@ class Model(StreamingModel):
         return self.worker_reply(name, messages)
 
     def owner_reply(self, messages, last, content):
+        self.server.owner_inputs.append(content)
         if last["role"] == "tool":
             if last.get("tool_call_id") == "delegate-followup":
                 self.server.task = json.loads(content)["task_id"]
@@ -70,6 +71,9 @@ class Model(StreamingModel):
                 return {"content": "Owner got the live answer."}
             if "The finding was amber." in result:
                 return {"content": "Owner got the original reviewer's answer."}
+        # Each hand-back opens a turn of its own: one handed to a running
+        # turn would read as a participant's words, its mark a copy, and the
+        # wait for its answer fails (RoomKit RMK-2146).
         if "[Background task from remote-linux " in content:
             if "Included the requested finding." in content:
                 return {"content": "Owner received the revised finding."}
@@ -172,6 +176,7 @@ def run(options):
         server.release_review = threading.Event()
         stack.callback(server.release_review.set)
         server.attempts = []
+        server.owner_inputs = []
         server.accepted = threading.Event()
         server.release = threading.Event()
         stack.callback(server.release.set)
@@ -206,7 +211,14 @@ def run(options):
         print("PASS The parent terminal received the reason the worker stopped.", flush=True)
         # Both workers expose the same profile. Only the chosen one may receive this task.
         offset = start_from_composer(term, "Confirm placement")
-        term.wait("Owner received proof from macbook.", offset)
+        try:
+            term.wait("Owner received proof from macbook.", offset)
+        except AssertionError:
+            # What the owner's model was given tells why: two hand-backs
+            # in one turn showed here before RoomKit RMK-2146.
+            for given in server.owner_inputs[-3:]:
+                print("Owner was given:", json.dumps(given[:1500]), flush=True)
+            raise
         # The resumed coordinator has no in-memory worker queue or previous turn.
         os.write(term.master, b"\x04")
         assert term.proc.wait(15) == 0

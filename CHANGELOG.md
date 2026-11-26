@@ -2,13 +2,13 @@
 
 ## Unreleased
 
-- Releases are signed. Each checksum file is signed with the project's minisign key where the release is built, and the updater installs nothing whose checksum that key did not sign. `install.sh` checks the signature when `minisign` is installed and says when it could not. Versions published before this one are unsigned: the updater of this version does not install them.
+- Releases are signed. Each checksum file is signed with the project's minisign key where the release is built, and the updater installs nothing whose checksum that key did not sign. `install.sh` checks the signature when `minisign` is installed and says when it could not. Versions published before this one are unsigned: the updater of this version does not install them, and an unsigned latest release that is not newer reads as no update rather than as an error. A refused signature says why (another key, an old algorithm, a forged file). The user guide shows how to check a release by hand without trusting `install.sh`, and what a signature does not prove.
 
 - The result of a delegated task that ends while the agent is still telling another task's result now waits its own turn, and the agent reads it as the application's notice of that task. It was handed to the running answer as words of a participant, with the mark of the task's result neutralised as a copy: when two delegated tasks ended close together, the agent read the second one's outcome as something a participant said.
 
 - Built on RoomKit Rust d33e0eed with roomkit-providers a89f09e, roomkit-tools 9eb5450 and roomkit-tui a44ea2b. The engine no longer holds the turn backend on Redis: the executor pool and session groups take it from roomkit-providers (`roomkit-providers-redis`), where it moved as it was. Their configuration is unchanged. With this engine, the notice of a delegated task that did not complete tells the agent that asked for it why, in one code of a closed list: `failed: an error ended it (error)` where it read `failed.`
 
-- Session groups (beta) can authenticate their members: with the same secret of at least 32 characters in `ROOMKIT_SESSION_GROUP_KEY` on every member, each message between sessions is sealed, and a message the key did not seal is refused. Without the variable a group works as before, open to anyone who can write to its Redis.
+- Session groups (beta) can authenticate their members: with the same secret of at least 32 bytes in `ROOMKIT_SESSION_GROUP_KEY` on every member, each message between sessions is sealed, and a message the key did not seal is refused. The receiving session answers with a sealed receipt, without which the sender does not count the message as delivered: whoever answers in the broker in a member's place cannot confirm it. A refusal says why on the sender's side (no key, another key, a key on one side only) and is recorded as `session_message_refused` in the refusing session's diagnostics, once per kind. Without the variable a group works as before, open to anyone who can write to its Redis. The guide states what the key does not cover.
 
 - The executor pool's and the session group's fingerprints are computed without the Redis URL's user and password. A fingerprint is shown in executor addresses and kept in rooms, where a digest of the whole URL let its password be guessed. Delegated executor sessions and session addresses recorded before this change are not continued under a URL that holds credentials: start them anew.
 
@@ -28,7 +28,7 @@
 
 - A conversation no view opened no longer inherits a launch's Yolo mode.
 
-- Executor pool (beta): a task waiting for a slot survives Redis errors for 30 seconds; a worker record that does not read is left out instead of stopping the pool; a worker whose heartbeats fail says so and stops after five minutes; a lost slot cancels the worker's turn; a worker's tool result past 256 KiB is omitted from its report.
+- Executor pool (beta): a task waiting for a slot survives Redis errors for 30 seconds; a worker record that does not read, one that is not JSON included, is left out instead of stopping the pool, and its worker replaces it when it registers again; a worker whose heartbeats fail says so and stops after five minutes; a lost slot cancels the worker's turn; a worker's tool result past 256 KiB is omitted from its report.
 
 - Updates follow a download redirect to github.com only for this repository's releases.
 

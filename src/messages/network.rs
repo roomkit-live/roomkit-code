@@ -54,8 +54,9 @@ pub(super) struct Network {
     pub channel: ChannelId,
     scope: String,
     pub wake: Arc<tokio::sync::Notify>,
-    /// The group's key, which seals what this session sends.
-    key: Option<seal::Key>,
+    /// The group's key, which seals what this session sends and checks the
+    /// receipts it gets back.
+    guard: seal::Guard,
     responses: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -66,7 +67,7 @@ impl Network {
         kit: &Kit,
         room: &RoomId,
         leases: Arc<SessionLeases>,
-        key: Option<seal::Key>,
+        guard: seal::Guard,
     ) -> Result<Joined> {
         let backend = RedisTurnBackend::new(
             Some(address),
@@ -83,7 +84,7 @@ impl Network {
             channel.clone(),
             leases,
             wake.clone(),
-            key.clone(),
+            guard.clone(),
         );
         let executor = TurnExecutor::new(
             move |id| std::future::ready(Ok((id == inbox.channel).then(|| inbox.clone()))),
@@ -102,7 +103,7 @@ impl Network {
                 crate::remote::without_credentials(address)?,
             ))?),
             wake,
-            key,
+            guard,
             responses: Default::default(),
         };
         // What is kept in the project's own store failing is the launch's
@@ -242,11 +243,7 @@ impl Network {
             to: to.clone(),
         });
         let wire = json!(wire);
-        let seal = self
-            .key
-            .as_ref()
-            .map(|key| key.seal(id, &wire))
-            .transpose()?;
+        let seal = self.guard.seal(id, &wire)?;
         call.arguments = [("id".into(), json!(id)), ("mail".into(), wire)]
             .into_iter()
             .chain(seal.map(|seal| ("seal".into(), json!(seal))))
@@ -257,8 +254,21 @@ impl Network {
             .await
             .map_err(|_| "Remote session unreachable or acknowledgement lost")?
             .ok_or("Remote session did not acknowledge the message")?;
-        if response.error.is_some() || response.result != json!(id) {
-            return Err("Remote session refused the message".into());
+        if let Some(error) = &response.error {
+            // A refusal for the seal says what to fix; anything else the
+            // peer wrote is not repeated.
+            let refusal = seal::Refusal::answered(&error.message);
+            let told =
+                refusal.map_or_else(|| "Remote session refused the message".into(), |r| r.told());
+            return Err(told.into());
+        }
+        if !self.guard.confirms(id, &response.result) {
+            return Err(if self.guard.sealed() {
+                "Remote session did not confirm the message with the group's key: whoever answered is no member of the group"
+            } else {
+                "Remote session refused the message"
+            }
+            .into());
         }
         Ok(())
     }

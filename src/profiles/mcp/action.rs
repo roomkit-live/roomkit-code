@@ -47,6 +47,9 @@ impl<'a> Action<'a> {
     /// The action `arguments` name: words separated by colons, as a choice
     /// writes them, or by spaces, as a person types them.
     pub(in crate::profiles) fn parse(arguments: &'a str) -> Result<Self, String> {
+        // As before the actions had a type: a tab or a newline typed around
+        // them is no part of them.
+        let arguments = arguments.trim();
         let mut parts = arguments.split([':', ' ']).filter(|part| !part.is_empty());
         let action = parts.next().unwrap_or("list");
         let id = parts.next().unwrap_or_default();
@@ -82,12 +85,25 @@ impl<'a> Action<'a> {
     }
 
     /// Whether the action writes the profile files: it then holds the
-    /// cross-process edit lease, which a menu left open must not.
+    /// cross-process edit lease, which a menu left open must not. Every
+    /// action is named, so that a new one cannot skip the lease unnoticed.
     pub(in crate::profiles) fn mutates(&self) -> bool {
-        matches!(
-            self,
-            Self::ConfirmDelete { .. } | Self::Enable(_) | Self::Disable(_) | Self::Toggle { .. }
-        )
+        match self {
+            Self::ConfirmDelete { .. }
+            | Self::Enable(_)
+            | Self::Disable(_)
+            | Self::Toggle { .. } => true,
+            // A connection is the runtime's, which takes the lease to save.
+            Self::Connect(_) | Self::Disconnect(_) => false,
+            Self::List
+            | Self::Close
+            | Self::Add
+            | Self::AddHttp
+            | Self::Show(_)
+            | Self::Tools { .. }
+            | Self::Edit(_)
+            | Self::Delete(_) => false,
+        }
     }
 }
 
@@ -159,6 +175,12 @@ mod tests {
         assert_eq!(Action::parse("")?, Action::List);
         assert_eq!(Action::parse("connect files")?, Action::Connect("files"));
         assert_eq!(Action::parse(" disable  files ")?, Action::Disable("files"));
+        // Review finding: since 7d6ea96 a tab or a newline typed around an
+        // action gave the usage text.
+        assert_eq!(
+            Action::parse("\tconnect files\n")?,
+            Action::Connect("files")
+        );
         assert!(Action::parse("toggle files").is_err());
         assert!(Action::parse("uninstall files").is_err());
         assert!(Action::parse("toggle:files:read").is_ok_and(|action| action.mutates()));

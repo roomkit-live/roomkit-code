@@ -1,7 +1,9 @@
 # Contributing
 
 Use the toolchain pinned in `rust-toolchain.toml`. Rust 1.94 is the minimum
-supported version. Run `make check`, `make msrv` and `make audit` before delivery.
+supported version. Run `make check`, `make msrv` and `make audit` before delivery,
+and on Linux with Docker `make redis-check`: the executor pool and session group
+scenarios, which CI runs on Linux after `make check`.
 Install cargo-deny with `cargo install cargo-deny --locked` for the audit gate.
 CI runs on Linux and macOS; tests must not require a real model or credentials.
 For native image paste on Linux, `make clipboard-check` additionally uses Xvfb

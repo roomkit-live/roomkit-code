@@ -285,6 +285,140 @@ async fn github_fixture_checks_pair_size_integrity_and_never_follows_untrusted_r
     task.abort();
 }
 
+/// A second key made for one test, whose secret half was not kept either.
+const OTHER_KEY: &str = "RWQDL1d+eln49WUATnip+g2D+MUheyt+OGaggNiJBLef+mzOC6qmpwMY";
+
+/// `OTHER_KEY`'s signature of a checksum file that names a binary of
+/// another version and platform, beside the fixture binary's digest.
+const OTHER_SIGNATURE: &str = "untrusted comment: fixture\nRUQDL1d+eln49W6nocLncIn4QFMg/IdRHuiaJ3D9ANY0WSgunW2jzR9HOQMQBwg1L9w17zFxlw20fHAh7VmPJqPJV2CcqACnKg0=\ntrusted comment: fixture\n1VfpPNNfK56aNLBnjfS8pabm1tp5VOxjLfZ/4RxmlwvrW7OdWDYK93UW2aRPvpgu3TnNtHYadrYrzI53CH34BQ==\n";
+
+/// Review finding: no download test failed once the signature check or the
+/// check of the name the signed checksum holds was removed. Each case here
+/// serves a binary whose digest its checksum file gives, so only those
+/// checks stand between it and an installation.
+#[tokio::test]
+async fn a_download_needs_a_checksum_its_signature_covers_naming_this_binary() {
+    let data = b"fixture release binary";
+    let forged = b"forged release binary";
+    let name = format!("roomkit-code-v0.2.0-{TARGET}");
+    let checksum =
+        |binary: &[u8], named: &str| format!("{}  {named}\n", crate::digest::sha256_hex(binary));
+    let (unsigned, other) = (
+        checksum(forged, &name),
+        checksum(data, "roomkit-code-v0.1.0-other-target"),
+    );
+    let router = Router::new()
+        .route(
+            "/repos/roomkit-live/roomkit-code/releases/assets/1",
+            get(|| async { &b"fixture release binary"[..] }),
+        )
+        .route(
+            "/repos/roomkit-live/roomkit-code/releases/assets/5",
+            get(|| async { fixture_signature() }),
+        )
+        .route(
+            "/repos/roomkit-live/roomkit-code/releases/assets/6",
+            get(move || async { unsigned }),
+        )
+        .route(
+            "/repos/roomkit-live/roomkit-code/releases/assets/7",
+            get(|| async { &b"forged release binary"[..] }),
+        )
+        .route(
+            "/repos/roomkit-live/roomkit-code/releases/assets/8",
+            get(move || async { other }),
+        )
+        .route(
+            "/repos/roomkit-live/roomkit-code/releases/assets/9",
+            get(|| async { OTHER_SIGNATURE }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let release = |(binary, size): (u64, usize), checksum, signature| Release {
+        tag_name: "v0.2.0".into(),
+        draft: false,
+        prerelease: false,
+        assets: vec![
+            Asset {
+                id: binary,
+                name: name.clone(),
+                size: size as u64,
+            },
+            Asset {
+                id: checksum,
+                name: format!("{name}.sha256"),
+                size: 150,
+            },
+            Asset {
+                id: signature,
+                name: format!("{name}.sha256.minisig"),
+                size: 300,
+            },
+        ],
+    };
+    // A checksum file and a binary replaced together, the signature kept.
+    let github = GitHub::with_source(url.clone(), None, FIXTURE_KEY).unwrap();
+    let replaced = release((7, forged.len()), 6, 5);
+    let refused = github.download(&replaced).await.unwrap_err().to_string();
+    assert!(
+        refused.contains("signature verification failed"),
+        "{refused}"
+    );
+    // A checksum file the key did sign, for another binary.
+    let github = GitHub::with_source(url, None, OTHER_KEY).unwrap();
+    let elsewhere = release((1, data.len()), 8, 9);
+    let refused = github.download(&elsewhere).await.unwrap_err().to_string();
+    assert_eq!(refused, "Invalid release checksum file");
+    task.abort();
+}
+
+/// Review finding: the latest release had to be signed before its version
+/// was compared, so a build newer than the latest release, or one whose
+/// latest release predates signing, reported an error at each check
+/// instead of no update. A release that would update this build still has
+/// to be signed.
+#[tokio::test]
+async fn only_a_release_that_would_update_this_build_must_be_signed() {
+    for (tag, newer) in [("v0.0.1", false), ("v999.0.0", true)] {
+        let name = format!("roomkit-code-{tag}-{TARGET}");
+        let release = Release {
+            tag_name: tag.into(),
+            draft: false,
+            prerelease: false,
+            assets: vec![
+                Asset {
+                    id: 1,
+                    name: name.clone(),
+                    size: 22,
+                },
+                Asset {
+                    id: 2,
+                    name: format!("{name}.sha256"),
+                    size: 150,
+                },
+            ],
+        };
+        let json = serde_json::to_string(&release).unwrap();
+        let router = Router::new().route(
+            "/repos/roomkit-live/roomkit-code/releases/latest",
+            get(move || async { json }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let github = GitHub::with_source(url, None, FIXTURE_KEY).unwrap();
+        let latest = github.latest().await;
+        if newer {
+            let refused = latest.unwrap_err().to_string();
+            assert!(refused.contains("no signature"), "{refused}");
+        } else {
+            assert_eq!(latest.unwrap().unwrap().tag_name, tag);
+        }
+        task.abort();
+    }
+}
+
 /// Review finding: any path of github.com was accepted after a redirect,
 /// where anyone can publish a file.
 #[test]

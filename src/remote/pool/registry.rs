@@ -7,11 +7,14 @@ use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::OnceCell;
 
 type Result<T> = std::result::Result<T, String>;
+// A record that does not read stops none of these scripts: `pcall` takes
+// its decoding error, and it is replaced, skipped or listed as it is.
 const REGISTER: &str = r#"
 local now = tonumber(redis.call('TIME')[1])
 local name, sample = ARGV[1], ARGV[2]
 local prior = redis.call('GET', KEYS[2])
-if prior and cjson.decode(prior).instance ~= ARGV[3] and
+local read, w = pcall(cjson.decode, prior or 'null')
+if read and type(w) == 'table' and w.instance ~= ARGV[3] and
    tonumber(redis.call('ZSCORE', KEYS[1], name) or 0) > now-10 then return 0 end
 redis.call('SET', KEYS[2], sample, 'EX', 86400)
 redis.call('ZADD', KEYS[1], now, name)
@@ -20,7 +23,8 @@ redis.call('EXPIRE', KEYS[1], 86400)
 return 1"#;
 const RETIRE: &str = r#"
 local data = redis.call('GET', KEYS[2])
-if data and cjson.decode(data).instance == ARGV[2] then
+local read, w = pcall(cjson.decode, data or 'null')
+if read and type(w) == 'table' and w.instance == ARGV[2] then
     redis.call('ZADD',KEYS[1],tonumber(redis.call('TIME')[1])-10,ARGV[1])
 end
 return 1"#;
@@ -30,9 +34,11 @@ local rows = {}
 for _,name in ipairs(redis.call('ZRANGEBYSCORE', KEYS[1], now-86400, '+inf')) do
     local data = redis.call('GET', ARGV[1]..':worker:'..name)
     if data then
-        local w = cjson.decode(data)
-        local leases = ARGV[1]..':slots:'..w.instance
-        local used = redis.call('ZCOUNT',leases,'('..now,'+inf')
+        local read, w = pcall(cjson.decode, data)
+        local used = 0
+        if read and type(w) == 'table' and type(w.instance) == 'string' then
+            used = redis.call('ZCOUNT',ARGV[1]..':slots:'..w.instance,'('..now,'+inf')
+        end
         local seen = tonumber(redis.call('ZSCORE',KEYS[1],name))
         table.insert(rows,{data,now-seen,used})
     end

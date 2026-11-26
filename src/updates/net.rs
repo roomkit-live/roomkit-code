@@ -33,14 +33,23 @@ pub struct Release {
     pub assets: Vec<Asset>,
 }
 impl Release {
+    /// Whether this release can be installed: [`Self::listed`], and signed.
     pub fn validate(&self) -> Result<()> {
+        self.listed()?;
+        self.signature()?;
+        Ok(())
+    }
+
+    /// Whether this release can be the latest one: published, stable, with
+    /// this platform's binary and checksum. Its signature only matters to
+    /// a build it would update.
+    fn listed(&self) -> Result<()> {
         if self.draft || self.prerelease {
             return Err("Only published stable releases are supported".into());
         }
         version(&self.tag_name)?;
         self.asset(false)?;
         self.asset(true)?;
-        self.signature()?;
         Ok(())
     }
     pub fn number(&self) -> &str {
@@ -82,14 +91,17 @@ const SIGNATURE_BYTES: u64 = 4096;
 const RELEASE_KEY: &str = include_str!("release-key.pub");
 
 /// Checks that `signature`, a minisign signature file's text, is `key`'s
-/// over `signed`.
+/// over `signed`. An error keeps minisign's cause: another key (after a
+/// rotation), an old algorithm and a forged file read differently.
 fn verify(key: &str, signed: &[u8], signature: &str) -> Result<()> {
-    let key = minisign_verify::PublicKey::from_base64(key.trim())
-        .map_err(|_| "This build has no valid release key; it cannot verify an update")?;
+    let key = minisign_verify::PublicKey::from_base64(key.trim()).map_err(|error| {
+        format!("This build has no valid release key ({error}); it cannot verify an update")
+    })?;
     let signature = minisign_verify::Signature::decode(signature)
-        .map_err(|_| "Invalid release signature file")?;
-    key.verify(signed, &signature, false)
-        .map_err(|_| "Release signature verification failed; installation unchanged".into())
+        .map_err(|error| format!("Invalid release signature file ({error})"))?;
+    key.verify(signed, &signature, false).map_err(|error| {
+        format!("Release signature verification failed ({error}); installation unchanged").into()
+    })
 }
 
 pub struct GitHub {
@@ -217,7 +229,12 @@ impl GitHub {
         }
         let release: Release =
             serde_json::from_slice(&data).map_err(|_| "Invalid release metadata")?;
-        release.validate()?;
+        release.listed()?;
+        // A release this build would not install is no update, signed or
+        // not: one published before releases were signed included.
+        if version(release.number())? > version(CURRENT)? {
+            release.signature()?;
+        }
         Ok(Some(release))
     }
     /// The asset `id`, of at most `most` bytes; `what` names it in an error.

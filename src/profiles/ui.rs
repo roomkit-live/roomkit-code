@@ -109,19 +109,18 @@ impl Profiles {
     ) -> Option<Result<CommandResult, String>> {
         let room = current.room.as_str();
         Some(match action {
-            Action::Delete { command, id } => {
-                self.delete(kit, terminal, (command, false), id, current.clone())
+            Action::Delete { command, id } => self.delete(command, id, current.clone()).await,
+            Action::ConfirmDelete { command, token } => {
+                self.confirm_delete(kit, terminal, command, token, current.clone())
                     .await
             }
-            Action::ConfirmDelete { command, token } => {
-                self.delete(kit, terminal, (command, true), token, current.clone())
-                    .await
+            Action::ChatGpt(crate::accounts::Action::Use(account)) => {
+                self.use_chatgpt(current, account).await
             }
             Action::ChatGpt(account_action) => {
                 self.state.lock().await.pending_delete = None;
                 self.accounts.handle(room, account_action).await
             }
-            Action::UseChatGpt(account) => self.use_chatgpt(current, account).await,
             _ => return None,
         })
     }
@@ -156,10 +155,7 @@ impl Profiles {
             found.cloned().ok_or("Unknown provider")
         };
         match action {
-            Action::Delete { .. }
-            | Action::ConfirmDelete { .. }
-            | Action::ChatGpt(_)
-            | Action::UseChatGpt(_) => {
+            Action::Delete { .. } | Action::ConfirmDelete { .. } | Action::ChatGpt(_) => {
                 Err("Unknown profile action; reopen /providers or /agents".into())
             }
             Action::Model(id) => self.model(kit, state, current, id).await,

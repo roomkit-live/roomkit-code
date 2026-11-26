@@ -18,8 +18,9 @@ pub(super) struct Inbox {
     pub channel: ChannelId,
     leases: Arc<SessionLeases>,
     wake: Arc<tokio::sync::Notify>,
-    /// The group's key: with one, only what it sealed is accepted.
-    key: Option<super::seal::Key>,
+    /// The group's key: with one, only what it sealed is accepted, and
+    /// what is accepted is answered with a sealed receipt.
+    guard: super::seal::Guard,
 }
 
 #[derive(Deserialize)]
@@ -39,7 +40,7 @@ impl Inbox {
         channel: ChannelId,
         leases: Arc<SessionLeases>,
         wake: Arc<tokio::sync::Notify>,
-        key: Option<super::seal::Key>,
+        guard: super::seal::Guard,
     ) -> Self {
         Self {
             kit,
@@ -47,7 +48,7 @@ impl Inbox {
             channel,
             leases,
             wake,
-            key,
+            guard,
         }
     }
     async fn accept(&self, room: &RoomId, verb: &str, arguments: Metadata) -> Result<Value> {
@@ -61,12 +62,12 @@ impl Inbox {
         }
         let Envelope { id, mail, seal } = serde_json::from_value(arguments.into())?;
         // Before anything in the mail is believed, its sender included.
-        super::seal::check(self.key.as_ref(), &id, &mail, seal.as_deref())?;
+        self.guard.admit(&id, &mail, seal.as_deref())?;
         let mail: Mail = serde_json::from_value(mail)?;
         validate(&kit, room, &self.channel, &id, &mail).await?;
         mail.write(&kit, room, id.clone(), None).await?;
         self.wake.notify_one();
-        Ok(json!(id))
+        Ok(self.guard.receipt(&id))
     }
 }
 

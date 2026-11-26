@@ -42,7 +42,7 @@ impl Accounts {
         *state = Some(Pending {
             room: room.into(),
             panel: PanelSpec::new(&id, "providers", "Sign in with ChatGPT", "")
-                .with_dismiss(format!("chatgpt:dismiss:{id}")),
+                .with_dismiss(super::Action::Dismiss(&id).to_string()),
             remote: Some(remote),
             task: None,
         });
@@ -120,7 +120,7 @@ fn form(url: &url::Url) -> FormSpec {
     .with_markdown_description(format!(
         "Cmd-click (macOS) or Ctrl-click (Linux), or copy this link:\n\n[Open sign-in page](<{url}>)\n\nOn RoomKit Code's computer, sign-in completes by itself. On another, the browser ends on a connection error at `127.0.0.1`, which is expected: copy its whole address, paste it below and press Enter. Expires in ten minutes."
     ))
-    .with_dismiss(format!("chatgpt:dismiss:{id}"))
+    .with_dismiss(super::Action::Dismiss(&id).to_string())
     .with_async_completion()
 }
 
@@ -130,7 +130,11 @@ fn completed_panel(panel: &mut PanelSpec, result: Result<Account, roomkit_auth::
         Err(error) => {
             panel.title = "ChatGPT sign-in did not complete".into();
             panel.body = error.to_string();
-            panel.actions = vec![choice("chatgpt:menu", "Back to accounts", "")];
+            panel.actions = vec![choice(
+                super::Action::Menu.to_string(),
+                "Back to accounts",
+                "",
+            )];
         }
     }
 }
@@ -148,16 +152,20 @@ fn connected_panel(panel: &mut PanelSpec, account: &Account) {
     );
     panel.actions = vec![
         if account.plan_usage {
-            choice(format!("chatgpt-use:{}", account.id), "Choose a model", "")
+            choice(
+                super::Action::Use(&account.id).to_string(),
+                "Choose a model",
+                "",
+            )
         } else {
             choice(
-                format!("chatgpt:login:{}", account.id),
+                super::Action::Login(&account.id).to_string(),
                 "Authorize plan usage",
                 "",
             )
         },
         choice(
-            format!("chatgpt:account:{}", account.id),
+            super::Action::Account(&account.id).to_string(),
             "Manage account",
             "",
         ),

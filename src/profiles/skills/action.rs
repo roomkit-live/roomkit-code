@@ -59,9 +59,13 @@ impl<'a> Action<'a> {
 
     /// Whether the action writes the profile files or replaces the skills
     /// read: it then holds the cross-process edit lease, which a menu left
-    /// open must not.
+    /// open must not. Every action is named, so that a new one cannot skip
+    /// the lease unnoticed.
     pub(in crate::profiles) fn mutates(&self) -> bool {
-        matches!(self, Self::Reload | Self::Enable(_) | Self::Disable(_))
+        match self {
+            Self::Reload | Self::Enable(_) | Self::Disable(_) => true,
+            Self::List | Self::Close | Self::Locations | Self::Open(_) | Self::Use { .. } => false,
+        }
     }
 }
 

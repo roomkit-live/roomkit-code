@@ -125,10 +125,14 @@ sys.exit(1 if os.environ.get('FIXTURE_FORGED') else 0)
     assert bad.returncode != 0 and b'Release signature verification failed' in bad.stderr, bad.stderr
     assert public_entry.resolve() == public_first
     # Without minisign the installer says that the signature was not checked.
+    # A minisign installed on this machine hides that case: the report says so.
     minisign.unlink()
+    signatures = 'forged and unchecked signatures'
     if shutil.which('minisign', path=env['PATH']) is None:
         unchecked = subprocess.run(['sh', 'install.sh', version], env=dict(env, FIXTURE_UNCHECKED='1'), capture_output=True)
         assert unchecked.returncode == 0 and b'signature was not checked' in unchecked.stderr, unchecked.stderr
+    else:
+        signatures = 'forged signatures (not an install without minisign: minisign is installed here)'
     external = root / 'external'; external.mkdir(); (external/'roomkit-code').write_text('external binary')
     bad = subprocess.run([str(fixture_binary), '--install-dir', str(external)], env=env, capture_output=True)
     assert bad.returncode != 0 and (external/'roomkit-code').read_text() == 'external binary'
@@ -161,4 +165,4 @@ sys.exit(1 if os.environ.get('FIXTURE_FORGED') else 0)
     finally:
         if process.poll() is None: process.kill(); process.wait()
         os.close(master); os.close(slave)
-print('Distribution checks passed: anonymous curl and authenticated gh installs, latest version, repeat install, corruption, forged and unchecked signatures, external binary protection, welcome version, rollback error and terminal restoration.')
+print(f'Distribution checks passed: anonymous curl and authenticated gh installs, latest version, repeat install, corruption, {signatures}, external binary protection, welcome version, rollback error and terminal restoration.')

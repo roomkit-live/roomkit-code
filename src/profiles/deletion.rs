@@ -18,100 +18,24 @@ pub(super) struct Pending {
 }
 
 impl Profiles {
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Debt recorded when the limit was set: split it, never grow it"
-    )]
+    /// Asks to confirm the deletion of connection or agent `id`, as
+    /// `command` tells which. The confirmation holds for this view and for
+    /// the profile files as they are now.
     pub(super) async fn delete(
         &self,
-        kit: &RoomKit<SqliteStore>,
-        terminal: &ChannelId,
-        (command, confirmed): (&str, bool),
+        command: &str,
         id: &str,
         current: SessionConfig,
     ) -> Result<CommandResult, String> {
         let mut state = self.state.lock().await;
         state.pending = None;
-        if confirmed {
-            let pending = state
-                .pending_delete
-                .take()
-                .ok_or("Reopen the profile to confirm deletion")?;
-            if pending.token != id
-                || pending.command != command
-                || pending.room != current.room.as_str()
-                || pending.selected != current.agent.as_str()
-            {
-                return Err("This confirmation does not belong to the current view".into());
-            }
-            let _lease = store::edit_lease(&self.state_dir)?;
-            state.providers.reload()?;
-            state.reload_agents()?;
-            // A provider's references are rechecked below, global agents
-            // included; an agent's deletion needs the agent unchanged.
-            if state.providers.revision() != pending.providers_revision
-                || state.project.revision() != pending.project_revision
-                || (pending.global && state.global.revision() != pending.global_revision)
-            {
-                return Err(
-                    "Profiles changed; reopen the profile and confirm deletion again".into(),
-                );
-            }
-            if command == "providers" {
-                self.check_provider_references(&state, &pending.id)?;
-                let mut providers = state.providers.value.clone();
-                providers
-                    .profiles
-                    .remove(&pending.id)
-                    .ok_or("Unknown provider")?;
-                state.providers.save(providers)?;
-                return Ok(ui::provider_choices(&state, &current));
-            }
-            return self
-                .remove_agent(kit, terminal, &mut state, &pending.id, current)
-                .await;
-        }
-
         state.pending_delete = None;
         state.providers.reload()?;
         state.reload_agents()?;
         let (label, description) = if command == "providers" {
-            let provider = state
-                .providers
-                .value
-                .profiles
-                .get(id)
-                .ok_or("Unknown provider")?;
-            self.check_provider_references(&state, id)?;
-            (
-                provider.label.clone(),
-                match provider.account_managed() {
-                    Some(subscription) => format!(
-                        "Remove this shared connection. The {} account stays connected; sign out separately from the account menu.",
-                        subscription.name
-                    ),
-                    None => "Remove this shared connection and its stored API key, if any.".into(),
-                },
-            )
+            self.provider_deletion(&state, id)?
         } else {
-            let agent = state.agent(id).ok_or("Unknown agent")?;
-            let others = state.agents();
-            let next = if current.agent.as_str() != id {
-                "The active agent stays selected.".into()
-            } else if let Some((next, _)) = others.iter().find(|(a, _)| a.id != id) {
-                format!("Switch to {} ({}).", next.label, next.id)
-            } else {
-                "Return to setup; add an agent to send new messages.".into()
-            };
-            let reach = if state.scope(id) == Some(catalog::Scope::Global) {
-                "This global agent leaves every project. "
-            } else {
-                ""
-            };
-            (
-                agent.label.clone(),
-                format!("{reach}Keep all conversation history. {next}"),
-            )
+            agent_deletion(&state, id, &current)?
         };
         let token = uuid::Uuid::new_v4().to_string();
         state.pending_delete = Some(Pending {
@@ -144,6 +68,73 @@ impl Profiles {
                 choice(confirm.to_string(), "Delete", description),
             ],
         ))
+    }
+
+    /// The deletion the person confirmed with `token`, when it was asked
+    /// in `current`'s view and the profiles did not change since.
+    pub(super) async fn confirm_delete(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        terminal: &ChannelId,
+        command: &str,
+        token: &str,
+        current: SessionConfig,
+    ) -> Result<CommandResult, String> {
+        let mut state = self.state.lock().await;
+        state.pending = None;
+        let pending = state
+            .pending_delete
+            .take()
+            .ok_or("Reopen the profile to confirm deletion")?;
+        if pending.token != token
+            || pending.command != command
+            || pending.room != current.room.as_str()
+            || pending.selected != current.agent.as_str()
+        {
+            return Err("This confirmation does not belong to the current view".into());
+        }
+        let _lease = store::edit_lease(&self.state_dir)?;
+        state.providers.reload()?;
+        state.reload_agents()?;
+        // A provider's references are rechecked below, global agents
+        // included; an agent's deletion needs the agent unchanged.
+        if state.providers.revision() != pending.providers_revision
+            || state.project.revision() != pending.project_revision
+            || (pending.global && state.global.revision() != pending.global_revision)
+        {
+            return Err("Profiles changed; reopen the profile and confirm deletion again".into());
+        }
+        if command == "providers" {
+            self.check_provider_references(&state, &pending.id)?;
+            let mut providers = state.providers.value.clone();
+            providers
+                .profiles
+                .remove(&pending.id)
+                .ok_or("Unknown provider")?;
+            state.providers.save(providers)?;
+            return Ok(ui::provider_choices(&state, &current));
+        }
+        self.remove_agent(kit, terminal, &mut state, &pending.id, current)
+            .await
+    }
+
+    /// What deleting connection `id` is called and what it does.
+    fn provider_deletion(&self, state: &State, id: &str) -> Result<(String, String), String> {
+        let provider = state
+            .providers
+            .value
+            .profiles
+            .get(id)
+            .ok_or("Unknown provider")?;
+        self.check_provider_references(state, id)?;
+        let description = match provider.account_managed() {
+            Some(subscription) => format!(
+                "Remove this shared connection. The {} account stays connected; sign out separately from the account menu.",
+                subscription.name
+            ),
+            None => "Remove this shared connection and its stored API key, if any.".into(),
+        };
+        Ok((provider.label.clone(), description))
     }
 
     async fn remove_agent(
@@ -256,6 +247,33 @@ impl Profiles {
         }
         Ok(())
     }
+}
+
+/// What deleting agent `id` is called and what it does, seen from
+/// `current`'s view.
+fn agent_deletion(
+    state: &State,
+    id: &str,
+    current: &SessionConfig,
+) -> Result<(String, String), String> {
+    let agent = state.agent(id).ok_or("Unknown agent")?;
+    let others = state.agents();
+    let next = if current.agent.as_str() != id {
+        "The active agent stays selected.".into()
+    } else if let Some((next, _)) = others.iter().find(|(a, _)| a.id != id) {
+        format!("Switch to {} ({}).", next.label, next.id)
+    } else {
+        "Return to setup; add an agent to send new messages.".into()
+    };
+    let reach = if state.scope(id) == Some(catalog::Scope::Global) {
+        "This global agent leaves every project. "
+    } else {
+        ""
+    };
+    Ok((
+        agent.label.clone(),
+        format!("{reach}Keep all conversation history. {next}"),
+    ))
 }
 
 impl State {
