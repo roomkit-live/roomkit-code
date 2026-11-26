@@ -7,6 +7,17 @@ TARGET_DIR := $(or $(CARGO_TARGET_DIR),target)
 
 check: fmt-check clippy test doc package-check terminal-check distribution-check release-check
 
+# The executor pool and session groups on a loopback Redis, which each
+# scenario starts in Docker: CI runs them on Linux after `make check`.
+.PHONY: redis-check
+redis-check:
+	cargo build --locked
+	python3 scripts/check-remote-worker.py
+	python3 scripts/check-executor-pool.py
+	python3 scripts/check-pool-handover.py
+	python3 scripts/check-session-network.py
+	python3 scripts/check-session-key.py
+
 fmt:
 	cargo fmt --all
 

@@ -28,17 +28,11 @@ pub(super) async fn deliver(
     let checkpoint = Checkpoint::read(kit, &event).await?;
     if !matches!(checkpoint, Some(Checkpoint::Delivered))
         && let Some(route) = &mail.remote
+        && let Some(why) = lost_route(messages, kit, &event.room_id, &route.to).await?
     {
-        let owned = match net {
-            Some(net) => net.owns_endpoint(kit, &event.room_id, &route.to).await?,
-            None => false,
-        };
-        if !owned {
-            const EXPIRED: &str = "Session correspondence was interrupted. The original network address is unavailable in this group.";
-            return messages
-                .interrupted(kit, &event.room_id, &event.id, EXPIRED)
-                .await;
-        }
+        return messages
+            .interrupted(kit, &event.room_id, &event.id, why)
+            .await;
     }
     super::outgoing::confirm_return(kit, &event.room_id, &mail).await?;
     match checkpoint {
@@ -66,6 +60,29 @@ pub(super) async fn deliver(
         }
     }
     Ok(())
+}
+
+/// Why mail the group carried to `address` can no longer be handled here,
+/// if it cannot: this launch did not reach the group, or `address` is not
+/// one of this group's for this session.
+async fn lost_route(
+    messages: &super::Messages,
+    kit: &Kit,
+    room: &roomkit::model::RoomId,
+    address: &ChannelId,
+) -> crate::Result<Option<&'static str>> {
+    const EXPIRED: &str = "Session correspondence was interrupted. The original network address is unavailable in this group.";
+    // Review finding: the launch used to refuse to start without its
+    // group; it now opens without it, and the reason belongs here.
+    const UNREACHED: &str = "Session correspondence was interrupted. The session group could not be reached when this launch started: this message was not given to the agent, and its sender was not told.";
+    let Some(net) = messages.network.get() else {
+        let unreached = messages
+            .network_unavailable
+            .load(std::sync::atomic::Ordering::Acquire);
+        return Ok(Some(if unreached { UNREACHED } else { EXPIRED }));
+    };
+    let owned = net.owns_endpoint(kit, room, address).await?;
+    Ok((!owned).then_some(EXPIRED))
 }
 
 async fn prepare(
@@ -253,4 +270,35 @@ async fn steer(
         }
     }
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Review finding: mail accepted from the group before a relaunch whose
+    /// group could not be reached was said to come from an address no
+    /// longer in the group, as if the group had moved on.
+    #[tokio::test]
+    async fn mail_from_a_group_this_launch_did_not_reach_says_so() -> crate::Result<()> {
+        use roomkit::{RoomKit, RoomKitOptions};
+        use roomkit_sqlite::{SqliteStore, SqliteStoreOptions};
+        let dir = tempfile::tempdir()?;
+        let store = SqliteStore::new(SqliteStoreOptions {
+            path: dir.path().join("history.sqlite3"),
+        });
+        let kit = RoomKit::new(RoomKitOptions::with_store(store));
+        let room = roomkit::model::RoomId::new("review")?;
+        let address = ChannelId::new(format!("session-mail-{}-review", "a".repeat(32)))?;
+        let messages = super::super::Messages::default();
+        let without = lost_route(&messages, &kit, &room, &address).await?;
+        assert!(without.is_some_and(|why| why.contains("address is unavailable")));
+        messages
+            .network_unavailable
+            .store(true, std::sync::atomic::Ordering::Release);
+        let unreached = lost_route(&messages, &kit, &room, &address).await?;
+        assert!(unreached.is_some_and(|why| why.contains("could not be reached")));
+        kit.close().await?;
+        Ok(())
+    }
 }

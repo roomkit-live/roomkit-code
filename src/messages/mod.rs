@@ -134,14 +134,15 @@ impl Messages {
         kit: &RoomKit<SqliteStore>,
         room: &RoomId,
         leases: Arc<crate::storage::SessionLeases>,
-        diagnostics: &crate::diagnostics::Diagnostics,
+        diagnostics: &Arc<crate::diagnostics::Diagnostics>,
     ) -> crate::Result<()> {
         let Some(group) = &settings.session_group else {
             return Ok(());
         };
         let address = crate::remote::address(settings.executor_url.as_deref())?;
         let key = network::seal::Key::from_environment(group)?;
-        let opened = network::Network::open(group, &address, kit, room, leases, key).await?;
+        let guard = network::seal::Guard::new(key, diagnostics.clone());
+        let opened = network::Network::open(group, &address, kit, room, leases, guard).await?;
         let error = match opened {
             network::Joined::Group(net) => {
                 return self

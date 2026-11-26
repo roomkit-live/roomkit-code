@@ -301,12 +301,23 @@ the group's Redis keys can participate, so use a broker restricted to trusted
 participants. An executor pool and shared project directory are optional.
 
 To tell the group's members from anyone else who can write to the broker, give
-every member the same secret of at least 32 characters in
-`ROOMKIT_SESSION_GROUP_KEY`. A session that has it seals each message it sends
-and refuses any message the key did not seal; one without it refuses sealed
-messages, so set it on all members or none. The key is never sent to the broker
-nor passed to commands. Members still trust each other: it does not tell one
-member from another.
+every member the same random secret of at least 32 bytes in
+`ROOMKIT_SESSION_GROUP_KEY`, such as the output of `openssl rand -hex 32`. A
+session that has it seals each message it sends, refuses any message the key
+did not seal, and answers what it accepted with a sealed receipt: its sender
+counts the message as delivered only on that receipt. One without the key
+refuses sealed messages, so set it on all members or none, and run the same
+version on each. A refusal says why: the sender reads what to fix, and the
+refusing session records `session_message_refused` in its diagnostics. The key
+is never sent to the broker nor passed to commands. Members still trust each
+other: it does not tell one member from another.
+
+The key does not encrypt: whoever reads the broker reads the messages. The list
+of sessions comes from the broker as it is: an outsider can appear in it, but
+cannot seal a message or a receipt. A sealed message does not expire: captured
+on the broker, it can be given again to its recipient while that session runs,
+and is taken if it was not stored the first time. The executor pool on the
+same Redis is not covered by the key.
 
 ## Input history
 
