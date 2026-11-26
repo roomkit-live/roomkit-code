@@ -134,6 +134,19 @@ fn a_checksum_is_believed_only_when_the_release_key_signed_it() {
     assert!(verify("UNSET", checksum.as_bytes(), &signature).is_err());
 }
 
+/// What the `minisign` command itself writes is accepted: this signature
+/// was made by minisign 0.12 with a key made for this test and kept nowhere,
+/// the way `scripts/release.py sign` makes a release"s.
+#[test]
+fn a_signature_written_by_the_minisign_command_is_accepted() {
+    let key = "RWT0+SB5Nl4wisBnW8yRjQ7OBFVyWr1UxxsTauhwkHtFo3s2IaiCQUsX";
+    let checksum = "abababababababababababababababababababababababababababababababab  roomkit-code-v9.9.9-aarch64-apple-darwin\n";
+    let signature = "untrusted comment: signature from minisign secret key\nRUT0+SB5Nl4wilSzwHSiobiBt1HCvvUWfoGSaCcDlOgc/2qX2y783+X8+48qaj/2va6EGKmjhYei0zegevEcX5h9S4f8iy4HaAw=\ntrusted comment: RoomKit Code v9.9.9 roomkit-code-v9.9.9-aarch64-apple-darwin.sha256\nXnCFH5wsJddscPt/6+vzEGON4v6uj9vhIYRaH++88Q21XCM4AhrLLZ8+2ARnYMFyKoKmJcg3E1oqzrJfIV8TBQ==\n";
+    verify(key, checksum.as_bytes(), signature).unwrap();
+    assert!(verify(key, b"another checksum", signature).is_err());
+    assert!(verify(RELEASE_KEY, checksum.as_bytes(), signature).is_err());
+}
+
 /// A release without its signature is no release to install.
 #[test]
 fn a_release_without_a_signature_is_not_valid() {

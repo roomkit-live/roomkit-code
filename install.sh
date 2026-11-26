@@ -4,7 +4,7 @@ set -eu
 repo=roomkit-live/roomkit-code
 # The public half of the key that signs each release's checksum file: the
 # line of src/updates/release-key.pub, which the updater embeds.
-release_key='UNSET'
+release_key='RWSxO7fsDP+u4csK1pHZ2lwcpWCmOmBhgT0Wu5OlCxx6aEwsEe1FDtlK'
 fail() { printf '%s\n' "$*" >&2; exit 1; }
 case "$(uname -s)" in Linux) os=unknown-linux-gnu ;; Darwin) os=apple-darwin ;; *) fail 'Supported platforms: Linux and macOS' ;; esac
 case "$(uname -m)" in x86_64|amd64) arch=x86_64 ;; aarch64|arm64) arch=aarch64 ;; *) fail 'Unsupported CPU architecture' ;; esac
