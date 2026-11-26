@@ -26,9 +26,14 @@ in conversation history.
 
 ## Release integrity
 
-Published binaries have SHA-256 checksums verified by the installer and updater.
-These detect corruption; a checksum served by the same release is not an
-independent signature. macOS binaries currently use ad-hoc code signing, without
+Each published binary has a SHA-256 checksum file, signed with the project's
+[minisign](https://jedisct1.github.io/minisign/) key where the release is built.
+The key's public half is `src/updates/release-key.pub`; its secret half is in no
+release. The updater embeds the public key and installs nothing whose checksum
+the key did not sign. `install.sh` checks the signature when `minisign` is
+installed, and says so when it is not: it then only detects corruption, as a
+checksum served beside the binary proves nothing about its origin. macOS
+binaries currently use ad-hoc code signing, without
 Apple Developer ID signing or notarization. Download only from this repository's
 GitHub releases.
 

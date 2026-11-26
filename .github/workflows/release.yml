@@ -131,10 +131,19 @@ jobs:
           pattern: release-*
           path: dist
           merge-multiple: true
+      - name: Sign each checksum file with the release key
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends minisign
+          python3 scripts/release.py sign "$RELEASE_TAG"
       - name: Validate the unchanged tag and complete asset set
         run: |
           python3 scripts/release.py source "$RELEASE_TAG"
           python3 scripts/release.py assets "$RELEASE_TAG"
+          python3 scripts/release.py signatures "$RELEASE_TAG"
           python3 scripts/release.py notes "$RELEASE_TAG" > "$RUNNER_TEMP/release-notes.md"
           cp install.sh LICENSE README.md USER_GUIDE.md SECURITY.md dist/
       - name: Create a complete draft for publication review

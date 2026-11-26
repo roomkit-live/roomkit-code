@@ -40,6 +40,7 @@ class ReleaseTests(unittest.TestCase):
             (directory / name).write_bytes(data)
             (directory / (name + ".sha256")).write_text(
                 f"{hashlib.sha256(data).hexdigest()}  {name}\n")
+            (directory / (name + release.SIGNATURE)).write_text("signature fixture\n")
         return directory
 
     def test_source_and_notes_refer_to_the_exact_stable_version(self):
@@ -76,7 +77,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_assets_reject_corruption_empty_binaries_and_symlinks(self):
         directory = self.assets()
-        binary = next(path for path in directory.iterdir() if path.suffix != ".sha256")
+        binary = next(path for path in directory.iterdir() if path.suffix not in (".sha256", ".minisig"))
         for data in (b"changed", b""):
             binary.write_bytes(data)
             with self.assertRaises(ValueError):
@@ -85,6 +86,84 @@ class ReleaseTests(unittest.TestCase):
         binary.symlink_to(self.root / "Cargo.toml")
         with self.assertRaises(ValueError):
             release.verify_assets("v0.1.1", directory, self.root)
+
+
+class SignatureTests(unittest.TestCase):
+    """The signing step, with a stand-in for minisign that records what it is asked."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="roomkit-release-sign-test-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.directory = self.root / "dist"
+        self.directory.mkdir()
+        for target in release.TARGETS:
+            (self.directory / f"roomkit-code-v0.1.1-{target}.sha256").write_text("fixture\n")
+        self.calls = self.root / "calls"
+        self.minisign = self.root / "minisign"
+        self.minisign.write_text(f"""#!/usr/bin/env python3
+import pathlib, sys
+args = sys.argv[1:]
+with open({str(self.calls)!r}, "a") as calls:
+    calls.write(" ".join(args) + "\\n")
+value = lambda flag: args[args.index(flag) + 1]
+if "-S" in args:
+    key = pathlib.Path(value("-s"))
+    assert key.stat().st_mode & 0o077 == 0, "the secret key file must be private"
+    pathlib.Path(value("-x")).write_text(key.read_text() + sys.stdin.read())
+    sys.exit(0)
+sys.exit(0 if pathlib.Path(value("-x")).read_text().startswith("SECRET") else 1)
+""")
+        self.minisign.chmod(0o755)
+        self.key = release.RELEASE_KEY
+        self.environment = {name: os.environ.get(name) for name in ("MINISIGN_SECRET_KEY", "MINISIGN_PASSWORD")}
+        self.addCleanup(self.restore)
+
+    def restore(self):
+        release.RELEASE_KEY = self.key
+        for name, value in self.environment.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+    def public_key(self, text):
+        release.RELEASE_KEY = self.root / "release-key.pub"
+        release.RELEASE_KEY.write_text(text)
+
+    def test_every_checksum_is_signed_then_verified_with_the_repository_key(self):
+        self.public_key("RWQqrgpISR+AeoB/AdjguT4cwFZh8h7MmPQRPCsXrmfj7CfSag4GSA0p\n")
+        os.environ["MINISIGN_SECRET_KEY"] = "SECRET"
+        os.environ["MINISIGN_PASSWORD"] = "password"
+        release.sign("v0.1.1", self.directory, str(self.minisign))
+        signatures = sorted(path.name for path in self.directory.glob("*.minisig"))
+        self.assertEqual(len(signatures), 4)
+        calls = self.calls.read_text()
+        self.assertEqual(calls.count("-S "), 4)
+        self.assertEqual(calls.count("-V -P RWQqrgpISR+AeoB/AdjguT4cwFZh8h7MmPQRPCsXrmfj7CfSag4GSA0p"), 4)
+        self.assertNotIn("SECRET", calls)
+        self.assertNotIn("password", calls)
+
+    def test_a_release_is_not_signed_without_a_secret_key_or_a_public_key(self):
+        self.public_key("RWQqrgpISR+AeoB/AdjguT4cwFZh8h7MmPQRPCsXrmfj7CfSag4GSA0p\n")
+        os.environ.pop("MINISIGN_SECRET_KEY", None)
+        with self.assertRaises(ValueError):
+            release.sign("v0.1.1", self.directory, str(self.minisign))
+        self.public_key("UNSET\n")
+        os.environ["MINISIGN_SECRET_KEY"] = "SECRET"
+        with self.assertRaises(ValueError):
+            release.sign("v0.1.1", self.directory, str(self.minisign))
+
+    def test_a_signature_the_key_did_not_make_is_refused(self):
+        self.public_key("RWQqrgpISR+AeoB/AdjguT4cwFZh8h7MmPQRPCsXrmfj7CfSag4GSA0p\n")
+        for checksum in self.directory.glob("*.sha256"):
+            checksum.with_name(checksum.name + ".minisig").write_text("forged\n")
+        with self.assertRaises(ValueError):
+            release.verify_signatures("v0.1.1", self.directory, str(self.minisign))
+
+    def test_install_sh_holds_the_repository_key(self):
+        installer = (Path(__file__).resolve().parent.parent / "install.sh").read_text()
+        self.assertIn(f"release_key='{self.key.read_text().strip()}'", installer)
 
 
 class DependencyAccessTests(unittest.TestCase):

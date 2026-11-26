@@ -44,7 +44,8 @@ curl --proto '=https' --proto-redir '=https' -fsSL \
 sh "$roomkit_install_dir/install.sh"
 ```
 
-The installer verifies the binary's SHA-256 checksum and version, then installs
+The installer verifies the binary's SHA-256 checksum and version, and the
+checksum's signature when `minisign` is installed, then installs
 in `~/.local/bin`. Rust and sudo are not required. Add that directory to `PATH`
 if the installer asks. `ROOMKIT_CODE_BIN_DIR` selects another directory.
 

@@ -43,12 +43,15 @@ if args[:1] == ['api']: print('v'+os.environ['FIXTURE_VERSION']); sys.exit(0)
 if args[:2] == ['release','download']:
     out=pathlib.Path(args[args.index('--dir')+1])
     names=[args[i+1] for i, v in enumerate(args) if v=='--pattern']
-    name=next(n for n in names if not n.endswith('.sha256'))
+    name=next(n for n in names if not n.endswith(('.sha256', '.minisig')))
     source=pathlib.Path(os.environ['FIXTURE_BINARY'])
     shutil.copyfile(source, out/name)
     digest=hashlib.sha256(source.read_bytes()).hexdigest()
     if os.environ.get('FIXTURE_CORRUPT'): digest='0'*64
     (out/(name+'.sha256')).write_text(f'{digest}  {name}\\n')
+    asked=name+'.sha256.minisig' in names
+    assert asked != bool(os.environ.get('FIXTURE_UNCHECKED')), 'the signature is asked for where minisign is installed, and only there'
+    if asked: (out/(name+'.sha256.minisig')).write_text('signature fixture\\n')
     sys.exit(0)
 sys.exit(1)
 ''')
@@ -67,16 +70,32 @@ assert '--proto-redir' in args and '--max-filesize' in args
 name=url.rsplit('/',1)[1]
 out=pathlib.Path(args[args.index('-o')+1])
 source=pathlib.Path(os.environ['FIXTURE_BINARY'])
-if name.endswith('.sha256'):
+if name.endswith('.minisig'): out.write_text('signature fixture\\n')
+elif name.endswith('.sha256'):
     digest=hashlib.sha256(source.read_bytes()).hexdigest()
     if os.environ.get('FIXTURE_CORRUPT'): digest='0'*64
     out.write_text(f'{digest}  {name[:-7]}\\n')
 else: shutil.copyfile(source,out)
 ''')
     curl.chmod(0o755)
+    # A stand-in for minisign: the installer must hand it the repository's
+    # key, the checksum file and its signature, and stop when it refuses.
+    minisign = fake / 'minisign'
+    minisign.write_text('''#!/usr/bin/env python3
+import os, pathlib, sys
+args=sys.argv[1:]
+value=lambda flag: args[args.index(flag)+1]
+assert '-V' in args and value('-P')==os.environ['FIXTURE_KEY'], args
+assert value('-m').endswith('.sha256') and value('-x')==value('-m')+'.minisig', args
+assert pathlib.Path(value('-x')).read_text()=='signature fixture\\n'
+sys.exit(1 if os.environ.get('FIXTURE_FORGED') else 0)
+''')
+    minisign.chmod(0o755)
+    release_key = (Path(__file__).resolve().parent.parent / 'src' / 'updates' / 'release-key.pub').read_text().strip()
     env = {k:v for k,v in os.environ.items() if not k.startswith(('ROOMKIT_', 'GH_', 'GITHUB_', 'HERDR_'))}
     env.update(HOME=str(home), XDG_DATA_HOME=str(home/'data'), PATH=str(fake)+os.pathsep+os.environ['PATH'],
                ROOMKIT_CODE_BIN_DIR=str(bin_dir), FIXTURE_BINARY=str(fixture_binary), FIXTURE_VERSION=version,
+               FIXTURE_KEY=release_key,
                TERM='xterm-256color', ROOMKIT_NO_UPDATE_CHECK='true')
     subprocess.run(['sh', 'install.sh', version], env=env, check=True)
     entry = bin_dir / 'roomkit-code'
@@ -88,6 +107,10 @@ else: shutil.copyfile(source,out)
     bad = subprocess.run(['sh', 'install.sh', version], env=dict(env, FIXTURE_CORRUPT='1'), capture_output=True)
     assert bad.returncode != 0 and b'Checksum verification failed' in bad.stderr
     assert entry.resolve() == first
+    # A checksum the release key did not sign installs nothing, whatever it says.
+    bad = subprocess.run(['sh', 'install.sh', version], env=dict(env, FIXTURE_FORGED='1'), capture_output=True)
+    assert bad.returncode != 0 and b'Release signature verification failed' in bad.stderr, bad.stderr
+    assert entry.resolve() == first
     public_bin = root / 'public-bin'
     public_env = dict(env, FIXTURE_PUBLIC='1', ROOMKIT_CODE_BIN_DIR=str(public_bin))
     subprocess.run(['sh', 'install.sh'], env=public_env, check=True)
@@ -98,6 +121,14 @@ else: shutil.copyfile(source,out)
     bad = subprocess.run(['sh', 'install.sh'], env=dict(public_env, FIXTURE_CORRUPT='1'), capture_output=True)
     assert bad.returncode != 0 and b'Checksum verification failed' in bad.stderr
     assert public_entry.resolve() == public_first
+    bad = subprocess.run(['sh', 'install.sh'], env=dict(public_env, FIXTURE_FORGED='1'), capture_output=True)
+    assert bad.returncode != 0 and b'Release signature verification failed' in bad.stderr, bad.stderr
+    assert public_entry.resolve() == public_first
+    # Without minisign the installer says that the signature was not checked.
+    minisign.unlink()
+    if shutil.which('minisign', path=env['PATH']) is None:
+        unchecked = subprocess.run(['sh', 'install.sh', version], env=dict(env, FIXTURE_UNCHECKED='1'), capture_output=True)
+        assert unchecked.returncode == 0 and b'signature was not checked' in unchecked.stderr, unchecked.stderr
     external = root / 'external'; external.mkdir(); (external/'roomkit-code').write_text('external binary')
     bad = subprocess.run([str(fixture_binary), '--install-dir', str(external)], env=env, capture_output=True)
     assert bad.returncode != 0 and (external/'roomkit-code').read_text() == 'external binary'
@@ -130,4 +161,4 @@ else: shutil.copyfile(source,out)
     finally:
         if process.poll() is None: process.kill(); process.wait()
         os.close(master); os.close(slave)
-print('Distribution checks passed: anonymous curl and authenticated gh installs, latest version, repeat install, corruption, external binary protection, welcome version, rollback error and terminal restoration.')
+print('Distribution checks passed: anonymous curl and authenticated gh installs, latest version, repeat install, corruption, forged and unchecked signatures, external binary protection, welcome version, rollback error and terminal restoration.')

@@ -40,33 +40,64 @@ impl Release {
         version(&self.tag_name)?;
         self.asset(false)?;
         self.asset(true)?;
+        self.signature()?;
         Ok(())
     }
     pub fn number(&self) -> &str {
         self.tag_name.trim_start_matches('v')
     }
     pub fn asset(&self, checksum: bool) -> Result<&Asset> {
-        let name = format!(
-            "roomkit-code-{}-{TARGET}{}",
-            self.tag_name,
-            if checksum { ".sha256" } else { "" }
-        );
-        let assets: Vec<_> = self.assets.iter().filter(|a| a.name == name).collect();
-        if assets.len() != 1
-            || assets[0].id == 0
-            || assets[0].size == 0
-            || assets[0].size > if checksum { 1024 } else { MAX_BINARY }
-        {
-            return Err("The release has no valid binary/checksum pair for this platform".into());
-        }
-        Ok(assets[0])
+        let (suffix, most) = if checksum {
+            (".sha256", 1024)
+        } else {
+            ("", MAX_BINARY)
+        };
+        self.named(suffix, most)
+            .ok_or_else(|| "The release has no valid binary/checksum pair for this platform".into())
     }
+
+    /// The signature of this platform's checksum file.
+    fn signature(&self) -> Result<&Asset> {
+        self.named(".sha256.minisig", SIGNATURE_BYTES)
+            .ok_or_else(|| "The release has no signature for this platform".into())
+    }
+
+    /// The one asset of this platform's binary with `suffix`, of at most
+    /// `most` bytes.
+    fn named(&self, suffix: &str, most: u64) -> Option<&Asset> {
+        let name = format!("roomkit-code-{}-{TARGET}{suffix}", self.tag_name);
+        let mut found = self.assets.iter().filter(|a| a.name == name);
+        let asset = found.next().filter(|_| found.next().is_none())?;
+        (asset.id != 0 && asset.size != 0 && asset.size <= most).then_some(asset)
+    }
+}
+
+/// The most bytes of a signature file read.
+const SIGNATURE_BYTES: u64 = 4096;
+
+/// The public key releases are signed for, in minisign's base64. Its secret
+/// half signs each release's checksum files where the release is built, and
+/// is in no release: a binary and a checksum that only come from the same
+/// place prove nothing about that place.
+const RELEASE_KEY: &str = include_str!("release-key.pub");
+
+/// Checks that `signature`, a minisign signature file's text, is `key`'s
+/// over `signed`.
+fn verify(key: &str, signed: &[u8], signature: &str) -> Result<()> {
+    let key = minisign_verify::PublicKey::from_base64(key.trim())
+        .map_err(|_| "This build has no valid release key; it cannot verify an update")?;
+    let signature = minisign_verify::Signature::decode(signature)
+        .map_err(|_| "Invalid release signature file")?;
+    key.verify(signed, &signature, false)
+        .map_err(|_| "Release signature verification failed; installation unchanged".into())
 }
 
 pub struct GitHub {
     client: reqwest::Client,
     token: Option<String>,
     base: String,
+    /// The key a release's signature is checked with.
+    key: String,
 }
 impl GitHub {
     pub async fn new() -> Result<Self> {
@@ -92,10 +123,11 @@ impl GitHub {
                 }
             }
         };
-        Self::with_source("https://api.github.com".into(), token)
+        Self::with_source("https://api.github.com".into(), token, RELEASE_KEY)
     }
-    fn with_source(base: String, token: Option<String>) -> Result<Self> {
+    fn with_source(base: String, token: Option<String>, key: &str) -> Result<Self> {
         Ok(Self {
+            key: key.to_owned(),
             base,
             token,
             client: crate::http_client::builder()?
@@ -188,24 +220,37 @@ impl GitHub {
         release.validate()?;
         Ok(Some(release))
     }
-    pub async fn download(&self, release: &Release) -> Result<(tempfile::NamedTempFile, String)> {
-        release.validate()?;
-        let binary = release.asset(false)?;
-        let checksum = release.asset(true)?;
-        let mut response = self
-            .get(&format!("releases/assets/{}", checksum.id), true)
-            .await?;
+    /// The asset `id`, of at most `most` bytes; `what` names it in an error.
+    async fn small(&self, id: u64, most: u64, what: &str) -> Result<Vec<u8>> {
+        let mut response = self.get(&format!("releases/assets/{id}"), true).await?;
         let mut data = Vec::new();
         while let Some(chunk) = response
             .chunk()
             .await
-            .map_err(|_| "Checksum download failed")?
+            .map_err(|_| format!("{what} download failed"))?
         {
-            if data.len() + chunk.len() > 1024 {
-                return Err("Checksum file exceeds limit".into());
+            if (data.len() + chunk.len()) as u64 > most {
+                return Err(format!("{what} file exceeds limit").into());
             }
             data.extend_from_slice(&chunk);
         }
+        Ok(data)
+    }
+
+    pub async fn download(&self, release: &Release) -> Result<(tempfile::NamedTempFile, String)> {
+        release.validate()?;
+        let binary = release.asset(false)?;
+        let checksum = release.asset(true)?;
+        let data = self.small(checksum.id, 1024, "Checksum").await?;
+        // The checksum is believed once the release key signed it: it then
+        // vouches for the binary it names.
+        let signature = release.signature()?;
+        let signature = self
+            .small(signature.id, SIGNATURE_BYTES, "Signature")
+            .await?;
+        let signature =
+            std::str::from_utf8(&signature).map_err(|_| "Invalid release signature file")?;
+        verify(&self.key, &data, signature)?;
         let line = std::str::from_utf8(&data).map_err(|_| "Invalid checksum encoding")?;
         let parts = line.split_whitespace().collect::<Vec<_>>();
         if parts.len() != 2

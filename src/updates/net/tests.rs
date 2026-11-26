@@ -25,7 +25,10 @@ async fn missing_release_is_not_an_error_when_the_repository_is_accessible() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    let result = GitHub::with_source(url, None).unwrap().latest().await;
+    let result = GitHub::with_source(url, None, FIXTURE_KEY)
+        .unwrap()
+        .latest()
+        .await;
     task.abort();
     assert!(
         result.is_ok(),
@@ -57,7 +60,7 @@ async fn unavailable_service_is_not_reported_as_no_update() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-        let github = GitHub::with_source(url, None).unwrap();
+        let github = GitHub::with_source(url, None, FIXTURE_KEY).unwrap();
         let error = github.latest().await.unwrap_err();
         assert_eq!(
             error.to_string(),
@@ -80,6 +83,107 @@ async fn unavailable_service_is_not_reported_as_no_update() {
     }
 }
 
+/// A key made for these tests alone, whose secret half was not kept: the
+/// fixtures below were signed once with it.
+const FIXTURE_KEY: &str = "RWQqrgpISR+AeoB/AdjguT4cwFZh8h7MmPQRPCsXrmfj7CfSag4GSA0p";
+
+/// The fixture key's signature of the checksum file the fixture serves for
+/// each platform, whose name the file holds.
+fn fixture_signature() -> String {
+    let (signature, global) = match TARGET {
+        "x86_64-unknown-linux-gnu" => (
+            "RUQqrgpISR+AevRPsntdnj1yhgFfETFnMN2kIUem1+bCtuei5vwA4qbu0iMAaYnb57yPhFpvzcPX41R3iylinyBZ3G3hFaRTWgM=",
+            "tc7D8x31A2/IOjyZqz4vwojLXsWWE100gOWE1Ecx5TqQ56wUee1Qj/QRg0sHjYY61l/AW/eZsBLSSvpxEzQ6Bw==",
+        ),
+        "aarch64-unknown-linux-gnu" => (
+            "RUQqrgpISR+AehN+jegkRdnm+6NNN+nXh/0GIyeUGu1LF78V7AaP0E5r05ucNT+E649M3voZ0X40dv0/zCC6688l3423b1ljCQI=",
+            "jTSsFFkzOwDSFih1asvq/88NxtDR4ZOwL8HCdEyH2aCx1+DK+gf5ryLTuVa1lP299yl+pWuxn6R57YJCAtRGBA==",
+        ),
+        "x86_64-apple-darwin" => (
+            "RUQqrgpISR+AejVFHotc6OviANXh1kAoAnyfDDlWBw6ttnR9X7Lx23VFmin8SoapiPFNZ0Uch5zAw9k3UXj4dBQ5jJQMqxY5lQs=",
+            "XZdjIqTi0vCOg5tdxlGlzgJENjzmj1/LCTFtlVMQIuZ9PP+4aNl3CuZ/haiAoJLAxom9UO9V5ltSZY7OiZQRCw==",
+        ),
+        _ => (
+            "RUQqrgpISR+AehIjgapwkIcqvHGdPiT76mRuj2dkGzXtZPXkIc9FD/pnPzDLXzdyMNJt7q1n0euWvqS6BHkhNgnBXVuIC3d22Ac=",
+            "dW+y55e9MurAscbMGwW7/YWwzqppiiR0v4Q//EcKtZYd/6lGSra2bpfnK2Joc1pv/Bp56EjO+dWUtxsjRFFJCA==",
+        ),
+    };
+    format!("untrusted comment: fixture\n{signature}\ntrusted comment: fixture\n{global}\n")
+}
+
+/// A release is installed only when the release key signed its checksum:
+/// one that comes with the binary, from the same place, vouches for nothing.
+#[test]
+fn a_checksum_is_believed_only_when_the_release_key_signed_it() {
+    let hash = crate::digest::sha256_hex(b"fixture release binary");
+    let checksum = format!("{hash}  roomkit-code-v0.2.0-{TARGET}\n");
+    let signature = fixture_signature();
+    verify(FIXTURE_KEY, checksum.as_bytes(), &signature).unwrap();
+    // Another binary's checksum, signed by nobody.
+    let forged = format!("{}  roomkit-code-v0.2.0-{TARGET}\n", "0".repeat(64));
+    let refused = verify(FIXTURE_KEY, forged.as_bytes(), &signature).unwrap_err();
+    assert!(
+        refused
+            .to_string()
+            .contains("signature verification failed")
+    );
+    // Another key, a file that is no signature, a build without a key.
+    let other = "RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
+    assert!(verify(other, checksum.as_bytes(), &signature).is_err());
+    assert!(verify(FIXTURE_KEY, checksum.as_bytes(), "not a signature").is_err());
+    assert!(verify("UNSET", checksum.as_bytes(), &signature).is_err());
+}
+
+/// What the `minisign` command itself writes is accepted: this signature
+/// was made by minisign 0.12 with a key made for this test and kept nowhere,
+/// the way `scripts/release.py sign` makes a release"s.
+#[test]
+fn a_signature_written_by_the_minisign_command_is_accepted() {
+    let key = "RWT0+SB5Nl4wisBnW8yRjQ7OBFVyWr1UxxsTauhwkHtFo3s2IaiCQUsX";
+    let checksum = "abababababababababababababababababababababababababababababababab  roomkit-code-v9.9.9-aarch64-apple-darwin\n";
+    let signature = "untrusted comment: signature from minisign secret key\nRUT0+SB5Nl4wilSzwHSiobiBt1HCvvUWfoGSaCcDlOgc/2qX2y783+X8+48qaj/2va6EGKmjhYei0zegevEcX5h9S4f8iy4HaAw=\ntrusted comment: RoomKit Code v9.9.9 roomkit-code-v9.9.9-aarch64-apple-darwin.sha256\nXnCFH5wsJddscPt/6+vzEGON4v6uj9vhIYRaH++88Q21XCM4AhrLLZ8+2ARnYMFyKoKmJcg3E1oqzrJfIV8TBQ==\n";
+    verify(key, checksum.as_bytes(), signature).unwrap();
+    assert!(verify(key, b"another checksum", signature).is_err());
+    assert!(verify(RELEASE_KEY, checksum.as_bytes(), signature).is_err());
+}
+
+/// A release without its signature is no release to install.
+#[test]
+fn a_release_without_a_signature_is_not_valid() {
+    let name = format!("roomkit-code-v0.2.0-{TARGET}");
+    let asset = |id, suffix: &str, size| Asset {
+        id,
+        name: format!("{name}{suffix}"),
+        size,
+    };
+    let mut release = Release {
+        tag_name: "v0.2.0".into(),
+        draft: false,
+        prerelease: false,
+        assets: vec![
+            asset(1, "", 22),
+            asset(2, ".sha256", 150),
+            asset(3, ".sha256.minisig", 300),
+        ],
+    };
+    release.validate().unwrap();
+    release.assets[2].size = SIGNATURE_BYTES + 1;
+    assert!(release.validate().is_err());
+    release.assets.pop();
+    let refused = release.validate().unwrap_err();
+    assert!(refused.to_string().contains("no signature"));
+}
+
+/// The key this build verifies releases with is a minisign public key: a
+/// build without one could install no update.
+#[test]
+fn the_embedded_release_key_is_a_minisign_public_key() {
+    assert!(
+        minisign_verify::PublicKey::from_base64(RELEASE_KEY.trim()).is_ok(),
+        "src/updates/release-key.pub must hold the release signing key's public half"
+    );
+}
+
 #[tokio::test]
 async fn github_fixture_checks_pair_size_integrity_and_never_follows_untrusted_redirects() {
     let data = b"fixture release binary";
@@ -99,6 +203,11 @@ async fn github_fixture_checks_pair_size_integrity_and_never_follows_untrusted_r
                 id: 2,
                 name: format!("{name}.sha256"),
                 size: 150,
+            },
+            Asset {
+                id: 5,
+                name: format!("{name}.sha256.minisig"),
+                size: 300,
             },
         ],
     };
@@ -122,6 +231,10 @@ async fn github_fixture_checks_pair_size_integrity_and_never_follows_untrusted_r
             get(move || async { checksum }),
         )
         .route(
+            "/repos/roomkit-live/roomkit-code/releases/assets/5",
+            get(|| async { fixture_signature() }),
+        )
+        .route(
             "/repos/roomkit-live/roomkit-code/releases/assets/3",
             get(|| async {
                 (
@@ -135,7 +248,7 @@ async fn github_fixture_checks_pair_size_integrity_and_never_follows_untrusted_r
     let task = tokio::spawn(async move {
         axum::serve(listener, router).await.unwrap();
     });
-    let github = GitHub::with_source(url, Some("fixture-token".into())).unwrap();
+    let github = GitHub::with_source(url, Some("fixture-token".into()), FIXTURE_KEY).unwrap();
     let found = github.latest().await.unwrap().unwrap();
     let (file, got) = github.download(&found).await.unwrap();
     assert_eq!(got, hash);
