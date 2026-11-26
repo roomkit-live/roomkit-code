@@ -2,7 +2,9 @@
 use roomkit_auth::{Account, ChatGpt, RemoteSignIn, SignOut};
 use roomkit_tui::protocol::{Choice, Event, PanelSpec};
 
+mod action;
 mod signin;
+pub(crate) use action::Action;
 use roomkit_tui_engine::CommandResult;
 pub(crate) use signin::callback_form_id;
 use std::{path::Path, sync::Arc};
@@ -72,18 +74,17 @@ impl Accounts {
     pub async fn handle(
         self: &Arc<Self>,
         room: &str,
-        argument: &str,
+        action: Action<'_>,
     ) -> Result<CommandResult, String> {
-        let (action, id) = argument.split_once(':').unwrap_or((argument, ""));
         match action {
-            "menu" | "" => {
+            Action::Menu => {
                 self.close().await;
                 self.menu(room)
             }
-            "account" => self.account_menu(room, id),
-            "connect" => self.connect(room, None).await,
-            "login" => self.connect(room, Some(id)).await,
-            "logout" => {
+            Action::Account(id) => self.account_menu(room, id),
+            Action::Connect => self.connect(room, None).await,
+            Action::Login(id) => self.connect(room, Some(id)).await,
+            Action::Logout(id) => {
                 let outcome = self.auth.sign_out(id).await.map_err(|e| e.to_string())?;
                 let mut result = self.account_menu(room, id)?;
                 if let CommandResult::Events(events) = &mut result {
@@ -94,7 +95,7 @@ impl Accounts {
                 }
                 Ok(result)
             }
-            "cancel" | "dismiss" => {
+            Action::Cancel(id) | Action::Dismiss(id) => {
                 let mut state = self.pending.lock().await;
                 if !state
                     .as_ref()
@@ -104,18 +105,19 @@ impl Accounts {
                 }
                 state.take();
                 self.events.send_replace(None);
-                if action == "cancel" {
+                if matches!(action, Action::Cancel(_)) {
                     self.menu(room)
                 } else {
                     Ok(CommandResult::Events(Vec::new()))
                 }
             }
-            _ => Err("Unknown ChatGPT account action; reopen /providers".into()),
+            // The profiles save an account's connection.
+            Action::Use(_) => Err("Choose a model for this account from /providers".into()),
         }
     }
     fn menu(&self, room: &str) -> Result<CommandResult, String> {
         let mut entries = vec![choice(
-            "chatgpt:connect",
+            Action::Connect.to_string(),
             "+ Connect a ChatGPT account",
             "Sign in with ChatGPT in your browser",
         )];
@@ -126,7 +128,7 @@ impl Accounts {
                 .iter()
                 .map(|a| {
                     choice(
-                        format!("chatgpt:account:{}", a.id),
+                        Action::Account(&a.id).to_string(),
                         label(a),
                         if !a.connected {
                             "Signed out"
@@ -151,13 +153,13 @@ impl Accounts {
         let mut entries = Vec::new();
         if account.connected && account.plan_usage {
             entries.push(choice(
-                format!("chatgpt-use:{id}"),
+                Action::Use(id).to_string(),
                 "Use this account · choose a model",
                 "Create an agent using this account's available models",
             ));
         }
         entries.push(choice(
-            format!("chatgpt:login:{id}"),
+            Action::Login(id).to_string(),
             if account.connected {
                 "Sign in again"
             } else {
@@ -167,7 +169,7 @@ impl Accounts {
         ));
         if account.connected {
             entries.push(choice(
-                format!("chatgpt:logout:{id}"),
+                Action::Logout(id).to_string(),
                 "Sign out",
                 "Revoke access and remove this account's local tokens",
             ));

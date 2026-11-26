@@ -20,10 +20,8 @@ pub(in crate::profiles) enum Action<'a> {
         command: &'a str,
         token: &'a str,
     },
-    /// An action on a ChatGPT account, which `accounts` reads.
-    ChatGpt(&'a str),
-    /// Saves the connection of a signed-in ChatGPT account.
-    UseChatGpt(&'a str),
+    /// An action of the ChatGPT account menus, which they define.
+    ChatGpt(crate::accounts::Action<'a>),
     EffortMenu,
     Effort(&'a str),
     /// `/model`, with a model's ID or nothing: an ID may hold colons, so it
@@ -73,15 +71,10 @@ impl<'a> Action<'a> {
                 return Ok(Self::Delete { command, id });
             }
         }
-        if command == "providers" {
-            if let Some(action) = arguments.strip_prefix("chatgpt:") {
-                return Ok(Self::ChatGpt(action));
-            }
-            if let Some(account) = arguments.strip_prefix("chatgpt-use:") {
-                return Ok(Self::UseChatGpt(
-                    account.split(':').next().unwrap_or_default(),
-                ));
-            }
+        if command == "providers"
+            && let Some(action) = crate::accounts::Action::parse(arguments)
+        {
+            return action.map(Self::ChatGpt);
         }
         let mut parts = arguments.splitn(3, ':');
         let action = parts.next().unwrap_or_default();
@@ -115,12 +108,30 @@ impl<'a> Action<'a> {
 
     /// Whether the action writes the profile files or what a conversation
     /// keeps: it then holds the cross-process edit lease. Menus, forms being
-    /// opened and model discovery do not.
+    /// opened and model discovery do not. Every action is named, so that a
+    /// new one cannot skip the lease unnoticed.
     pub(in crate::profiles) fn mutates(&self) -> bool {
         match self {
             Self::SelectAgent(_) | Self::Effort(_) => true,
             Self::Model(id) => !id.is_empty(),
-            _ => false,
+            // Served before the lease is decided: the deletion and the
+            // accounts take it themselves where they write.
+            Self::Delete { .. } | Self::ConfirmDelete { .. } | Self::ChatGpt(_) => false,
+            Self::EffortMenu
+            | Self::Providers
+            | Self::OpenProvider(_)
+            | Self::AddProvider
+            | Self::EditProvider(_)
+            | Self::AddSubscription(_)
+            | Self::TestProvider(_)
+            | Self::NewAgentOn { .. }
+            | Self::Agents
+            | Self::NewAgent(_)
+            | Self::AgentModels(_)
+            | Self::UseModel { .. }
+            | Self::OpenAgent(_)
+            | Self::AddAgent
+            | Self::EditAgent(_) => false,
         }
     }
 }
@@ -134,7 +145,6 @@ impl Action<'_> {
             Self::EffortMenu | Self::Effort(_) => "effort",
             Self::Model(_) => "model",
             Self::ChatGpt(_)
-            | Self::UseChatGpt(_)
             | Self::Providers
             | Self::OpenProvider(_)
             | Self::AddProvider
@@ -161,8 +171,7 @@ impl fmt::Display for Action<'_> {
         match self {
             Self::Delete { id, .. } => write!(f, "delete:{id}"),
             Self::ConfirmDelete { token, .. } => write!(f, "confirm-delete:{token}"),
-            Self::ChatGpt(action) => write!(f, "chatgpt:{action}"),
-            Self::UseChatGpt(account) => write!(f, "chatgpt-use:{account}"),
+            Self::ChatGpt(action) => action.fmt(f),
             Self::EffortMenu | Self::Providers | Self::Agents => Ok(()),
             Self::Effort(text) | Self::Model(text) => f.write_str(text),
             Self::OpenProvider(id) | Self::OpenAgent(id) => write!(f, "open:{id}"),
@@ -203,8 +212,8 @@ mod tests {
                 command: "agents",
                 token: "0b5c",
             },
-            Action::ChatGpt("account:0b5c"),
-            Action::UseChatGpt("0b5c"),
+            Action::ChatGpt(crate::accounts::Action::Account("0b5c")),
+            Action::ChatGpt(crate::accounts::Action::Use("0b5c")),
             Action::EffortMenu,
             Action::Effort("high"),
             Action::Model("vendor/model:latest"),

@@ -85,10 +85,18 @@ pub(super) fn available(id: &str, server: &McpToolProvider) -> Vec<AiTool> {
         .collect()
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "Debt recorded when the limit was set: split it, never grow it"
-)]
+/// What a server's panel shows: its connection, the tools it lists, and
+/// those the current agent selected.
+struct Shown<'a> {
+    id: &'a str,
+    status: &'a str,
+    live: Option<&'a McpToolProvider>,
+    tools: Vec<AiTool>,
+    names: &'a [String],
+}
+
+/// The panel of server `config`: its tools from `offset` when
+/// `tools_page`, its connection and actions otherwise.
 pub(super) async fn detail(
     state: &State,
     current: &SessionConfig,
@@ -99,82 +107,85 @@ pub(super) async fn detail(
 ) -> Result<CommandResult, String> {
     let connections = runtime.connections.lock().await;
     let connection = connections.get(&config.id);
-    let status = connection.map_or("Disconnected", |c| c.status());
     let live = connection
         .and_then(|c| c.server.as_ref())
         .filter(|s| s.connected());
     let agent = state.agent(current.agent.as_str());
     let selected = agent.as_ref().and_then(|a| a.mcp.get(&config.id));
-    let names = selected.map_or(&[][..], Vec::as_slice);
-    let tools = live.map(|s| available(&config.id, s)).unwrap_or_default();
-    let id = &config.id;
+    let shown = Shown {
+        id: &config.id,
+        status: connection.map_or("Disconnected", |c| c.status()),
+        live,
+        tools: live.map(|s| available(&config.id, s)).unwrap_or_default(),
+        names: selected.map_or(&[][..], Vec::as_slice),
+    };
     if tools_page {
-        let offset = offset.min(tools.len().saturating_sub(1)) / 30 * 30;
-        let actions = tools
-            .iter()
-            .skip(offset)
-            .take(30)
-            .map(|tool| {
-                choice(
-                    Action::Toggle {
-                        id,
-                        tool: &tool.name,
-                        page: offset,
-                    }
-                    .to_string(),
-                    format!(
-                        "[{}] {}",
-                        if names.contains(&tool.name) {
-                            "on"
-                        } else {
-                            "off"
-                        },
-                        tool.name
-                    ),
-                    tool.description.chars().take(120).collect::<String>(),
-                )
-            })
-            .chain((offset > 0).then(|| {
-                choice(
-                    Action::Tools {
-                        id,
-                        page: offset.saturating_sub(30),
-                    }
-                    .to_string(),
-                    "Previous page",
-                    "",
-                )
-            }))
-            .chain((offset + 30 < tools.len()).then(|| {
-                choice(
-                    Action::Tools {
-                        id,
-                        page: offset + 30,
-                    }
-                    .to_string(),
-                    "Next page",
-                    "",
-                )
-            }))
-            .chain(std::iter::once(choice(
-                Action::Show(id).to_string(),
-                "Back to server",
-                "",
-            )))
-            .collect();
-        return Ok(panel(
-            current,
-            format!("MCP tools · {id}"),
-            format!(
-                "{status} · {} available tools · {} selected for {}. Select an entry to toggle it. At most 64 MCP tools per agent.",
-                tools.len(),
-                names.len(),
-                current.agent
-            ),
-            actions,
-        ));
+        return Ok(tools_panel(current, &shown, offset));
     }
-    let process = live
+    let body = server_body(current, config, &shown)?;
+    // A server that stopped answering still holds what its connection opened.
+    let held = live.is_none() && connection.is_some_and(|c| c.server.is_some());
+    let actions = server_actions(&shown, held);
+    Ok(panel(current, format!("MCP · {}", shown.id), body, actions))
+}
+
+/// The page of `shown`'s tools from `offset`, 30 at a time, each a toggle.
+fn tools_panel(current: &SessionConfig, shown: &Shown<'_>, offset: usize) -> CommandResult {
+    let (id, status, names, tools) = (shown.id, shown.status, shown.names, &shown.tools);
+    let offset = offset.min(tools.len().saturating_sub(1)) / 30 * 30;
+    let page = |page, label| choice(Action::Tools { id, page }.to_string(), label, "");
+    let actions = tools
+        .iter()
+        .skip(offset)
+        .take(30)
+        .map(|tool| {
+            let on = if names.contains(&tool.name) {
+                "on"
+            } else {
+                "off"
+            };
+            let toggle = Action::Toggle {
+                id,
+                tool: &tool.name,
+                page: offset,
+            };
+            choice(
+                toggle.to_string(),
+                format!("[{on}] {}", tool.name),
+                tool.description.chars().take(120).collect::<String>(),
+            )
+        })
+        .chain((offset > 0).then(|| page(offset.saturating_sub(30), "Previous page")))
+        .chain((offset + 30 < tools.len()).then(|| page(offset + 30, "Next page")))
+        .chain(std::iter::once(choice(
+            Action::Show(id).to_string(),
+            "Back to server",
+            "",
+        )))
+        .collect();
+    panel(
+        current,
+        format!("MCP tools · {id}"),
+        format!(
+            "{status} · {} available tools · {} selected for {}. Select an entry to toggle it. At most 64 MCP tools per agent.",
+            tools.len(),
+            names.len(),
+            current.agent
+        ),
+        actions,
+    )
+}
+
+/// The text of `config`'s panel: its connection, its tools and those the
+/// current agent selected.
+fn server_body(
+    current: &SessionConfig,
+    config: &Server,
+    shown: &Shown<'_>,
+) -> Result<String, String> {
+    let (id, status, names, tools) = (shown.id, shown.status, shown.names, &shown.tools);
+    let process = shown
+        .live
         .and_then(|s| s.process_id())
         .map_or_else(|| "none".into(), |pid| pid.to_string());
     let connection_details = match &config.transport {
@@ -197,7 +208,7 @@ pub(super) async fn detail(
             serde_json::to_string(headers).map_err(|_| "Invalid headers")?
         ),
     };
-    let body = format!(
+    Ok(format!(
         "Status: {status}\n{connection_details}\nConnection timeout: {} seconds\nAvailable tools: {}\nSelected for {}: {}\n\nMCP tools use mcp__{id}__<tool>. Existing tool selections are preserved on save and reconnect. Names unsupported by the model protocol are omitted. Status refreshes when this panel is reopened.",
         config.timeout_seconds,
         tools.len(),
@@ -207,8 +218,15 @@ pub(super) async fn detail(
         } else {
             names.join(", ")
         }
-    );
-    let mut actions = if live.is_some() {
+    ))
+}
+
+/// The actions of a server's panel. `held`: the server stopped answering
+/// but its connection still holds a process or a session.
+fn server_actions(shown: &Shown<'_>, held: bool) -> Vec<Choice> {
+    let id = shown.id;
+    let live = shown.live.is_some();
+    let mut actions = if live {
         vec![
             choice(
                 Action::Tools { id, page: 0 }.to_string(),
@@ -238,7 +256,7 @@ pub(super) async fn detail(
         "Edit connection",
         "Save to reconnect; existing tool selections are preserved",
     ));
-    if live.is_none() && connection.is_some_and(|c| c.server.is_some()) {
+    if held {
         actions.insert(
             1,
             choice(
@@ -248,14 +266,14 @@ pub(super) async fn detail(
             ),
         );
     }
-    if !names.is_empty() {
+    if !shown.names.is_empty() {
         actions.push(choice(
             Action::Disable(id).to_string(),
             "Disable all tools for this agent",
             "Keep the connection for other configured agents",
         ));
     }
-    if live.is_none() {
+    if !live {
         actions.push(choice(
             Action::Delete(id).to_string(),
             "Delete configuration…",
@@ -264,7 +282,7 @@ pub(super) async fn detail(
     }
     actions.push(choice(Action::Show(id).to_string(), "Refresh status", ""));
     actions.push(choice(Action::List.to_string(), "Back to servers", ""));
-    Ok(panel(current, format!("MCP · {id}"), body, actions))
+    actions
 }
 
 fn field(name: &str, label: &str, value: String, help: &str) -> FormField {

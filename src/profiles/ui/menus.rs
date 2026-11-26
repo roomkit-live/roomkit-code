@@ -25,7 +25,7 @@ pub(super) fn provider_menu(
     let entries = if let Authentication::ChatGpt { account } = &provider.authentication {
         vec![
             choice(
-                Action::ChatGpt(&format!("account:{account}")).to_string(),
+                Action::ChatGpt(crate::accounts::Action::Account(account)).to_string(),
                 "Manage ChatGPT account",
                 "Choose models, sign in or sign out",
             ),

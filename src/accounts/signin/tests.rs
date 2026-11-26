@@ -124,7 +124,10 @@ async fn dismissing_a_submitted_form_aborts_the_pending_operation_without_waitin
     }));
     *accounts.pending.lock().await = Some(attempt);
     ready.await.unwrap();
-    accounts.handle("room", "dismiss:revision").await.unwrap();
+    accounts
+        .handle("room", super::super::Action::Dismiss("revision"))
+        .await
+        .unwrap();
     assert!(
         tokio::time::timeout(std::time::Duration::from_secs(1), stopped)
             .await
