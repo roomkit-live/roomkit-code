@@ -24,6 +24,7 @@ pub(crate) struct Settings {
     pub remote_worker: Option<String>,
     pub update_check: bool,
     pub auto_title: bool,
+    pub compact_tools: bool,
     pub require_tool_intent: bool,
     pub herdr: bool,
     pub resume_options: Option<Vec<String>>,
@@ -106,6 +107,7 @@ impl Settings {
             auto_title: !cli.no_auto_title && cli.prompt.is_none(),
             memory: file.memory.checked()?,
             update_check: file.updates.check && !cli.no_update_check,
+            compact_tools: cli.compact_tools,
             require_tool_intent: cli
                 .require_tool_intent
                 .unwrap_or(file.agent.require_tool_intent),
@@ -376,6 +378,9 @@ fn resume_options(cli: &Cli) -> Result<Option<Vec<String>>> {
     }
     if !cli.inherit_env.is_empty() {
         args.extend(["--inherit-env".into(), cli.inherit_env.join(",")]);
+    }
+    if cli.compact_tools {
+        args.push("--compact-tools".into());
     }
     if let Some(required) = cli.require_tool_intent {
         args.push(format!("--require-tool-intent={required}"));

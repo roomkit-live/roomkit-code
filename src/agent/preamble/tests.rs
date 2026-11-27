@@ -279,11 +279,33 @@ fn the_tools_are_listed_only_when_some_wait_behind_the_discovery_tools() {
         "{declared}"
     );
     assert!(declared.contains("Only the tools you are given are available to you."));
-    assert!(
-        base_prompt(&profile, &[shell], true, facts(120_000)).contains(
-            "for this run):\nshell, find_tools, list_tools\nOnly tools in this inventory"
-        )
-    );
+    let mut message = shell.clone();
+    message.name = crate::names::SEND_MESSAGE.into();
+    let grouped = base_prompt(&profile, &[shell, message.clone()], true, facts(120_000));
+    assert!(grouped.contains("Run a shell command — shell"));
+    assert!(grouped.contains("call find_tools with its exact English tool name"));
+    assert!(grouped.contains("Reply to an incoming session message — send_message"));
+    assert!(!grouped.contains("Contact a session or reply"));
+    assert!(!grouped.contains("Manage this conversation's plans"));
+    message.parameters = serde_json::json!({"properties":{"to":{"type":"string"}}});
+    assert!(available(&[message], true).contains("Contact a session or reply — send_message"));
+}
+
+#[test]
+fn compact_tools_keep_a_small_profile_direct_unless_search_is_already_active() {
+    let tool = AiTool {
+        name: "docs_read".into(),
+        description: String::new(),
+        parameters: serde_json::json!({}),
+        tags: Vec::new(),
+        changes_state: false,
+        defer_loading: false,
+    };
+    let selected = std::slice::from_ref(&tool);
+    assert!(!discovery::worth_deferring(
+        selected, false, selected, false
+    ));
+    assert!(discovery::worth_deferring(selected, false, selected, true));
 }
 
 #[test]

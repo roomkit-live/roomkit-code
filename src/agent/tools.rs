@@ -130,6 +130,22 @@ pub(crate) fn asks_intent(name: &str) -> bool {
     matches!(name, "shell" | "process_start" | "delegate_task") || name.starts_with("mcp__")
 }
 
+/// Bind native implementations and the definitions served by the MCP tool handler.
+pub(super) fn tool_entries(
+    native: Vec<(AiTool, Arc<dyn Tool>)>,
+    mcp: &[crate::profiles::McpTools],
+) -> Vec<ToolEntry> {
+    let mut entries: Vec<_> = native
+        .into_iter()
+        .map(|(_, tool)| ToolEntry::Tool(tool))
+        .collect();
+    entries.extend(
+        mcp.iter()
+            .flat_map(|server| server.tools.iter().cloned().map(ToolEntry::Definition)),
+    );
+    entries
+}
+
 /// The tools of an agent with `mcp` that ask the model for an intention.
 pub(super) fn intent_tools(mcp: &[crate::profiles::McpTools]) -> Vec<String> {
     ["shell", "process_start", "delegate_task"]

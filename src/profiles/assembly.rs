@@ -73,6 +73,7 @@ impl Profiles {
             skills,
             skill_roots,
             mcp: self.mcp_runtime.selected(profile).await?,
+            compact_tools: self.compact_tools,
             intent_required: self.require_tool_intent,
             max_tool_rounds: self.max_tool_rounds,
             unattended: self.unattended,

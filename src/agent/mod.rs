@@ -77,6 +77,7 @@ pub(crate) struct Extensions {
     pub mcp: Vec<crate::profiles::McpTools>,
     /// Whether the tool calls that ask for an intent must carry one.
     pub intent_required: bool,
+    pub compact_tools: bool,
     /// Rounds of tool calls one turn may run.
     pub max_tool_rounds: u32,
     /// Nobody watches the launch: the agent gets no mode tools, which wait
@@ -151,6 +152,7 @@ pub(crate) async fn create(
         skill_roots,
         mcp,
         intent_required,
+        compact_tools,
         max_tool_rounds,
         delegation,
         images,
@@ -165,23 +167,16 @@ pub(crate) async fn create(
         &skills,
         &skill_roots,
         &mcp,
-        (
+        preamble::ToolOptions {
             intent_required,
-            engine_tools(delegation, human_input.as_ref()),
-        ),
+            compact: compact_tools,
+            engine: engine_tools(delegation, human_input.as_ref()),
+        },
         shell,
-    );
-    let mut entries: Vec<ToolEntry> = tools
-        .into_iter()
-        .map(|(_, tool)| ToolEntry::Tool(tool))
-        .collect();
-    entries.extend(
-        mcp.iter()
-            .flat_map(|server| server.tools.iter().cloned().map(ToolEntry::Definition)),
     );
     let options = AiChannelOptions {
         system_prompt: Some(preamble.prompt),
-        tools: entries,
+        tools: tool_entries(tools, &mcp),
         tool_handler: mcp_handler(&mcp)?,
         server_instructions: mcp
             .iter()
@@ -209,8 +204,7 @@ pub(crate) async fn create(
         evict_threshold_tokens: stored_result_threshold(ceiling),
         image_resolver: Some(images),
         human_input_handler: human_input,
-        // Native tools stay declared; only MCP tools wait behind find_tools.
-        tool_search: Some(preamble.hides_mcp),
+        tool_search: Some(preamble.search),
         tool_search_pinned: preamble.pinned,
         ..AiChannelOptions::default()
     };

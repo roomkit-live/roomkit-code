@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Try `--compact-tools` to keep a task-oriented inventory in the prompt and load specialized native tool schemas on demand through RoomKit Tool Search.
+
 - Find earlier workspace discussions through the memory tool, read the visible messages around a match, and cite the original decision without saving a note first.
 
 - Sign in to Gemini with a Google account from `/providers`, select a quota project, and discover or run its models using renewable credentials.

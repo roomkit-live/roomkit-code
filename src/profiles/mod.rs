@@ -52,6 +52,7 @@ pub(crate) struct Profiles {
     pub(crate) pool: Option<Arc<crate::remote::pool::Coordinator>>,
     pub(crate) policy: crate::permissions::Policy,
     pub(crate) plans: Arc<crate::plans::PlanView>,
+    compact_tools: bool,
     require_tool_intent: bool,
     /// Rounds of tool calls one turn of an agent may run.
     max_tool_rounds: u32,
@@ -235,6 +236,7 @@ impl Profiles {
             executor_inventory,
             policy: policy.clone(),
             plans: crate::plans::PlanView::new((*resources.plans).clone()),
+            compact_tools: settings.compact_tools,
             require_tool_intent: settings.require_tool_intent,
             max_tool_rounds: settings.max_tool_rounds,
             unattended: settings.unattended,

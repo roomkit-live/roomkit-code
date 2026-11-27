@@ -5,6 +5,8 @@
 use roomkit_ai::{AiChannelOptions, AiTool, SkillRegistry, TOOL_SEARCH_INFRA_TOOL_NAMES};
 use std::path::PathBuf;
 
+mod discovery;
+
 use crate::profiles::{McpTools, model::Agent};
 
 const INSTRUCTIONS: &str = include_str!("coding-agent.txt");
@@ -17,8 +19,7 @@ pub(crate) struct Composition {
     /// The application's instructions, the agent's own and, with hidden tools,
     /// the names of the tools.
     pub system: usize,
-    /// Native tool schemas, and the discovery tools' when MCP tools wait behind
-    /// them.
+    /// Initially declared native schemas and any discovery tools.
     pub tools: usize,
     /// The skills manifest, its discovery context and the skill tools.
     pub skills: usize,
@@ -56,9 +57,9 @@ const SERVER_INSTRUCTIONS_MAX: usize = 8192;
 /// Tools as an OpenAI-compatible request sends them: with the reserved intent
 /// property the engine adds for the tools that ask for one, required when the
 /// application requires it, each wrapped as a function.
-fn schema_chars(tools: &[AiTool], intent_required: bool) -> usize {
+fn schema_chars<'a>(tools: impl IntoIterator<Item = &'a AiTool>, intent_required: bool) -> usize {
     tools
-        .iter()
+        .into_iter()
         .map(|tool| {
             let shown = super::asks_intent(&tool.name)
                 .then(|| {
@@ -131,9 +132,9 @@ fn past_search_thresholds(tokens: usize, count: usize, window: Option<u64>) -> b
 pub(super) struct Preamble {
     pub prompt: String,
     pub inventory: Inventory,
-    /// Whether its MCP tools wait behind the discovery tools.
-    pub hides_mcp: bool,
-    /// The tools that never wait behind them: the native ones.
+    /// Whether any catalogue is served through RoomKit Tool Search.
+    pub search: bool,
+    /// Selected tools declared from the first request.
     pub pinned: Vec<String>,
 }
 
@@ -164,6 +165,12 @@ const SHELL_JOB_ENDS: &str = " A job a command leaves running in the background 
 /// What the agent reads of its processes, when it is told of their end.
 const PROCESS_ENDS: &str = " When a process ends, the application tells you in a message: you need not poll it to learn that.";
 
+pub(super) struct ToolOptions {
+    pub intent_required: bool,
+    pub compact: bool,
+    pub engine: Vec<AiTool>,
+}
+
 /// The preamble of `profile` with its selected `native` tools, its skills
 /// and its MCP servers, whether every call carries an intent, the tools the
 /// engine serves it (delegation, `ask_user`), and what it is told of its
@@ -174,10 +181,15 @@ pub(super) fn preamble(
     skills: &SkillRegistry,
     skill_roots: &[PathBuf],
     mcp: &[McpTools],
-    (intent_required, engine): (bool, Vec<AiTool>),
+    options: ToolOptions,
     shell: ShellFacts,
 ) -> Preamble {
-    let hidden = hides_mcp(mcp, intent_required, profile.context_window);
+    let ToolOptions {
+        intent_required,
+        compact,
+        engine,
+    } = options;
+    let deferred_mcp = hides_mcp(mcp, intent_required, profile.context_window);
     let mut tools = native.clone();
     tools.extend(skills.tool_definitions());
     for server in mcp {
@@ -186,9 +198,16 @@ pub(super) fn preamble(
     // The engine serves the delegation tools (RMK-1532) and `ask_user`:
     // listed and declared outright with the native ones, though no agent
     // selects them.
-    let served = [native.as_slice(), &engine].concat();
     let listed = [tools.as_slice(), &engine].concat();
-    let base = base_prompt(profile, &listed, hidden, shell);
+    let deferred_native =
+        compact && discovery::worth_deferring(&native, intent_required, &listed, deferred_mcp);
+    let search = deferred_native || deferred_mcp;
+    let mut served = native;
+    if deferred_native {
+        served.retain(discovery::immediate);
+    }
+    served.extend(engine);
+    let base = base_prompt(profile, &listed, search, shell);
     let context = skill_context(skills, skill_roots);
     let composition = measure(
         (&base, &context),
@@ -196,13 +215,20 @@ pub(super) fn preamble(
         skills,
         mcp,
         intent_required,
-        hidden,
+        (search, deferred_mcp),
     );
+    let mut pinned: Vec<_> = served.into_iter().map(|tool| tool.name).collect();
+    if search && !deferred_mcp {
+        pinned.extend(
+            mcp.iter()
+                .flat_map(|s| s.tools.iter().map(|t| t.name.clone())),
+        );
+    }
     Preamble {
         prompt: format!("{base}\n{context}\n{ACTIVITY_INSTRUCTIONS}"),
         inventory: Inventory { tools, composition },
-        hides_mcp: hidden,
-        pinned: served.into_iter().map(|tool| tool.name).collect(),
+        search,
+        pinned,
     }
 }
 
@@ -226,15 +252,7 @@ fn available(tools: &[AiTool], hidden: bool) -> String {
     if !hidden {
         return format!("Only the tools you are given are available to you. {GUIDANCE}");
     }
-    let inventory = tools
-        .iter()
-        .map(|tool| tool.name.as_str())
-        .chain(TOOL_SEARCH_INFRA_TOOL_NAMES)
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(
-        "Current capability inventory (provided by the application for this run):\n{inventory}\nOnly tools in this inventory are available to you. {GUIDANCE}"
-    )
+    discovery::manifest(tools)
 }
 
 /// The application's instructions for an agent with `tools`, and the
@@ -302,7 +320,7 @@ fn measure(
     skills: &SkillRegistry,
     mcp: &[McpTools],
     intent_required: bool,
-    hidden: bool,
+    (search, deferred_mcp): (bool, bool),
 ) -> Composition {
     let servers = mcp
         .iter()
@@ -317,10 +335,10 @@ fn measure(
         system: base.len()
             + ACTIVITY_INSTRUCTIONS.len()
             + only_if(servers, SERVERS_BLOCK)
-            + only_if(hidden, SEARCH_PREAMBLE),
+            + only_if(search, SEARCH_PREAMBLE),
         tools: schema_chars(native, intent_required)
             + REREAD_TOOL
-            + only_if(hidden, DISCOVERY_TOOLS),
+            + only_if(search, DISCOVERY_TOOLS),
         skills: context.len()
             + preamble
             + skills.to_prompt_xml().len()
@@ -329,7 +347,7 @@ fn measure(
             .iter()
             .map(|server| {
                 let size = instruction_chars(&server.label, server.instructions.as_deref())
-                    + only_if(!hidden, schema_chars(&server.tools, intent_required));
+                    + only_if(!deferred_mcp, schema_chars(&server.tools, intent_required));
                 (server.label.clone(), size)
             })
             .collect(),

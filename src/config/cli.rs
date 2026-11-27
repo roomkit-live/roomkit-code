@@ -104,6 +104,9 @@ pub(crate) struct Cli {
     /// Record additional framework lifecycle events in the private diagnostic log.
     #[arg(long)]
     pub debug: bool,
+    /// Discover specialized native tools on demand (experimental).
+    #[arg(long)]
+    pub compact_tools: bool,
     /// Require the public intent field in tool schemas sent to the model.
     #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
     pub require_tool_intent: Option<bool>,

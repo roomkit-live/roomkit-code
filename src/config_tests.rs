@@ -34,7 +34,11 @@ fn resume_options_exclude_provider_bootstrap_values() {
     cli.model = Some("private-model".into());
     cli.reasoning_effort = Some("high".into());
     cli.no_logo = true;
-    assert_eq!(resume_options(&cli).unwrap().unwrap(), ["--no-logo"]);
+    cli.compact_tools = true;
+    let options = resume_options(&cli).unwrap().unwrap();
+    assert_eq!(options.len(), 2);
+    assert!(options.iter().any(|option| option == "--no-logo"));
+    assert!(options.iter().any(|option| option == "--compact-tools"));
 }
 
 #[test]

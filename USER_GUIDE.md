@@ -1189,6 +1189,18 @@ existing conversation in that mode, which it then keeps. A launch without the
 terminal interface uses its own mode and leaves the conversation's as it was.
 Project files never implicitly select a mode.
 
+## Compact tool discovery (experimental)
+
+For an experimental smaller first request, launch `roomkit-code --compact-tools`.
+The model receives a short inventory pairing purposes with the exact names of
+the tools selected for its profile. Common file operations, shell, memory and
+available session or executor communication tools are ready immediately.
+For example, when asked about the installed guide, the model can look up
+`docs_search` with RoomKit's `find_tools` and use its schema on the next call.
+Small profiles keep all their schemas when discovery would cost more. The flag
+also applies to a worker launched with it. Tool selection and permissions still
+apply to each call.
+
 ## Plans and progress
 
 Switch to **Plan** and ask the agent to prepare a plan. This mode allows project
@@ -1341,7 +1353,8 @@ the conversation. The parts are estimates, at four characters per token, marked
 schemas fill the window shows up at once. While an agent's MCP tools wait behind
 `find_tools`, their server parts count only its instructions, **Tools** counts
 the two discovery tools, and the schemas of the tools it finds fall in
-**Messages**.
+**Messages**. With `--compact-tools` the same accounting applies to deferred
+native tools. **Tools** counts their initially declared schemas.
 
 The separate **turn** counter totals all reported input/output tokens across
 that execution's model calls. Cached input is counted once. Missing measurements
@@ -1869,7 +1882,7 @@ file. Select a different agent with **/agents** to configure its own subset.
 Disabling tools leaves the shared connection open. Before deleting a server,
 disconnect it and remove its selections from every agent.
 
-An agent's native tools are always declared to the model. Its selected MCP tools
+By default an agent's native tools are declared to the model. Its selected MCP tools
 are too, unless they would cost more than 8,000 tokens of schemas, more than 10%
 of its **Context capacity** or, with no capacity set, count more than 20 tools.
 Past that, they wait behind `find_tools` and `list_tools`: the model searches,

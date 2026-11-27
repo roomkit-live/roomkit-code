@@ -318,6 +318,53 @@ fn declared(request: &Value) -> Vec<String> {
         .collect()
 }
 
+/// Tool Search for a full native profile also keeps a light MCP server available.
+#[tokio::test]
+async fn compact_tools_reveal_the_guide_and_keep_a_light_server_declared() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![
+        ("find_tools", json!({"query":"docs_read","max_results":1})),
+        ("docs_read", json!({"document_id":"project-memory.md"})),
+    ])
+    .await;
+    let mut settings = settings(root.path(), state.path(), &mock.base_url);
+    settings.compact_tools = true;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    configure(&app, root.path(), "demo", "normal", "5").await;
+    turn(&app).await;
+    let requests = mock.requests.lock().unwrap().clone();
+    let first = declared(&requests[0]);
+    for name in [
+        "read",
+        "memory",
+        "edit",
+        "shell",
+        "find_tools",
+        "list_tools",
+        "mcp__demo__read",
+    ] {
+        assert!(first.iter().any(|tool| tool == name), "{name}: {first:?}");
+    }
+    assert!(!first.iter().any(|tool| tool == "docs_read"));
+    let system = requests[0]["messages"][0]["content"].as_str().unwrap();
+    assert!(system.contains("Consult the RoomKit Code guide — docs_"));
+    let second = declared(&requests[1]);
+    assert!(second.iter().any(|tool| tool == "docs_read"));
+    assert!(!second.iter().any(|tool| tool == "web_fetch"));
+    let result = requests[2]["messages"].as_array().unwrap().last().unwrap();
+    assert_eq!(result["role"], "tool");
+    assert!(
+        result["content"]
+            .as_str()
+            .unwrap()
+            .contains("1: # Project memory"),
+        "{result}"
+    );
+    super::breakdown::fixed_parts_match(&app, &requests[0]).await;
+    app.close().await.unwrap();
+}
+
 /// A server whose schemas would fill the window stays out of the requests: the
 /// native tools stay declared, the search answers without an approval, and the
 /// tool it finds is declared next and asks for its approval as any MCP tool.

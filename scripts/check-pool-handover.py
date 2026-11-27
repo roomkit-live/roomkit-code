@@ -27,6 +27,8 @@ class Model(StreamingModel):
         last = messages[-1]
         content = str(last["content"])
         if name == "owner":
+            declared = {tool["function"]["name"] for tool in request["tools"]}
+            assert {"list_sessions", "send_message", "delegate_task", "find_tools"} <= declared, declared
             return self.owner_reply(messages, last, content)
 
         return self.worker_reply(name, messages)
@@ -144,7 +146,7 @@ class Model(StreamingModel):
 def app(binary, work, model, port):
     return [binary, str(work / "workspace"), "--state-dir", str(work / "state"),
             "--base-url", f"http://127.0.0.1:{port}/v1", "--model", model,
-            "--mode", "plan", "--no-update-check", "--no-herdr", "--no-animations"]
+            "--mode", "plan", "--compact-tools", "--no-update-check", "--no-herdr", "--no-animations"]
 
 
 def start_worker(stack, peer, binary, name, group, port, redis_port):
