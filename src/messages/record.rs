@@ -2,7 +2,7 @@
 use crate::system_row::SystemRow;
 use roomkit::model::{ChannelId, EventId, EventType, RoomEvent, RoomId};
 use roomkit::{ConversationStore, RoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use serde::{Deserialize, Serialize};
 
 pub(super) const STREAM: &str = "roomkit_code:session_mail:v1";

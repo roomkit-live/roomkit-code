@@ -2,7 +2,7 @@
 use super::Scheduler;
 use roomkit::model::{ChannelId, Room, RoomId};
 use roomkit::{ConversationStore, RoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use serde_json::{Value, json};
 
 impl Scheduler {

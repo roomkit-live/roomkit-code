@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use roomkit::model::{Access, ChannelId, RoomId};
 use roomkit::{GetRoomOptions, ListBindingsOptions, RoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tools_process::{ObservedProcess, ProcessSession, ProcessState};
 use roomkit_tui::protocol::{Event, SidebarContent, SidebarEntry, SidebarSection, SidebarTone};
 use roomkit_tui_engine::SessionConfig;

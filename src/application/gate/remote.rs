@@ -4,7 +4,7 @@ use super::{Gate, decide};
 use crate::{Result, remote};
 use roomkit::model::{ChannelType, HookAction, Room, RoomContext};
 use roomkit::{RoomKit, ToolCallEvent};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::sync::Arc;

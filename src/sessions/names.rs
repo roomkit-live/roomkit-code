@@ -4,7 +4,7 @@
 
 use roomkit::model::RoomId;
 use roomkit::{ConversationStore, RoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui::protocol::Event;
 use roomkit_tui_engine::{CommandResult, SessionConfig};
 

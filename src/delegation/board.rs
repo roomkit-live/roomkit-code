@@ -91,7 +91,7 @@ impl Tasks {
     /// Gives the lines of tasks' ends where to be stored.
     pub(crate) fn install_lines(
         &self,
-        kit: &roomkit::RoomKit<roomkit_sqlite::SqliteStore>,
+        kit: &roomkit::RoomKit<roomkit_providers_sqlite::SqliteStore>,
         terminal: &roomkit::model::ChannelId,
     ) {
         self.lines.install(kit, terminal);

@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use roomkit::model::{ChannelId, EventType, RoomEvent};
 use roomkit::{HookExecution, HookOptions, HookTrigger, RoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui_engine::Diagnostic;
 use serde_json::Value;
 

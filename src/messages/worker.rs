@@ -8,7 +8,7 @@ use roomkit::{
     model::{Metadata, Room},
 };
 use roomkit_ai::{AiTool, Tool, ToolError, ToolFuture, ToolResult};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use serde::Deserialize;
 use serde_json::{Value, json};
 

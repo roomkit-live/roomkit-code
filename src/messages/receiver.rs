@@ -275,7 +275,7 @@ fn idle_delay(last: Duration, progress: bool) -> Duration {
 mod tests {
     use super::*;
     use roomkit::{RoomKit, RoomKitOptions, model::ChannelId};
-    use roomkit_sqlite::{SqliteStore, SqliteStoreOptions};
+    use roomkit_providers_sqlite::{SqliteStore, SqliteStoreOptions};
     #[tokio::test]
     async fn restart_closes_an_interrupted_question_once_and_leaves_new_mail_pending()
     -> crate::Result<()> {

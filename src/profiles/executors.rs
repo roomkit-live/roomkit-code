@@ -5,7 +5,7 @@ use crate::{
     storage::document::Document,
 };
 use roomkit::RoomKit;
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui::protocol::{
     Choice, Command, Event, FieldKind, FormField, FormSpec, FormValues, Request,
 };

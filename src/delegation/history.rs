@@ -7,7 +7,7 @@ use std::time::Instant;
 use roomkit::RoomKit;
 use roomkit::model::Room;
 use roomkit::store::{ConversationStore, FindRoomsOptions};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui_engine::SessionConfig;
 use serde_json::{Value, json};
 

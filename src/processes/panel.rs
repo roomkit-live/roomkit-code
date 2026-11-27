@@ -3,7 +3,7 @@ use std::num::NonZeroUsize;
 
 use roomkit::RoomKit;
 use roomkit::model::ChannelId;
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tools_process::{ProcessChunk, ProcessReadInput, ProcessState, ProcessStopInput};
 use roomkit_tui::protocol::{Choice, Event, PanelSpec};
 use roomkit_tui_engine::{CommandResult, SessionConfig};

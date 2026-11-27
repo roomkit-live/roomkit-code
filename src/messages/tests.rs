@@ -3,7 +3,7 @@
 use super::{record::Mail, reply};
 use roomkit::model::EventId;
 use roomkit::{ConversationStore, RoomKit, RoomKitOptions};
-use roomkit_sqlite::{SqliteStore, SqliteStoreOptions};
+use roomkit_providers_sqlite::{SqliteStore, SqliteStoreOptions};
 
 #[tokio::test]
 async fn replay_validates_the_content_and_reply_ids_stay_in_the_recipient_room() {

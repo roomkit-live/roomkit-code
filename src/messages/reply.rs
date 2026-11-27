@@ -3,7 +3,7 @@ use super::record::{Kind, Mail};
 use roomkit::model::{EventId, RoomEvent, RoomId};
 use roomkit::{ConversationStore, RoomKit};
 use roomkit_ai::ToolError;
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 
 pub(super) async fn original(
     kit: &RoomKit<SqliteStore>,

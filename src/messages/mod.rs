@@ -21,7 +21,7 @@ mod tools;
 use crate::sync::lock;
 use roomkit::model::{RoomEvent, RoomId};
 use roomkit::{RoomKit, WeakRoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui::protocol::{ActorId, Event, Item, Message};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};

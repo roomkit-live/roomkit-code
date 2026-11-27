@@ -8,7 +8,7 @@ pub(crate) use kept::{View, still_read};
 use crate::diagnostics::Diagnostics;
 use roomkit::{ConversationStore, RoomKit, WeakRoomKit, model::RoomId};
 use roomkit_core::rules::transcript::{fence, json_text_line};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui::protocol::{Event, PanelSpec};
 use roomkit_tui_engine::{CommandResult, SessionConfig};
 use serde::{Deserialize, Serialize};

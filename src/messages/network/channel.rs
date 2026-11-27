@@ -6,7 +6,7 @@ use crate::{
     storage::SessionLeases,
 };
 use roomkit::{Channel, ChannelError, ConversationStore, WeakRoomKit, model::*};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -143,7 +143,7 @@ mod tests {
     use super::*;
     use crate::messages::record::Route;
     use roomkit::{RoomKit, RoomKitOptions};
-    use roomkit_sqlite::SqliteStoreOptions;
+    use roomkit_providers_sqlite::SqliteStoreOptions;
 
     #[tokio::test]
     async fn returned_mail_requires_the_expected_live_endpoints_and_request() -> Result<()> {

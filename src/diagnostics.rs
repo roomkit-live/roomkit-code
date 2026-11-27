@@ -11,7 +11,7 @@ use std::{
 };
 
 use roomkit::{FrameworkEvent, HookExecution, HookOptions, HookTrigger, RoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui::protocol::{Choice, Event, PanelSpec};
 use roomkit_tui_engine::{CommandResult, Diagnostic, SessionConfig};
 use serde_json::{Value, json};

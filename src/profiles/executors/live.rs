@@ -5,7 +5,7 @@ use crate::{
     remote::pool::{self, Coordinator, Scheduler},
 };
 use roomkit::RoomKit;
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use std::sync::Arc;
 use tokio::sync::OwnedRwLockWriteGuard;
 

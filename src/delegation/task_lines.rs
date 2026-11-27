@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use roomkit::RoomKit;
 use roomkit::model::ChannelId;
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui::protocol::{ActorId, Item, Message};
 use serde_json::Value;
 

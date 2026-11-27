@@ -277,7 +277,7 @@ async fn closing_waits_once_for_a_comparison_that_never_ends() {
 #[tokio::test]
 async fn an_unreadable_saved_list_is_never_overwritten() {
     let state = tempfile::tempdir().unwrap();
-    let store = SqliteStore::new(roomkit_sqlite::SqliteStoreOptions {
+    let store = SqliteStore::new(roomkit_providers_sqlite::SqliteStoreOptions {
         path: state.path().join("history.sqlite3"),
     });
     let kit = RoomKit::new(roomkit::RoomKitOptions::with_store(store));

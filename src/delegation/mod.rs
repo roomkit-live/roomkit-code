@@ -34,7 +34,7 @@ use roomkit::tasks::{DelegateHandler, DelegateHandlerOptions};
 use roomkit::{HookTrigger, RoomKit};
 use roomkit_ai::AiTool;
 use roomkit_ai::tasks::{DELEGATE_TOOL, SetupDelegationOptions, setup_delegation};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use serde_json::Value;
 
 /// The engine's tool that hands a task over.

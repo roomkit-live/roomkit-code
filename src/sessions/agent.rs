@@ -15,7 +15,7 @@ use roomkit::model::{ChannelId, ChannelType, RoomId};
 use roomkit::orchestration::{TransitionOptions, get_conversation_state, save_conversation_state};
 use roomkit::store::ListEventsOptions;
 use roomkit::{ConversationStore, EventFilter, RoomKit, RoomKitError};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 
 /// Why a conversation's agent changed, as its state records it.
 const SELECTED: &str = "selected in roomkit-code";

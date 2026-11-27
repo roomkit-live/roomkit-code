@@ -15,7 +15,7 @@
 use roomkit::model::{ChannelId, RoomEvent, RoomId};
 use roomkit::store::ListEventsOptions;
 use roomkit::{ConversationStore, EventFilter, RoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui::protocol::{ContextUsage, Event};
 use serde::{Deserialize, Serialize};
 

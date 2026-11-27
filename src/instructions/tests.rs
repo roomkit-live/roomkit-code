@@ -320,7 +320,7 @@ async fn rules_given_along_another_path_are_taken_back_by_a_snapshot_already_car
 
 /// An engine that keeps its conversations in `state`, and holds "room".
 async fn engine(state: &Path) -> RoomKit<SqliteStore> {
-    let store = SqliteStore::new(roomkit_sqlite::SqliteStoreOptions {
+    let store = SqliteStore::new(roomkit_providers_sqlite::SqliteStoreOptions {
         path: state.join("history.sqlite3"),
     });
     let kit = RoomKit::new(roomkit::RoomKitOptions::with_store(store));

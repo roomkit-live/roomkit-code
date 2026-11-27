@@ -211,13 +211,15 @@ fn panics_are_recorded_and_counted_without_waiting_on_the_log() -> crate::Result
 }
 
 fn kit(directory: &std::path::Path) -> RoomKit<SqliteStore> {
-    let store = SqliteStore::new(roomkit_sqlite::SqliteStoreOptions {
+    let store = SqliteStore::new(roomkit_providers_sqlite::SqliteStoreOptions {
         path: directory.join("history.sqlite3"),
     });
     RoomKit::new(roomkit::RoomKitOptions::with_store(store))
 }
 
-fn room(id: &str) -> crate::Result<roomkit::CreateRoomOptions<roomkit_sqlite::SqliteStore>> {
+fn room(
+    id: &str,
+) -> crate::Result<roomkit::CreateRoomOptions<roomkit_providers_sqlite::SqliteStore>> {
     Ok(roomkit::CreateRoomOptions {
         room_id: Some(roomkit::model::RoomId::new(id)?),
         ..Default::default()

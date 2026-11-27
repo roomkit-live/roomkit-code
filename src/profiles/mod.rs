@@ -26,7 +26,7 @@ mod worker;
 use roomkit::model::{Access, ChannelId};
 use roomkit::{ListBindingsOptions, RoomKit};
 use roomkit_ai::AiTool;
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui::protocol::ModelInfo;
 use roomkit_tui_engine::SessionConfig;
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};

@@ -17,7 +17,7 @@ const POLL: Duration = Duration::from_secs(2);
 
 /// What a view's live events are read for.
 type View<'a> = (
-    &'a roomkit::RoomKit<roomkit_sqlite::SqliteStore>,
+    &'a roomkit::RoomKit<roomkit_providers_sqlite::SqliteStore>,
     &'a Arc<Profiles>,
     &'a Services,
     &'a SessionConfig,

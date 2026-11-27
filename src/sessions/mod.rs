@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use roomkit::model::{Access, ChannelId, EventContent, RoomId};
 use roomkit::{ListBindingsOptions, RoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui::protocol::{Choice, Command, CommandSpec, Event, Rejection, Request};
 use roomkit_tui_engine::{CommandHandler, CommandResult, SessionConfig};
 

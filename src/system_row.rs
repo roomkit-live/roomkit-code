@@ -7,7 +7,7 @@ use roomkit::model::{
     TextContent, Visibility,
 };
 use roomkit::{CommitEventOptions, RoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use serde_json::Value;
 
 /// One such line.

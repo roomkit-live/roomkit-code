@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use roomkit::model::{ChannelId, ChannelType, EventType, RoomId};
 use roomkit::store::ListEventsOptions;
 use roomkit::{ConversationStore, EventFilter, RoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use serde::{Deserialize, Serialize};
 
 use crate::permissions::{Mode, Policy};

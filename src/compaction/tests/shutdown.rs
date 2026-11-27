@@ -10,7 +10,7 @@ use roomkit::{
 async fn close_waits_for_the_timeline_commit_and_its_delivery_cursor() {
     let dir = tempfile::tempdir().unwrap();
     let locks = Arc::new(InMemoryLockManager::default());
-    let store = SqliteStore::new(roomkit_sqlite::SqliteStoreOptions {
+    let store = SqliteStore::new(roomkit_providers_sqlite::SqliteStoreOptions {
         path: dir.path().join("history.sqlite3"),
     });
     let kit = RoomKit::new(RoomKitOptions {

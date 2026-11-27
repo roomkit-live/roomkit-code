@@ -12,7 +12,7 @@ use roomkit::{
     ConversationStore, CreateRoomOptions, EventFilter, GetRoomOptions, GetTimelineOptions,
     ListBindingsOptions, RoomFilter, RoomKit,
 };
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui::protocol::{Choice, Event};
 use roomkit_tui_engine::{CommandResult, SessionConfig};
 

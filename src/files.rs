@@ -17,7 +17,7 @@ use std::{
 };
 
 use roomkit::{ConversationStore, RoomKit, model::RoomId};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use tokio::sync::{Mutex, OnceCell, watch};
 
 use record::Record;

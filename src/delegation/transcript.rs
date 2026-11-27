@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use roomkit::model::{EventContent, EventType, RoomEvent, RoomId, ToolCallContent};
 use roomkit::model::{ToolCallOutcome, ToolCallStatus};
 use roomkit::{GetTimelineOptions, RoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 
 /// How many of the room's latest events are read.
 const EVENTS: u64 = 200;

@@ -119,7 +119,7 @@ impl Resources {
     /// what a shell command left running, from now until the resources
     /// close: the agent reads it in a turn of its own, or in the turn it is
     /// running.
-    pub fn follow_job_ends(&self, kit: &roomkit::RoomKit<roomkit_sqlite::SqliteStore>) {
+    pub fn follow_job_ends(&self, kit: &roomkit::RoomKit<roomkit_providers_sqlite::SqliteStore>) {
         for ends in [self.processes.ends(), self.shell.ends()] {
             let kit = kit.clone();
             tokio::spawn(async move { roomkit_tools_roomkit::notify_job_ends(&kit, ends).await });

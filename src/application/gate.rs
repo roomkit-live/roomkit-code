@@ -7,7 +7,7 @@ use std::sync::Arc;
 use roomkit::model::RoomContext;
 use roomkit::turns::HookOptions;
 use roomkit::{HookTrigger, RoomKit, ToolCallEvent, WeakRoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui_engine::ConversationChannel;
 use serde_json::Value;
 

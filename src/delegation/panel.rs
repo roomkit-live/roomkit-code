@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use roomkit::{CancelTaskOptions, RoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui::protocol::{Event, SidebarSection};
 use roomkit_tui_engine::{CommandResult, SessionConfig};
 

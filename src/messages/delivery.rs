@@ -282,7 +282,7 @@ mod tests {
     #[tokio::test]
     async fn mail_from_a_group_this_launch_did_not_reach_says_so() -> crate::Result<()> {
         use roomkit::{RoomKit, RoomKitOptions};
-        use roomkit_sqlite::{SqliteStore, SqliteStoreOptions};
+        use roomkit_providers_sqlite::{SqliteStore, SqliteStoreOptions};
         let dir = tempfile::tempdir()?;
         let store = SqliteStore::new(SqliteStoreOptions {
             path: dir.path().join("history.sqlite3"),

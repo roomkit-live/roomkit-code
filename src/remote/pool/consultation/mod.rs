@@ -10,7 +10,7 @@ use roomkit::{
     RoomKit,
     model::{ChannelId, Metadata, Room, RoomId},
 };
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use serde_json::{Value, json};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;

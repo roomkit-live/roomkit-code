@@ -13,7 +13,7 @@ use roomkit::model::{
 use roomkit::{
     CommitEventOptions, ConversationStore, ListBindingsOptions, RoomKit, UpdateEventOptions,
 };
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tools_process::{
     ProcessChunk, ProcessEnd, ProcessReadInput, ProcessReadResult, ProcessSession,
     ProcessStartInput, ProcessState, ProcessStopInput, ProcessWriteInput,

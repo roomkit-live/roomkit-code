@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use roomkit::model::{ChannelId, EventType, Metadata, RoomEvent, RoomId};
 use roomkit::{GetTimelineOptions, RoomKit};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tools_process::{ProcessSession, ProcessState};
 use roomkit_tui::protocol::ConversationCost;
 use roomkit_tui_engine::SessionConfig;

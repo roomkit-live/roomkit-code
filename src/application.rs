@@ -6,7 +6,7 @@ use roomkit::ConversationStore;
 use roomkit::model::ChannelId;
 use roomkit::store::ListRoomsOptions;
 use roomkit::{RoomKit, RoomKitOptions};
-use roomkit_sqlite::{SqliteStore, SqliteStoreOptions};
+use roomkit_providers_sqlite::{SqliteStore, SqliteStoreOptions};
 use roomkit_tui::connection;
 use roomkit_tui_engine::{ConversationChannel, LocalSession, SessionConfig};
 

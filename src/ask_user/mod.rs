@@ -14,7 +14,7 @@ use roomkit::model::{ChannelId, HookResult, RoomId};
 use roomkit::turns::HookOptions;
 use roomkit::{HookTrigger, RejectInputOptions, RoomKit};
 use roomkit_ai::HumanInputToolHandler;
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tools_agents::{AskUserQuestion, AskUserTool};
 use roomkit_tools_core::ToolError;
 use roomkit_tui::protocol::{QuestionItem, QuestionOption};

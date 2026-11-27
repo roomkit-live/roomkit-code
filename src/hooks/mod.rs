@@ -235,7 +235,7 @@ impl Hooks {
 
     pub fn install(
         self: &Arc<Self>,
-        kit: &roomkit::RoomKit<roomkit_sqlite::SqliteStore>,
+        kit: &roomkit::RoomKit<roomkit_providers_sqlite::SqliteStore>,
     ) -> crate::Result<()> {
         let hooks = self.clone();
         let options = roomkit::turns::HookOptions {

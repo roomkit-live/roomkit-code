@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 
 use roomkit::RoomKit;
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 use roomkit_tui::protocol::{
     Choice, PanelSpec, SidebarContent, SidebarEntry, SidebarSection, SidebarTone,
 };

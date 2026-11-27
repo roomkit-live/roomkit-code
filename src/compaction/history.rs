@@ -10,7 +10,7 @@ use roomkit::model::{ChannelId, EventContent, EventType, RoomContext, RoomEvent,
 use roomkit::store::ListEventsOptions;
 use roomkit::{ConversationStore, EventFilter, GetRoomOptions, ListBindingsOptions, RoomKit};
 use roomkit_ai::memory::{EstimateEventTokensOptions, estimate_event_tokens};
-use roomkit_sqlite::SqliteStore;
+use roomkit_providers_sqlite::SqliteStore;
 
 use super::WINDOW;
 
