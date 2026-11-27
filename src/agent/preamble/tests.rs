@@ -119,7 +119,8 @@ fn a_paragraph_about_tools_comes_only_with_one_of_them() {
     for text in [
         "plan_mode_enter asks the user",
         "manage durable plans",
-        "Project memory holds durable project facts",
+        "call memory with action save",
+        "ordinary personal preferences unrelated to the project",
         "read project-memory.md",
         "RoomKit Code's own user guide",
         "document_id experimental-executor-pool.md",

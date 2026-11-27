@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Agents can recall and maintain bounded project memory across sessions and linked Git worktrees. Choose the local Markdown store or a compatible MCP server in the launch configuration.
+- Agents can recall and maintain bounded project memory across sessions and linked Git worktrees, including ordinary personal preferences explicitly saved by the user. Choose the local Markdown store or a compatible MCP server in the launch configuration.
 
 - `/effort` shows the native levels of a loaded llama.cpp template or opens the reasoning budget. A conversation can set its own token limit and restore the agent default.
 
