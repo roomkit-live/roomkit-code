@@ -102,7 +102,7 @@ def fail_idle_post(root, *, checkpoint):
     with sqlite3.connect(private / "history.sqlite3") as db:
         if checkpoint:
             db.execute("""CREATE TRIGGER reject_idle_post BEFORE INSERT ON private_state
-                          WHEN NEW.key = 'roomkit_code:session_mail_dispatch:v1'
+                          WHEN NEW.key = 'roomkit_code:session_mail_dispatch:remote:v1'
                             AND json_extract(NEW.value, '$.id') LIKE 'session-reply-%'
                             AND json_type(NEW.value, '$.dispatch.Post') = 'object'
                           BEGIN SELECT RAISE(FAIL, 'inbox-checkpoint-fixture'); END""")

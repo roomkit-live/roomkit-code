@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import json
 import os
 import re
+import socket
 import sqlite3
 import threading
 import time
@@ -71,10 +72,10 @@ def exercise_recovery(stack, directory, binary, env, args_for):
     stack.callback(responder.finish.set)
     group = uuid.uuid4().hex
 
-    def launch(name, model, scope=group):
+    def launch(name, model, scope=group, launch_env=env):
         path = directory / name
         (path / "workspace").mkdir(parents=True, exist_ok=True)
-        terminal = Terminal(stack, args_for(binary, path, name, scope, model.server_port), env)
+        terminal = Terminal(stack, args_for(binary, path, name, scope, model.server_port), launch_env)
         database = next((path / "state").glob("projects/*/history.sqlite3"))
         return terminal, database
 
@@ -120,7 +121,7 @@ def exercise_recovery(stack, directory, binary, env, args_for):
     assert len(rows(remote, "SELECT 1 FROM events WHERE idempotency_key=?", "dispatch-"+unanswered)) == 1
 
     def interrupt(text, terminal):
-        with reject(remote, "INSERT ON private_state", """NEW.key = 'roomkit_code:session_mail_dispatch:v1'
+        with reject(remote, "INSERT ON private_state", """NEW.key = 'roomkit_code:session_mail_dispatch:remote:v1'
                 AND json_extract(NEW.value,'$.dispatch')='Steering'"""):
             addr = rows(remote, "SELECT json_extract(value,'$.channel') FROM private_state WHERE key='roomkit_code:session_address:v1'")[0][0]
             sender.send("@peer:" + addr + " " + text, "Message to @review")
@@ -131,9 +132,25 @@ def exercise_recovery(stack, directory, binary, env, args_for):
         return ident
 
     waiting = interrupt("RESTART_BEFORE_DISPATCH", reviewer)
+    # This owner cannot join the group. Wait for its inbox to pass the row
+    # locally before restoring the original broker, so the assertion covers dispatch.
+    with socket.socket() as unavailable:
+        unavailable.bind(("127.0.0.1", 0))
+        offline_env = dict(env, ROOMKIT_EXECUTOR_REDIS_URL=f"redis://127.0.0.1:{unavailable.getsockname()[1]}")
+        offline, _ = launch("review", responder, launch_env=offline_env)
+        offline.wait("could not be reached", 0)
+        wait_for(lambda: rows(remote, """SELECT 1 FROM private_state, events
+            WHERE key='roomkit_code:session_mail_cursor:v1' AND events.id=?
+              AND json_extract(value,'$.local_index') >= events.idx
+              AND coalesce(json_extract(value,'$.index'), -1) < events.idx""", waiting))
+        assert not rows(remote, "SELECT 1 FROM events WHERE id=? OR idempotency_key=?",
+                        "uncertain-"+waiting, "dispatch-"+waiting)
+        os.write(offline.master, b"\x04")
+        offline.proc.wait(timeout=15)
     reviewer, _ = launch("review", responder)
     sender.wait("Answer to " + waiting, 0)
     assert len(rows(remote, "SELECT 1 FROM events WHERE idempotency_key=?", "dispatch-"+waiting)) == 1
+    assert len(rows(local, "SELECT 1 FROM events WHERE id=?", "session-reply-"+waiting)) == 1
     expired = interrupt("SWITCH_GROUP_BEFORE_DISPATCH", reviewer)
     outsider, _ = launch("review", responder, uuid.uuid4().hex)
     outsider.wait("original network address is unavailable", 0)
@@ -142,4 +159,4 @@ def exercise_recovery(stack, directory, binary, env, args_for):
     for terminal in (sender, outsider):
         os.write(terminal.master, b"\x04")
         terminal.proc.wait(timeout=15)
-    print("PASS Durable outgoing history, reply receipt recovery, accepted mail after restart and group isolation.", flush=True)
+    print("PASS Durable outgoing history, reply receipt recovery, accepted mail across an offline restart and group isolation.", flush=True)

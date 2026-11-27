@@ -1,4 +1,4 @@
-//! The receipt for the single inbox record being admitted in each room.
+//! Durable admission receipts for local and group mail in each room.
 use super::{
     delivery::{Posts, after_post},
     network::Network,
@@ -11,7 +11,22 @@ use serde_json::json;
 use std::time::Duration;
 
 use super::Kit;
-const RECEIPT: &str = "roomkit_code:session_mail_dispatch:v1";
+const LEGACY_RECEIPT: &str = "roomkit_code:session_mail_dispatch:v1";
+
+// An offline launch can handle local mail while an older remote handover
+// remains pending. Neither delivery may replace the other's steering receipt.
+fn receipt_key(event: &RoomEvent) -> &'static str {
+    if event
+        .metadata
+        .get(super::record::STREAM)
+        .and_then(|value| value.get("remote"))
+        .is_some_and(|v| !v.is_null())
+    {
+        "roomkit_code:session_mail_dispatch:remote:v1"
+    } else {
+        "roomkit_code:session_mail_dispatch:local:v1"
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub(super) enum Checkpoint {
@@ -27,7 +42,11 @@ impl Checkpoint {
             ("dispatch".into(), serde_json::to_value(self)?),
         ];
         kit.store()
-            .set_private_state(&event.room_id, RECEIPT, Some(state.into_iter().collect()))
+            .set_private_state(
+                &event.room_id,
+                receipt_key(event),
+                Some(state.into_iter().collect()),
+            )
             .await?;
         Ok(())
     }
@@ -46,10 +65,18 @@ impl Checkpoint {
     }
 
     pub(super) async fn read(kit: &Kit, event: &RoomEvent) -> crate::Result<Option<Self>> {
-        let state = kit
-            .store()
-            .get_private_state(&event.room_id, RECEIPT)
-            .await?;
+        let store = kit.store();
+        let state = match store
+            .get_private_state(&event.room_id, receipt_key(event))
+            .await?
+        {
+            Some(state) => Some(state),
+            None => {
+                store
+                    .get_private_state(&event.room_id, LEGACY_RECEIPT)
+                    .await?
+            }
+        };
         let Some(mut state) =
             state.filter(|s| s.get("id").and_then(|id| id.as_str()) == Some(event.id.as_str()))
         else {
