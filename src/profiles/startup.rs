@@ -118,6 +118,7 @@ fn add_first_agent(
         mcp: BTreeMap::new(),
         context_window: settings.context_window,
         max_output_tokens: settings.max_output_tokens,
+        thinking_budget: settings.thinking_budget,
         instructions: String::new(),
         tools: TOOLS.iter().map(|s| (*s).into()).collect(),
     };

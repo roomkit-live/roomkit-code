@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Set a per-agent llama.cpp reasoning token budget in `/agents`. Local generation diagnostics show the requested reasoning limit, output budget and finish reason.
+
 - GGUF downloads show live progress while the conversation stays available. Use `/downloads` to cancel, select a finished model or delete an installed quantization after confirmation.
 
 - Explain incomplete llama.cpp generations in the conversation and `/diagnostics` with the finish reason, effective output budget, and reported output tokens.

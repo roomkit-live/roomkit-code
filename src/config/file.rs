@@ -82,6 +82,7 @@ pub(super) struct Provider {
     pub(super) timeout_seconds: Option<u64>,
     pub(super) context_window: Option<u64>,
     pub(super) max_output_tokens: Option<u32>,
+    pub(super) thinking_budget: Option<u32>,
     pub(super) reasoning_effort: Option<String>,
     pub(super) pricing: Option<Pricing>,
 }

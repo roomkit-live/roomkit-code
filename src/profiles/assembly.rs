@@ -49,6 +49,11 @@ impl Profiles {
         inventory: Option<crate::remote::pool::Inventory>,
     ) -> Result<(CodeAgent, Inventory), String> {
         profile.validate()?;
+        crate::local_models::validate_thinking_budget(
+            provider.kind,
+            profile.thinking_budget,
+            profile.max_output_tokens,
+        )?;
         provider.validate()?;
         let provider_instance = self.generation_provider(profile, provider)?;
         let (skills, skill_roots) = {

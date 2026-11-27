@@ -23,6 +23,29 @@ use std::{
 pub(crate) const CONTEXT_HINT: &str = "In /model, raise Agent context capacity";
 pub(crate) const DEFAULT_CONTEXT: u32 = 16_384;
 
+pub(crate) fn validate_thinking_budget(
+    provider: crate::providers::ProviderKind,
+    thinking: Option<u32>,
+    output: Option<u32>,
+) -> Result<(), String> {
+    let Some(thinking) = thinking else {
+        return Ok(());
+    };
+    if provider != crate::providers::ProviderKind::LlamaCpp {
+        return Err("Reasoning budget in tokens requires a llama.cpp connection".into());
+    }
+    let output = output.unwrap_or_else(|| LlamaCppConfig::default().max_tokens);
+    if thinking >= output {
+        return Err(format!(
+            "Reasoning budget must be less than the output budget ({output} tokens)"
+        ));
+    }
+    if thinking > i32::MAX as u32 {
+        return Err("Reasoning budget exceeds the llama.cpp token limit".into());
+    }
+    Ok(())
+}
+
 type ActiveServer = Arc<tokio::sync::RwLock<Option<Arc<LlamaCpp>>>>;
 
 #[derive(Default)]

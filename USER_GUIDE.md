@@ -537,8 +537,17 @@ A fresh project can also start with `--provider llamacpp --model /path/to/model.
 
 The default llama.cpp output budget is 1,024 tokens per generation, including reasoning.
 Set **Output budget (advanced)** in **/agents** to give the model more room to answer.
+Set **Reasoning budget (advanced)** on a llama.cpp agent to limit the tokens
+spent thinking within that total. For example, use 1,024 reasoning tokens with a
+4,096-token output budget. Enter the numbers as `1024` and `4096`. The limit
+applies per generation, including tool rounds, on templates that support reasoning
+budgets. Leave the field empty to use the server default, or enter `0` to request
+that reasoning be disabled. For a new project the same settings are available as
+`--thinking-budget` and `--max-output-tokens`.
+
 An incomplete local generation leaves an explanation in its conversation.
-**/diagnostics** also shows the reported finish reason, output usage when available, and the effective output budget.
+**/diagnostics** records the requested reasoning limit, total output budget,
+reported finish reason, and output usage when available.
 
 CodeLALA v1 and Olala v1 mini use a dedicated OVH llama.cpp build. On first use, Code builds a pinned source revision with Git, CMake and a C++ compiler. Linux builds use CUDA when its toolkit and an NVIDIA device are available. The executable lives under the user's RoomKit Code data directory in `runtimes/ovh-llama.cpp/<revision>/bin/`. Code launches it by absolute path. To supply a compatible build yourself, set `ROOMKIT_LLAMA_BINARY` to the absolute path of its `llama-server`.
 

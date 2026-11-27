@@ -313,6 +313,32 @@ fn the_output_limit_is_optional_and_positive() {
 }
 
 #[test]
+fn local_thinking_budget_uses_the_file_then_the_flag_and_requires_llama_cpp() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("settings.toml");
+    std::fs::write(
+        &path,
+        "[provider]\nkind = \"llamacpp\"\nmax_output_tokens = 4096\nthinking_budget = 1024\n",
+    )
+    .unwrap();
+    let mut cli = cli(root.path());
+    cli.base_url = None;
+    cli.config = Some(path);
+    assert_eq!(Settings::load(&cli).unwrap().thinking_budget, Some(1024));
+    cli.thinking_budget = Some(0);
+    assert_eq!(Settings::load(&cli).unwrap().thinking_budget, Some(0));
+    cli.base_url = Some("http://localhost:8000/v1".into());
+    cli.provider = Some(crate::providers::ProviderKind::OpenAi);
+    assert!(
+        Settings::load(&cli)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("requires a llama.cpp connection")
+    );
+}
+
+#[test]
 fn sidebar_appearance_is_configurable_without_changing_agent_settings() {
     let root = tempfile::tempdir().unwrap();
     let mut cli = cli(root.path());

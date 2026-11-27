@@ -92,8 +92,17 @@ impl Diagnostics {
     }
 
     /// Record the llama.cpp generation even when it ended outside an interactive room.
-    pub(crate) fn local_generation(&self, room: Option<&str>, mut fields: Value, summary: String) {
+    pub(crate) fn local_generation(
+        &self,
+        room: Option<&str>,
+        mut fields: Value,
+        summary: Option<String>,
+    ) {
         fields["room"] = json!(room);
+        let Some(summary) = summary else {
+            self.observe("local_generation_completed", fields, None);
+            return;
+        };
         fields["summary"] = json!(summary);
         self.record("local_generation_incomplete", fields, None);
         if let Some(room) = room {
@@ -307,12 +316,18 @@ impl Diagnostics {
             return CommandResult::Events(vec![]);
         }
         let local = self.local.heading(current.room.as_str());
-        let (recent, failed) = {
+        let (recent, failed, generation) = {
             let (state, _recording) = self.locked();
             let recent = state.recent.iter().rev().take(20).cloned();
             (
                 recent.collect::<Vec<_>>().join("\n"),
                 state.storage_failed(),
+                state
+                    .recent
+                    .iter()
+                    .rev()
+                    .find_map(|line| local::generation_heading(line, current.room.as_str()))
+                    .unwrap_or_default(),
             )
         };
         CommandResult::Events(vec![Event::Panel {
@@ -322,7 +337,7 @@ impl Diagnostics {
                 "diagnostics",
                 "Diagnostics · current application",
                 format!(
-                    "{local}Log: {}\nDebug: {}\nStorage: {}\n\nErrors and tool outcomes are recorded automatically. Use --debug for additional framework events.\nNo prompts, credentials, tool arguments/results or raw provider errors are recorded.\nTwo files, at most 1 MiB each. Recent records, newest first:\n\n{recent}",
+                    "{generation}{local}Log: {}\nDebug: {}\nStorage: {}\n\nErrors and tool outcomes are recorded automatically. Use --debug for additional framework events.\nNo prompts, credentials, tool arguments/results or raw provider errors are recorded.\nTwo files, at most 1 MiB each. Recent records, newest first:\n\n{recent}",
                     self.path.display(),
                     self.debug,
                     if failed {

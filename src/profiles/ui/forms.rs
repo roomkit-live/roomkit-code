@@ -234,10 +234,6 @@ pub(super) fn provider_form(existing: Option<&Provider>, state: &State, id: Stri
     )
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "Debt recorded when the limit was set: split it, never grow it"
-)]
 pub(super) fn agent_form(
     existing: Option<&Agent>,
     state: &State,
@@ -266,142 +262,166 @@ pub(super) fn agent_form(
         mcp: BTreeMap::new(),
         context_window: preset.and_then(|p| p.2),
         max_output_tokens: None,
+        thinking_budget: None,
         instructions: String::new(),
         tools: TOOLS.iter().map(|s| (*s).into()).collect(),
     };
     let a = existing.unwrap_or(&default);
+    let mut fields = vec![
+        field(
+            "id",
+            "ID",
+            &a.id,
+            "Stable author identity in history; existing profiles cannot be renamed",
+            true,
+            FieldKind::Text,
+        ),
+        field(
+            "label",
+            "Name",
+            &a.label,
+            "Name shown above this agent's messages",
+            true,
+            FieldKind::Text,
+        ),
+        field(
+            "provider",
+            "Provider",
+            &a.provider,
+            "Connection shared with other agents",
+            true,
+            FieldKind::Choice {
+                choices: state
+                    .providers
+                    .value
+                    .profiles
+                    .values()
+                    .map(|p| choice(&p.id, &p.label, ""))
+                    .collect(),
+            },
+        ),
+        field(
+            "model",
+            "Model",
+            &a.model,
+            "Exact served model ID; /providers offers connection testing and discovery",
+            true,
+            FieldKind::Text,
+        ),
+        field(
+            "context",
+            "Context capacity",
+            a.context_window.map_or_else(String::new, |n| n.to_string()),
+            "Effective server capacity in tokens; empty means unknown",
+            false,
+            FieldKind::Text,
+        ),
+    ];
+    fields.extend(generation_fields(a, state));
+    let scope = existing
+        .and_then(|agent| state.scope(&agent.id))
+        .unwrap_or(Scope::Global);
+    fields.extend(agent_settings_fields(a, scope));
+
     Ok(FormSpec::new(
         id,
         "agents",
         "Agent profile · save and select",
-        vec![
-            field(
-                "id",
-                "ID",
-                &a.id,
-                "Stable author identity in history; existing profiles cannot be renamed",
-                true,
-                FieldKind::Text,
-            ),
-            field(
-                "label",
-                "Name",
-                &a.label,
-                "Name shown above this agent's messages",
-                true,
-                FieldKind::Text,
-            ),
-            field(
-                "provider",
-                "Provider",
-                &a.provider,
-                "Connection shared with other agents",
-                true,
-                FieldKind::Choice {
-                    choices: state
-                        .providers
-                        .value
-                        .profiles
-                        .values()
-                        .map(|p| choice(&p.id, &p.label, ""))
-                        .collect(),
-                },
-            ),
-            field(
-                "model",
-                "Model",
-                &a.model,
-                "Exact served model ID; /providers offers connection testing and discovery",
-                true,
-                FieldKind::Text,
-            ),
-            field(
-                "context",
-                "Context capacity",
-                a.context_window.map_or_else(String::new, |n| n.to_string()),
-                "Effective server capacity in tokens; empty means unknown",
-                false,
-                FieldKind::Text,
-            ),
-            field(
-                "output",
-                "Output budget (advanced)",
-                a.max_output_tokens
-                    .map_or_else(String::new, |n| n.to_string()),
-                output_budget_help(a, state),
-                false,
-                FieldKind::Text,
-            ),
-            field(
-                "effort",
-                "Reasoning effort",
-                a.reasoning_effort.as_deref().unwrap_or("default"),
-                "Model-specific; default omits the parameter. Also available through /effort",
-                true,
-                FieldKind::Choice {
-                    choices: effort_choices(),
-                },
-            ),
-            field(
-                "instructions",
-                "Instructions",
-                &a.instructions,
-                "Additional instructions for this agent; Alt+Enter inserts a line break",
-                false,
-                FieldKind::Multiline,
-            ),
-            field(
-                "tools",
-                "Tools",
-                a.tools.join(", "),
-                &format!(
-                    "Comma-separated: {}. Pool workers can also use cargo_test. Empty = no tools",
-                    TOOLS.join(", ")
-                ),
-                false,
-                FieldKind::Text,
-            ),
-            field(
-                "vision",
-                "Image input",
-                if a.vision { "enabled" } else { "disabled" },
-                "Enable only for models that accept images; Ctrl+V attaches a clipboard image",
-                true,
-                FieldKind::Choice {
-                    choices: vec![
-                        choice("disabled", "Disabled", "Text only"),
-                        choice("enabled", "Enabled", "Model supports vision"),
-                    ],
-                },
-            ),
-            field(
-                "scope",
-                "Scope",
-                existing
-                    .and_then(|a| state.scope(&a.id))
-                    .unwrap_or(Scope::Global)
-                    .value(),
-                "Global agents are available in every project; MCP servers and skills stay per project",
-                true,
-                FieldKind::Choice {
-                    choices: vec![
-                        choice("global", "Global", "Available in every project"),
-                        choice("project", "This project", "Only in this project"),
-                    ],
-                },
-            ),
-        ],
+        fields,
     ))
 }
 
-fn output_budget_help(agent: &Agent, state: &State) -> &'static str {
-    if state
-        .providers
-        .value
-        .profiles
-        .get(&agent.provider)
-        .is_some_and(|p| p.kind == ProviderKind::LlamaCpp)
+fn agent_settings_fields(a: &Agent, scope: Scope) -> [FormField; 4] {
+    [
+        field(
+            "instructions",
+            "Instructions",
+            &a.instructions,
+            "Additional instructions for this agent; Alt+Enter inserts a line break",
+            false,
+            FieldKind::Multiline,
+        ),
+        field(
+            "tools",
+            "Tools",
+            a.tools.join(", "),
+            &format!(
+                "Comma-separated: {}. Pool workers can also use cargo_test. Empty = no tools",
+                TOOLS.join(", ")
+            ),
+            false,
+            FieldKind::Text,
+        ),
+        field(
+            "vision",
+            "Image input",
+            if a.vision { "enabled" } else { "disabled" },
+            "Enable only for models that accept images; Ctrl+V attaches a clipboard image",
+            true,
+            FieldKind::Choice {
+                choices: vec![
+                    choice("disabled", "Disabled", "Text only"),
+                    choice("enabled", "Enabled", "Model supports vision"),
+                ],
+            },
+        ),
+        field(
+            "scope",
+            "Scope",
+            scope.value(),
+            "Global agents are available in every project; MCP servers and skills stay per project",
+            true,
+            FieldKind::Choice {
+                choices: vec![
+                    choice("global", "Global", "Available in every project"),
+                    choice("project", "This project", "Only in this project"),
+                ],
+            },
+        ),
+    ]
+}
+
+fn generation_fields(a: &Agent, state: &State) -> Vec<FormField> {
+    let mut fields = vec![field(
+        "output",
+        "Output budget (advanced)",
+        a.max_output_tokens
+            .map_or_else(String::new, |n| n.to_string()),
+        output_budget_help(a, state),
+        false,
+        FieldKind::Text,
+    )];
+    if state.uses_llama_cpp(a)
+        || (a.provider.is_empty()
+            && state
+                .providers
+                .value
+                .profiles
+                .values()
+                .any(|provider| provider.kind == ProviderKind::LlamaCpp))
     {
+        fields.push(field(
+            "thinking_budget", "Reasoning budget (advanced)",
+            a.thinking_budget.map_or_else(String::new, |n| n.to_string()),
+            "llama.cpp tokens for reasoning within the output budget. Empty uses the server default. 0 disables reasoning on supported templates.",
+            false, FieldKind::Text,
+        ));
+    }
+    fields.push(field(
+        "effort",
+        "Reasoning effort",
+        a.reasoning_effort.as_deref().unwrap_or("default"),
+        "Model-specific; default omits the parameter. Also available through /effort",
+        true,
+        FieldKind::Choice {
+            choices: effort_choices(),
+        },
+    ));
+    fields
+}
+
+fn output_budget_help(agent: &Agent, state: &State) -> &'static str {
+    if state.uses_llama_cpp(agent) {
         "Empty uses the llama.cpp default of 1024 tokens per generation, including reasoning"
     } else {
         "Empty = Auto (includes reasoning); enter a token count only to set a fixed limit"

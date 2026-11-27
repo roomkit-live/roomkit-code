@@ -37,6 +37,7 @@ pub(crate) struct Settings {
     pub provider_timeout_seconds: u64,
     pub context_window: Option<u64>,
     pub max_output_tokens: Option<u32>,
+    pub thinking_budget: Option<u32>,
     /// The reasoning effort a project's first agent starts with.
     pub reasoning_effort: Option<String>,
     /// The list price `[provider.pricing]` states for `model` on `base_url`.
@@ -124,6 +125,7 @@ impl Settings {
             provider_timeout_seconds: first.timeout_seconds,
             context_window: first.context_window,
             max_output_tokens: first.max_output_tokens,
+            thinking_budget: first.thinking_budget,
             reasoning_effort: first.reasoning_effort,
             pricing: first.pricing,
             ui: ui_options(cli, file.ui)?,
@@ -163,6 +165,7 @@ struct FirstAgent {
     timeout_seconds: u64,
     context_window: Option<u64>,
     max_output_tokens: Option<u32>,
+    thinking_budget: Option<u32>,
     reasoning_effort: Option<String>,
     pricing: Option<roomkit_ai::ModelPricing>,
 }
@@ -221,7 +224,14 @@ impl FirstAgent {
         if max_output_tokens == Some(0) {
             return Err("max output tokens must be a positive token count".into());
         }
+        let thinking_budget = cli.thinking_budget.or(file.thinking_budget);
+        crate::local_models::validate_thinking_budget(
+            provider,
+            thinking_budget,
+            max_output_tokens,
+        )?;
         Ok(Self {
+            thinking_budget,
             provider,
             base_url,
             model,

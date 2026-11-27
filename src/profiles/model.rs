@@ -110,6 +110,9 @@ pub(crate) struct Agent {
     /// stays readable by earlier versions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
+    /// llama.cpp reasoning tokens within the total generation budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
     pub instructions: String,
     pub tools: Vec<String>,
 }

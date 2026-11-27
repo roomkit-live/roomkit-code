@@ -261,6 +261,55 @@ mod background;
 mod manage;
 
 #[tokio::test]
+async fn local_reasoning_budget_round_trips_and_respects_the_output_limit() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mut app = open_local(root.path(), state.path()).await;
+    assert_eq!(
+        opened(&invoke(&app, "agents", "edit:code").await)["thinking_budget"],
+        ""
+    );
+    for (value, expected) in [
+        ("1024", "less than the output budget (1024"),
+        ("-1", "nonnegative"),
+    ] {
+        let err = submit_profile(&app, "agents", "edit:code", &[("thinking_budget", value)])
+            .await
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains(expected), "{err}");
+    }
+    edit_profile(
+        &mut app,
+        "agents",
+        "edit:code",
+        &[("output", "4096"), ("thinking_budget", "1024")],
+    )
+    .await;
+    app.close().await.unwrap();
+    let mut app = open_local(root.path(), state.path()).await;
+    assert_eq!(
+        opened(&invoke(&app, "agents", "edit:code").await)["thinking_budget"],
+        "1024"
+    );
+    for value in ["0", ""] {
+        edit_profile(
+            &mut app,
+            "agents",
+            "edit:code",
+            &[("thinking_budget", value)],
+        )
+        .await;
+        assert_eq!(
+            opened(&invoke(&app, "agents", "edit:code").await)["thinking_budget"],
+            value
+        );
+    }
+    app.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn gguf_local_model_switch_keeps_the_agent_context_and_allows_editing_it() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();

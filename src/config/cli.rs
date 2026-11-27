@@ -71,6 +71,9 @@ pub(crate) struct Cli {
     /// Fixed reply token limit, including reasoning; omitted selects Auto.
     #[arg(long)]
     pub max_output_tokens: Option<u32>,
+    /// llama.cpp reasoning token limit within the reply budget (0 disables reasoning).
+    #[arg(long)]
+    pub thinking_budget: Option<u32>,
     /// Initial reasoning effort; the provider's default when omitted.
     #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(crate::profiles::model::EFFORTS))]
     pub reasoning_effort: Option<String>,

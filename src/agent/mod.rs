@@ -197,6 +197,7 @@ pub(crate) async fn create(
         max_context_events: HISTORY,
         retry_policy: Some(retry_policy()),
         reasoning_effort: profile.reasoning_effort.clone(),
+        thinking_budget: profile.thinking_budget.map(i64::from),
         memory: memory(
             (ceiling, &profile.id, channel),
             &provider,

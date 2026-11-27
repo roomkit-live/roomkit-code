@@ -135,6 +135,7 @@ pub(super) fn parse_agent(
                     |_| "Max output tokens must be a positive number of tokens, or empty",
                 )?)
             },
+            thinking_budget: local_thinking_budget(state, values)?,
             instructions: value(values, "instructions").into(),
             mcp: original
                 .and_then(|id| state.agent(id))
@@ -163,4 +164,20 @@ pub(super) fn parse_agent(
     }
     profile.validate()?;
     Ok((profile, scope))
+}
+
+fn local_thinking_budget(state: &State, values: &FormValues) -> Result<Option<u32>, String> {
+    let input = value(values, "thinking_budget").trim();
+    let provider = state
+        .providers
+        .value
+        .profiles
+        .get(value(values, "provider"));
+    if input.is_empty() || !provider.is_some_and(|p| p.kind == ProviderKind::LlamaCpp) {
+        return Ok(None);
+    }
+    input
+        .parse()
+        .map(Some)
+        .map_err(|_| "Reasoning budget must be a nonnegative token count or empty".into())
 }

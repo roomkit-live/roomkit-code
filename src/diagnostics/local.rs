@@ -4,6 +4,29 @@ use std::{collections::VecDeque, time::Instant};
 use roomkit_tui::protocol::{Event, Item, Message};
 use tokio::sync::watch;
 
+/// Format the latest retained local generation for the room that opened the panel.
+pub(super) fn generation_heading(line: &str, room: &str) -> Option<String> {
+    let record: serde_json::Value = serde_json::from_str(line).ok()?;
+    if record["room"].as_str() != Some(room)
+        || !matches!(
+            record["event"].as_str(),
+            Some("local_generation_completed" | "local_generation_incomplete")
+        )
+    {
+        return None;
+    }
+    let output = record["output_budget"].as_u64()?;
+    let thinking = match record["thinking_budget"].as_i64() {
+        None => "server default".to_owned(),
+        Some(0) => "disabled".to_owned(),
+        Some(n) => format!("{n} tokens"),
+    };
+    let finish = record["finish_reason"].as_str().unwrap_or("unreported");
+    Some(format!(
+        "Last llama.cpp generation\nOutput budget: {output} tokens · Reasoning budget: {thinking} · Finish reason: {finish}\n\n"
+    ))
+}
+
 struct Issue {
     room: String,
     id: String,
@@ -67,6 +90,26 @@ impl LocalIssues {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_generation_heading_shows_the_requested_budgets_in_its_room() {
+        let mut record = serde_json::json!({"room":"test","event":"local_generation_completed","finish_reason":"stop","output_budget":4096});
+        for (budget, shown) in [
+            (None, "server default"),
+            (Some(0), "disabled"),
+            (Some(1024), "1024 tokens"),
+        ] {
+            record["thinking_budget"] = serde_json::json!(budget);
+            let line = record.to_string();
+            assert!(generation_heading(&line, "other").is_none());
+            assert_eq!(
+                generation_heading(&line, "test"),
+                Some(format!(
+                    "Last llama.cpp generation\nOutput budget: 4096 tokens · Reasoning budget: {shown} · Finish reason: stop\n\n"
+                ))
+            );
+        }
+    }
 
     #[test]
     fn conversations_only_receive_their_own_generation_explanation() -> crate::Result<()> {

@@ -77,37 +77,51 @@ impl Reporter {
             .filter(|n| *n > 0)
             .unwrap_or(self.default_budget);
         let written = usage.get("output_tokens").and_then(Value::as_u64);
-        let summary = if reason == Some(FinishReason::Length) {
-            if written.is_some_and(|n| n >= u64::from(budget)) {
-                format!(
-                    "llama.cpp reached the output budget of {budget} tokens. Increase Output budget (advanced) in /agents and retry."
-                )
-            } else {
-                format!(
-                    "llama.cpp reported a length limit. The requested output budget was {budget} tokens and the context capacity was {} tokens. Check both settings before retrying.",
-                    self.context_size
-                )
-            }
-        } else if !output.text && !output.tool {
-            let reason = reason.map_or("unreported", FinishReason::as_str);
-            let detail = if output.thinking {
-                " It produced reasoning only."
-            } else {
-                ""
-            };
+        let summary = incomplete_summary(output, reason, written, budget, self.context_size);
+        let fields = json!({
+            "agent_profile": self.profile, "turn": roomkit::current_turn_id(), "provider": "llamacpp",
+            "finish_reason": reason, "output_budget": budget, "thinking_budget": request.thinking_budget,
+            "context_capacity": self.context_size, "output_tokens": written, "reasoning_seen": output.thinking,
+            "text_seen": output.text, "tool_call_seen": output.tool,
+        });
+        self.log.local_generation(
+            request.room.as_ref().map(|r| r.room.id.as_str()),
+            fields,
+            summary,
+        );
+    }
+}
+
+fn incomplete_summary(
+    output: &Output,
+    reason: Option<FinishReason>,
+    written: Option<u64>,
+    budget: u32,
+    context_size: u32,
+) -> Option<String> {
+    if reason == Some(FinishReason::Length) {
+        return Some(if written.is_some_and(|n| n >= u64::from(budget)) {
             format!(
-                "llama.cpp returned no visible text or tool call (finish reason: {reason}).{detail} Retry the request."
+                "llama.cpp reached the output budget of {budget} tokens. Adjust the reasoning or output budget in /agents and retry."
             )
         } else {
-            return;
-        };
-        self.log.local_generation(request.room.as_ref().map(|r| r.room.id.as_str()), json!({
-            "agent_profile": self.profile, "turn": roomkit::current_turn_id(), "provider": "llamacpp",
-            "finish_reason": reason, "output_budget": budget, "context_capacity": self.context_size,
-            "output_tokens": written, "reasoning_seen": output.thinking, "text_seen": output.text,
-            "tool_call_seen": output.tool,
-        }), summary);
+            format!(
+                "llama.cpp reported a length limit. The requested output budget was {budget} tokens and the context capacity was {context_size} tokens. Check both settings before retrying."
+            )
+        });
     }
+    if output.text || output.tool {
+        return None;
+    }
+    let reason = reason.map_or("unreported", FinishReason::as_str);
+    let detail = if output.thinking {
+        " It produced reasoning only."
+    } else {
+        ""
+    };
+    Some(format!(
+        "llama.cpp returned no visible text or tool call (finish reason: {reason}).{detail} Retry the request."
+    ))
 }
 
 #[cfg(test)]
@@ -141,6 +155,7 @@ mod tests {
 
         let request = AiContext {
             max_tokens: Some(4096),
+            thinking_budget: Some(1024),
             ..request
         };
         let mut answer = AiResponse::new("private answer");
@@ -171,6 +186,8 @@ mod tests {
                 .is_some_and(|s| s.contains("reached the output budget of 1024"))
         );
         assert_eq!(records[1]["output_budget"], 4096);
+        assert_eq!(records[1]["thinking_budget"], 1024);
+        assert!(records[0]["thinking_budget"].is_null());
         assert!(records[1]["output_tokens"].is_null());
         assert!(
             records[1]["summary"]
