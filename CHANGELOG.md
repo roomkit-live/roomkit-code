@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## [0.5.0]
+
+RoomKit Code 0.5.0 adds automatic session titles, project memory, beta remote
+executors and session messaging, and a model picker with GGUF downloads for
+llama.cpp. It ships signed checksums for Linux x86-64 and ARM64 (glibc 2.35
+or later) and for Intel and Apple Silicon Macs (macOS 12 or later). The macOS
+binaries use ad-hoc signing and are distributed without notarization.
+
+**Before upgrading from 0.4.0**, close RoomKit Code and back up its state
+directory (the directory selected by `--state-dir` if supplied). On first
+open, 0.5.0 upgrades existing agent profiles from schema 4 or 5 to schema 6.
+Version 0.4.0 cannot open the upgraded profiles. To return to 0.4.0, restore
+the previous binary and use the pre-upgrade state backup.
+
 - Interactive conversations get a short title from their active model. The header, session list and recipient picker show it; a manual rename always wins. Group peers can read the shared title at the original address.
 
 - Agents can recall and maintain bounded project memory across sessions and linked Git worktrees, including ordinary personal preferences explicitly saved by the user. Choose the local Markdown store or a compatible MCP server in the launch configuration.
@@ -25,7 +39,7 @@
 
 - The result of a delegated task that ends while the agent is still telling another task's result now waits its own turn, and the agent reads it as the application's notice of that task. It was handed to the running answer as words of a participant, with the mark of the task's result neutralised as a copy: when two delegated tasks ended close together, the agent read the second one's outcome as something a participant said.
 
-- Built on RoomKit Rust e6f92c6d with roomkit-providers 2807ced, roomkit-tools 376714c and roomkit-tui 1ed4a85. The engine no longer holds the turn backend on Redis nor the SQLite store: the executor pool and session groups take the turn backend from roomkit-providers (`roomkit-providers-redis`), and sessions their store (`roomkit-providers-sqlite`), each moved as it was. Their configuration and the session files are unchanged. With this engine, the notice of a delegated task that did not complete tells the agent that asked for it why, in one code of a closed list: `failed: an error ended it (error)` where it read `failed.`
+- This release uses RoomKit Rust e6f92c6d, roomkit-providers 708ff3f3, roomkit-tools 171ba55 and roomkit-tui 8f6ba8c. The executor pool and session groups use the Redis turn backend from roomkit-providers (`roomkit-providers-redis`), and sessions use its SQLite store (`roomkit-providers-sqlite`). Both keep their existing configuration and session files. When a delegated task ends early, the requesting agent receives its stop reason.
 
 - Session groups (beta) can authenticate their members: with the same secret of at least 32 bytes in `ROOMKIT_SESSION_GROUP_KEY` on every member, each message between sessions is sealed, and a message the key did not seal is refused. The receiving session answers with a sealed receipt, without which the sender does not count the message as delivered: whoever answers in the broker in a member's place cannot confirm it. A refusal says why on the sender's side (no key, another key, a key on one side only) and is recorded as `session_message_refused` in the refusing session's diagnostics, once per kind. Without the variable a group works as before, open to anyone who can write to its Redis. The guide states what the key does not cover.
 
@@ -131,10 +145,8 @@
   workspace over Redis. Start the worker with `--serve-worker GROUP` and
   the interactive owner with `--remote-worker GROUP`.
 
-- Built on RoomKit Rust 8f49956, after 0.3.0, with roomkit-providers b33a7de,
-  roomkit-tools 4058f3f and roomkit-tui f1efcea: the engine now tells how a
-  model's answer ended in one closed vocabulary, which each provider maps its
-  own words onto. Two things follow in the application. Anthropic's retry
+- Model providers now report how an answer ended in a common vocabulary.
+  Anthropic's retry
   with a larger output budget, made once when a reply is cut at its token
   bound before showing anything, is also made when the cut comes from a full
   context window: the engine tells the two alike. And the diagnostics log
