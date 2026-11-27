@@ -525,7 +525,7 @@ These files contain counters, not conversation content or resume arguments.
 
 ## Local GGUF models
 
-In **/providers**, add a connection of type **Local llama.cpp**, leave the URL empty and choose **No key**. Select a cached model or **Search Hugging Face**. The default search requests repositories tagged `text-generation` on the Hub. Choose **Search all GGUF models** to include audio, other tasks and untagged models. Enter a search term, choose a repository, then choose a GGUF file by quantization and size. An exact public repository opens its files directly. After you press Enter, the picker shows when it is waiting for a response.
+In **/providers**, add a connection of type **Local llama.cpp**, leave the URL empty and choose **No key**. Select a cached model or **Search Hugging Face**. The default search requests GGUF language models tagged `text-generation` or `image-text-to-text` on the Hub. Choose **Search all GGUF models** to include audio, other tasks and untagged models. Enter a search term, choose a repository, then choose a GGUF file by quantization and size. An exact public repository opens its files directly. After you press Enter, the picker shows when it is waiting for a response.
 
 Choosing a file that is not installed starts a background transfer and opens **Model downloads**. The panel shows a progress bar, bytes received and verification. Press **Esc** to keep chatting with the current model. Reopen **/downloads** to check progress, cancel a transfer or choose **Use** when the model is ready. Downloading never switches the conversation's model automatically. When configuring an agent, select the installed file in its model picker to finish setup.
 

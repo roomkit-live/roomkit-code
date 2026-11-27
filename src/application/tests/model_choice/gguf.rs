@@ -40,10 +40,13 @@ async fn hub(
                     std::collections::HashMap<String, String>,
                 >| async move {
                     assert_eq!(query["filter"], "gguf");
-                    let mut found = vec![serde_json::json!({"id":"example/coder"})];
-                    if query.get("pipeline_tag").map(String::as_str) != Some("text-generation") {
-                        found.push(serde_json::json!({"id":"example/voice"}));
-                    }
+                    let text = serde_json::json!({"id":"example/coder","downloads":100});
+                    let vision = serde_json::json!({"id":"example/vision","downloads":50});
+                    let found = match query.get("pipeline_tag").map(String::as_str) {
+                        Some("text-generation") => vec![text],
+                        Some("image-text-to-text") => vec![vision],
+                        _ => vec![text, vision, serde_json::json!({"id":"example/voice"})],
+                    };
                     Json(found)
                 },
             ),
@@ -113,6 +116,7 @@ async fn gguf_search_download_retry_select_and_offline_resume() {
                 .await
                 .unwrap();
             assert!(!offered(&result).1.iter().any(|c| c.label == "example/voice"));
+            assert_eq!(offered(&result).1[1].label, "example/vision");
             let all = &offered(&picker).1.iter().find(|c| c.label == "Search all GGUF models").unwrap().value;
             let any = submit_profile(&app, "model", all, &[("query", "coder")]).await.unwrap();
             assert!(offered(&any).1.iter().any(|c| c.label == "example/voice"));

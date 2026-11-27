@@ -84,6 +84,8 @@ pub(crate) struct Variant {
 #[derive(Deserialize)]
 struct Entry {
     id: String,
+    #[serde(default)]
+    downloads: u64,
 }
 #[derive(Deserialize)]
 struct Repository {
@@ -104,7 +106,7 @@ struct Lfs {
 /// Which GGUF repositories to request from the Hub before its result limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SearchScope {
-    TextGeneration,
+    LanguageModels,
     All,
 }
 
@@ -181,6 +183,30 @@ impl Hub {
         if query.len() > 128 || query.chars().any(char::is_control) {
             return Err("Model search is too long or contains a control character".into());
         }
+        let entries = match scope {
+            SearchScope::All => self.repositories(query, None).await?,
+            SearchScope::LanguageModels => {
+                // The Hub accepts one pipeline tag per query. Merge by popularity
+                // before limiting so multimodal language models stay discoverable.
+                let (mut text, vision) = tokio::try_join!(
+                    self.repositories(query, Some("text-generation")),
+                    self.repositories(query, Some("image-text-to-text")),
+                )?;
+                text.extend(vision);
+                text.sort_by_key(|e| std::cmp::Reverse(e.downloads));
+                text
+            }
+        };
+        let mut seen = std::collections::HashSet::new();
+        Ok(entries
+            .into_iter()
+            .map(|e| e.id)
+            .filter(|id| valid_repo(id) && seen.insert(id.clone()))
+            .take(30)
+            .collect())
+    }
+
+    async fn repositories(&self, query: &str, task: Option<&str>) -> Result<Vec<Entry>, String> {
         let mut url = self.url(&["api", "models"])?;
         url.query_pairs_mut().extend_pairs([
             ("filter", "gguf"),
@@ -188,18 +214,10 @@ impl Hub {
             ("limit", "30"),
             ("sort", "downloads"),
         ]);
-        if scope == SearchScope::TextGeneration {
-            url.query_pairs_mut()
-                .append_pair("pipeline_tag", "text-generation");
+        if let Some(task) = task {
+            url.query_pairs_mut().append_pair("pipeline_tag", task);
         }
-        Ok(self
-            .metadata::<Vec<Entry>>(url)
-            .await?
-            .into_iter()
-            .map(|e| e.id)
-            .filter(|r| valid_repo(r))
-            .take(30)
-            .collect())
+        self.metadata(url).await
     }
 
     pub async fn variants(

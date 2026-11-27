@@ -15,13 +15,13 @@ pub(in crate::profiles) enum Destination {
 impl SearchScope {
     fn search_action(self) -> &'static str {
         match self {
-            Self::TextGeneration => "search",
+            Self::LanguageModels => "search",
             Self::All => "all-search",
         }
     }
     fn repo_action(self) -> &'static str {
         match self {
-            Self::TextGeneration => "repo",
+            Self::LanguageModels => "repo",
             Self::All => "all-repo",
         }
     }
@@ -81,7 +81,7 @@ impl Destination {
         let mut entries = vec![choice(
             self.arg("search", ""),
             "Search Hugging Face",
-            "Text-generation models in GGUF format",
+            "Language models for text or image-and-text input",
         )];
         entries.push(choice(
             self.arg("all-search", ""),
@@ -214,7 +214,7 @@ impl Profiles {
             }
             if matches!(verb, "search" | "all-search" | "background-search") {
                 let scope = if verb == "search" {
-                    SearchScope::TextGeneration
+                    SearchScope::LanguageModels
                 } else {
                     SearchScope::All
                 };
@@ -246,7 +246,7 @@ impl Profiles {
                     &current,
                     &Hub::public()?,
                     value,
-                    SearchScope::TextGeneration,
+                    SearchScope::LanguageModels,
                 )
                 .await
             }
