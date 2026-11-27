@@ -70,14 +70,15 @@ pub(super) async fn list(
         "Connect local stdio or remote Streamable HTTP servers. Local servers run with your user permissions, in this workspace. Saving connects the server and enables its tools for the current agent. Existing selections, including disabled tools, are preserved. Connections last until disconnect or application exit. Ask approves every MCP tool call; Plan blocks MCP calls; Yolo runs selected tools without asking. Servers and tools are independent of the agent's model provider.".into(), actions)
 }
 
-pub(super) fn available(id: &str, server: &McpToolProvider) -> Vec<AiTool> {
+pub(super) fn available(runtime: &Runtime, id: &str, server: &McpToolProvider) -> Vec<AiTool> {
     server
         .get_tools()
         .unwrap_or_default()
         .into_iter()
         .filter(|tool| {
             let alias = format!("mcp__{id}__{}", tool.name);
-            alias.len() <= 128
+            !runtime.reserved(id, &tool.name)
+                && alias.len() <= 128
                 && alias
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
@@ -116,7 +117,9 @@ pub(super) async fn detail(
         id: &config.id,
         status: connection.map_or("Disconnected", |c| c.status()),
         live,
-        tools: live.map(|s| available(&config.id, s)).unwrap_or_default(),
+        tools: live
+            .map(|s| available(runtime, &config.id, s))
+            .unwrap_or_default(),
         names: selected.map_or(&[][..], Vec::as_slice),
     };
     if tools_page {

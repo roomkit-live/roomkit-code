@@ -973,3 +973,37 @@ async fn invalid_mcp_edits_keep_the_saved_configuration_and_live_connection() {
     );
     app.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn memory_reads_the_selected_server_and_plan_refuses_writes_before_transport() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![
+        ("memory", json!({"action":"read","id":"ci"})),
+        (
+            "memory",
+            json!({"action":"save","id":"ci","title":"No","text":"forbidden","revision":"r1"}),
+        ),
+    ])
+    .await;
+    let mut settings = settings(project.path(), state.path(), &mock.base_url);
+    settings.mode = crate::permissions::Mode::Plan;
+    settings.memory = toml::from_str("backend='mcp'\nserver='notes'").unwrap();
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let (finished, _) = configure(&app, project.path(), "notes", "memory", "10").await;
+    assert_eq!(finished, RunOutcome::Completed);
+    turn(&app).await;
+    let trace = std::fs::read_to_string(project.path().join("notes.trace")).unwrap();
+    assert!(trace.lines().any(|line| line == "search"), "{trace}");
+    assert!(trace.lines().any(|line| line == "read"), "{trace}");
+    assert!(!trace.lines().any(|line| line == "save"), "{trace}");
+    let wire = mock.requests.lock().unwrap().clone();
+    assert!(wire[0]["messages"].to_string().contains("CI runner"));
+    assert!(
+        wire[1]["messages"]
+            .to_string()
+            .contains("blue remote runner")
+    );
+    assert!(!wire[0]["tools"].to_string().contains("mcp__notes__memory"));
+    app.close().await.unwrap();
+}

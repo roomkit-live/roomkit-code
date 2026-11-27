@@ -21,11 +21,33 @@ impl Connection {
 
 #[derive(Default)]
 pub(crate) struct Runtime {
+    memory_server: Option<String>,
     pub(super) connections: Mutex<BTreeMap<String, Connection>>,
     pub(super) operation: Mutex<()>,
     pub(super) stop: CancellationToken,
 }
 impl Runtime {
+    pub(crate) fn with_memory(server: Option<&str>) -> Self {
+        Self {
+            memory_server: server.map(str::to_owned),
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn reserved(&self, server: &str, tool: &str) -> bool {
+        self.memory_server.as_deref() == Some(server) && tool == "memory"
+    }
+
+    pub(crate) async fn memory_connection(&self, id: &str) -> Option<McpToolProvider> {
+        self.connections
+            .lock()
+            .await
+            .get(id)?
+            .server
+            .clone()
+            .filter(McpToolProvider::connected)
+    }
+
     pub async fn close(&self) {
         self.stop.cancel();
         let _operation = self.operation.lock().await;
@@ -56,6 +78,7 @@ impl Runtime {
             })?;
             let tools: Vec<AiTool> = listed
                 .into_iter()
+                .filter(|tool| !self.reserved(id, &tool.name))
                 .filter(|tool| names.contains(&tool.name))
                 .map(|tool| AiTool {
                     name: alias(id, &tool.name),
@@ -343,7 +366,7 @@ impl Profiles {
                 .and_then(|c| c.server.as_ref())
                 .filter(|s| s.connected())
             {
-                let tools = super::ui::available(id, server);
+                let tools = super::ui::available(&self.mcp_runtime, id, server);
                 let capacity = 64usize.saturating_sub(profile.mcp.values().map(Vec::len).sum());
                 let names = tools
                     .iter()

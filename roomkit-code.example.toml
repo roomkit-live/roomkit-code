@@ -22,6 +22,12 @@ timeout_seconds = 600 # longest wait between two reads of a model answer
 # currency = "USD"
 # verified = "2026-11-06" # the day the rates were read
 
+# Project memory defaults to Markdown in the private state directory. To use a
+# compatible MCP server, connect it in /mcp and uncomment this table.
+# [memory]
+# backend = "mcp"
+# server = "notes"
+
 [agent]
 require_tool_intent = true # false makes the public description optional in model-facing tool schemas
 # max_tool_rounds = 200 # rounds of tool calls one turn may run; omitted: 200, none with --prompt

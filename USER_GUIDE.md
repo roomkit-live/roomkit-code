@@ -2061,6 +2061,32 @@ This first version deliberately rejects unsupported events/fields: `Stop`
 continuation, `PermissionRequest` auto-approval, input rewriting, context injection,
 asynchronous command mode, HTTP/MCP handlers and prompt/agent handlers come later.
 
+## Project memory
+
+Ask “How does project memory work?” to have an agent read this topic with `docs_read`. For example, say “Remember that Windows load tests run on the blue runner.” In a later session ask “Where do we run Windows load tests?” To remove the fact, say “Forget the note about the Windows runner.”
+
+An agent with the `memory` tool receives a short index of note IDs and titles. It can search all note titles and bodies by words, read one note, save a new fact, or forget a note. Search still reaches notes omitted from the index. A save to an existing ID or a deletion needs the current revision returned by a search or read. If two sessions edit a note, the second writer must reread it. Use `/agents` to enable or remove the tool for a profile. An agent without it gets no index.
+
+You can explicitly ask the agent to save an ordinary personal preference, even when it is unrelated to the project. For example, say “I like tea. Remember that.” A new session in the same project can then answer “Which drink do I like?” The agent saves preferences only on request and confirms after the save succeeds. It can also propose notes about stable conventions or decisions and wait for consent. Keep credentials and sensitive personal data out of shared notes. Ask prompts before a save or deletion. Plan permits search and read. Yolo applies the selected write directly. Notes are reference material. Repository instructions still come from AGENTS.md.
+
+Markdown is the default. On Linux, state lives in `$XDG_DATA_HOME/roomkit-code` or `~/.local/share/roomkit-code`. On macOS it lives in `~/Library/Application Support/roomkit-code`. You can also select `--state-dir`. Under that directory, `projects/<project-hash>/memory/MEMORY.md` lists the notes and `<note-id>.md` holds each body. For Git the hash identifies the canonical common Git directory. All linked worktrees on the same machine and state directory share notes. Separate clones and remote executors have their own scope. Outside Git the canonical workspace path identifies the project. Deleting a session leaves project notes available to other sessions.
+
+Storage is capped at 256 KiB per project including the index, 256 notes and 32 KiB of body per note. A full store refuses additional writes and keeps existing notes. Shorten or forget a note to free space. At each generation the index and memory results share at most 1/32 of the known context window, capped at 1,024 estimated tokens (512 for a 16,384-token window). An unknown window uses 256. Tool results take priority over the index. A long result may appear as an excerpt.
+
+### Use a different memory backend
+
+Configure a trusted server with `/mcp`. Pass an explicit TOML file with `--config`:
+
+```toml
+[memory]
+backend = "mcp"
+server = "notes"
+```
+
+Connect that server in `/mcp`. The same `memory` tool, permission checks and recall budget apply. The configured server handles the index and every operation. If disconnected, an explicit lookup reports the connection to restore. Return to the default with `backend = "markdown"` and remove `server`. Switching backends selects the other store and leaves existing notes in place.
+
+A compatible MCP server exposes a tool named `memory`. Code supplies `scope` (opaque project ID), `max_bytes` (262144) and `input` (the action arguments). The scope includes a private identifier from the local state directory so equal paths on different installations stay distinct. The authenticated server must isolate scopes, enforce the quota and check revisions atomically. Return one MCP text content item containing JSON of the form `{"notes":[{"id":"ci","title":"Windows runner","revision":"r1"}]}`, with `text` on a read only. Search may return an empty array. A mutation returns the affected note's metadata. The host validates the result and reserves this endpoint for the memory tool. Connect only servers you trust with your project notes.
+
 ## Project instructions: AGENTS.md
 
 RoomKit Code automatically supplies global and project instructions to the

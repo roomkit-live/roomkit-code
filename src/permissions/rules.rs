@@ -99,6 +99,7 @@ const RULES: &[(&str, Rule)] = &[
     ("output_forget", CLEANUP),
     // Runs as a read while it only previews; see `rule_for`.
     ("patch", MUTATION),
+    ("memory", MUTATION),
     ("write", MUTATION),
     ("edit", MUTATION),
     ("shell", COMMAND),
@@ -165,8 +166,13 @@ pub(crate) fn summary(has: impl Fn(&str) -> bool) -> String {
             None => "none".into(),
         }
     };
+    let memory = if has("memory") {
+        " Project memory search and read run directly, including in Plan. Saving or forgetting a note requires Ask approval and is blocked in Plan."
+    } else {
+        ""
+    };
     format!(
-        "In Ask mode these tools run without approval: {}, as does patch while it only previews. Every other tool, MCP tools included, asks for approval before it runs. In Yolo mode selected tools run without prompts. Plan permits only these tools without approval: {}, plus patch while it only previews; it also permits {}, with approval. A command hook may still refuse a call or require its approval.",
+        "In Ask mode these tools run without approval: {}, as does patch while it only previews. Every other tool, MCP tools included, asks for approval before it runs. In Yolo mode selected tools run without prompts. Plan permits only these tools without approval: {}, plus patch while it only previews; it also permits {}, with approval. A command hook may still refuse a call or require its approval.{memory}",
         names(|rule| rule.direct),
         names(|rule| rule.direct && rule.plan),
         names(|rule| !rule.direct && rule.plan),
@@ -181,6 +187,14 @@ pub(crate) fn rule(event: &ToolCallEvent) -> Option<Rule> {
 fn rule_for(name: &str, arguments: &serde_json::Map<String, serde_json::Value>) -> Option<Rule> {
     // The tool's schema defines an omitted dry_run as true.
     if name == "patch" && arguments.get("dry_run").is_none_or(|value| value == true) {
+        return Some(READ);
+    }
+    if name == "memory"
+        && matches!(
+            arguments.get("action").and_then(|v| v.as_str()),
+            Some("search" | "read")
+        )
+    {
         return Some(READ);
     }
     if name.starts_with("mcp__") {

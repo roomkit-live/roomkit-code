@@ -4,6 +4,8 @@
 
 - Interactive conversations get a short title from their active model. The header, session list and recipient picker show it; a manual rename always wins. Group peers can read the shared title at the original address.
 
+- Agents can recall and maintain bounded project memory across sessions and linked Git worktrees, including ordinary personal preferences explicitly saved by the user. Choose the local Markdown store or a compatible MCP server in the launch configuration.
+
 - `/effort` shows the native levels of a loaded llama.cpp template or opens the reasoning budget. A conversation can set its own token limit and restore the agent default.
 
 - Set a per-agent llama.cpp reasoning token budget in `/agents`. Local generation diagnostics show the requested reasoning limit, output budget and finish reason.

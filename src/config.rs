@@ -16,6 +16,7 @@ pub(crate) use file::{DEFAULT_TOOL_ROUNDS, UNATTENDED_TOOL_ROUNDS};
 use file::{FileConfig, Pricing, Provider, ShellOptions};
 
 pub(crate) struct Settings {
+    pub memory: crate::project_memory::Config,
     pub local_only: bool,
     pub executor_url: Option<String>,
     pub serve_pool: Option<String>,
@@ -101,6 +102,7 @@ impl Settings {
         let (workspace, state_dir) = locations(cli)?;
         Ok(Self {
             auto_title: !cli.no_auto_title && cli.prompt.is_none(),
+            memory: file.memory.checked()?,
             update_check: file.updates.check && !cli.no_update_check,
             require_tool_intent: cli
                 .require_tool_intent

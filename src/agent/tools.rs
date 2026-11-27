@@ -45,6 +45,23 @@ pub(super) fn selected(
         .collect()
 }
 
+/// A profile opting into the tool gets its index under the same allowance.
+pub(super) fn add_memory(
+    tools: &mut Vec<Arc<dyn Tool>>,
+    profile: &Agent,
+    extensions: &Extensions,
+) -> Option<crate::project_memory::View> {
+    profile.tools.iter().any(|name| name == "memory").then(|| {
+        let view = crate::project_memory::View::new(
+            extensions.project_memory.clone(),
+            extensions.ceiling,
+            profile.max_output_tokens,
+        );
+        tools.push(Arc::new(view.tool()));
+        view
+    })
+}
+
 /// Owners and workers see the inventory. Only an opted-in worker profile
 /// exposes the fixed Cargo command.
 pub(super) fn add_pool_tools(

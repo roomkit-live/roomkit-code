@@ -262,6 +262,10 @@ async fn turn(app: &Application) -> Session {
 }
 
 async fn turn_operation(app: &Application, operation: &str) -> Session {
+    submit_prompt(app, operation, "Inspect the project.").await
+}
+
+async fn submit_prompt(app: &Application, operation: &str, prompt: &str) -> Session {
     let (client, host) = connection(NonZeroUsize::new(256).unwrap());
     let task = tokio::spawn(app.session().run(host));
     let session = tokio::time::timeout(Duration::from_secs(15), async {
@@ -296,7 +300,7 @@ async fn turn_operation(app: &Application, operation: &str) -> Session {
                                 snapshot.conversation.clone(),
                                 Command::Submit {
                                     agent: snapshot.selected_agent.clone(),
-                                    text: "Inspect the project.".into(),
+                                    text: prompt.into(),
                                 },
                             ))
                             .unwrap();
@@ -1919,6 +1923,7 @@ mod docs;
 mod exit_summary;
 mod files;
 mod global_agents;
+mod project_memory;
 
 mod processes;
 

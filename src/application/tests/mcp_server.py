@@ -26,6 +26,8 @@ for line in sys.stdin:
                   "instructions": "MCP-SERVER-INSTRUCTIONS: use the selected fixture tools."}
     elif method == "tools/list":
         names = [f"tool-{i:03}" for i in range(75)] if mode == "large" else ["read", "danger", "slow"]
+        if mode == "memory":
+            names = ["memory"]
         schema = {"type": "object", "properties": {}}
         if mode == "heavy":
             schema["properties"]["note"] = {"type": "string", "description": "A schema that fills the window. " * 450}
@@ -40,6 +42,17 @@ for line in sys.stdin:
         if mode == "crash":
             sys.exit(0)
         result = {"content": [{"type": "text", "text": "Fixture MCP result for " + name}]}
+        if mode == "memory":
+            args = request["params"]["arguments"]
+            assert set(args) == {"scope", "max_bytes", "input"} and args["max_bytes"] == 262144
+            assert len(args["scope"]) == 64
+            action = args["input"]["action"]
+            with open(trace_path, "a") as trace:
+                trace.write(action + "\n")
+            note = {"id": "ci", "title": "CI runner", "revision": "r1"}
+            if action == "read":
+                note["text"] = "blue remote runner"
+            result = {"content": [{"type": "text", "text": json.dumps({"notes": [note]})}]}
     else:
         result = {}
     print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)

@@ -8,6 +8,7 @@ use crate::permissions::Mode;
 #[serde(default, deny_unknown_fields)]
 pub(super) struct FileConfig {
     pub(super) agent: AgentOptions,
+    pub(super) memory: crate::project_memory::Config,
     pub(super) provider: Provider,
     pub(super) ui: Appearance,
     pub(super) permissions: Permissions,

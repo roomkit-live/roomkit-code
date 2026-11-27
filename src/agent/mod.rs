@@ -42,7 +42,7 @@ pub(crate) use preamble::{Composition, Inventory};
 
 /// The agent the application runs: an AI channel answering through an
 /// configured native provider.
-pub(crate) type CodeAgent = AiChannel<CodeProvider>;
+pub(crate) type CodeAgent = AiChannel<crate::project_memory::AgentProvider>;
 
 /// How an agent's generation that failed before its provider handed anything
 /// is tried again: the engine's default, 3 retries 1, 2 and 4 seconds apart, on
@@ -69,6 +69,7 @@ pub(crate) const HISTORY: usize = 50;
 
 /// What an agent receives beyond the application's own tools.
 pub(crate) struct Extensions {
+    pub project_memory: roomkit_tools_memory::MemoryTool,
     pub executor_inventory: Option<crate::remote::pool::Inventory>,
     pub skills: SkillRegistry,
     pub skill_roots: Vec<std::path::PathBuf>,
@@ -123,7 +124,8 @@ pub(crate) async fn create(
         told_ends: !unattended,
     };
     let policy = extensions.policy.clone();
-    let tools = native_tools(root, resources, policy).await?;
+    let mut tools = native_tools(root, resources, policy).await?;
+    let recall = tools::add_memory(&mut tools, profile, &extensions);
     let mut tools = selected(profile, tools, (unattended, extensions.planning));
     if !unattended && channel != crate::names::REMOTE_AGENT {
         tools.extend(
@@ -211,6 +213,7 @@ pub(crate) async fn create(
         tool_search_pinned: preamble.pinned,
         ..AiChannelOptions::default()
     };
+    let provider = crate::project_memory::AgentProvider::new(provider, recall);
     let agent = AiChannel::new(ChannelId::new(channel)?, provider, options)?;
     Ok((agent, preamble.inventory))
 }
