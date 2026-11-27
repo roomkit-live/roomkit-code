@@ -187,9 +187,6 @@ impl Cache {
         progress: impl Fn(u64),
     ) -> Result<(), String> {
         let target = dir.join(&asset.sha);
-        if target.metadata().is_ok_and(|m| m.len() == asset.size) {
-            return Ok(());
-        }
         let locks = self
             .0
             .join(".locks")
@@ -210,8 +207,19 @@ impl Cache {
                 Err(e) => return Err(io(e)),
             }
         }
-        if target.metadata().is_ok_and(|m| m.len() == asset.size) {
-            return Ok(());
+        match tokio::fs::metadata(&target).await {
+            Ok(meta) => {
+                if meta.len() == asset.size
+                    && super::transfer::checksum(&target).await? == asset.sha
+                {
+                    return Ok(());
+                }
+                // Existing snapshots may already link here. Retire corrupt data
+                // under the lock, even if its replacement cannot be fetched.
+                tokio::fs::remove_file(&target).await.map_err(io)?;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(io(e)),
         }
         super::transfer::download(hub, asset, &target, progress).await
     }

@@ -104,7 +104,7 @@ async fn receive(
     Ok(())
 }
 
-async fn checksum(path: &Path) -> Result<String, String> {
+pub(super) async fn checksum(path: &Path) -> Result<String, String> {
     let mut file = tokio::fs::File::open(path).await.map_err(io)?;
     let mut hash = Sha256::new();
     let mut buf = vec![0; 256 * 1024];
