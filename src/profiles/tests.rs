@@ -70,3 +70,30 @@ fn hosted_provider_profiles_require_their_own_api_credentials() {
         assert!(profile.validate().is_err());
     }
 }
+
+#[test]
+fn google_accounts_require_a_gemini_endpoint_and_an_explicit_quota_project() {
+    use crate::providers::ProviderKind;
+    let id = uuid::Uuid::new_v4().to_string();
+    let kind = ProviderKind::Gemini;
+    let auth = |project: &str| Authentication::Google {
+        account: id.clone(),
+        project: project.into(),
+    };
+    let mut provider = Provider {
+        kind,
+        base_url: kind.default_url().into(),
+        ..connection(auth("example-project"))
+    };
+    assert!(provider.validate().is_ok());
+    assert!(provider.authentication.key().is_err());
+    for project in ["", "-example", "example-", "EXAMPLE", "a/b", "bad\r\nvalue"] {
+        provider.authentication = auth(project);
+        assert!(provider.validate().is_err());
+    }
+    provider.authentication = auth("example-project");
+    provider.base_url = "https://another.example".into();
+    assert!(provider.validate().is_err());
+    provider.kind = ProviderKind::OpenAi;
+    assert!(provider.validate().is_err());
+}

@@ -14,9 +14,9 @@ fn authorization() -> url::Url {
 #[expect(clippy::cognitive_complexity, reason = "A scenario told in one piece")]
 fn sign_in_displays_the_link_and_private_return_field_together() {
     let url = authorization();
-    let form = form(&url);
+    let form = form(Service::ChatGpt, &url);
     assert!(callback_form_id(&form.id));
-    assert_ne!(form.id, super::form(&url).id);
+    assert_ne!(form.id, super::form(Service::ChatGpt, &url).id);
     assert_eq!(form.command, "providers");
     assert!(form.wait_for_completion);
     assert!(form.description_markdown);
@@ -79,17 +79,17 @@ async fn expiration_and_local_completion_replace_the_open_form_without_submissio
     for (result, expected) in [
         (Err(roomkit_auth::Error::Timeout), "timed out"),
         (
-            Ok(Account {
+            Ok(Entry {
                 id: "account".into(),
                 email: None,
                 connected: true,
-                plan_usage: true,
+                can_use: true,
             }),
             "Connected as",
         ),
     ] {
         let mut updates = accounts.subscribe();
-        let form = form(&authorization());
+        let form = form(Service::ChatGpt, &authorization());
         *accounts.pending.lock().await = Some(pending(&form.id));
         let mut session = roomkit_tui::Session::default();
         let mut snapshot = Snapshot::new("room", "Test", Actor::new("agent", "Agent"));
@@ -101,7 +101,7 @@ async fn expiration_and_local_completion_replace_the_open_form_without_submissio
             conversation: "room".into(),
             form: form.clone(),
         });
-        accounts.finished(&form.id, result).await;
+        accounts.finished(Service::ChatGpt, &form.id, result).await;
         updates.changed().await.unwrap();
         session.apply(updates.borrow_and_update().clone().unwrap());
         assert!(session.form().is_none());
@@ -125,7 +125,11 @@ async fn dismissing_a_submitted_form_aborts_the_pending_operation_without_waitin
     *accounts.pending.lock().await = Some(attempt);
     ready.await.unwrap();
     accounts
-        .handle("room", super::super::Action::Dismiss("revision"))
+        .handle(
+            "room",
+            Service::ChatGpt,
+            super::super::Action::Dismiss("revision"),
+        )
         .await
         .unwrap();
     assert!(
@@ -148,7 +152,7 @@ fn sign_in_renders_the_exact_browser_destination_as_a_native_terminal_link() {
     session.apply(Event::Snapshot(snapshot));
     session.apply(Event::Form {
         conversation: "room".into(),
-        form: form(&url),
+        form: form(Service::ChatGpt, &url),
     });
     let renderers = roomkit_tui::render::Renderers::default();
     for width in [40, 100, 140] {

@@ -1,10 +1,10 @@
-//! What the ChatGPT account menus are asked under `/providers`: written by
+//! What the account menus are asked under `/providers`: written by
 //! their choices and read back once, in one definition, so a menu cannot
 //! offer what the accounts do not understand.
 
 use std::fmt;
 
-/// One action on the ChatGPT accounts, as `/providers` carries it.
+/// One action on the accounts, as `/providers` carries it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Action<'a> {
     /// The list of accounts, with a sign-in under way closed.
@@ -28,26 +28,38 @@ pub(crate) enum Action<'a> {
 impl<'a> Action<'a> {
     /// The action `arguments`, a `/providers` argument, name, if they name
     /// one of the accounts'.
-    pub(crate) fn parse(arguments: &'a str) -> Option<Result<Self, String>> {
-        if let Some(account) = arguments.strip_prefix("chatgpt-use:") {
-            return Some(Ok(Self::Use(account.split(':').next().unwrap_or_default())));
+    pub(crate) fn parse(arguments: &'a str) -> Option<Result<(super::Service, Self), String>> {
+        let (prefix, action) = arguments.split_once(':')?;
+        let (prefix, use_account) = prefix
+            .strip_suffix("-use")
+            .map_or((prefix, false), |p| (p, true));
+        let service = match prefix {
+            "chatgpt" => super::Service::ChatGpt,
+            "google" => super::Service::Google,
+            _ => return None,
+        };
+        if use_account {
+            return Some(Ok((
+                service,
+                Self::Use(action.split(':').next().unwrap_or_default()),
+            )));
         }
-        let action = arguments.strip_prefix("chatgpt:")?;
         let (action, id) = action.split_once(':').unwrap_or((action, ""));
-        Some(Ok(match action {
-            "menu" | "" => Self::Menu,
-            "connect" => Self::Connect,
-            "account" => Self::Account(id),
-            "login" => Self::Login(id),
-            "logout" => Self::Logout(id),
-            "cancel" => Self::Cancel(id),
-            "dismiss" => Self::Dismiss(id),
-            _ => {
-                return Some(Err(
-                    "Unknown ChatGPT account action; reopen /providers".into()
-                ));
-            }
-        }))
+        Some(Ok((
+            service,
+            match action {
+                "menu" | "" => Self::Menu,
+                "connect" => Self::Connect,
+                "account" => Self::Account(id),
+                "login" => Self::Login(id),
+                "logout" => Self::Logout(id),
+                "cancel" => Self::Cancel(id),
+                "dismiss" => Self::Dismiss(id),
+                _ => {
+                    return Some(Err("Unknown account action; reopen /providers".into()));
+                }
+            },
+        )))
     }
 }
 
@@ -55,14 +67,14 @@ impl fmt::Display for Action<'_> {
     /// The action as a choice carries it, which [`Action::parse`] reads back.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Menu => f.write_str("chatgpt:menu"),
-            Self::Connect => f.write_str("chatgpt:connect"),
-            Self::Account(id) => write!(f, "chatgpt:account:{id}"),
-            Self::Login(id) => write!(f, "chatgpt:login:{id}"),
-            Self::Logout(id) => write!(f, "chatgpt:logout:{id}"),
-            Self::Cancel(id) => write!(f, "chatgpt:cancel:{id}"),
-            Self::Dismiss(id) => write!(f, "chatgpt:dismiss:{id}"),
-            Self::Use(id) => write!(f, "chatgpt-use:{id}"),
+            Self::Menu => f.write_str("menu"),
+            Self::Connect => f.write_str("connect"),
+            Self::Account(id) => write!(f, "account:{id}"),
+            Self::Login(id) => write!(f, "login:{id}"),
+            Self::Logout(id) => write!(f, "logout:{id}"),
+            Self::Cancel(id) => write!(f, "cancel:{id}"),
+            Self::Dismiss(id) => write!(f, "dismiss:{id}"),
+            Self::Use(id) => write!(f, "use:{id}"),
         }
     }
 }
@@ -103,10 +115,22 @@ mod tests {
         listed.sort_unstable();
         assert_eq!(listed, (0..actions.len()).collect::<Vec<_>>());
         for action in actions {
-            let written = action.to_string();
-            assert_eq!(Action::parse(&written), Some(Ok(action)), "{written}");
+            for service in [
+                super::super::Service::ChatGpt,
+                super::super::Service::Google,
+            ] {
+                let written = service.action(action);
+                assert_eq!(
+                    Action::parse(&written),
+                    Some(Ok((service, action))),
+                    "{written}"
+                );
+            }
         }
-        assert_eq!(Action::parse("chatgpt:"), Some(Ok(Action::Menu)));
+        assert_eq!(
+            Action::parse("chatgpt:"),
+            Some(Ok((super::super::Service::ChatGpt, Action::Menu)))
+        );
         assert!(matches!(Action::parse("chatgpt:revoke:x"), Some(Err(_))));
         assert_eq!(Action::parse("open:other"), None);
         Ok(())

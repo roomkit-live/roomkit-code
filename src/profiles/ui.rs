@@ -12,6 +12,24 @@ pub(super) struct Pending {
     form: FormSpec,
     target: Target,
 }
+impl Pending {
+    fn submitted(
+        &self,
+        room: &str,
+        name: &str,
+        form: &str,
+        values: &FormValues,
+    ) -> Result<Target, String> {
+        if self.room != room || self.form.id != form || self.form.command != name {
+            return Err("This form does not belong to the current view".into());
+        }
+        let fields = &self.form.fields;
+        if values.len() != fields.len() || fields.iter().any(|f| values.get(&f.name).is_none()) {
+            return Err("The form fields changed; cancel and reopen it".into());
+        }
+        Ok(self.target.clone())
+    }
+}
 #[derive(Clone)]
 enum Target {
     Provider(Option<String>),
@@ -21,6 +39,9 @@ enum Target {
         original: Option<String>,
     },
     Agent(Option<String>),
+    GoogleProject {
+        account: String,
+    },
     ReasoningBudget {
         agent: String,
         provider: String,
@@ -71,6 +92,7 @@ mod action;
 pub(super) mod downloads;
 mod effort;
 mod forms;
+mod google;
 pub(in crate::profiles) mod local;
 mod local_context;
 mod menus;
@@ -132,12 +154,17 @@ impl Profiles {
                 self.confirm_delete(kit, terminal, command, token, current.clone())
                     .await
             }
-            Action::ChatGpt(crate::accounts::Action::Use(account)) => {
-                self.use_chatgpt(current, account).await
-            }
-            Action::ChatGpt(account_action) => {
+            Action::Account(
+                crate::accounts::Service::ChatGpt,
+                crate::accounts::Action::Use(account),
+            ) => self.use_chatgpt(current, account).await,
+            Action::Account(
+                crate::accounts::Service::Google,
+                crate::accounts::Action::Use(account),
+            ) => self.google_project_form(current, account).await,
+            Action::Account(service, account_action) => {
                 self.state.lock().await.pending_delete = None;
-                self.accounts.handle(room, account_action).await
+                self.accounts.handle(room, service, account_action).await
             }
             _ => return None,
         })
@@ -176,7 +203,7 @@ impl Profiles {
             Action::Effort(_)
             | Action::Delete { .. }
             | Action::ConfirmDelete { .. }
-            | Action::ChatGpt(_) => {
+            | Action::Account(..) => {
                 Err("Unknown profile action; reopen /providers or /agents".into())
             }
             Action::Model(id) => self.model(kit, state, current, id).await,
@@ -275,17 +302,7 @@ impl Profiles {
             .pending
             .as_ref()
             .ok_or("This form is no longer open")?;
-        if pending.room != current.room.as_str()
-            || pending.form.id != form
-            || pending.form.command != name
-        {
-            return Err("This form does not belong to the current view".into());
-        }
-        let fields = &pending.form.fields;
-        if values.len() != fields.len() || fields.iter().any(|f| values.get(&f.name).is_none()) {
-            return Err("The form fields changed; cancel and reopen it".into());
-        }
-        let target = pending.target.clone();
+        let target = pending.submitted(current.room.as_str(), name, form, values)?;
         let mut next = current;
         let mut created = None;
         match &target {
@@ -330,6 +347,14 @@ impl Profiles {
                 )
                 .await?;
             }
+            Target::GoogleProject { account } => {
+                state.providers.reload()?;
+                let profile =
+                    self.google_connection(&state, account, value(values, "project").trim())?;
+                self.save_connection(kit, &mut state, &next, profile.clone())
+                    .await?;
+                created = Some(profile);
+            }
             Target::Provider(original) => {
                 let profile = parse_provider(values, original.as_deref(), &state)?;
                 created = original.is_none().then(|| profile.clone());
@@ -361,7 +386,9 @@ impl Profiles {
                 .agent(next.agent.as_str())
                 .is_some_and(|a| a.provider == p.id)
         };
-        if let Some(provider) = created.filter(|p| !current_uses(p)) {
+        if let Some(provider) =
+            created.filter(|p| matches!(target, Target::GoogleProject { .. }) || !current_uses(p))
+        {
             // A listing reads a server: no profile edit waits on it.
             drop(edit_lease);
             drop(state);

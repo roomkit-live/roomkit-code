@@ -42,7 +42,7 @@ impl Profiles {
                 })
                 .collect());
         }
-        let served: Vec<Served> = discover(provider)
+        let served: Vec<Served> = discover(provider, &self.accounts)
             .await?
             .into_iter()
             .map(|(id, capacity)| Served {

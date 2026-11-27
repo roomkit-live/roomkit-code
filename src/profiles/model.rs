@@ -42,6 +42,7 @@ pub(crate) enum Authentication {
     Stored { key: String },
     Environment { variable: String },
     ChatGpt { account: String },
+    Google { account: String, project: String },
 }
 
 /// A test's literal key: none when empty, else stored.
@@ -57,10 +58,21 @@ impl From<String> for Authentication {
 }
 
 impl Authentication {
+    pub(super) fn account(&self) -> Option<(crate::accounts::Service, &str)> {
+        use crate::accounts::Service;
+        match self {
+            Self::ChatGpt { account } => Some((Service::ChatGpt, account)),
+            Self::Google { account, .. } => Some((Service::Google, account)),
+            _ => None,
+        }
+    }
     pub fn key(&self) -> Result<String, String> {
         match self {
             Self::ChatGpt { .. } => {
                 Err("ChatGPT credentials must be resolved through the account manager".into())
+            }
+            Self::Google { .. } => {
+                Err("Google credentials must be resolved through the account manager".into())
             }
             Self::None => Ok(String::new()),
             Self::Stored { key } => Ok(key.clone()),
@@ -253,6 +265,21 @@ impl Provider {
             Authentication::ChatGpt { account } if uuid::Uuid::parse_str(account).is_err() => {
                 return Err("Invalid ChatGPT account ID".into());
             }
+            Authentication::Google { account, project } => {
+                if self.kind != crate::providers::ProviderKind::Gemini
+                    || self.base_url != self.kind.default_url()
+                {
+                    return Err(
+                        "Google account connections require the Gemini Developer API".into(),
+                    );
+                }
+                if uuid::Uuid::parse_str(account).is_err() {
+                    return Err("Invalid Google account ID".into());
+                }
+                if !valid_google_project(project) {
+                    return Err("Enter a Google Cloud project ID (6–30 lowercase letters, digits or hyphens, starting with a letter and ending with a letter or digit)".into());
+                }
+            }
             Authentication::Stored { key } if !text(key, 8192) => {
                 return Err("Enter a nonempty API key without control characters".into());
             }
@@ -344,13 +371,15 @@ impl Provider {
         }
         Ok(())
     }
+}
 
-    /// The subscription whose account manages this connection, if any: its
-    /// settings change through that account's menu, not the provider form.
-    pub fn account_managed(&self) -> Option<&'static super::subscriptions::Subscription> {
-        self.subscription()
-            .filter(|s| s.credential == super::subscriptions::Credential::Account)
-    }
+fn valid_google_project(id: &str) -> bool {
+    (6..=30).contains(&id.len())
+        && id.starts_with(|c: char| c.is_ascii_lowercase())
+        && !id.ends_with('-')
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
 impl Agent {

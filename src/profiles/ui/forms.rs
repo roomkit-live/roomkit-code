@@ -26,8 +26,8 @@ pub(super) fn connection_form(
         let form = provider_form(None, state, uuid::Uuid::new_v4().to_string());
         return Ok(open_form(state, current, form, Target::Provider(None)));
     };
-    if let Some(subscription) = existing.account_managed() {
-        return Err(managed_elsewhere(subscription));
+    if let Some((service, _)) = existing.authentication.account() {
+        return Err(managed_account(service));
     }
     let form_id = uuid::Uuid::new_v4().to_string();
     let (form, target) = match existing.subscription() {
@@ -159,7 +159,7 @@ pub(super) fn provider_form(existing: Option<&Provider>, state: &State, id: Stri
     };
     let p = existing.unwrap_or(&default);
     let (auth, variable) = match &p.authentication {
-        Authentication::ChatGpt { .. } => ("none", ""),
+        Authentication::ChatGpt { .. } | Authentication::Google { .. } => ("none", ""),
         Authentication::None => ("none", ""),
         Authentication::Stored { .. } => ("stored", ""),
         Authentication::Environment { variable } => ("environment", variable.as_str()),

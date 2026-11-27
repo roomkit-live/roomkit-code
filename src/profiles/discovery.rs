@@ -5,11 +5,16 @@ use roomkit_ai::AiProvider;
 use roomkit_providers_anthropic::{Anthropic as AnthropicAiProvider, AnthropicConfig};
 use std::time::Duration;
 
-pub(super) async fn discover(provider: &Provider) -> Result<Vec<(String, Option<u64>)>, String> {
+pub(super) async fn discover(
+    provider: &Provider,
+    accounts: &crate::accounts::Accounts,
+) -> Result<Vec<(String, Option<u64>)>, String> {
     provider.validate()?;
     match provider.kind {
         ProviderKind::OpenAi => openai(provider).await,
-        ProviderKind::Gemini => native("Gemini", provider.gemini("discovery", None)?).await,
+        ProviderKind::Gemini => {
+            native("Gemini", provider.gemini(accounts, "discovery", None)?).await
+        }
         ProviderKind::OpenRouter => {
             native("OpenRouter", provider.openrouter("discovery", None, None)?).await
         }

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Sign in to Gemini with a Google account from `/providers`, select a quota project, and discover or run its models using renewable credentials.
+
 - Add native Google Gemini and OpenRouter connections to `/providers`, `--provider` and TOML, with API-key authentication and model discovery.
 
 ## [0.5.0]

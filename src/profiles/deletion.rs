@@ -127,10 +127,10 @@ impl Profiles {
             .get(id)
             .ok_or("Unknown provider")?;
         self.check_provider_references(state, id)?;
-        let description = match provider.account_managed() {
-            Some(subscription) => format!(
+        let description = match provider.authentication.account() {
+            Some((service, _)) => format!(
                 "Remove this shared connection. The {} account stays connected; sign out separately from the account menu.",
-                subscription.name
+                service.name()
             ),
             None => "Remove this shared connection and its stored API key, if any.".into(),
         };

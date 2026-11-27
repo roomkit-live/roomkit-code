@@ -1,13 +1,18 @@
 //! Application menus over reusable account authentication.
-use roomkit_auth::{Account, ChatGpt, RemoteSignIn, SignOut};
+use roomkit_auth::{ChatGpt, Google, RemoteSignIn, SignOut};
 use roomkit_tui::protocol::{Choice, Event, PanelSpec};
 
 mod action;
+mod service;
 mod signin;
+mod token;
 pub(crate) use action::Action;
 use roomkit_tui_engine::CommandResult;
+use service::Entry;
+pub(crate) use service::Service;
 pub(crate) use signin::callback_form_id;
 use std::{path::Path, sync::Arc};
+pub(crate) use token::Credential;
 use tokio::{
     sync::{Mutex, watch},
     task::JoinHandle,
@@ -15,6 +20,7 @@ use tokio::{
 
 pub(crate) struct Accounts {
     pub auth: ChatGpt,
+    google: Result<Google, String>,
     pending: Mutex<Option<Pending>>,
     events: watch::Sender<Option<Event>>,
 }
@@ -36,10 +42,15 @@ impl Accounts {
     pub fn new(path: &Path) -> Result<Arc<Self>, String> {
         Ok(Arc::new(Self {
             auth: ChatGpt::new(path, "RoomKit Code").map_err(|e| e.to_string())?,
+            google: service::google_client(path),
             pending: Mutex::new(None),
             events: watch::channel(None).0,
         }))
     }
+    pub fn google(&self) -> Result<&Google, String> {
+        self.google.as_ref().map_err(Clone::clone)
+    }
+
     /// The renewable credential of a saved account that may make model
     /// requests; an account signed out or without plan usage has none.
     pub fn token_source(
@@ -59,10 +70,10 @@ impl Accounts {
         if !saved.plan_usage {
             return Err("Authorize ChatGPT plan usage with /providers".into());
         }
-        Ok(Arc::new(Credential {
-            auth: self.auth.clone(),
-            account: account.into(),
-        }))
+        Ok(Arc::new(Credential::ChatGpt(
+            self.auth.clone(),
+            account.into(),
+        )))
     }
     pub fn subscribe(&self) -> watch::Receiver<Option<Event>> {
         self.events.subscribe()
@@ -74,23 +85,24 @@ impl Accounts {
     pub async fn handle(
         self: &Arc<Self>,
         room: &str,
+        service: Service,
         action: Action<'_>,
     ) -> Result<CommandResult, String> {
         match action {
             Action::Menu => {
                 self.close().await;
-                self.menu(room)
+                self.menu(room, service)
             }
-            Action::Account(id) => self.account_menu(room, id),
-            Action::Connect => self.connect(room, None).await,
-            Action::Login(id) => self.connect(room, Some(id)).await,
+            Action::Account(id) => self.account_menu(room, service, id),
+            Action::Connect => self.connect(room, service, None).await,
+            Action::Login(id) => self.connect(room, service, Some(id)).await,
             Action::Logout(id) => {
-                let outcome = self.auth.sign_out(id).await.map_err(|e| e.to_string())?;
-                let mut result = self.account_menu(room, id)?;
+                let outcome = service.sign_out(self, id).await?;
+                let mut result = self.account_menu(room, service, id)?;
                 if let CommandResult::Events(events) = &mut result {
                     events.push(Event::Notice { conversation: room.into(), text: match outcome {
-                        SignOut::Revoked => "Signed out of this ChatGPT account".into(),
-                        SignOut::LocalOnly => "Signed out locally. Remote revocation could not be confirmed; revoke access in your ChatGPT account settings if needed.".into(),
+                        SignOut::Revoked => format!("Signed out of this {} account", service.name()),
+                        SignOut::LocalOnly => format!("Signed out locally. Confirm revocation in your {} account settings.", service.name()),
                     } });
                 }
                 Ok(result)
@@ -106,7 +118,7 @@ impl Accounts {
                 state.take();
                 self.events.send_replace(None);
                 if matches!(action, Action::Cancel(_)) {
-                    self.menu(room)
+                    self.menu(room, service)
                 } else {
                     Ok(CommandResult::Events(Vec::new()))
                 }
@@ -115,51 +127,52 @@ impl Accounts {
             Action::Use(_) => Err("Choose a model for this account from /providers".into()),
         }
     }
-    fn menu(&self, room: &str) -> Result<CommandResult, String> {
+    fn menu(&self, room: &str, service: Service) -> Result<CommandResult, String> {
         let mut entries = vec![choice(
-            Action::Connect.to_string(),
-            "+ Connect a ChatGPT account",
-            "Sign in with ChatGPT in your browser",
+            service.action(Action::Connect),
+            format!("+ Connect a {} account", service.name()),
+            &format!("Sign in with {} in your browser", service.name()),
         )];
-        entries.extend(
-            self.auth
-                .accounts()
-                .map_err(|e| e.to_string())?
-                .iter()
-                .map(|a| {
-                    choice(
-                        Action::Account(&a.id).to_string(),
-                        label(a),
-                        if !a.connected {
-                            "Signed out"
-                        } else if !a.plan_usage {
-                            "Connected · plan usage not enabled"
-                        } else {
-                            "Connected · choose models or manage account"
-                        },
-                    )
-                }),
-        );
-        Ok(choices(room, "ChatGPT accounts", entries))
+        entries.extend(service.entries(self)?.iter().map(|a| {
+            choice(
+                service.action(Action::Account(&a.id)),
+                label(a),
+                if !a.connected {
+                    "Signed out"
+                } else if !a.can_use {
+                    "Connected · plan usage not enabled"
+                } else {
+                    "Connected · choose models or manage account"
+                },
+            )
+        }));
+        Ok(choices(
+            room,
+            &format!("{} accounts", service.name()),
+            entries,
+        ))
     }
-    fn account_menu(&self, room: &str, id: &str) -> Result<CommandResult, String> {
-        let account = self
-            .auth
-            .accounts()
-            .map_err(|e| e.to_string())?
+    fn account_menu(
+        &self,
+        room: &str,
+        service: Service,
+        id: &str,
+    ) -> Result<CommandResult, String> {
+        let account = service
+            .entries(self)?
             .into_iter()
             .find(|a| a.id == id)
-            .ok_or("Unknown ChatGPT account")?;
+            .ok_or_else(|| format!("Unknown {} account", service.name()))?;
         let mut entries = Vec::new();
-        if account.connected && account.plan_usage {
+        if account.connected && account.can_use {
             entries.push(choice(
-                Action::Use(id).to_string(),
+                service.action(Action::Use(id)),
                 "Use this account · choose a model",
                 "Create an agent using this account's available models",
             ));
         }
         entries.push(choice(
-            Action::Login(id).to_string(),
+            service.action(Action::Login(id)),
             if account.connected {
                 "Sign in again"
             } else {
@@ -169,20 +182,20 @@ impl Accounts {
         ));
         if account.connected {
             entries.push(choice(
-                Action::Logout(id).to_string(),
+                service.action(Action::Logout(id)),
                 "Sign out",
                 "Revoke access and remove this account's local tokens",
             ));
         }
         Ok(choices(
             room,
-            &format!("ChatGPT · {}", label(&account)),
+            &format!("{} · {}", service.name(), label(&account)),
             entries,
         ))
     }
 }
 
-fn label(account: &Account) -> String {
+fn label(account: &Entry) -> String {
     account
         .email
         .clone()
@@ -199,26 +212,8 @@ fn choices(room: &str, title: &str, choices: Vec<Choice>) -> CommandResult {
         choices,
     }])
 }
-pub(crate) struct Credential {
-    pub auth: ChatGpt,
-    pub account: String,
-}
-impl roomkit_providers_openai::TokenSource for Credential {
-    fn token(&self) -> roomkit_providers_openai::TokenFuture<'_> {
-        Box::pin(async {
-            self.auth
-                .access_token(&self.account)
-                .await
-                .map(|s| s.expose_secret().to_owned())
-                .map_err(|error| match error {
-                    roomkit_auth::Error::SignInRequired | roomkit_auth::Error::Identity => {
-                        roomkit_providers_openai::TokenError::SignInRequired
-                    }
-                    roomkit_auth::Error::PlanUsageRequired => {
-                        roomkit_providers_openai::TokenError::PermissionRequired
-                    }
-                    _ => roomkit_providers_openai::TokenError::Unavailable,
-                })
-        })
-    }
+
+#[cfg(test)]
+tokio::task_local! {
+    pub(crate) static TEST_GOOGLE_CLIENT: Google;
 }

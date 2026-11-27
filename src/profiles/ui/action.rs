@@ -21,7 +21,7 @@ pub(in crate::profiles) enum Action<'a> {
         token: &'a str,
     },
     /// An action of the ChatGPT account menus, which they define.
-    ChatGpt(crate::accounts::Action<'a>),
+    Account(crate::accounts::Service, crate::accounts::Action<'a>),
     Effort(&'a str),
     /// `/model`, with a model's ID or nothing: an ID may hold colons, so it
     /// is the whole argument.
@@ -76,7 +76,7 @@ impl<'a> Action<'a> {
         if command == "providers"
             && let Some(action) = crate::accounts::Action::parse(arguments)
         {
-            return action.map(Self::ChatGpt);
+            return action.map(|(service, action)| Self::Account(service, action));
         }
         let mut parts = arguments.splitn(3, ':');
         let action = parts.next().unwrap_or_default();
@@ -116,7 +116,7 @@ impl<'a> Action<'a> {
             Self::Model(id) => !id.is_empty(),
             // Served before the lease is decided: the deletion and the
             // accounts take it themselves where they write.
-            Self::Delete { .. } | Self::ConfirmDelete { .. } | Self::ChatGpt(_) => false,
+            Self::Delete { .. } | Self::ConfirmDelete { .. } | Self::Account(..) => false,
             Self::Effort(_)
             | Self::Providers
             | Self::OpenProvider(_)
@@ -144,7 +144,7 @@ impl Action<'_> {
             Self::Delete { command, .. } | Self::ConfirmDelete { command, .. } => command,
             Self::Effort(_) => "effort",
             Self::Model(_) => "model",
-            Self::ChatGpt(_)
+            Self::Account(..)
             | Self::Providers
             | Self::OpenProvider(_)
             | Self::AddProvider
@@ -171,7 +171,7 @@ impl fmt::Display for Action<'_> {
         match self {
             Self::Delete { id, .. } => write!(f, "delete:{id}"),
             Self::ConfirmDelete { token, .. } => write!(f, "confirm-delete:{token}"),
-            Self::ChatGpt(action) => action.fmt(f),
+            Self::Account(service, action) => f.write_str(&service.action(*action)),
             Self::Providers | Self::Agents => Ok(()),
             Self::Effort(text) | Self::Model(text) => f.write_str(text),
             Self::OpenProvider(id) | Self::OpenAgent(id) => write!(f, "open:{id}"),
@@ -212,8 +212,14 @@ mod tests {
                 command: "agents",
                 token: "0b5c",
             },
-            Action::ChatGpt(crate::accounts::Action::Account("0b5c")),
-            Action::ChatGpt(crate::accounts::Action::Use("0b5c")),
+            Action::Account(
+                crate::accounts::Service::ChatGpt,
+                crate::accounts::Action::Account("0b5c"),
+            ),
+            Action::Account(
+                crate::accounts::Service::Google,
+                crate::accounts::Action::Use("0b5c"),
+            ),
             Action::Effort(""),
             Action::Effort("high"),
             Action::Model("vendor/model:latest"),

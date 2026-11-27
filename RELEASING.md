@@ -122,3 +122,18 @@ it. Fork pull requests never receive that credential and cannot compile private
 dependencies. Keep them on `pull_request`; never use `pull_request_target` to
 run untrusted source with credentials. Private repositories also require an
 available GitHub Actions allowance before native builds can run.
+
+## Configure Google sign-in for distribution
+
+Register RoomKit Code as a **Desktop app** in Google Auth Platform and configure
+its audience and consent screen for the users of the release. Authorize the
+`openid`, `email` and `https://www.googleapis.com/auth/cloud-platform` scopes.
+Set the GitHub Actions repository variable `ROOMKIT_GOOGLE_CLIENT_ID` and
+secret `ROOMKIT_GOOGLE_CLIENT_SECRET` before building the distribution binaries.
+Google treats installed apps as public clients. The binary contains this
+registration and uses PKCE for each browser sign-in.
+
+For a source build or self-hosted distribution, supply both variables together
+at build time or in the process environment. Builds without a registration
+still support Gemini API keys. The quota project belongs to the signed-in user
+and is selected in the application.

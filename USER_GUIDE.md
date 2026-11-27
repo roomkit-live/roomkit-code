@@ -43,12 +43,13 @@ The explicit TOML equivalent is `[provider] kind = "anthropic"`.
 `ROOMKIT_API_KEY` takes precedence over `ANTHROPIC_API_KEY` when bootstrapping
 an Anthropic connection. Saved connections retain their selected authentication.
 
-For **Google Gemini** or **OpenRouter**, open **/providers → + Add provider**,
+To connect **Google Gemini** or **OpenRouter** with a key, open **/providers → + Add provider**,
 select the provider type and leave the API base URL empty. Choose **Environment
 variable** and enter `GEMINI_API_KEY` or `OPENROUTER_API_KEY`, or choose **Stored
 API key**. Save the connection and pick a model. Gemini uses the Google AI Studio
 key with the Gemini Developer API. OpenRouter uses an OpenRouter key and a
-model ID in `author/model` form.
+model ID in `author/model` form. To connect Gemini with a Google account, choose
+**Sign in with Google** in `/providers`.
 
 With the corresponding key exported, a fresh project can also start from the terminal:
 
@@ -1538,6 +1539,25 @@ By default OpenCode refuses them with an HTTP 400, which RoomKit Code reports as
 a rejected request: select **Global** in the console's privacy settings to use
 them. Usage counts against your Go plan's limits.
 
+## Sign in with Google
+
+Open `/providers` and choose **Sign in with Google** → **Connect a Google
+account**. Open the browser link and grant access. On the same machine, the
+callback completes automatically. If the browser runs on a different computer,
+paste its complete return URL into the private field and press Enter.
+
+Choose **Choose a model** and enter the ID of your Google Cloud quota project.
+Enable the Generative Language API on that project and grant the account
+`serviceusage.services.use` (included in the Service Usage Consumer role).
+The first form defaults to `GOOGLE_CLOUD_QUOTA_PROJECT` when set. Once saved,
+the connection remembers the project. Select a model to create your agent.
+
+Gemini API usage counts toward the selected Cloud project's quota. Credentials
+are saved in the private local `auth/google/accounts.json` file. The connection
+stores the project ID and account reference. Reauthorize or sign out in the
+Google account menu. Distributions enable this option with their registered
+OAuth client as described in the [release guide](RELEASING.md).
+
 ## Sign in with ChatGPT
 
 Open `/providers`, choose **Sign in with ChatGPT**, then **Connect a ChatGPT
@@ -1647,9 +1667,8 @@ remain. An explicitly empty project is not repopulated from launch options.
 A provider cannot be deleted while any saved project's agent references it;
 change those agents' provider or delete them first. References are checked again
 at confirmation, under a shared profile edit lock. Stored API keys are removed
-with their provider. For ChatGPT, deleting a provider removes the connection
-profile; account sign-out and credential revocation remain separate actions in
-the ChatGPT account menu.
+with their provider. For ChatGPT and Google accounts, delete the connection in
+the provider menu and revoke account access with **Sign out** in the account menu.
 
 ### Sending images
 

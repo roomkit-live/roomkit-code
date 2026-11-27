@@ -2,17 +2,11 @@
 //! describes.
 use super::*;
 
-pub(super) fn managed_elsewhere(subscription: &super::subscriptions::Subscription) -> String {
-    match subscription.credential {
-        super::subscriptions::Credential::Account => format!(
-            "Manage {name} connections through the {name} account menu",
-            name = subscription.name
-        ),
-        super::subscriptions::Credential::Key { .. } => format!(
-            "Edit {} connections from their own form in /providers",
-            subscription.name
-        ),
-    }
+pub(super) fn managed_account(service: crate::accounts::Service) -> String {
+    format!(
+        "Manage {name} connections through the {name} account menu",
+        name = service.name()
+    )
 }
 pub(in crate::profiles) fn value<'a>(values: &'a FormValues, key: &str) -> &'a str {
     values.get(key).unwrap_or("")
@@ -37,11 +31,16 @@ pub(super) fn parse_provider(
         original,
         state.providers.value.profiles.contains_key(id),
     )?;
-    if let Some(subscription) = original
-        .and_then(|id| state.providers.value.profiles.get(id))
-        .and_then(Provider::subscription)
-    {
-        return Err(managed_elsewhere(subscription));
+    if let Some(existing) = original.and_then(|id| state.providers.value.profiles.get(id)) {
+        if let Some((service, _)) = existing.authentication.account() {
+            return Err(managed_account(service));
+        }
+        if let Some(subscription) = existing.subscription() {
+            return Err(format!(
+                "Edit {} connections from their own form in /providers",
+                subscription.name
+            ));
+        }
     }
     let authentication = match value(values, "auth") {
         "none" => Authentication::None,

@@ -12,7 +12,7 @@ an implementation plan, edit files and run tests with the model you choose.
 ## What it does
 
 - **Choose your provider:** Gemini, OpenRouter, Anthropic Messages, OpenAI-compatible endpoints,
-  ChatGPT sign-in, OpenCode Go or local GGUF models with llama.cpp. Configure
+  ChatGPT and Google sign-in, OpenCode Go or local GGUF models with llama.cpp. Configure
   connections and agents in the app.
 - **Control changes:** Ask requests approval for writes and commands; Plan is
   for investigation and planning; Yolo allows the agent to act without those
@@ -65,8 +65,15 @@ roomkit-code /path/to/project
 2. Open **`/agents`**, choose the connection and select a model.
 3. Ask the agent to explore your project, make a plan or implement a change.
 
-ChatGPT sign-in shows a browser link and a private field for the return URL.
+ChatGPT and Google sign-in show a browser link and a private field for the return URL.
 You can open the link on your laptop when RoomKit Code runs on a remote machine.
+For Gemini, choose **Sign in with Google**, connect the account, and enter the ID
+of the Google Cloud project whose quota you want to use. Enable the Generative
+Language API on that project and give the account the Service Usage Consumer
+role (or equivalent permission). The project is saved with the connection.
+The next time you open the project form, its saved ID is prefilled. On first use
+the form can take its default from `GOOGLE_CLOUD_QUOTA_PROJECT`.
+
 To run a local model, select **Local llama.cpp** in `/providers`, then search Hugging Face from the model picker. For a new project with a GGUF already on disk:
 
 ```sh

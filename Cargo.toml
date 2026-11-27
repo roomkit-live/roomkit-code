@@ -15,7 +15,7 @@ include = ["build.rs", "src/**", "Cargo.toml", "Cargo.lock", "README.md", "USER_
 
 [dependencies]
 roomkit-hooks = { path = "crates/roomkit-hooks", version = "0.1.0" }
-roomkit-auth = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-auth", rev = "f29f07e5c6885aa3dab22f4b9624104267b4e81c" }
+roomkit-auth = { version = "0.1.0", git = "https://github.com/roomkit-live/roomkit-auth", rev = "1446e4c537d1e19c60b26c5962516fdfaa33f2a2" }
 # Keep the engine source identical to the CLI and tools adapters.
 roomkit = { version = "0.3.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "e6f92c6dba1cb158ff2cc8d734038a1100402ceb" }
 # An event's plain text and the transcript's image references, which roomkit
@@ -24,12 +24,12 @@ roomkit-core = { version = "0.3.0", git = "https://github.com/roomkit-live/roomk
 roomkit-mcp = { version = "0.3.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "e6f92c6dba1cb158ff2cc8d734038a1100402ceb", features = ["http"] }
 roomkit-ai = { version = "0.3.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "e6f92c6dba1cb158ff2cc8d734038a1100402ceb" }
 # The model providers, which are built on the same engine revision.
-roomkit-providers-openai = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "9ec1993c09fe17337f790abf1a844b210deea6c8" }
-roomkit-providers-llamacpp = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "9ec1993c09fe17337f790abf1a844b210deea6c8" }
-roomkit-providers-anthropic = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "9ec1993c09fe17337f790abf1a844b210deea6c8" }
-roomkit-providers-gemini = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "9ec1993c09fe17337f790abf1a844b210deea6c8" }
-roomkit-providers-redis = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "9ec1993c09fe17337f790abf1a844b210deea6c8" }
-roomkit-providers-sqlite = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "9ec1993c09fe17337f790abf1a844b210deea6c8" }
+roomkit-providers-openai = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "552cf54e59f41c2f18c3503499a471f4008f0d33" }
+roomkit-providers-llamacpp = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "552cf54e59f41c2f18c3503499a471f4008f0d33" }
+roomkit-providers-anthropic = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "552cf54e59f41c2f18c3503499a471f4008f0d33" }
+roomkit-providers-gemini = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "552cf54e59f41c2f18c3503499a471f4008f0d33" }
+roomkit-providers-redis = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "552cf54e59f41c2f18c3503499a471f4008f0d33" }
+roomkit-providers-sqlite = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "552cf54e59f41c2f18c3503499a471f4008f0d33" }
 roomkit-tui-engine = { version = "0.3.1", git = "https://github.com/roomkit-live/roomkit-tui", rev = "8f6ba8cf555ff159d1c967b04b1cc266c7163d8b" }
 roomkit-tui = { version = "0.3.1", git = "https://github.com/roomkit-live/roomkit-tui", rev = "8f6ba8cf555ff159d1c967b04b1cc266c7163d8b" }
 roomkit-tools-memory = { version = "0.2.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "171ba557fff782a7b4e74b9e1dd2ce7f226bef60" }
@@ -76,7 +76,7 @@ ignore = "0.4.34"
 
 [dev-dependencies]
 # Redirect the fixed Gemini endpoint to a loopback fixture in tests.
-roomkit-providers-gemini = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "9ec1993c09fe17337f790abf1a844b210deea6c8", features = ["replay"] }
+roomkit-providers-gemini = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "552cf54e59f41c2f18c3503499a471f4008f0d33", features = ["replay"] }
 axum = "0.8"
 tokio = { version = "1", features = ["net", "test-util"] }
 

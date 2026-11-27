@@ -22,11 +22,11 @@ pub(super) fn provider_menu(
     id: &str,
     provider: &Provider,
 ) -> CommandResult {
-    let entries = if let Authentication::ChatGpt { account } = &provider.authentication {
+    let entries = if let Some((service, account)) = provider.authentication.account() {
         vec![
             choice(
-                Action::ChatGpt(crate::accounts::Action::Account(account)).to_string(),
-                "Manage ChatGPT account",
+                service.action(crate::accounts::Action::Account(account)),
+                format!("Manage {} account", service.name()),
                 "Choose models, sign in or sign out",
             ),
             choice(
@@ -123,6 +123,11 @@ pub(in crate::profiles) fn provider_choices(
         let offer = &subscription.offer;
         choice(offer.action, offer.label, offer.description)
     }));
+    entries.push(choice(
+        crate::accounts::Service::Google.action(crate::accounts::Action::Menu),
+        "Sign in with Google",
+        "Use Gemini with a Google account and a Cloud quota project",
+    ));
     entries.extend(state.providers.value.profiles.values().map(|p| {
         choice(
             Action::OpenProvider(&p.id).to_string(),

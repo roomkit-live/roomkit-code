@@ -44,7 +44,7 @@ impl Profiles {
                 .map(CodeProvider::OpenAi)
                 .map_err(|_| "Cannot initialize the OpenAI connection".into()),
             ProviderKind::Gemini => provider
-                .gemini(&profile.model, profile.max_output_tokens)
+                .gemini(&self.accounts, &profile.model, profile.max_output_tokens)
                 .map(|p| CodeProvider::Gemini {
                     provider: p,
                     vision: profile.vision,
@@ -141,14 +141,34 @@ impl Profiles {
 }
 
 impl Provider {
-    pub(super) fn gemini(&self, model: &str, max_tokens: Option<u32>) -> Result<Gemini, String> {
-        let mut config = GeminiConfig::new(self.authentication.key()?);
+    pub(super) fn gemini(
+        &self,
+        accounts: &crate::accounts::Accounts,
+        model: &str,
+        max_tokens: Option<u32>,
+    ) -> Result<Gemini, String> {
+        let oauth = if let Authentication::Google { account, project } = &self.authentication {
+            self.validate()?;
+            Some((project, accounts.google_token_source(account)?))
+        } else {
+            None
+        };
+        let key = if oauth.is_some() {
+            String::new()
+        } else {
+            self.authentication.key()?
+        };
+        let mut config = GeminiConfig::new(key);
         config.model = model.into();
         config.timeout = Duration::from_secs(self.timeout_seconds);
         if let Some(max) = max_tokens {
             config.max_tokens = max;
         }
-        let client = Gemini::new(config).map_err(|_| "Cannot initialize the Gemini connection")?;
+        let client = match oauth {
+            Some((project, source)) => Gemini::with_oauth(config, project, source),
+            None => Gemini::new(config),
+        }
+        .map_err(|_| "Cannot initialize the Gemini connection")?;
         #[cfg(test)]
         let client = GEMINI_SERVER
             .try_with(|address| client.replaying(*address, 0.0))
