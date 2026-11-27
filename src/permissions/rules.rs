@@ -167,7 +167,7 @@ pub(crate) fn summary(has: impl Fn(&str) -> bool) -> String {
         }
     };
     let memory = if has("memory") {
-        " Project memory search and read run directly, including in Plan. Saving or forgetting a note requires Ask approval and is blocked in Plan."
+        " Project memory lookups run directly, including in Plan. Saving or forgetting a note requires Ask approval and is blocked in Plan."
     } else {
         ""
     };
@@ -192,7 +192,7 @@ fn rule_for(name: &str, arguments: &serde_json::Map<String, serde_json::Value>) 
     if name == "memory"
         && matches!(
             arguments.get("action").and_then(|v| v.as_str()),
-            Some("search" | "read")
+            Some("search" | "read" | "history")
         )
     {
         return Some(READ);

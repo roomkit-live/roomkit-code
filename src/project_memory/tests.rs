@@ -74,7 +74,7 @@ async fn memory_search_reaches_a_note_beyond_the_index_and_reads_share_one_budge
     assert!(!indexed.messages[0].text().contains("runner-31"));
     assert!(estimate_context_tokens(&indexed) <= 64);
     let search = view
-        .tool()
+        .tool(None)
         .handler(
             "memory".into(),
             json!({"action":"search","query":"runner-31"})
@@ -86,7 +86,7 @@ async fn memory_search_reaches_a_note_beyond_the_index_and_reads_share_one_budge
         .unwrap();
     assert!(matches!(search,roomkit_ai::ToolResult::Text(ref s) if s.contains("runner-31")));
     let read = view
-        .tool()
+        .tool(None)
         .handler(
             "memory".into(),
             json!({"action":"read","id":"runner-31"})

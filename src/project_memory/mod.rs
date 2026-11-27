@@ -1,9 +1,12 @@
 //! Project scope, quota and backend choice belong to the host.
+mod history;
 mod provider;
 mod scope;
 #[cfg(test)]
 mod tests;
+mod tool;
 mod view;
+pub(crate) use history::History;
 pub(crate) use provider::AgentProvider;
 pub(crate) use view::View;
 

@@ -71,6 +71,7 @@ pub(crate) struct Profiles {
     skill_catalogue: tokio::sync::RwLock<skills::Catalogue>,
     pub(crate) mcp_runtime: Arc<mcp::Runtime>,
     project_memory: roomkit_tools_memory::MemoryTool,
+    conversation_store: Option<SqliteStore>,
     /// The context capacity each connection's server reported for its
     /// models in its latest listing, by connection and model.
     reported: std::sync::Mutex<std::collections::HashMap<(String, String), u64>>,
@@ -188,6 +189,7 @@ impl Profiles {
         storage: &Storage,
         authentication: Authentication,
         resources: Option<crate::agent::Resources>,
+        conversation_store: Option<SqliteStore>,
     ) -> Result<Arc<Self>, String> {
         let diagnostics = crate::diagnostics::Diagnostics::open(
             storage.database.with_file_name("diagnostics.jsonl"),
@@ -202,15 +204,7 @@ impl Profiles {
         } = startup::load(settings, storage, authentication).await?;
         let resources = match resources {
             Some(resources) => resources,
-            None => crate::agent::Resources::new(
-                &settings.workspace,
-                storage.database.parent().ok_or("Missing state directory")?,
-                &settings.state_dir,
-                &settings.inherit_env,
-                settings.unattended,
-            )
-            .await
-            .map_err(|_| "Could not initialize workspace tools")?,
+            None => startup::workspace_tools(settings, storage).await?,
         };
         let skill_catalogue =
             skills::Catalogue::load(settings.workspace.clone(), settings.state_dir.clone()).await?;
@@ -235,6 +229,7 @@ impl Profiles {
         let project_memory = crate::project_memory::bind(settings, &mcp_runtime).await?;
         Ok(Arc::new(Self {
             project_memory,
+            conversation_store,
             pool,
             local_models: Default::default(),
             executor_inventory,

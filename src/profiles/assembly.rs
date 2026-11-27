@@ -65,6 +65,10 @@ impl Profiles {
         };
         let extensions = crate::agent::Extensions {
             project_memory: self.project_memory.clone(),
+            history: crate::project_memory::History::for_agent(
+                self.conversation_store.as_ref(),
+                channel,
+            ),
             executor_inventory: inventory,
             skills,
             skill_roots,

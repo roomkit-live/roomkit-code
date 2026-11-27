@@ -2112,6 +2112,10 @@ Markdown is the default. On Linux, state lives in `$XDG_DATA_HOME/roomkit-code` 
 
 Storage is capped at 256 KiB per project including the index, 256 notes and 32 KiB of body per note. A full store refuses additional writes and keeps existing notes. Shorten or forget a note to free space. At each generation the index and memory results share at most 1/32 of the known context window, capped at 1,024 estimated tokens (512 for a 16,384-token window). An unknown window uses 256. Tool results take priority over the index. A long result may appear as an excerpt.
 
+To find an earlier discussion, ask “What did we decide about publishing the guide, and why?” The agent can use `memory` with `{"action":"history","query":"publishing guide"}` even if nobody saved a note. Results cite messages as `session#message`. With `{"action":"read","reference":"docs-review#12"}` the agent reads an excerpt of that message and up to two visible messages on either side in order. It can follow the first or last citation to continue. A search with no exact hits may return a labeled partial match. The search examines up to 512 ranked candidates per query. If a broad query misses the discussion, retry with a distinctive topic word.
+
+Conversation lookup reads the current workspace's local RoomKit database, including sessions created by earlier versions. It covers other active top-level sessions in the same organization that both the terminal and the calling agent can read. Results contain visible message text. Audit events, blocked messages and private task rooms stay out of the results. A linked worktree has its own conversation database. Remote workers do not expose this lookup. Searches and passages run in Plan mode, share the existing memory budget, and do not create notes.
+
 ### Use a different memory backend
 
 Configure a trusted server with `/mcp`. Pass an explicit TOML file with `--config`:
@@ -2122,7 +2126,7 @@ backend = "mcp"
 server = "notes"
 ```
 
-Connect that server in `/mcp`. The same `memory` tool, permission checks and recall budget apply. The configured server handles the index and every operation. If disconnected, an explicit lookup reports the connection to restore. Return to the default with `backend = "markdown"` and remove `server`. Switching backends selects the other store and leaves existing notes in place.
+Connect that server in `/mcp`. The same `memory` tool, permission checks and recall budget apply. The configured server handles the note index and note operations. Conversation searches and passages are processed locally. If disconnected, an explicit note lookup reports the connection to restore. Return to the default with `backend = "markdown"` and remove `server`. Switching backends selects the other store and leaves existing notes in place.
 
 A compatible MCP server exposes a tool named `memory`. Code supplies `scope` (opaque project ID), `max_bytes` (262144) and `input` (the action arguments). The scope includes a private identifier from the local state directory so equal paths on different installations stay distinct. The authenticated server must isolate scopes, enforce the quota and check revisions atomically. Return one MCP text content item containing JSON of the form `{"notes":[{"id":"ci","title":"Windows runner","revision":"r1"}]}`, with `text` on a read only. Search may return an empty array. A mutation returns the affected note's metadata. The host validates the result and reserves this endpoint for the memory tool. Connect only servers you trust with your project notes.
 

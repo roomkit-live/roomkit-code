@@ -11,6 +11,21 @@ pub(super) struct Documents {
     pub global: Document<Project>,
 }
 
+pub(super) async fn workspace_tools(
+    settings: &Settings,
+    storage: &Storage,
+) -> Result<crate::agent::Resources, String> {
+    crate::agent::Resources::new(
+        &settings.workspace,
+        storage.database.parent().ok_or("Missing state directory")?,
+        &settings.state_dir,
+        &settings.inherit_env,
+        settings.unattended,
+    )
+    .await
+    .map_err(|_| "Could not initialize workspace tools".into())
+}
+
 pub(super) async fn load(
     settings: &Settings,
     storage: &Storage,

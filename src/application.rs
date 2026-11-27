@@ -47,10 +47,20 @@ impl Application {
     ) -> Result<Self> {
         let authentication = authentication.into();
         let storage = Storage::open(&settings.state_dir, &settings.workspace)?;
-        let profiles = Profiles::load(settings, &storage, authentication, resources).await?;
+        let store = SqliteStore::new(SqliteStoreOptions {
+            path: storage.database.clone(),
+        });
+        let profiles = Profiles::load(
+            settings,
+            &storage,
+            authentication,
+            resources,
+            Some(store.clone()),
+        )
+        .await?;
         // From here the profiles hold processes, MCP connections and the
         // diagnostic log: a start that fails releases them and records where.
-        let (services, kit) = match engine(settings, &storage, &profiles).await {
+        let (services, kit) = match engine(settings, &storage, &profiles, store).await {
             Ok(opened) => opened,
             Err(error) => {
                 abandon("engine", &error.to_string(), None, &profiles, None).await;
@@ -294,13 +304,11 @@ async fn engine(
     settings: &Settings,
     storage: &Storage,
     profiles: &std::sync::Arc<Profiles>,
+    store: SqliteStore,
 ) -> Result<(std::sync::Arc<Services>, RoomKit<SqliteStore>)> {
     let services = Services::new(settings, storage, profiles)?;
-    let store = {
+    {
         let _initializing = storage.initialization_lease().await?;
-        let store = SqliteStore::new(SqliteStoreOptions {
-            path: storage.database.clone(),
-        });
         // The store opens its file, creating or migrating its schema, at
         // its first operation: run one under the lease, which serializes
         // that across instances, and refuse a file it cannot open now.
@@ -309,8 +317,7 @@ async fn engine(
             ..ListRoomsOptions::default()
         };
         store.list_rooms(first).await?;
-        store
-    };
+    }
     let mut options = RoomKitOptions::with_store(store);
     if let Some(pool) = &profiles.pool {
         options.turn_backend = Some(roomkit::turns::TurnBackendHandle::new(pool.clone()));

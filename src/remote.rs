@@ -107,8 +107,14 @@ pub(crate) async fn serve(
     // The worker serves no delegation or human-input tools of its own.
     settings.unattended = true;
     let storage = Storage::open(&settings.state_dir, &settings.workspace)?;
-    let profiles =
-        Profiles::load(&settings, &storage, settings.initial_authentication(), None).await?;
+    let profiles = Profiles::load(
+        &settings,
+        &storage,
+        settings.initial_authentication(),
+        None,
+        None,
+    )
+    .await?;
     // A worker has no terminal to hide a panic's message, and no one
     // watching it either: its record goes to the diagnostic log.
     crate::diagnostics::report_panics(profiles.diagnostics.clone());

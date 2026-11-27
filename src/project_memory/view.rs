@@ -1,11 +1,9 @@
 //! Fit recalled material into one allowance shared by an index and explicit lookups.
-use roomkit::model::Metadata;
 use roomkit_ai::{
-    AiContentPart, AiContext, AiMessage, AiMessageContent, AiRole, AiTool, Tool, ToolFuture,
-    ToolResult,
+    AiContentPart, AiContext, AiMessage, AiMessageContent, AiRole, Tool,
     memory::{estimate_context_tokens, estimate_message_tokens, estimate_tokens},
 };
-use roomkit_tools_memory::{MemoryInput, MemoryResult, MemoryTool};
+use roomkit_tools_memory::{MemoryInput, MemoryTool};
 use std::{borrow::Cow, collections::HashSet, time::Duration};
 use tokio_util::sync::CancellationToken;
 
@@ -27,8 +25,9 @@ impl View {
         }
     }
 
-    pub fn tool(&self) -> impl Tool {
-        RecallTool {
+    pub fn tool(&self, history: Option<super::History>) -> impl Tool {
+        super::tool::RecallTool {
+            history,
             inner: roomkit_tools_roomkit::Memory::new(self.store.clone()),
             allowance: self.allowance,
         }
@@ -143,54 +142,18 @@ fn index_message(titles: &[String], budget: usize) -> Option<AiMessage> {
 }
 
 /// RoomKit estimates one token per four code points, plus one.
-fn excerpt(text: &str, budget: usize) -> String {
-    if budget == 0 {
+pub(super) fn excerpt(text: &str, budget: usize) -> String {
+    clip_chars(text, budget.saturating_mul(4).saturating_sub(1))
+}
+
+pub(super) fn clip_chars(text: &str, limit: usize) -> String {
+    if limit == 0 {
         return String::new();
     }
-    let limit = budget.saturating_mul(4).saturating_sub(1);
     if text.chars().count() <= limit {
         return text.into();
     }
     let mut kept: String = text.chars().take(limit.saturating_sub(1)).collect();
     kept.push('…');
     kept
-}
-
-struct RecallTool {
-    inner: roomkit_tools_roomkit::Memory,
-    allowance: usize,
-}
-impl Tool for RecallTool {
-    fn definition(&self) -> AiTool {
-        self.inner.definition()
-    }
-    fn handler(&self, name: String, arguments: Metadata) -> ToolFuture {
-        let call = self.inner.handler(name, arguments);
-        let allowance = self.allowance;
-        Box::pin(async move {
-            let result = call.await?;
-            let ToolResult::Text(ref raw) = result else {
-                return Ok(result);
-            };
-            let notes: MemoryResult =
-                serde_json::from_str(raw).map_err(|e| roomkit_ai::ToolError::raised(&e))?;
-            let rows = notes
-                .notes
-                .into_iter()
-                .map(|n| {
-                    let header = format!("{} [{}] {}", n.id, n.revision, n.title);
-                    match n.text {
-                        Some(body) => format!("{header}\n{body}"),
-                        None => header,
-                    }
-                })
-                .collect::<Vec<_>>();
-            let text = if rows.is_empty() {
-                "No matching project notes".into()
-            } else {
-                rows.join("\n")
-            };
-            Ok(excerpt(&text, allowance).into())
-        })
-    }
 }

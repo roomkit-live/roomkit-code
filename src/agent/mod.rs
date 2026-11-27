@@ -70,6 +70,7 @@ pub(crate) const HISTORY: usize = 50;
 /// What an agent receives beyond the application's own tools.
 pub(crate) struct Extensions {
     pub project_memory: roomkit_tools_memory::MemoryTool,
+    pub history: Option<crate::project_memory::History>,
     pub executor_inventory: Option<crate::remote::pool::Inventory>,
     pub skills: SkillRegistry,
     pub skill_roots: Vec<std::path::PathBuf>,

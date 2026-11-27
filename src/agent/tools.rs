@@ -57,7 +57,7 @@ pub(super) fn add_memory(
             extensions.ceiling,
             profile.max_output_tokens,
         );
-        tools.push(Arc::new(view.tool()));
+        tools.push(Arc::new(view.tool(extensions.history.clone())));
         view
     })
 }
