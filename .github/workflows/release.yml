@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
     inputs:
       tag:
@@ -114,7 +114,8 @@ jobs:
 
   draft:
     needs: [source, build, audit]
-    runs-on: ubuntu-22.04
+    # Noble provides minisign. Linux binaries are built on Jammy above.
+    runs-on: ubuntu-24.04
     # The signing key's secrets belong to this environment, which admits
     # release tags only: a workflow pushed on a branch cannot read them.
     environment: release

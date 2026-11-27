@@ -106,6 +106,12 @@ gh workflow run release.yml --repo roomkit-live/roomkit-code --ref v0.1.3 -f tag
 
 Run it from the tag (`--ref`): the `release` environment admits only `v*` tags.
 
+If the workflow itself needs a fix after tagging, merge the workflow fix into
+`main` and give that commit an annotated tag such as `v0.5.0-release-ci.1`.
+Use that tag for `--ref` and the original version for `-f tag=v0.5.0`.
+Only stable version tags trigger the workflow on push. The manual run builds
+the original version, runs its checks, and requests approval to sign it.
+
 If a draft already exists, inspect it before proceeding. The workflow refuses
 to overwrite an existing release, including a draft; finish publication only
 after verifying its contents. For a source correction, use a new version/tag.
