@@ -1,10 +1,11 @@
 //! Exact model files in the Hugging Face Hub cache shared with other clients.
+mod locks;
+mod remove;
 use super::hub::{Asset, Hub, ModelFile, Variant, shard};
 use std::io::Write;
 use std::{
     fs,
     path::{Path, PathBuf},
-    time::Duration,
 };
 
 pub(crate) struct Cache(pub PathBuf);
@@ -151,24 +152,48 @@ impl Cache {
         &self,
         hub: &Hub,
         model: &Variant,
+        cancel: &tokio_util::sync::CancellationToken,
         progress: impl Fn(u64),
     ) -> Result<(), String> {
         let root = self.repository(&model.first.repo);
         let blobs = root.join("blobs");
         fs::create_dir_all(&blobs).map_err(io)?;
+        let _locks = self.reserve_blobs(model, cancel).await?;
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => {
+                self.discard_partial(model)?;
+                Err("Download cancelled".into())
+            }
+            result = self.fetch_and_publish(hub, model, &root, &blobs, progress) => result,
+        }
+    }
+
+    async fn fetch_and_publish(
+        &self,
+        hub: &Hub,
+        model: &Variant,
+        root: &Path,
+        blobs: &Path,
+        progress: impl Fn(u64),
+    ) -> Result<(), String> {
         let mut done = 0;
         for file in &model.files {
-            self.blob(hub, &blobs, file, |bytes| progress(done + bytes))
-                .await?;
+            let target = blobs.join(&file.sha);
+            if !target.metadata().is_ok_and(|m| m.len() == file.size) {
+                super::transfer::download(hub, file, &target, |bytes| progress(done + bytes))
+                    .await?;
+            }
             done += file.size;
             progress(done);
         }
+        let main = hub.is_main(&model.first).await.unwrap_or(false);
         // Publish the first shard last: a model is selectable only once all its files exist.
         for file in model.files.iter().rev() {
             let path = self.path(&file.file);
             publish_link(&path, file)?;
         }
-        if hub.is_main(&model.first).await.unwrap_or(false) {
+        if main {
             let refs = root.join("refs");
             fs::create_dir_all(&refs).map_err(io)?;
             let mut temp = tempfile::NamedTempFile::new_in(&refs).map_err(io)?;
@@ -177,43 +202,6 @@ impl Cache {
             temp.persist(refs.join("main")).map_err(|e| io(e.error))?;
         }
         Ok(())
-    }
-
-    async fn blob(
-        &self,
-        hub: &Hub,
-        dir: &Path,
-        asset: &Asset,
-        progress: impl Fn(u64),
-    ) -> Result<(), String> {
-        let target = dir.join(&asset.sha);
-        if target.metadata().is_ok_and(|m| m.len() == asset.size) {
-            return Ok(());
-        }
-        let locks = self
-            .0
-            .join(".locks")
-            .join(format!("models--{}", asset.file.repo.replace('/', "--")));
-        fs::create_dir_all(&locks).map_err(io)?;
-        let lock = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(locks.join(format!("{}.lock", asset.sha)))
-            .map_err(io)?;
-        loop {
-            match fs2::FileExt::try_lock_exclusive(&lock) {
-                Ok(()) => break,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    tokio::time::sleep(Duration::from_millis(200)).await
-                }
-                Err(e) => return Err(io(e)),
-            }
-        }
-        if target.metadata().is_ok_and(|m| m.len() == asset.size) {
-            return Ok(());
-        }
-        super::transfer::download(hub, asset, &target, progress).await
     }
 }
 

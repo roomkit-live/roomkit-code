@@ -523,19 +523,21 @@ same pane. An unavailable/invalid counter or another reporter holding that pane
 disables the TUI adapter for that launch and records `sequence_unavailable`.
 These files contain counters, not conversation content or resume arguments.
 
-## Providers and agents
+## Local GGUF models
 
-### Local GGUF models
+In **/providers**, add a connection of type **Local llama.cpp**, leave the URL empty and choose **No key**. Select a cached model or **Search Hugging Face**. The default search requests repositories tagged `text-generation` on the Hub. Choose **Search all GGUF models** to include audio, other tasks and untagged models. Enter a search term, choose a repository, then choose a GGUF file by quantization and size. An exact public repository opens its files directly. After you press Enter, the picker shows when it is waiting for a response.
 
-In **/providers**, add a connection of type **Local llama.cpp**, leave the URL empty and choose **No key**. Select a cached model or **Search Hugging Face**. Enter a search term, choose a repository, then choose a GGUF file by quantization and size. An exact public repository opens its files directly. After you press Enter, the picker shows when it is waiting for a response.
+Choosing a file that is not installed starts a background transfer and opens **Model downloads**. The panel shows a progress bar, bytes received and verification. Press **Esc** to keep chatting with the current model. Reopen **/downloads** to check progress, cancel a transfer or choose **Use** when the model is ready. Downloading never switches the conversation's model automatically. When configuring an agent, select the installed file in its model picker to finish setup.
 
-To keep chatting with the current model, choose **Download in background** in the GGUF picker and select a file. Open **/downloads** or the sidebar (**F7** on wide terminals) to see the progress bar, percentage, bytes received and completion or failure. A background download continues across conversations while the application is open. Select the installed file when you want to use it.
+In **/downloads → Manage installed models**, select a file to use it or delete it from disk. Deletion asks for confirmation, removes that quantization and keeps weights shared with other snapshots of the repository. Choose another model first if this instance has it selected in a conversation or agent. Cancelling a download releases its partial files and unshared shards. Closing the application or losing the connection keeps partial data for a retry.
 
 After an interruption, selecting the same file resumes the transfer when the server supports byte ranges. The application verifies each downloaded file against its SHA-256 and saves all shards in the Hugging Face Hub cache. **/model** lists installed models offline. The sidebar and footer show the model name and quantization. The saved profile retains the model repository, revision and filename for Hub selections.
 
-A fresh project can also start with `--provider llamacpp --model /path/to/model.gguf` or `--provider llamacpp --model owner/repository:Q4_K_M`. Each local server listens on loopback. Local agents default to a 16,384-token context. If a request exceeds the window, the status names the context limit. The notice and **/diagnostics** include the requested and available tokens when both appear in the llama.cpp error message. In **/agents**, edit the local agent, select the same model as the conversation and raise **Context capacity** if the model and available memory allow, then resend the message. **/compact** reports when its estimate still fills the local window. Choose a model that supports tool calls and a context size that fits the machine.
+A fresh project can also start with `--provider llamacpp --model /path/to/model.gguf` or `--provider llamacpp --model owner/repository:Q4_K_M`. Each local server listens on loopback. Local agents default to a 16,384-token context. If a request exceeds the window, the status names the context limit. The notice and **/diagnostics** include the requested and available tokens when both appear in the llama.cpp error message. Set **/model → Agent context capacity** (for example, `128K` or `131072`) to change the llama.cpp window for this agent. Each GGUF it uses inherits that setting, including in existing conversations. Choose a size the model and available memory support, then resend the message. **/compact** reports when its estimate still fills the local window. Choose a model that supports tool calls and a context size that fits the machine.
 
 CodeLALA v1 and Olala v1 mini use a dedicated OVH llama.cpp build. On first use, Code builds a pinned source revision with Git, CMake and a C++ compiler. Linux builds use CUDA when its toolkit and an NVIDIA device are available. The executable lives under the user's RoomKit Code data directory in `runtimes/ovh-llama.cpp/<revision>/bin/`. Code launches it by absolute path. To supply a compatible build yourself, set `ROOMKIT_LLAMA_BINARY` to the absolute path of its `llama-server`.
+
+## Providers and agents
 
 **/providers** manages connections shared across your projects. Add a name, provider type, API
 base URL, timeout and authentication: no key, a stored key, or a named environment

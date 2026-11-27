@@ -230,7 +230,7 @@ async fn a_local_window_filled_by_fixed_input_warns_even_with_nothing_to_compact
     let warnings = compactions.notices("room").join(" ");
     assert!(
         warnings.contains("17020 tokens against a 16384-token context")
-            && warnings.contains("/agents"),
+            && warnings.contains("/model, raise Agent context capacity"),
         "{warnings}"
     );
 }

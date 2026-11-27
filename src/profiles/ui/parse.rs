@@ -127,15 +127,7 @@ pub(super) fn parse_agent(
                 "" | "default" => None,
                 effort => Some(effort.into()),
             },
-            context_window: if capacity.is_empty() {
-                None
-            } else {
-                Some(
-                    capacity
-                        .parse()
-                        .map_err(|_| "Context capacity must be a positive integer")?,
-                )
-            },
+            context_window: super::local_context::capacity(capacity)?,
             max_output_tokens: if output.is_empty() {
                 None
             } else {

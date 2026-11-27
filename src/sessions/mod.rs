@@ -200,11 +200,11 @@ impl Sessions {
         let arguments = arguments.trim();
         match name.as_str() {
             "skills" => self.profiles.skills(&self.kit, current, arguments).await,
-            "downloads" if arguments == "close" => Ok(CommandResult::Events(Vec::new())),
-            "downloads" if arguments.is_empty() => Ok(CommandResult::Events(vec![Event::Panel {
-                conversation: current.room.as_str().into(),
-                panel: self.profiles.local_models.downloads.panel(),
-            }])),
+            "downloads" => {
+                self.profiles
+                    .manage_downloads(&self.kit, current, arguments)
+                    .await
+            }
             "update" => self.services.updates.handle(&current, arguments),
             "instructions" => {
                 self.profiles

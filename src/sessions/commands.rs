@@ -44,7 +44,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         ),
         (
             "downloads",
-            "Show model download progress and recent results",
+            "Manage GGUF downloads and installed models",
             "",
         ),
         (

@@ -104,6 +104,7 @@ struct State {
     delegation: Option<roomkit::tasks::DelegateHandler<SqliteStore>>,
     pending: Option<ui::Pending>,
     pending_delete: Option<deletion::Pending>,
+    pending_gguf_removal: Option<ui::downloads::Removal>,
     setup_error: Option<String>,
     /// The model and the effort each agent runs with in the conversations
     /// this instance opened, as each conversation keeps them: by room and
@@ -269,6 +270,7 @@ impl Profiles {
                 delegation: None,
                 pending: None,
                 pending_delete: None,
+                pending_gguf_removal: None,
                 setup_error: None,
                 running: BTreeMap::new(),
                 unfitted: BTreeMap::new(),

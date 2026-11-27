@@ -35,7 +35,18 @@ async fn hub(
     let routes = Router::new()
         .route(
             "/api/models",
-            get(|| async { Json(serde_json::json!([{"id":"example/coder"}])) }),
+            get(
+                |axum::extract::Query(query): axum::extract::Query<
+                    std::collections::HashMap<String, String>,
+                >| async move {
+                    assert_eq!(query["filter"], "gguf");
+                    let mut found = vec![serde_json::json!({"id":"example/coder"})];
+                    if query.get("pipeline_tag").map(String::as_str) != Some("text-generation") {
+                        found.push(serde_json::json!({"id":"example/voice"}));
+                    }
+                    Json(found)
+                },
+            ),
         )
         .route("/api/models/example/coder", get(repo))
         .route(
@@ -101,6 +112,10 @@ async fn gguf_search_download_retry_select_and_offline_resume() {
             let result = submit_profile(&app, "model", search, &[("query", "coder")])
                 .await
                 .unwrap();
+            assert!(!offered(&result).1.iter().any(|c| c.label == "example/voice"));
+            let all = &offered(&picker).1.iter().find(|c| c.label == "Search all GGUF models").unwrap().value;
+            let any = submit_profile(&app, "model", all, &[("query", "coder")]).await.unwrap();
+            assert!(offered(&any).1.iter().any(|c| c.label == "example/voice"));
             let repo = &offered(&result).1[0].value;
             let files = model(&app, repo).await;
             assert!(matches!(&files, CommandResult::Events(events)
@@ -108,22 +123,17 @@ async fn gguf_search_download_retry_select_and_offline_resume() {
             let choice = &offered(&files).1[0];
             assert_eq!(choice.label, FIRST);
             let selected = &choice.value;
-            let failure = profile_command(
-                &app,
-                Command::Invoke {
-                    name: "model".into(),
-                    arguments: selected.clone(),
-                },
-            )
-            .await
-            .unwrap_err();
-            assert!(failure.to_string().contains("SHA-256"));
+            let mut changes = app.profiles.local_models.downloads.changes.subscribe();
+            let _ = model(&app, selected).await;
+            background::wait_status(&app, &mut changes, "SHA-256").await;
             assert_eq!(
                 offered(&model(&app, "").await).1.len(),
-                2,
+                3,
                 "no partial model"
             );
             bad.store(false, Ordering::Relaxed);
+            let _ = model(&app, selected).await;
+            background::wait_status(&app, &mut changes, "ready to select").await;
             let CommandResult::Switch(view) = model(&app, selected).await else {
                 panic!("Expected model switch")
             };
@@ -132,7 +142,7 @@ async fn gguf_search_download_retry_select_and_offline_resume() {
             assert_eq!(view.model.as_ref().unwrap().label(), "example · Q6_K");
             assert_eq!(
                 view.model.as_ref().unwrap().context_limit_hint.as_deref(),
-                Some("/agents → select model + Context capacity")
+                Some("/model → Agent context capacity")
             );
             app.view = *view;
             let path = cache_dir.join("models--example--coder/snapshots").join(REV);
@@ -244,3 +254,45 @@ async fn open_local(root: &std::path::Path, state: &std::path::Path) -> Applicat
 }
 
 mod background;
+mod manage;
+
+#[tokio::test]
+async fn gguf_local_model_switch_keeps_the_agent_context_and_allows_editing_it() {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    for name in ["original.gguf", "another.gguf"] {
+        std::fs::write(root.path().join(name), b"fixture").unwrap();
+    }
+    let mut config = settings(root.path(), state.path(), "http://localhost");
+    config.provider = crate::providers::ProviderKind::LlamaCpp;
+    config.base_url.clear();
+    config.model = "original.gguf".into();
+    config.context_window = Some(131_072);
+    let mut app = Application::open(&config, String::new()).await.unwrap();
+    let CommandResult::Switch(next) = model(&app, "another.gguf").await else {
+        panic!("Expected switch")
+    };
+    app.view = *next;
+    assert_eq!(app.view.context_capacity, Some(131_072));
+    let menu = model(&app, "").await;
+    let context = &offered(&menu)
+        .1
+        .iter()
+        .find(|c| c.label == "Agent context capacity")
+        .unwrap()
+        .value;
+    let CommandResult::Switch(next) = submit_profile(&app, "model", context, &[("context", "96K")])
+        .await
+        .unwrap()
+    else {
+        panic!("Expected refreshed capacity")
+    };
+    assert_eq!(next.model.as_ref().unwrap().model, "another.gguf");
+    assert_eq!(next.context_capacity, Some(98_304));
+    app.close().await.unwrap();
+    drop(app);
+    let app = Application::open(&config, String::new()).await.unwrap();
+    assert_eq!(app.view.model.as_ref().unwrap().model, "another.gguf");
+    assert_eq!(app.view.context_capacity, Some(98_304));
+    app.close().await.unwrap();
+}

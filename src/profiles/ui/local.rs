@@ -2,7 +2,7 @@
 use super::*;
 use crate::local_models::{
     cache::Cache,
-    hub::{Hub, ModelFile},
+    hub::{Hub, ModelFile, SearchScope},
 };
 
 #[derive(Clone, Debug)]
@@ -12,29 +12,17 @@ pub(in crate::profiles) enum Destination {
     Edit(String),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum AfterDownload {
-    Use,
-    Cache,
-}
-
-impl AfterDownload {
-    fn search(self) -> &'static str {
+impl SearchScope {
+    fn search_action(self) -> &'static str {
         match self {
-            Self::Use => "search",
-            Self::Cache => "background-search",
+            Self::TextGeneration => "search",
+            Self::All => "all-search",
         }
     }
-    fn repo(self) -> &'static str {
+    fn repo_action(self) -> &'static str {
         match self {
-            Self::Use => "repo",
-            Self::Cache => "background-repo",
-        }
-    }
-    fn select(self) -> &'static str {
-        match self {
-            Self::Use => "use",
-            Self::Cache => "download",
+            Self::TextGeneration => "repo",
+            Self::All => "all-repo",
         }
     }
 }
@@ -93,13 +81,20 @@ impl Destination {
         let mut entries = vec![choice(
             self.arg("search", ""),
             "Search Hugging Face",
-            "Find GGUF models and choose a file to download",
+            "Text-generation models in GGUF format",
         )];
         entries.push(choice(
-            self.arg("background-search", ""),
-            "Download in background",
-            "Find a GGUF on Hugging Face and keep working with the current model",
+            self.arg("all-search", ""),
+            "Search all GGUF models",
+            "Include audio, other tasks and repositories without a task tag",
         ));
+        if let Self::Current = self {
+            entries.push(choice(
+                self.arg("context", ""),
+                "Agent context capacity",
+                "Set the token window for this agent’s local models",
+            ));
+        }
         for file in crate::sync::blocking(|| Cache::locate().map(|c| c.models()))? {
             entries.push(choice(
                 self.arg("use", &file.id()),
@@ -131,16 +126,16 @@ impl Destination {
         &self,
         current: &SessionConfig,
         query: &str,
-        after: AfterDownload,
+        scope: SearchScope,
     ) -> Result<CommandResult, String> {
         let hub = Hub::public()?;
         if crate::local_models::hub::valid_repo(query) {
-            return self.files(current, &hub, query, after).await;
+            return self.files(current, &hub, query, scope).await;
         }
-        let repos = hub.search(query).await?;
+        let repos = hub.search(query, scope).await?;
         let mut entries: Vec<_> = repos
             .into_iter()
-            .map(|r| choice(self.arg(after.repo(), &r), r, "Choose a GGUF file"))
+            .map(|r| choice(self.arg(scope.repo_action(), &r), r, "Choose a GGUF file"))
             .collect();
         let title = if entries.is_empty() {
             "No matching GGUF repositories"
@@ -148,7 +143,7 @@ impl Destination {
             "Choose a Hugging Face repository"
         };
         entries.push(choice(
-            self.arg(after.search(), ""),
+            self.arg(scope.search_action(), ""),
             "Search again",
             "Enter a model name or owner/repository",
         ));
@@ -160,7 +155,7 @@ impl Destination {
         current: &SessionConfig,
         hub: &Hub,
         repo: &str,
-        after: AfterDownload,
+        scope: SearchScope,
     ) -> Result<CommandResult, String> {
         let cache = Cache::locate()?;
         let variants = hub
@@ -175,13 +170,11 @@ impl Destination {
         {
             let status = if cache.installed(&model.first) {
                 "installed"
-            } else if after == AfterDownload::Cache {
-                "download in background"
             } else {
-                "download and use"
+                "download in background"
             };
             entries.push(choice(
-                self.arg(after.select(), &model.first.id()),
+                self.arg("use", &model.first.id()),
                 model.first.name,
                 format!("{:.2} GB · {status}", model.size as f64 / 1e9),
             ));
@@ -191,15 +184,8 @@ impl Destination {
         } else {
             format!("Choose a GGUF file · {repo}")
         };
-        if !entries.is_empty() && after == AfterDownload::Use {
-            entries.push(choice(
-                self.arg("background-repo", repo),
-                "Download in background",
-                "Choose a file to cache while you work",
-            ));
-        }
         entries.push(choice(
-            self.arg(after.search(), ""),
+            self.arg(scope.search_action(), ""),
             "Search again",
             "Choose another repository",
         ));
@@ -223,11 +209,14 @@ impl Profiles {
             let mut state = self.state.lock().await;
             let provider = dest.check(&state, &current)?;
             state.pending = None;
-            if matches!(verb, "search" | "background-search") {
-                let after = if verb == "search" {
-                    AfterDownload::Use
+            if verb == "context" && matches!(dest, Destination::Current) {
+                return self.local_context_form(&mut state, &current);
+            }
+            if matches!(verb, "search" | "all-search" | "background-search") {
+                let scope = if verb == "search" {
+                    SearchScope::TextGeneration
                 } else {
-                    AfterDownload::Cache
+                    SearchScope::All
                 };
                 let form = FormSpec::new(
                     uuid::Uuid::new_v4().to_string(),
@@ -246,21 +235,26 @@ impl Profiles {
                     &mut state,
                     &current,
                     form,
-                    Target::Hub(dest, after),
+                    Target::Hub(dest, scope),
                 ));
             }
             provider
         };
         match verb {
             "repo" => {
-                dest.files(&current, &Hub::public()?, value, AfterDownload::Use)
+                dest.files(
+                    &current,
+                    &Hub::public()?,
+                    value,
+                    SearchScope::TextGeneration,
+                )
+                .await
+            }
+            "all-repo" | "background-repo" => {
+                dest.files(&current, &Hub::public()?, value, SearchScope::All)
                     .await
             }
-            "background-repo" => {
-                dest.files(&current, &Hub::public()?, value, AfterDownload::Cache)
-                    .await
-            }
-            "download" => self.cache_local(&current, value),
+            "download" => self.download_local(&current, selection(value)?, Cache::locate()?),
             "use" => {
                 self.select_local(kit, current, dest, &provider, value)
                     .await
@@ -269,22 +263,19 @@ impl Profiles {
         }
     }
 
-    fn cache_local(&self, current: &SessionConfig, id: &str) -> Result<CommandResult, String> {
-        let file = selection(id)?;
-        let cache = Cache::locate()?;
-        let text = if cache.installed(&file) {
-            format!("{} is already installed.", file.name)
-        } else {
-            let text = format!(
-                "Downloading {} in the background. Use /downloads to follow progress.",
-                file.name
-            );
-            self.local_models.downloads.start(cache, file, true)?;
-            text
-        };
-        Ok(CommandResult::Events(vec![Event::Notice {
+    fn download_local(
+        &self,
+        current: &SessionConfig,
+        file: ModelFile,
+        cache: Cache,
+    ) -> Result<CommandResult, String> {
+        let downloads = &self.local_models.downloads;
+        if !cache.installed(&file) {
+            downloads.start(cache, file)?;
+        }
+        Ok(CommandResult::Events(vec![Event::Panel {
             conversation: current.room.as_str().into(),
-            text,
+            panel: downloads.panel(),
         }]))
     }
 
@@ -299,11 +290,7 @@ impl Profiles {
         let file = selection(id)?;
         let cache = Cache::locate()?;
         if !cache.installed(&file) {
-            self.local_models
-                .downloads
-                .start(cache, file, false)?
-                .wait()
-                .await?;
+            return self.download_local(&current, file, cache);
         }
         let mut state = self.state.lock().await;
         let _lease = matches!(dest, Destination::Current)
@@ -316,15 +303,17 @@ impl Profiles {
         }
         match dest {
             Destination::Current => {
-                self.change_current(kit, &mut state, current, |a| self.switch(a, id))
-                    .await
+                self.change_current(kit, &mut state, current, |state, agent| {
+                    self.switch(state, agent, id)
+                })
+                .await
             }
             Destination::New(provider) => {
                 new_agent_form(&mut state, &current, (&provider, id, None), false)
             }
             Destination::Edit(agent) => {
                 let mut profile = state.agent(&agent).ok_or("Unknown agent")?;
-                self.switch(&mut profile, id);
+                self.switch(&state, &mut profile, id);
                 edit_agent_form(&mut state, &current, Some(&profile))
             }
         }

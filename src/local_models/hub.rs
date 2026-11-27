@@ -101,6 +101,13 @@ struct Lfs {
     size: u64,
 }
 
+/// Which GGUF repositories to request from the Hub before its result limit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SearchScope {
+    TextGeneration,
+    All,
+}
+
 pub(crate) struct Hub {
     root: Url,
     pub(super) client: reqwest::Client,
@@ -170,7 +177,7 @@ impl Hub {
         Ok(head.sha == file.revision)
     }
 
-    pub async fn search(&self, query: &str) -> Result<Vec<String>, String> {
+    pub async fn search(&self, query: &str, scope: SearchScope) -> Result<Vec<String>, String> {
         if query.len() > 128 || query.chars().any(char::is_control) {
             return Err("Model search is too long or contains a control character".into());
         }
@@ -181,6 +188,10 @@ impl Hub {
             ("limit", "30"),
             ("sort", "downloads"),
         ]);
+        if scope == SearchScope::TextGeneration {
+            url.query_pairs_mut()
+                .append_pair("pipeline_tag", "text-generation");
+        }
         Ok(self
             .metadata::<Vec<Entry>>(url)
             .await?

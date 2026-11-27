@@ -174,7 +174,7 @@ mod tests {
             local_capacity: Some(16_384),
             ..told
         };
-        assert!(text(&full).contains("still needs 17020 tokens against a 16384-token context. In /agents, select this model and raise Context capacity"));
+        assert!(text(&full).contains("still needs 17020 tokens against a 16384-token context. In /model, raise Agent context capacity"));
         let fits = Told {
             local_capacity: Some(32_000),
             ..full

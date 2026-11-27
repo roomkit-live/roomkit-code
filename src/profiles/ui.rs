@@ -21,7 +21,11 @@ enum Target {
         original: Option<String>,
     },
     Agent(Option<String>),
-    Hub(local::Destination, local::AfterDownload),
+    LocalContext {
+        agent: String,
+        provider: String,
+    },
+    Hub(local::Destination, crate::local_models::hub::SearchScope),
 }
 
 pub(super) fn choice(
@@ -59,8 +63,10 @@ pub(super) fn choices(
 }
 
 mod action;
+pub(super) mod downloads;
 mod forms;
 pub(in crate::profiles) mod local;
+mod local_context;
 mod menus;
 mod parse;
 
@@ -172,7 +178,7 @@ impl Profiles {
                 Ok(choices(&current, "effort", title, effort_choices()))
             }
             Action::Effort(effort) => {
-                self.change_current(kit, &mut state, current, |agent| {
+                self.change_current(kit, &mut state, current, |_, agent| {
                     agent.reasoning_effort = (effort != "default").then(|| effort.into());
                 })
                 .await
@@ -206,7 +212,7 @@ impl Profiles {
                 if !listable(model) {
                     return Err("Invalid agent/model selection".into());
                 }
-                self.switch(&mut agent, model);
+                self.switch(&state, &mut agent, model);
                 edit_agent_form(&mut state, &current, Some(&agent))
             }
             Action::OpenAgent(id) => {
@@ -298,6 +304,17 @@ impl Profiles {
                     .pending
                     .take_if(|p| p.form.id == form);
                 return Ok(result);
+            }
+            Target::LocalContext { agent, provider } => {
+                self.save_local_context(
+                    kit,
+                    &mut state,
+                    &next,
+                    agent,
+                    provider,
+                    value(values, "context"),
+                )
+                .await?;
             }
             Target::Provider(original) => {
                 let profile = parse_provider(values, original.as_deref(), &state)?;

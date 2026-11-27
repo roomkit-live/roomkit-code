@@ -3,7 +3,7 @@ use super::*;
 use tokio::time::{Duration, timeout};
 
 #[tokio::test]
-async fn gguf_background_download_shares_work_and_preserves_the_active_model() {
+async fn gguf_file_selection_downloads_without_blocking_or_switching_models() {
     let gate = Arc::new(Gate::default());
     let bad = Arc::new(AtomicBool::new(true));
     let (url, server) = hub(bad.clone(), Some(gate.clone())).await;
@@ -13,14 +13,14 @@ async fn gguf_background_download_shares_work_and_preserves_the_active_model() {
     crate::local_models::TEST_HUB.scope((url, cache.path().into()), async {
         let app = open_local(root.path(), state.path()).await;
         let menu = model(&app, "").await;
-        let search = &offered(&menu).1.iter().find(|c| c.label == "Download in background").unwrap().value;
+        let search = &offered(&menu).1.iter().find(|c| c.label == "Search Hugging Face").unwrap().value;
         let repos = submit_profile(&app, "model", search, &[("query", "coder")]).await.unwrap();
         let repo = &offered(&repos).1[0].value;
         let choices = model(&app, repo).await;
         let download = &offered(&choices).1[0].value;
         let mut changes = app.profiles.local_models.downloads.changes.subscribe();
         let result = timeout(Duration::from_secs(3), model(&app, download)).await.unwrap();
-        assert!(matches!(result, CommandResult::Events(ref events) if matches!(&events[..], [Event::Notice { text, .. }] if text.contains("in the background"))));
+        assert!(matches!(result, CommandResult::Events(ref events) if matches!(&events[..], [Event::Panel { panel, .. }] if panel.command == "downloads")));
         timeout(Duration::from_secs(3), gate.entered.notified()).await.unwrap();
         assert!(status(&app).contains("50%"));
         assert!(status(&app).contains("█████░░░░░"));
@@ -110,7 +110,7 @@ fn status(app: &Application) -> String {
     serde_json::to_string(&section).unwrap()
 }
 
-async fn wait_status(
+pub(super) async fn wait_status(
     app: &Application,
     changes: &mut tokio::sync::watch::Receiver<()>,
     text: &str,

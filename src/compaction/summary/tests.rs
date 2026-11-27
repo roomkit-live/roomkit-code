@@ -249,6 +249,6 @@ fn a_refused_local_summary_tells_how_to_change_its_context() {
     );
     assert_eq!(
         failure.recovery(Some(6000), std::time::Duration::from_secs(60)),
-        "The summary request needs 7200 tokens. The server context limit is 6000 tokens. In /agents, select this model and raise Context capacity, then run /compact again."
+        "The summary request needs 7200 tokens. The server context limit is 6000 tokens. In /model, raise Agent context capacity, then run /compact again."
     );
 }

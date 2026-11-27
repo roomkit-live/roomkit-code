@@ -4,6 +4,7 @@ mod downloads;
 pub(crate) mod hub;
 mod label;
 pub(crate) use label::display_name;
+pub(crate) use runtime::resolve;
 mod provider;
 mod runtime;
 mod transfer;
@@ -18,7 +19,7 @@ use std::{
     sync::{Arc, Mutex, Weak},
 };
 
-pub(crate) const CONTEXT_HINT: &str = "In /agents, select this model and raise Context capacity";
+pub(crate) const CONTEXT_HINT: &str = "In /model, raise Agent context capacity";
 pub(crate) const DEFAULT_CONTEXT: u32 = 16_384;
 
 type ActiveServer = Arc<tokio::sync::RwLock<Option<Arc<LlamaCpp>>>>;

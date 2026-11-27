@@ -23,16 +23,30 @@ pub(super) fn own(agent: &Agent) -> Running {
 }
 
 impl State {
+    pub(super) fn uses_llama_cpp(&self, profile: &Agent) -> bool {
+        self.providers
+            .value
+            .profiles
+            .get(&profile.provider)
+            .is_some_and(|p| p.kind == crate::providers::ProviderKind::LlamaCpp)
+    }
+
+    fn apply_running(&self, agent: &mut Agent, running: &Running) {
+        // The local agent configures its own llama-server window for every GGUF.
+        // A hosted model instead uses the capacity advertised by its server.
+        if running.model != agent.model && !self.uses_llama_cpp(agent) {
+            agent.context_window = running.context;
+        }
+        agent.model.clone_from(&running.model);
+        agent.reasoning_effort.clone_from(&running.effort);
+    }
+
     /// Agent `id` as it runs in `room`: its profile, with the model and the
     /// effort the conversation keeps for it.
     pub(super) fn running_agent(&self, room: &str, id: &str) -> Option<Agent> {
         let mut agent = self.agent(id)?;
         if let Some(running) = self.running.get(&(room.to_owned(), id.to_owned())) {
-            if running.model != agent.model {
-                agent.context_window = running.context;
-            }
-            agent.model.clone_from(&running.model);
-            agent.reasoning_effort.clone_from(&running.effort);
+            self.apply_running(&mut agent, running);
         }
         Some(agent)
     }
@@ -134,11 +148,7 @@ impl Profiles {
             slot.unfit(room);
             return;
         };
-        if running.model != profile.model {
-            profile.context_window = running.context;
-        }
-        profile.model.clone_from(&running.model);
-        profile.reasoning_effort = running.effort;
+        state.apply_running(&mut profile, &running);
         let assembled = match state.providers.value.profiles.get(&profile.provider) {
             Some(provider) => self.assemble_for(&profile, provider, Some(room)).await,
             None => Err("Configure the agent's provider with /agents".into()),
@@ -265,7 +275,7 @@ impl Profiles {
         kit: &RoomKit<SqliteStore>,
         state: &mut State,
         current: SessionConfig,
-        change: impl FnOnce(&mut Agent),
+        change: impl FnOnce(&State, &mut Agent),
     ) -> Result<CommandResult, String> {
         let (room, id) = (current.room.as_str(), current.agent.as_str());
         if self.resources.tasks.root_of(room) != room {
@@ -277,11 +287,13 @@ impl Profiles {
         let mut agent = state
             .running_agent(room, id)
             .ok_or("Configure an agent with /agents first")?;
-        change(&mut agent);
+        change(state, &mut agent);
         agent.validate()?;
         let mut running = own(&agent);
         // Another model than the agent's own runs with its own capacity.
-        if state.agent(id).is_some_and(|own| own.model != agent.model) {
+        if !state.uses_llama_cpp(&agent)
+            && state.agent(id).is_some_and(|own| own.model != agent.model)
+        {
             running.context = agent.context_window;
         }
         let key = (room.to_owned(), id.to_owned());

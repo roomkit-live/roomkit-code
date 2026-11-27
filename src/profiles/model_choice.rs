@@ -72,8 +72,8 @@ impl Profiles {
     /// none, the kit's catalogue then deciding: a capacity is its model's
     /// (HITL d430b32a), and the compaction takes it as its ceiling. The
     /// same model keeps its capacity.
-    pub(super) fn switch(&self, agent: &mut Agent, model: &str) {
-        if agent.model != model {
+    pub(super) fn switch(&self, state: &State, agent: &mut Agent, model: &str) {
+        if agent.model != model && !state.uses_llama_cpp(agent) {
             agent.context_window = self.reported(&agent.provider, model);
         }
         agent.model = model.into();
@@ -226,7 +226,9 @@ impl Profiles {
     ) -> Result<CommandResult, String> {
         if !id.is_empty() {
             return self
-                .change_current(kit, &mut state, current, |agent| self.switch(agent, id))
+                .change_current(kit, &mut state, current, |state, agent| {
+                    self.switch(state, agent, id)
+                })
                 .await;
         }
         let agent = state

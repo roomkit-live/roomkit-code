@@ -7,7 +7,7 @@ use std::{
 
 const REVISION: &str = "55c22dca0c987f247c21b427c3b3a09e1a28187f";
 
-pub(super) fn resolve(model: &str, workspace: &Path) -> Result<String, String> {
+pub(crate) fn resolve(model: &str, workspace: &Path) -> Result<String, String> {
     if model.starts_with("hf://") {
         let file = ModelFile::parse(model).ok_or("Invalid Hugging Face model selection")?;
         let cache = Cache::locate()?;

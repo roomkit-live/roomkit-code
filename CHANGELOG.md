@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- GGUF downloads show live progress while the conversation stays available. Use `/downloads` to cancel, select a finished model or delete an installed quantization after confirmation.
+
+- Local model switches keep the agent’s llama.cpp context window. Edit it in `/model`. Hugging Face search defaults to text-generation GGUFs and offers an all-models search.
+
 - The GGUF picker distinguishes repositories from installable files, reports empty results and lets a failed search be retried from the same form. Confirming a choice shows a pending request until the host responds.
 
 - Local context overflows show the request size, server limit and agent setting to change. A compaction warns when the remaining request is still estimated to fill the local window.

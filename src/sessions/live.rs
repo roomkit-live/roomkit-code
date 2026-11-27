@@ -147,6 +147,7 @@ async fn events(
     }
     sidebar.sections.push(services.updates.sidebar());
     let downloads = &profiles.local_models.downloads;
+    downloads.show_progress(&mut events);
     events.push(Event::PanelUpdated {
         conversation: current.room.as_str().into(),
         panel: downloads.panel(),

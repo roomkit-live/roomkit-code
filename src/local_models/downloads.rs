@@ -11,28 +11,11 @@ use std::{
 use tokio::sync::watch;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
-type ResultReceiver = watch::Receiver<Option<Result<(), String>>>;
-
-pub(crate) struct Transfer(ResultReceiver);
-
-impl Transfer {
-    pub async fn wait(mut self) -> Result<(), String> {
-        let result = self
-            .0
-            .wait_for(Option::is_some)
-            .await
-            .map_err(|_| "Model download stopped")?;
-        result
-            .clone()
-            .unwrap_or_else(|| Err("Model download stopped".into()))
-    }
-}
-
 struct Active {
     name: String,
     bytes: Option<(u64, u64)>,
-    result: ResultReceiver,
-    background: bool,
+    ticket: uuid::Uuid,
+    cancel: CancellationToken,
 }
 
 #[derive(Default)]
@@ -51,23 +34,17 @@ pub(crate) struct Downloads {
 }
 
 impl Downloads {
-    pub fn start(
-        self: &Arc<Self>,
-        cache: Cache,
-        file: ModelFile,
-        background: bool,
-    ) -> Result<Transfer, String> {
+    pub fn start(self: &Arc<Self>, cache: Cache, file: ModelFile) -> Result<(), String> {
         let id = file.id();
         let mut state = crate::sync::lock(&self.state);
         if self.stop.is_cancelled() {
             return Err("Model downloads are shutting down".into());
         }
-        if let Some(active) = state.active.get_mut(&id) {
-            active.background |= background;
-            return Ok(Transfer(active.result.clone()));
+        if state.active.contains_key(&id) {
+            return Ok(());
         }
         let hub = Hub::public()?;
-        let (sender, result) = watch::channel(None);
+        let cancel = CancellationToken::new();
         state.recent.retain(|(previous, _, _)| previous != &id);
         state.active.insert(
             id.clone(),
@@ -78,26 +55,46 @@ impl Downloads {
                     file.repo
                 ),
                 bytes: None,
-                result: result.clone(),
-                background,
+                ticket: uuid::Uuid::new_v4(),
+                cancel: cancel.clone(),
             },
         );
         self.changes.send_replace(());
         let owner = self.clone();
         self.tasks.spawn(async move {
             let outcome = tokio::select! {
+                biased;
                 () = owner.stop.cancelled() => Err("Model download stopped. Select the file again to resume.".into()),
-                outcome = owner.fetch(hub, cache, &file, &id) => outcome,
+                outcome = owner.fetch(hub, cache, &file, &id, &cancel) => outcome,
             };
             let mut state = crate::sync::lock(&owner.state);
-            if let Some(active) = state.active.remove(&id) && active.background {
-                state.recent.push_front((id, active.name, outcome.clone()));
+            if let Some(active) = state.active.remove(&id) {
+                state.recent.push_front((id, active.name, outcome));
                 state.recent.truncate(8);
             }
-            sender.send_replace(Some(outcome));
             owner.changes.send_replace(());
         });
-        Ok(Transfer(result))
+        Ok(())
+    }
+
+    pub fn cancel(&self, ticket: &str) -> Result<(), String> {
+        let state = crate::sync::lock(&self.state);
+        let ticket = uuid::Uuid::try_parse(ticket).map_err(|_| "Invalid download selection")?;
+        let job = state
+            .active
+            .values()
+            .find(|job| job.ticket == ticket)
+            .ok_or("This download is no longer running")?;
+        job.cancel.cancel();
+        Ok(())
+    }
+
+    pub fn forget(&self, file: &ModelFile) {
+        let removed = file.id();
+        crate::sync::lock(&self.state)
+            .recent
+            .retain(|(id, _, _)| id != &removed);
+        self.changes.send_replace(());
     }
 
     async fn fetch(
@@ -106,17 +103,21 @@ impl Downloads {
         cache: Cache,
         file: &ModelFile,
         id: &str,
+        cancel: &CancellationToken,
     ) -> Result<(), String> {
-        let model = hub
-            .variants(&file.repo, Some(&file.revision))
-            .await?
+        let variants = tokio::select! {
+            biased;
+            () = cancel.cancelled() => return Err("Download cancelled".into()),
+            found = hub.variants(&file.repo, Some(&file.revision)) => found?,
+        };
+        let model = variants
             .into_iter()
             .find(|v| &v.first == file)
             .ok_or("The chosen GGUF is unavailable")?;
         self.progress(id, 0, model.size);
         let last_percent = std::sync::atomic::AtomicU64::new(0);
         cache
-            .download(&hub, &model, |done| {
+            .download(&hub, &model, cancel, |done| {
                 let percent = percentage(done, model.size);
                 if last_percent.swap(percent, std::sync::atomic::Ordering::Relaxed) != percent {
                     self.progress(id, done, model.size);
