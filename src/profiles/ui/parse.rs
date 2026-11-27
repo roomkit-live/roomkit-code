@@ -69,10 +69,8 @@ pub(super) fn parse_provider(
         "" => original
             .and_then(|id| state.providers.value.profiles.get(id))
             .map_or(ProviderKind::OpenAi, |p| p.kind),
-        "openai" => ProviderKind::OpenAi,
-        "anthropic" => ProviderKind::Anthropic,
-        "llamacpp" => ProviderKind::LlamaCpp,
-        _ => return Err("Choose a provider type from the list".into()),
+        name => <ProviderKind as clap::ValueEnum>::from_str(name, false)
+            .map_err(|_| "Choose a provider type from the list")?,
     };
     let url = value(values, "url").trim().trim_end_matches('/');
     let provider = Provider {

@@ -137,6 +137,8 @@ fn provider_type(kind: ProviderKind) -> FormField {
             choices: vec![
                 choice("openai", "OpenAI-compatible", "Chat Completions"),
                 choice("anthropic", "Anthropic", "Native Messages API"),
+                choice("gemini", "Google Gemini", "Gemini Developer API"),
+                choice("openrouter", "OpenRouter", "OpenRouter Chat Completions"),
                 choice("llamacpp", "Local llama.cpp", "Run a GGUF on this computer"),
             ],
         },
@@ -188,7 +190,7 @@ pub(super) fn provider_form(existing: Option<&Provider>, state: &State, id: Stri
                 "url",
                 "API base URL",
                 &p.base_url,
-                "Leave empty for local llama.cpp or default Anthropic. Include /v1 for OpenAI-compatible servers when required.",
+                "Leave empty for Gemini, local llama.cpp or the default Anthropic or OpenRouter endpoint. Include /v1 for OpenAI-compatible servers when required.",
                 false,
                 FieldKind::Text,
             ),

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add native Google Gemini and OpenRouter connections to `/providers`, `--provider` and TOML, with API-key authentication and model discovery.
+
 ## [0.5.0]
 
 RoomKit Code 0.5.0 adds automatic session titles, project memory, beta remote

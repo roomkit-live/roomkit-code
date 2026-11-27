@@ -235,6 +235,7 @@ impl Provider {
             }
             return self.validate_timeout();
         }
+        self.validate_api_connection()?;
         let url = url::Url::parse(&self.base_url).map_err(|_| "Invalid provider URL")?;
         if self.base_url.len() > 2048
             || !matches!(url.scheme(), "http" | "https")
@@ -294,6 +295,21 @@ impl Provider {
                 .as_deref()
                 .and_then(super::subscriptions::find),
         }
+    }
+
+    fn validate_api_connection(&self) -> Result<(), String> {
+        use crate::providers::ProviderKind;
+        self.kind.check_endpoint(&self.base_url)?;
+        if self.base_url.trim_end_matches('/') == self.kind.default_url()
+            && matches!(self.authentication, Authentication::None)
+        {
+            match self.kind {
+                ProviderKind::Gemini => return Err("Choose a stored Gemini API key or an environment variable such as GEMINI_API_KEY".into()),
+                ProviderKind::OpenRouter => return Err("Choose a stored OpenRouter API key or an environment variable such as OPENROUTER_API_KEY".into()),
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     fn validate_timeout(&self) -> Result<(), String> {

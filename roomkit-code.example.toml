@@ -1,7 +1,7 @@
 # Explicitly select with: roomkit-code --config roomkit-code.local.toml
 # Keep personal configuration in an ignored *.local.toml file.
 [provider]
-kind = "openai" # openai or anthropic; omitted preserves OpenAI-compatible behavior
+kind = "openai" # openai (default), anthropic, gemini, openrouter or llamacpp
 base_url = "http://localhost:8000/v1"
 model = "your-model"
 timeout_seconds = 600 # longest wait between two reads of a model answer
@@ -10,7 +10,10 @@ timeout_seconds = 600 # longest wait between two reads of a model answer
 # thinking_budget = 1024 # llama.cpp only, included in max_output_tokens
 # reasoning_effort = "low" # low, medium, high, xhigh, max; omitted: the provider's default
 # Anthropic: kind = "anthropic", base_url = "https://api.anthropic.com", model = "claude-sonnet-5-5".
-# API keys come from ROOMKIT_API_KEY (or ANTHROPIC_API_KEY for Anthropic), never this file.
+# For Gemini or OpenRouter, remove base_url above to use the provider's default.
+# Gemini: kind = "gemini", model = "gemini-3.8-flash", key in GEMINI_API_KEY.
+# OpenRouter: kind = "openrouter", model = "openrouter/auto", key in OPENROUTER_API_KEY.
+# ROOMKIT_API_KEY overrides the provider's key during setup. Anthropic also accepts ANTHROPIC_API_KEY.
 
 # The model's list price, which shows the conversation's cost. The kit already
 # prices OpenAI and Anthropic models; this prices this server's model, per million tokens.

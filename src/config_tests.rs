@@ -648,3 +648,37 @@ fn an_unconfigured_anthropic_launch_can_open_the_provider_menu() {
     let settings = Settings::load(&parsed).unwrap();
     assert!(settings.base_url.is_empty() && settings.model.is_empty());
 }
+
+#[test]
+fn hosted_provider_launches_use_the_same_protocol_and_endpoint_as_saved_profiles() {
+    for kind in [
+        crate::providers::ProviderKind::Gemini,
+        crate::providers::ProviderKind::OpenRouter,
+    ] {
+        let cli = Cli::try_parse_from([
+            "roomkit-code",
+            "--provider",
+            kind.value(),
+            "--model",
+            "fixture",
+        ])
+        .unwrap();
+        let settings = Settings::load(&cli).unwrap();
+        assert_eq!(settings.base_url, kind.default_url());
+        assert_eq!(
+            serde_json::to_value(settings.provider).unwrap(),
+            kind.value()
+        );
+    }
+    let cli = Cli::try_parse_from([
+        "roomkit-code",
+        "--provider",
+        "gemini",
+        "--base-url",
+        "https://other.example",
+        "--model",
+        "fixture",
+    ])
+    .unwrap();
+    assert!(Settings::load(&cli).is_err());
+}

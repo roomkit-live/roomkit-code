@@ -42,6 +42,8 @@ use crate::{
 pub(crate) use discovery::SUBSCRIPTION_SERVER;
 pub(crate) use mcp::McpTools;
 use model::{Agent, Authentication, PROJECT_SCHEMA, Project, Provider, Providers, TOOLS};
+#[cfg(test)]
+pub(crate) use provider::GEMINI_SERVER;
 use slot::AgentSlot;
 pub(crate) use worker::profile_id;
 

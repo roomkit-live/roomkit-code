@@ -2,7 +2,9 @@
 use super::*;
 use crate::providers::{CodeProvider, ProviderKind};
 use roomkit_providers_anthropic::{Anthropic as AnthropicAiProvider, AnthropicConfig};
-use roomkit_providers_openai::OpenAi as OpenAiAiProvider;
+use roomkit_providers_gemini::{Gemini, GeminiConfig};
+use roomkit_providers_openai::{OpenAi as OpenAiAiProvider, OpenRouter, OpenRouterConfig};
+use std::time::Duration;
 
 impl Profiles {
     /// The same connection and model this agent runs with in the named conversation.
@@ -41,29 +43,50 @@ impl Profiles {
             ProviderKind::OpenAi => OpenAiAiProvider::new(self.openai_config(profile, provider)?)
                 .map(CodeProvider::OpenAi)
                 .map_err(|_| "Cannot initialize the OpenAI connection".into()),
-            ProviderKind::Anthropic => {
-                let mut config =
-                    AnthropicConfig::new(provider.authentication.key()?, &profile.model);
-                config.base_url = Some(provider.base_url.clone());
-                config.timeout = std::time::Duration::from_secs(provider.timeout_seconds);
-                config.supports_custom_temperature = Some(false);
-                if let Some(max) = profile.max_output_tokens {
-                    config.max_tokens = max;
-                }
-                AnthropicAiProvider::new(config)
-                    .map(|provider| CodeProvider::Anthropic {
-                        provider: crate::providers::Anthropic::new(
-                            provider,
-                            profile.max_output_tokens,
-                            profile.context_window,
-                            self.diagnostics.clone(),
-                        )
-                        .for_agent(&profile.id),
-                        vision: profile.vision,
-                    })
-                    .map_err(|_| "Cannot initialize the Anthropic connection".into())
-            }
+            ProviderKind::Gemini => provider
+                .gemini(&profile.model, profile.max_output_tokens)
+                .map(|p| CodeProvider::Gemini {
+                    provider: p,
+                    vision: profile.vision,
+                }),
+            ProviderKind::OpenRouter => provider
+                .openrouter(
+                    &profile.model,
+                    profile.max_output_tokens,
+                    profile.reasoning_effort.clone(),
+                )
+                .map(|p| CodeProvider::OpenRouter {
+                    provider: p,
+                    vision: profile.vision,
+                }),
+            ProviderKind::Anthropic => self.anthropic_provider(profile, provider),
         }
+    }
+
+    fn anthropic_provider(
+        &self,
+        profile: &Agent,
+        provider: &Provider,
+    ) -> Result<CodeProvider, String> {
+        let mut config = AnthropicConfig::new(provider.authentication.key()?, &profile.model);
+        config.base_url = Some(provider.base_url.clone());
+        config.timeout = std::time::Duration::from_secs(provider.timeout_seconds);
+        config.supports_custom_temperature = Some(false);
+        if let Some(max) = profile.max_output_tokens {
+            config.max_tokens = max;
+        }
+        AnthropicAiProvider::new(config)
+            .map(|provider| CodeProvider::Anthropic {
+                provider: crate::providers::Anthropic::new(
+                    provider,
+                    profile.max_output_tokens,
+                    profile.context_window,
+                    self.diagnostics.clone(),
+                )
+                .for_agent(&profile.id),
+                vision: profile.vision,
+            })
+            .map_err(|_| "Cannot initialize the Anthropic connection".into())
     }
 
     fn openai_config(
@@ -115,4 +138,45 @@ impl Profiles {
             ..config
         })
     }
+}
+
+impl Provider {
+    pub(super) fn gemini(&self, model: &str, max_tokens: Option<u32>) -> Result<Gemini, String> {
+        let mut config = GeminiConfig::new(self.authentication.key()?);
+        config.model = model.into();
+        config.timeout = Duration::from_secs(self.timeout_seconds);
+        if let Some(max) = max_tokens {
+            config.max_tokens = max;
+        }
+        let client = Gemini::new(config).map_err(|_| "Cannot initialize the Gemini connection")?;
+        #[cfg(test)]
+        let client = GEMINI_SERVER
+            .try_with(|address| client.replaying(*address, 0.0))
+            .map_err(|_| "Gemini tests require a loopback fixture")?
+            .map_err(|_| "Invalid Gemini fixture address")?
+            .0;
+        Ok(client)
+    }
+
+    pub(super) fn openrouter(
+        &self,
+        model: &str,
+        max_tokens: Option<u32>,
+        effort: Option<String>,
+    ) -> Result<OpenRouter, String> {
+        let config = OpenRouterConfig {
+            base_url: self.base_url.clone(),
+            timeout: Duration::from_secs(self.timeout_seconds),
+            max_tokens,
+            reasoning_effort: effort,
+            supports_custom_temperature: false,
+            ..OpenRouterConfig::new(self.authentication.key()?, model)
+        };
+        OpenRouter::new(config).map_err(|_| "Cannot initialize the OpenRouter connection".into())
+    }
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    pub(crate) static GEMINI_SERVER: std::net::SocketAddr;
 }

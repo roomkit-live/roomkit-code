@@ -6,7 +6,7 @@ terminal interface, conversation engine, authentication and tool implementations
 own repositories.
 
 This version can **explore, plan, edit and test projects**, with Ask/Plan/Yolo permissions.
-It supports native Anthropic Messages, OpenAI-compatible Chat Completions endpoints and Sign in with
+It supports Google Gemini, OpenRouter, native Anthropic Messages, OpenAI-compatible Chat Completions endpoints and Sign in with
 ChatGPT through Responses, with streamed answers, tool details,
 activity timing, mouse selection, configurable appearance and SQLite history.
 Linux and macOS are the supported platforms. See [installation](#binary-installation-and-updates)
@@ -42,6 +42,26 @@ cargo run --locked -- /path/to/project --provider anthropic \
 The explicit TOML equivalent is `[provider] kind = "anthropic"`.
 `ROOMKIT_API_KEY` takes precedence over `ANTHROPIC_API_KEY` when bootstrapping
 an Anthropic connection. Saved connections retain their selected authentication.
+
+For **Google Gemini** or **OpenRouter**, open **/providers → + Add provider**,
+select the provider type and leave the API base URL empty. Choose **Environment
+variable** and enter `GEMINI_API_KEY` or `OPENROUTER_API_KEY`, or choose **Stored
+API key**. Save the connection and pick a model. Gemini uses the Google AI Studio
+key with the Gemini Developer API. OpenRouter uses an OpenRouter key and a
+model ID in `author/model` form.
+
+With the corresponding key exported, a fresh project can also start from the terminal:
+
+```sh
+roomkit-code /path/to/project --provider gemini --model gemini-3.8-flash
+roomkit-code /path/to/project --provider openrouter --model openrouter/auto
+```
+
+Both commands also accept `ROOMKIT_API_KEY`, which takes precedence during
+setup. For Gemini, the next choices are `GOOGLE_API_KEY` and then
+`GEMINI_API_KEY`. The native Gemini connection uses
+`https://generativelanguage.googleapis.com/v1beta`. OpenRouter defaults to
+`https://openrouter.ai/api/v1` and accepts a custom API root.
 
 The selected model must support function calling and the provider's streaming protocol.
 API requests go to the selected endpoint. File contents returned by tools can
@@ -581,7 +601,7 @@ stored in chat history. Leaving a stored-key field blank preserves that key.
 Choosing another authentication mode removes the stored key from that profile.
 Saving a new connection lists the models it serves, and choosing one opens the
 form of an agent using it; **Test connection and list models** lists them again.
-The listing is a bounded `GET /models` request (`/v1/models` for Anthropic) with
+The listing is a bounded `GET /models` request (`/v1/models` for Anthropic and `/v1beta/models` for Gemini) with
 no redirects; it sends no conversation. Each list of models for a new agent ends
 with **Type a model ID**, for a model it does not show. Some compatible servers do not implement
 discovery: the connection is saved all the same, and the model's ID is typed in
@@ -1339,7 +1359,7 @@ temperature, so the endpoint's default applies. OpenAI-compatible connections
 send no output limit by default; each model has its own. Set the agent's **Output budget (advanced)** in `/agents` to cap how many
 tokens one reply may write; it is sent as `max_tokens`, or as
 `max_completion_tokens` to the OpenAI models that take it, and zero is refused.
-Leave that field empty for **Auto**. Anthropic starts with 32,000 tokens for
+Leave that field empty for **Auto**. Gemini then uses the provider default of 1,024 output tokens. OpenRouter leaves the output limit to the routed model. Anthropic starts with 32,000 tokens for
 reasoning and the answer together, bounded by known model limits and estimated
 remaining context. If it exhausts that budget before producing text or a tool
 call, Auto can double it once per turn, up to 64,000 tokens. Later rounds retain
@@ -1644,8 +1664,8 @@ RoomKit Code validates the image before sending it, and stores it outside the
 workspace in the private project state directory. `/resume` can reuse those
 attachments; the model receives the newest four images within its conversation
 history. Older images retain text mentions. Missing image files produce an
-unavailable-image marker. This applies to native Anthropic Messages and OpenAI-compatible Chat Completions
-and ChatGPT Responses connections; no image tool is needed for native vision.
+unavailable-image marker. This applies to Gemini, vision-capable OpenRouter models, native Anthropic Messages,
+OpenAI-compatible Chat Completions and ChatGPT Responses connections; no image tool is needed for native vision.
 
 Image paste requires the native clipboard of the machine running the terminal
 (X11, a supported Wayland data-control compositor, or macOS). A remote SSH

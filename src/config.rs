@@ -66,15 +66,17 @@ impl Settings {
     /// is the one used. Saved profiles remain authoritative thereafter.
     pub fn initial_authentication(&self) -> crate::profiles::model::Authentication {
         use crate::profiles::model::Authentication;
-        if self.provider == crate::providers::ProviderKind::LlamaCpp {
-            return Authentication::None;
-        }
-        let mut variables = vec!["ROOMKIT_API_KEY"];
-        if self.provider == crate::providers::ProviderKind::Anthropic {
-            variables.push("ANTHROPIC_API_KEY");
-        }
+        use crate::providers::ProviderKind;
+        let variables: &[&str] = match self.provider {
+            ProviderKind::LlamaCpp => return Authentication::None,
+            ProviderKind::OpenAi => &["ROOMKIT_API_KEY"],
+            ProviderKind::Anthropic => &["ROOMKIT_API_KEY", "ANTHROPIC_API_KEY"],
+            ProviderKind::Gemini => &["ROOMKIT_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"],
+            ProviderKind::OpenRouter => &["ROOMKIT_API_KEY", "OPENROUTER_API_KEY"],
+        };
         variables
-            .into_iter()
+            .iter()
+            .copied()
             .find(|name| std::env::var(name).is_ok_and(|key| !key.is_empty()))
             .map_or(Authentication::None, |variable| {
                 Authentication::Environment {
@@ -187,6 +189,7 @@ impl FirstAgent {
         let mut base_url = given(&cli.base_url, file.base_url);
         if !base_url.is_empty() {
             check_base_url(&base_url)?;
+            provider.check_endpoint(&base_url)?;
         }
         let model = given(&cli.model, file.model);
         if base_url.is_empty() && !model.is_empty() {

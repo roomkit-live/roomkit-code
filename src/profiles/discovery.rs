@@ -7,18 +7,31 @@ use std::time::Duration;
 
 pub(super) async fn discover(provider: &Provider) -> Result<Vec<(String, Option<u64>)>, String> {
     provider.validate()?;
-    if provider.kind == ProviderKind::OpenAi {
-        return openai(provider).await;
+    match provider.kind {
+        ProviderKind::OpenAi => openai(provider).await,
+        ProviderKind::Gemini => native("Gemini", provider.gemini("discovery", None)?).await,
+        ProviderKind::OpenRouter => {
+            native("OpenRouter", provider.openrouter("discovery", None, None)?).await
+        }
+        ProviderKind::Anthropic => {
+            let mut config = AnthropicConfig::new(provider.authentication.key()?, "discovery");
+            config.base_url = Some(server(provider)?);
+            config.timeout = Duration::from_secs(10);
+            let client = AnthropicAiProvider::new(config)
+                .map_err(|_| "Cannot initialize connection check")?;
+            native("Anthropic", client).await
+        }
+        ProviderKind::LlamaCpp => Err("Choose a local model from the GGUF picker".into()),
     }
-    let mut config = AnthropicConfig::new(provider.authentication.key()?, "discovery");
-    config.base_url = Some(server(provider)?);
-    config.timeout = Duration::from_secs(10);
-    let client =
-        AnthropicAiProvider::new(config).map_err(|_| "Cannot initialize connection check")?;
+}
+
+async fn native(name: &str, client: impl AiProvider) -> Result<Vec<(String, Option<u64>)>, String> {
     let models = tokio::time::timeout(Duration::from_secs(10), client.list_models())
         .await
         .map_err(|_| "Model discovery timed out")?
-        .map_err(|_| "Anthropic model discovery failed; verify the URL, network and credential")?;
+        .map_err(|_| {
+            format!("{name} model discovery failed; verify the URL, network and credential")
+        })?;
     accepted(
         models
             .into_iter()
@@ -28,7 +41,6 @@ pub(super) async fn discover(provider: &Provider) -> Result<Vec<(String, Option<
 }
 
 async fn openai(provider: &Provider) -> Result<Vec<(String, Option<u64>)>, String> {
-    provider.validate()?;
     let client = crate::http_client::builder()
         .map_err(|_| "Cannot initialize connection check")?
         .redirect(reqwest::redirect::Policy::none())

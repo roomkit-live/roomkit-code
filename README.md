@@ -11,7 +11,7 @@ an implementation plan, edit files and run tests with the model you choose.
 
 ## What it does
 
-- **Choose your provider:** Anthropic Messages, OpenAI-compatible endpoints,
+- **Choose your provider:** Gemini, OpenRouter, Anthropic Messages, OpenAI-compatible endpoints,
   ChatGPT sign-in, OpenCode Go or local GGUF models with llama.cpp. Configure
   connections and agents in the app.
 - **Control changes:** Ask requests approval for writes and commands; Plan is

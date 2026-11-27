@@ -1930,6 +1930,7 @@ mod processes;
 mod accounts;
 mod anthropic;
 mod anthropic_recovery;
+mod hosted_providers;
 mod model_choice;
 mod profile_deletion;
 mod provider_errors;

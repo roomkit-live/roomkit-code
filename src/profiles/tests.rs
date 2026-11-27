@@ -49,3 +49,24 @@ fn a_model_is_priced_by_the_catalogue_else_the_configuration() {
     });
     assert_eq!(list_price(&plan, &catalogue.0, None), Some(catalogue.1));
 }
+
+#[test]
+fn hosted_provider_profiles_require_their_own_api_credentials() {
+    use crate::providers::ProviderKind;
+    for kind in [ProviderKind::Gemini, ProviderKind::OpenRouter] {
+        let mut profile = Provider {
+            kind,
+            base_url: kind.default_url().into(),
+            ..connection(Authentication::None)
+        };
+        assert!(profile.validate().is_err());
+        profile.authentication = Authentication::Environment {
+            variable: "FIXTURE_KEY".into(),
+        };
+        assert!(profile.validate().is_ok());
+        profile.authentication = Authentication::ChatGpt {
+            account: uuid::Uuid::new_v4().to_string(),
+        };
+        assert!(profile.validate().is_err());
+    }
+}

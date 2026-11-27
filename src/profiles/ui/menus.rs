@@ -117,7 +117,7 @@ pub(in crate::profiles) fn provider_choices(
     let mut entries = vec![choice(
         Action::AddProvider.to_string(),
         "+ Add provider",
-        "Local llama.cpp, OpenAI-compatible or Anthropic",
+        "Gemini, OpenRouter, Anthropic, OpenAI-compatible or local llama.cpp",
     )];
     entries.extend(super::subscriptions::ALL.iter().map(|subscription| {
         let offer = &subscription.offer;
