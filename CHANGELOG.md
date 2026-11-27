@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The GGUF picker distinguishes repositories from installable files, reports empty results and lets a failed search be retried from the same form. Confirming a choice shows a pending request until the host responds.
+
 - Local context overflows show the request size, server limit and agent setting to change. A compaction warns when the remaining request is still estimated to fill the local window.
 
 - Run GGUF models through the managed llama.cpp provider. The model picker can search public Hugging Face repositories, download a quantization in the background with a sidebar progress bar, and select cached files offline. The sidebar and footer show the model name and quantization. CodeLALA uses a separate, versioned OVH runtime.

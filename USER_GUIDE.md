@@ -527,7 +527,7 @@ These files contain counters, not conversation content or resume arguments.
 
 ### Local GGUF models
 
-In **/providers**, add a connection of type **Local llama.cpp**, leave the URL empty and choose **No key**. Select a cached model or **Search Hugging Face**. Enter a search term or an exact public repository, then choose the GGUF file by quantization and size.
+In **/providers**, add a connection of type **Local llama.cpp**, leave the URL empty and choose **No key**. Select a cached model or **Search Hugging Face**. Enter a search term, choose a repository, then choose a GGUF file by quantization and size. An exact public repository opens its files directly. After you press Enter, the picker shows when it is waiting for a response.
 
 To keep chatting with the current model, choose **Download in background** in the GGUF picker and select a file. Open **/downloads** or the sidebar (**F7** on wide terminals) to see the progress bar, percentage, bytes received and completion or failure. A background download continues across conversations while the application is open. Select the installed file when you want to use it.
 

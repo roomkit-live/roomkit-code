@@ -287,12 +287,17 @@ impl Profiles {
         let mut created = None;
         match &target {
             Target::Hub(dest, after) => {
-                state.pending = None;
                 drop(edit_lease);
                 drop(state);
-                return dest
+                let result = dest
                     .search(&next, value(values, "query").trim(), *after)
-                    .await;
+                    .await?;
+                self.state
+                    .lock()
+                    .await
+                    .pending
+                    .take_if(|p| p.form.id == form);
+                return Ok(result);
             }
             Target::Provider(original) => {
                 let profile = parse_provider(values, original.as_deref(), &state)?;

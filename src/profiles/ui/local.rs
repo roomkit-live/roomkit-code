@@ -142,17 +142,17 @@ impl Destination {
             .into_iter()
             .map(|r| choice(self.arg(after.repo(), &r), r, "Choose a GGUF file"))
             .collect();
+        let title = if entries.is_empty() {
+            "No matching GGUF repositories"
+        } else {
+            "Choose a Hugging Face repository"
+        };
         entries.push(choice(
             self.arg(after.search(), ""),
             "Search again",
             "Enter a model name or owner/repository",
         ));
-        Ok(choices(
-            current,
-            self.command(),
-            "Hugging Face repositories",
-            entries,
-        ))
+        Ok(choices(current, self.command(), title, entries))
     }
 
     async fn files(
@@ -163,7 +163,10 @@ impl Destination {
         after: AfterDownload,
     ) -> Result<CommandResult, String> {
         let cache = Cache::locate()?;
-        let variants = hub.variants(repo, None).await?;
+        let variants = hub
+            .variants(repo, None)
+            .await
+            .map_err(|e| format!("Could not list GGUF files in {repo}. {e}"))?;
         let mut entries = Vec::new();
         for model in variants
             .into_iter()
@@ -183,7 +186,12 @@ impl Destination {
                 format!("{:.2} GB · {status}", model.size as f64 / 1e9),
             ));
         }
-        if after == AfterDownload::Use {
+        let title = if entries.is_empty() {
+            format!("No installable GGUF files in {repo}")
+        } else {
+            format!("Choose a GGUF file · {repo}")
+        };
+        if !entries.is_empty() && after == AfterDownload::Use {
             entries.push(choice(
                 self.arg("background-repo", repo),
                 "Download in background",
@@ -195,7 +203,7 @@ impl Destination {
             "Search again",
             "Choose another repository",
         ));
-        Ok(choices(current, self.command(), repo, entries))
+        Ok(choices(current, self.command(), &title, entries))
     }
 }
 

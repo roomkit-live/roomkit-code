@@ -39,6 +39,12 @@ async fn hub(
         )
         .route("/api/models/example/coder", get(repo))
         .route(
+            "/api/models/example/empty",
+            get(|| async {
+                Json(serde_json::json!({"sha":REV,"siblings":[{"rfilename":"README.md"}]}))
+            }),
+        )
+        .route(
             &format!("/api/models/example/coder/revision/{REV}"),
             get(repo),
         )
@@ -97,6 +103,8 @@ async fn gguf_search_download_retry_select_and_offline_resume() {
                 .unwrap();
             let repo = &offered(&result).1[0].value;
             let files = model(&app, repo).await;
+            assert!(matches!(&files, CommandResult::Events(events)
+                if matches!(&events[..], [Event::Choices { title, .. }] if title == "Choose a GGUF file · example/coder")));
             let choice = &offered(&files).1[0];
             assert_eq!(choice.label, FIRST);
             let selected = &choice.value;
@@ -196,6 +204,43 @@ async fn check_agent_forms(app: &Application, id: &str) {
     let edit = opened(&invoke(app, "agents", choice).await);
     assert_eq!(edit["id"], "code");
     assert_eq!(edit["model"], id);
+}
+
+#[tokio::test]
+async fn gguf_search_retries_from_the_same_form_and_explains_an_empty_repository() {
+    let (url, server) = hub(Arc::new(AtomicBool::new(false)), None).await;
+    let cache = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    crate::local_models::TEST_HUB.scope((url, cache.path().into()), async {
+        let app = open_local(workspace.path(), state.path()).await;
+        let CommandResult::Events(events) = model(&app, "gguf - search").await else {
+            panic!("Expected a search form")
+        };
+        let [Event::Form { form, .. }] = &events[..] else { panic!("Expected a search form") };
+        let search = |query: &str| {
+            let mut values = roomkit_tui::protocol::FormValues::new();
+            values.insert("query", query);
+            Command::SubmitForm { name: form.command.clone(), form: form.id.clone(), values: Box::new(values) }
+        };
+        let refused = profile_command(&app, search("example/missing")).await.unwrap_err();
+        assert!(refused.to_string().contains("404"));
+        let result = profile_command(&app, search("example/empty")).await.unwrap();
+        assert!(matches!(result, CommandResult::Events(events)
+            if matches!(&events[..], [Event::Choices { title, choices, .. }]
+                if title.contains("No installable GGUF files") && choices.len() == 1 && choices[0].label == "Search again")));
+        app.close().await.unwrap();
+    }).await;
+    server.abort();
+}
+
+async fn open_local(root: &std::path::Path, state: &std::path::Path) -> Application {
+    std::fs::write(root.join("initial.gguf"), b"fixture").unwrap();
+    let mut config = settings(root, state, "http://localhost");
+    config.base_url.clear();
+    config.provider = crate::providers::ProviderKind::LlamaCpp;
+    config.model = "initial.gguf".into();
+    Application::open(&config, String::new()).await.unwrap()
 }
 
 mod background;

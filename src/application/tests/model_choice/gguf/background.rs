@@ -105,15 +105,6 @@ async fn gguf_shutdown_joins_a_download_without_waiting_for_the_hub() {
     server.abort();
 }
 
-async fn open_local(root: &std::path::Path, state: &std::path::Path) -> Application {
-    std::fs::write(root.join("initial.gguf"), b"fixture").unwrap();
-    let mut config = settings(root, state, "http://localhost");
-    config.base_url.clear();
-    config.provider = crate::providers::ProviderKind::LlamaCpp;
-    config.model = "initial.gguf".into();
-    Application::open(&config, String::new()).await.unwrap()
-}
-
 fn status(app: &Application) -> String {
     let section = app.profiles.local_models.downloads.sidebar();
     serde_json::to_string(&section).unwrap()
