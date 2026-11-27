@@ -54,8 +54,8 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         ),
         (
             "effort",
-            "Choose reasoning effort for the current agent",
-            "[default|low|medium|high|xhigh|max]",
+            "Choose reasoning effort or a local token budget for this conversation",
+            "[default|<level>|budget|<tokens>]",
         ),
         (
             "diagnostics",

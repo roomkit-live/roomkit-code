@@ -39,7 +39,7 @@ impl Local {
 
     // Requests to the same model can overlap. Switching waits for active readers before
     // releasing the previous child's weights and admitting the first request to the next.
-    async fn acquire(
+    pub(super) async fn acquire(
         &self,
     ) -> Result<tokio::sync::OwnedRwLockReadGuard<Option<Arc<LlamaCpp>>>, ProviderError> {
         self.ready().await?;

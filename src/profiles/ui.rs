@@ -21,6 +21,11 @@ enum Target {
         original: Option<String>,
     },
     Agent(Option<String>),
+    ReasoningBudget {
+        agent: String,
+        provider: String,
+        model: String,
+    },
     LocalContext {
         agent: String,
         provider: String,
@@ -64,6 +69,7 @@ pub(super) fn choices(
 
 mod action;
 pub(super) mod downloads;
+mod effort;
 mod forms;
 pub(in crate::profiles) mod local;
 mod local_context;
@@ -120,6 +126,7 @@ impl Profiles {
     ) -> Option<Result<CommandResult, String>> {
         let room = current.room.as_str();
         Some(match action {
+            Action::Effort(argument) => self.effort(kit, current, argument).await,
             Action::Delete { command, id } => self.delete(command, id, current.clone()).await,
             Action::ConfirmDelete { command, token } => {
                 self.confirm_delete(kit, terminal, command, token, current.clone())
@@ -166,23 +173,13 @@ impl Profiles {
             found.cloned().ok_or("Unknown provider")
         };
         match action {
-            Action::Delete { .. } | Action::ConfirmDelete { .. } | Action::ChatGpt(_) => {
+            Action::Effort(_)
+            | Action::Delete { .. }
+            | Action::ConfirmDelete { .. }
+            | Action::ChatGpt(_) => {
                 Err("Unknown profile action; reopen /providers or /agents".into())
             }
             Action::Model(id) => self.model(kit, state, current, id).await,
-            Action::EffortMenu => {
-                state
-                    .agent(current.agent.as_str())
-                    .ok_or("Configure an agent with /agents first")?;
-                let title = "Reasoning effort · supported levels depend on the model";
-                Ok(choices(&current, "effort", title, effort_choices()))
-            }
-            Action::Effort(effort) => {
-                self.change_current(kit, &mut state, current, |_, agent| {
-                    agent.reasoning_effort = (effort != "default").then(|| effort.into());
-                })
-                .await
-            }
             Action::Providers => Ok(provider_choices(&state, &current)),
             Action::OpenProvider(id) => Ok(provider_menu(&current, id, &provider(&state, id)?)),
             Action::AddProvider => connection_form(&mut state, &current, None),
@@ -303,6 +300,23 @@ impl Profiles {
                     .await
                     .pending
                     .take_if(|p| p.form.id == form);
+                return Ok(result);
+            }
+            Target::ReasoningBudget {
+                agent,
+                provider,
+                model,
+            } => {
+                let result = self
+                    .save_effort_budget(
+                        kit,
+                        &mut state,
+                        next,
+                        (agent, provider, model),
+                        value(values, "budget"),
+                    )
+                    .await?;
+                state.pending = None;
                 return Ok(result);
             }
             Target::LocalContext { agent, provider } => {

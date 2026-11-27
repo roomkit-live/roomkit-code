@@ -22,7 +22,6 @@ pub(in crate::profiles) enum Action<'a> {
     },
     /// An action of the ChatGPT account menus, which they define.
     ChatGpt(crate::accounts::Action<'a>),
-    EffortMenu,
     Effort(&'a str),
     /// `/model`, with a model's ID or nothing: an ID may hold colons, so it
     /// is the whole argument.
@@ -59,6 +58,9 @@ impl<'a> Action<'a> {
     pub(in crate::profiles) fn parse(command: &'a str, arguments: &'a str) -> Result<Self, String> {
         let arguments = arguments.trim();
         let listed = matches!(command, "agents" | "providers");
+        if command == "effort" {
+            return Ok(Self::Effort(arguments));
+        }
         if command == "model" {
             return Ok(Self::Model(arguments));
         }
@@ -81,8 +83,6 @@ impl<'a> Action<'a> {
         let id = parts.next().unwrap_or_default();
         let model = parts.next().unwrap_or_default();
         Ok(match (command, action) {
-            ("effort", "") => Self::EffortMenu,
-            ("effort", effort) => Self::Effort(effort),
             ("providers", "" | "list") => Self::Providers,
             ("providers", "open") => Self::OpenProvider(id),
             ("providers", "add") => Self::AddProvider,
@@ -112,12 +112,12 @@ impl<'a> Action<'a> {
     /// new one cannot skip the lease unnoticed.
     pub(in crate::profiles) fn mutates(&self) -> bool {
         match self {
-            Self::SelectAgent(_) | Self::Effort(_) => true,
+            Self::SelectAgent(_) => true,
             Self::Model(id) => !id.is_empty(),
             // Served before the lease is decided: the deletion and the
             // accounts take it themselves where they write.
             Self::Delete { .. } | Self::ConfirmDelete { .. } | Self::ChatGpt(_) => false,
-            Self::EffortMenu
+            Self::Effort(_)
             | Self::Providers
             | Self::OpenProvider(_)
             | Self::AddProvider
@@ -142,7 +142,7 @@ impl Action<'_> {
     fn command(&self) -> &str {
         match self {
             Self::Delete { command, .. } | Self::ConfirmDelete { command, .. } => command,
-            Self::EffortMenu | Self::Effort(_) => "effort",
+            Self::Effort(_) => "effort",
             Self::Model(_) => "model",
             Self::ChatGpt(_)
             | Self::Providers
@@ -172,7 +172,7 @@ impl fmt::Display for Action<'_> {
             Self::Delete { id, .. } => write!(f, "delete:{id}"),
             Self::ConfirmDelete { token, .. } => write!(f, "confirm-delete:{token}"),
             Self::ChatGpt(action) => action.fmt(f),
-            Self::EffortMenu | Self::Providers | Self::Agents => Ok(()),
+            Self::Providers | Self::Agents => Ok(()),
             Self::Effort(text) | Self::Model(text) => f.write_str(text),
             Self::OpenProvider(id) | Self::OpenAgent(id) => write!(f, "open:{id}"),
             Self::AddProvider | Self::AddAgent => f.write_str("add"),
@@ -214,7 +214,7 @@ mod tests {
             },
             Action::ChatGpt(crate::accounts::Action::Account("0b5c")),
             Action::ChatGpt(crate::accounts::Action::Use("0b5c")),
-            Action::EffortMenu,
+            Action::Effort(""),
             Action::Effort("high"),
             Action::Model("vendor/model:latest"),
             Action::Model(""),

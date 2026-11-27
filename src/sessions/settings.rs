@@ -32,6 +32,9 @@ pub(crate) struct Running {
     /// The provider's default when none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// A local reasoning budget selected in this room. Missing inherits the agent profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
     /// The context capacity of a model other than the agent's own: the one
     /// its server reported as the conversation chose it, none when it
     /// reported none, the kit's catalogue then deciding (HITL d430b32a).

@@ -405,7 +405,7 @@ impl Agent {
     }
 }
 
-pub(crate) const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+pub(crate) const EFFORTS: &[&str] = &["minimal", "low", "medium", "high", "xhigh", "max"];
 
 #[cfg(test)]
 mod tests {

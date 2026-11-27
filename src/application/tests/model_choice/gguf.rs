@@ -258,6 +258,7 @@ async fn open_local(root: &std::path::Path, state: &std::path::Path) -> Applicat
 }
 
 mod background;
+mod effort;
 mod manage;
 
 #[tokio::test]

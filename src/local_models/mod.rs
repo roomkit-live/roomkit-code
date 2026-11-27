@@ -1,6 +1,8 @@
 //! Local model selection, download progress and shared llama.cpp runtimes.
 pub(crate) mod cache;
 mod downloads;
+mod effort;
+pub(crate) use effort::EffortLevels;
 pub(crate) mod hub;
 mod label;
 mod observation;

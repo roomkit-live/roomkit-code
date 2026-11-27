@@ -40,6 +40,13 @@ impl State {
             let mut model = ModelInfo::new(kind.name(), &profile.model)
                 .with_effort(profile.reasoning_effort.as_deref().unwrap_or("default"));
             if kind == crate::providers::ProviderKind::LlamaCpp {
+                if let Some(n) = profile.thinking_budget {
+                    let effort = profile.reasoning_effort.as_ref().map_or_else(
+                        || format!("{n} tokens"),
+                        |level| format!("{level} · {n} tokens"),
+                    );
+                    model = model.with_effort(effort);
+                }
                 model.context_limit_hint = Some("/model → Agent context capacity".into());
                 if let Some(label) = crate::local_models::display_name(&profile.model) {
                     model = model.with_display_name(label);

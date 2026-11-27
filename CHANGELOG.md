@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `/effort` shows the native levels of a loaded llama.cpp template or opens the reasoning budget. A conversation can set its own token limit and restore the agent default.
+
 - Set a per-agent llama.cpp reasoning token budget in `/agents`. Local generation diagnostics show the requested reasoning limit, output budget and finish reason.
 
 - GGUF downloads show live progress while the conversation stays available. Use `/downloads` to cancel, select a finished model or delete an installed quantization after confirmation.

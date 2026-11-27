@@ -590,13 +590,17 @@ fn the_first_agent_s_reasoning_effort_is_explicit_and_checked() {
     let error = Settings::load(&cli).err().unwrap();
     assert_eq!(
         error.to_string(),
-        "reasoning effort must be one of low, medium, high, xhigh, max"
+        "reasoning effort must be one of minimal, low, medium, high, xhigh, max"
     );
     let workspace = root.path().to_str().unwrap();
     assert!(
         Cli::try_parse_from(["roomkit-code", workspace, "--reasoning-effort", "turbo"]).is_err()
     );
-    assert!(Cli::try_parse_from(["roomkit-code", workspace, "--reasoning-effort", "max"]).is_ok());
+    for level in ["minimal", "max"] {
+        assert!(
+            Cli::try_parse_from(["roomkit-code", workspace, "--reasoning-effort", level]).is_ok()
+        );
+    }
 }
 
 #[test]

@@ -19,6 +19,7 @@ pub(super) fn own(agent: &Agent) -> Running {
         model: agent.model.clone(),
         effort: agent.reasoning_effort.clone(),
         context: None,
+        thinking_budget: None,
     }
 }
 
@@ -31,11 +32,22 @@ impl State {
             .is_some_and(|p| p.kind == crate::providers::ProviderKind::LlamaCpp)
     }
 
+    pub(super) fn budget_override(&self, room: &str, id: &str) -> Option<u32> {
+        self.running
+            .get(&(room.to_owned(), id.to_owned()))
+            .and_then(|kept| kept.thinking_budget)
+    }
+
     fn apply_running(&self, agent: &mut Agent, running: &Running) {
         // The local agent configures its own llama-server window for every GGUF.
         // A hosted model instead uses the capacity advertised by its server.
         if running.model != agent.model && !self.uses_llama_cpp(agent) {
             agent.context_window = running.context;
+        }
+        if self.uses_llama_cpp(agent)
+            && let Some(budget) = running.thinking_budget
+        {
+            agent.thinking_budget = Some(budget);
         }
         agent.model.clone_from(&running.model);
         agent.reasoning_effort.clone_from(&running.effort);
@@ -253,6 +265,8 @@ impl Profiles {
         if self.resources.tasks.root_of(room) != room {
             return Ok(());
         }
+        let mut running = running;
+        running.thinking_budget = state.budget_override(room, id);
         let kept = running.clone();
         crate::sessions::keep(kit, &view.room, |settings| {
             settings.agents.insert(id.to_owned(), kept);
@@ -278,12 +292,6 @@ impl Profiles {
         change: impl FnOnce(&State, &mut Agent),
     ) -> Result<CommandResult, String> {
         let (room, id) = (current.room.as_str(), current.agent.as_str());
-        if self.resources.tasks.root_of(room) != room {
-            return Err(
-                "A task runs with its agent's own model and effort; change them in its conversation"
-                    .into(),
-            );
-        }
         let mut agent = state
             .running_agent(room, id)
             .ok_or("Configure an agent with /agents first")?;
@@ -295,6 +303,24 @@ impl Profiles {
             && state.agent(id).is_some_and(|own| own.model != agent.model)
         {
             running.context = agent.context_window;
+        }
+        running.thinking_budget = state.budget_override(room, id);
+        self.keep_running(kit, state, current, running).await
+    }
+
+    pub(super) async fn keep_running(
+        &self,
+        kit: &RoomKit<SqliteStore>,
+        state: &mut State,
+        current: SessionConfig,
+        running: Running,
+    ) -> Result<CommandResult, String> {
+        let (room, id) = (current.room.as_str(), current.agent.as_str());
+        if self.resources.tasks.root_of(room) != room {
+            return Err(
+                "A task runs with its agent's own model and effort; change them in its conversation"
+                    .into(),
+            );
         }
         let key = (room.to_owned(), id.to_owned());
         let before = state.running.insert(key.clone(), running.clone());

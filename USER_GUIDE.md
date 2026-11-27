@@ -1538,6 +1538,19 @@ sign-in OpenAI documents for this kind of application returns to an address on
 
 ### Reasoning effort and diagnostics
 
+For a managed llama.cpp model, `/effort` shows the levels reported by its active
+chat template. If the template has no native effort levels, the command opens
+the reasoning budget directly. Before the model is loaded, choose **Reasoning
+budget** immediately or **Load model to discover native levels** to inspect it.
+Opening the menu alone does not load or switch models.
+
+Use `/effort 512` to limit reasoning to 512 tokens per generation in this
+conversation. Enter `0` to request no reasoning. Use `/effort budget` and clear
+the field to inherit the agent’s setting again. A budget must be smaller than
+the agent’s total output budget. On a model with native effort levels, its
+numeric budget and its selected level can both apply. `/effort default` clears
+both conversation overrides on llama.cpp.
+
 Use `/effort` to select the reasoning effort the active agent runs with in the
 conversation you are in, which keeps it; **Reasoning effort** in `/agents` sets
 the agent's own, which a new conversation starts with. It applies to subsequent
