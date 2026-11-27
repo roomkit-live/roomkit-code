@@ -33,6 +33,8 @@ struct Sources {
     files: watch::Receiver<()>,
     updates: watch::Receiver<()>,
     downloads: watch::Receiver<()>,
+    opened: std::time::Instant,
+    local_issues: watch::Receiver<()>,
     hooks: watch::Receiver<()>,
     /// A mode set by a mode tool, outside `/mode`.
     modes: watch::Receiver<()>,
@@ -63,6 +65,8 @@ pub(super) fn subscribe(
         files: sessions.profiles.resources.files.subscribe(),
         updates: sessions.services.updates.changes.subscribe(),
         downloads: sessions.profiles.local_models.downloads.changes.subscribe(),
+        opened: std::time::Instant::now(),
+        local_issues: sessions.profiles.diagnostics.local.subscribe(),
         hooks: sessions.services.hooks.changes.subscribe(),
         modes: sessions.policy.changes.subscribe(),
         compactions: sessions.profiles.resources.compactions.subscribe(),
@@ -146,6 +150,7 @@ async fn events(
         sidebar.sections.push(section);
     }
     sidebar.sections.push(services.updates.sidebar());
+    events.extend(profiles.diagnostics.local.lines(room, sources.opened));
     let downloads = &profiles.local_models.downloads;
     downloads.show_progress(&mut events);
     events.push(Event::PanelUpdated {
@@ -167,7 +172,7 @@ impl Sources {
     /// false once a source is gone.
     async fn changed(&mut self, poll: Option<Duration>) -> bool {
         tokio::select! {
-            changed = transfer_changed(&mut self.downloads, &mut self.updates) => changed,
+            changed = model_or_update_changed(&mut self.downloads, &mut self.local_issues, &mut self.updates) => changed,
             changed = self.messages.changed() => changed.is_ok(),
             changed = self.processes.changed() => changed.is_ok(),
             changed = self.accounts.changed() => changed.is_ok(),
@@ -186,13 +191,15 @@ impl Sources {
     }
 }
 
-/// The application update and local model transfers can both change the sidebar.
-async fn transfer_changed(
+/// Changes from local models or the application updater reach the live view.
+async fn model_or_update_changed(
     models: &mut watch::Receiver<()>,
+    issues: &mut watch::Receiver<()>,
     updates: &mut watch::Receiver<()>,
 ) -> bool {
     tokio::select! {
         change=models.changed()=>change.is_ok(),
+        change=issues.changed()=>change.is_ok(),
         change=updates.changed()=>change.is_ok(),
     }
 }

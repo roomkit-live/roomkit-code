@@ -24,6 +24,7 @@ const LIMIT: u64 = 1024 * 1024;
 const QUEUED: usize = 256;
 
 pub(crate) struct Diagnostics {
+    pub(crate) local: local::LocalIssues,
     path: PathBuf,
     instance: String,
     debug: bool,
@@ -65,6 +66,7 @@ impl Diagnostics {
     pub fn open(path: PathBuf, debug: bool) -> std::io::Result<Arc<Self>> {
         log_file(&path)?;
         let diagnostics = Arc::new(Self {
+            local: Default::default(),
             path,
             instance: uuid::Uuid::new_v4().to_string(),
             debug,
@@ -87,6 +89,16 @@ impl Diagnostics {
             None,
         );
         Ok(diagnostics)
+    }
+
+    /// Record the llama.cpp generation even when it ended outside an interactive room.
+    pub(crate) fn local_generation(&self, room: Option<&str>, mut fields: Value, summary: String) {
+        fields["room"] = json!(room);
+        fields["summary"] = json!(summary);
+        self.record("local_generation_incomplete", fields, None);
+        if let Some(room) = room {
+            self.local.report(room, &summary);
+        }
     }
 
     /// Records `kind` and writes it before returning. The log's lock can wait
@@ -294,6 +306,7 @@ impl Diagnostics {
         if action == "dismiss" {
             return CommandResult::Events(vec![]);
         }
+        let local = self.local.heading(current.room.as_str());
         let (recent, failed) = {
             let (state, _recording) = self.locked();
             let recent = state.recent.iter().rev().take(20).cloned();
@@ -309,7 +322,7 @@ impl Diagnostics {
                 "diagnostics",
                 "Diagnostics · current application",
                 format!(
-                    "Log: {}\nDebug: {}\nStorage: {}\n\nErrors and tool outcomes are recorded automatically. Use --debug for additional framework events.\nNo prompts, credentials, tool arguments/results or raw provider errors are recorded.\nTwo files, at most 1 MiB each. Recent records, newest first:\n\n{recent}",
+                    "{local}Log: {}\nDebug: {}\nStorage: {}\n\nErrors and tool outcomes are recorded automatically. Use --debug for additional framework events.\nNo prompts, credentials, tool arguments/results or raw provider errors are recorded.\nTwo files, at most 1 MiB each. Recent records, newest first:\n\n{recent}",
                     self.path.display(),
                     self.debug,
                     if failed {
@@ -390,6 +403,7 @@ fn log_file(path: &Path) -> std::io::Result<File> {
     options.open(path)
 }
 
+mod local;
 mod panics;
 
 pub(crate) use panics::report as report_panics;

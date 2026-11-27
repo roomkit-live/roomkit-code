@@ -13,7 +13,7 @@ impl Profiles {
         match provider.kind {
             ProviderKind::LlamaCpp => self
                 .local_models
-                .provider(profile, provider, &self.workspace)
+                .provider(profile, provider, &self.workspace, self.diagnostics.clone())
                 .map(CodeProvider::Local),
             ProviderKind::OpenAi => OpenAiAiProvider::new(self.openai_config(profile, provider)?)
                 .map(CodeProvider::OpenAi)

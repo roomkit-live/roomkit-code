@@ -8,6 +8,7 @@ use std::{future::poll_fn, path::PathBuf, sync::Arc};
 
 #[derive(Clone)]
 pub(crate) struct Local {
+    pub(super) report: super::observation::Reporter,
     pub(super) active: super::ActiveServer,
     pub(super) max_tokens: Option<u32>,
     pub(super) stop: tokio_util::sync::CancellationToken,
@@ -84,7 +85,10 @@ impl Local {
 
     pub async fn generate(&self, context: &AiContext) -> Result<AiResponse, ProviderError> {
         let _server = self.acquire().await?;
-        self.inner.generate(&self.request(context)).await
+        let request = self.request(context);
+        let response = self.inner.generate(&request).await?;
+        self.report.whole(&request, &response);
+        Ok(response)
     }
 
     pub fn generate_structured_stream<'a>(&'a self, context: &'a AiContext) -> ProviderStream<'a> {
@@ -92,19 +96,22 @@ impl Local {
             let _server = self.acquire().await?;
             let request = self.request(context);
             let mut stream = self.inner.generate_structured_stream(&request);
+            let mut observed = super::observation::Output::default();
             while let Some(part) = poll_fn(|cx| stream.as_mut().poll_next(cx)).await {
-                yield part?;
+                let event = part?;
+                self.report.event(&request, &mut observed, &event);
+                yield event;
             }
         })
     }
 
     pub fn generate_stream<'a>(&'a self, context: &'a AiContext) -> TextStream<'a> {
         Box::pin(async_stream::try_stream! {
-            let _server = self.acquire().await?;
-            let request = self.request(context);
-            let mut stream = self.inner.generate_stream(&request);
+            let mut stream = self.generate_structured_stream(context);
             while let Some(part) = poll_fn(|cx| stream.as_mut().poll_next(cx)).await {
-                yield part?;
+                if let roomkit_ai::StreamEvent::TextDelta(delta) = part? {
+                    yield delta.text;
+                }
             }
         })
     }
@@ -138,6 +145,13 @@ HTTPServer(("127.0.0.1", int(sys.argv[sys.argv.index("--port") + 1])), Health).s
         let mut cfg = roomkit_providers_llamacpp::LlamaCppConfig::new("example/fixture");
         cfg.binary = Some(binary);
         let first = Local {
+            report: super::super::observation::Reporter::new(
+                crate::diagnostics::Diagnostics::open(dir.path().join("diagnostics.jsonl"), false)
+                    .unwrap(),
+                "local",
+                cfg.context_size,
+                cfg.max_tokens,
+            ),
             active: Default::default(),
             max_tokens: None,
             model: cfg.model.clone(),

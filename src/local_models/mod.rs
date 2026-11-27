@@ -3,6 +3,7 @@ pub(crate) mod cache;
 mod downloads;
 pub(crate) mod hub;
 mod label;
+mod observation;
 pub(crate) use label::display_name;
 pub(crate) use runtime::resolve;
 mod provider;
@@ -38,6 +39,7 @@ impl LocalModels {
         profile: &Agent,
         connection: &Provider,
         workspace: &Path,
+        diagnostics: Arc<crate::diagnostics::Diagnostics>,
     ) -> Result<Local, String> {
         let model = runtime::resolve(&profile.model, workspace)?;
         let mut config = LlamaCppConfig::new(model);
@@ -51,6 +53,12 @@ impl LocalModels {
             .map_err(|_| "Invalid context size")?
             .unwrap_or(DEFAULT_CONTEXT);
         config.timeout = std::time::Duration::from_secs(connection.timeout_seconds);
+        let report = observation::Reporter::new(
+            diagnostics,
+            &profile.id,
+            config.context_size,
+            profile.max_output_tokens.unwrap_or(config.max_tokens),
+        );
         let key = serde_json::to_string(&config).map_err(|e| e.to_string())?;
         let mut servers = crate::sync::lock(&self.servers);
         servers.retain(|_, server| server.strong_count() > 0);
@@ -64,6 +72,7 @@ impl LocalModels {
         };
         Ok(Local {
             active: self.active.clone(),
+            report,
             max_tokens: profile.max_output_tokens,
             model: profile.model.clone(),
             stop: self.stop.clone(),

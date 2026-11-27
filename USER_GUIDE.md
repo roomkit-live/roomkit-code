@@ -535,6 +535,11 @@ After an interruption, selecting the same file resumes the transfer when the ser
 
 A fresh project can also start with `--provider llamacpp --model /path/to/model.gguf` or `--provider llamacpp --model owner/repository:Q4_K_M`. Each local server listens on loopback. Local agents default to a 16,384-token context. If a request exceeds the window, the status names the context limit. The notice and **/diagnostics** include the requested and available tokens when both appear in the llama.cpp error message. Set **/model → Agent context capacity** (for example, `128K` or `131072`) to change the llama.cpp window for this agent. Each GGUF it uses inherits that setting, including in existing conversations. Choose a size the model and available memory support, then resend the message. **/compact** reports when its estimate still fills the local window. Choose a model that supports tool calls and a context size that fits the machine.
 
+The default llama.cpp output budget is 1,024 tokens per generation, including reasoning.
+Set **Output budget (advanced)** in **/agents** to give the model more room to answer.
+An incomplete local generation leaves an explanation in its conversation.
+**/diagnostics** also shows the reported finish reason, output usage when available, and the effective output budget.
+
 CodeLALA v1 and Olala v1 mini use a dedicated OVH llama.cpp build. On first use, Code builds a pinned source revision with Git, CMake and a C++ compiler. Linux builds use CUDA when its toolkit and an NVIDIA device are available. The executable lives under the user's RoomKit Code data directory in `runtimes/ovh-llama.cpp/<revision>/bin/`. Code launches it by absolute path. To supply a compatible build yourself, set `ROOMKIT_LLAMA_BINARY` to the absolute path of its `llama-server`.
 
 ## Providers and agents

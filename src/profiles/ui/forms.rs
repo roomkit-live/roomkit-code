@@ -328,7 +328,7 @@ pub(super) fn agent_form(
                 "Output budget (advanced)",
                 a.max_output_tokens
                     .map_or_else(String::new, |n| n.to_string()),
-                "Empty = Auto (includes reasoning); enter a token count only to set a fixed limit",
+                output_budget_help(a, state),
                 false,
                 FieldKind::Text,
             ),
@@ -392,4 +392,18 @@ pub(super) fn agent_form(
             ),
         ],
     ))
+}
+
+fn output_budget_help(agent: &Agent, state: &State) -> &'static str {
+    if state
+        .providers
+        .value
+        .profiles
+        .get(&agent.provider)
+        .is_some_and(|p| p.kind == ProviderKind::LlamaCpp)
+    {
+        "Empty uses the llama.cpp default of 1024 tokens per generation, including reasoning"
+    } else {
+        "Empty = Auto (includes reasoning); enter a token count only to set a fixed limit"
+    }
 }
