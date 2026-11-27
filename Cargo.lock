@@ -2332,7 +2332,7 @@ dependencies = [
 [[package]]
 name = "roomkit-providers-anthropic"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/roomkit-live/roomkit-providers?rev=2807cedc7b380b6c838442324416929f4ef5495a#2807cedc7b380b6c838442324416929f4ef5495a"
+source = "git+https://github.com/roomkit-live/roomkit-providers?rev=0e7b489064afac320577691321a84793130269cb#0e7b489064afac320577691321a84793130269cb"
 dependencies = [
  "reqwest",
  "roomkit",
@@ -2346,7 +2346,7 @@ dependencies = [
 [[package]]
 name = "roomkit-providers-client"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/roomkit-live/roomkit-providers?rev=2807cedc7b380b6c838442324416929f4ef5495a#2807cedc7b380b6c838442324416929f4ef5495a"
+source = "git+https://github.com/roomkit-live/roomkit-providers?rev=0e7b489064afac320577691321a84793130269cb#0e7b489064afac320577691321a84793130269cb"
 dependencies = [
  "futures-core",
  "jiff",
@@ -2366,7 +2366,7 @@ dependencies = [
 [[package]]
 name = "roomkit-providers-http"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/roomkit-live/roomkit-providers?rev=2807cedc7b380b6c838442324416929f4ef5495a#2807cedc7b380b6c838442324416929f4ef5495a"
+source = "git+https://github.com/roomkit-live/roomkit-providers?rev=0e7b489064afac320577691321a84793130269cb#0e7b489064afac320577691321a84793130269cb"
 dependencies = [
  "openssl-probe",
  "rustls",
@@ -2379,7 +2379,7 @@ dependencies = [
 [[package]]
 name = "roomkit-providers-llamacpp"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/roomkit-live/roomkit-providers?rev=2807cedc7b380b6c838442324416929f4ef5495a#2807cedc7b380b6c838442324416929f4ef5495a"
+source = "git+https://github.com/roomkit-live/roomkit-providers?rev=0e7b489064afac320577691321a84793130269cb#0e7b489064afac320577691321a84793130269cb"
 dependencies = [
  "flate2",
  "futures-util",
@@ -2401,7 +2401,7 @@ dependencies = [
 [[package]]
 name = "roomkit-providers-openai"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/roomkit-live/roomkit-providers?rev=2807cedc7b380b6c838442324416929f4ef5495a#2807cedc7b380b6c838442324416929f4ef5495a"
+source = "git+https://github.com/roomkit-live/roomkit-providers?rev=0e7b489064afac320577691321a84793130269cb#0e7b489064afac320577691321a84793130269cb"
 dependencies = [
  "reqwest",
  "roomkit",
@@ -2416,7 +2416,7 @@ dependencies = [
 [[package]]
 name = "roomkit-providers-redis"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/roomkit-live/roomkit-providers?rev=2807cedc7b380b6c838442324416929f4ef5495a#2807cedc7b380b6c838442324416929f4ef5495a"
+source = "git+https://github.com/roomkit-live/roomkit-providers?rev=0e7b489064afac320577691321a84793130269cb#0e7b489064afac320577691321a84793130269cb"
 dependencies = [
  "redis",
  "roomkit",
@@ -2428,7 +2428,7 @@ dependencies = [
 [[package]]
 name = "roomkit-providers-sqlite"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/roomkit-live/roomkit-providers?rev=2807cedc7b380b6c838442324416929f4ef5495a#2807cedc7b380b6c838442324416929f4ef5495a"
+source = "git+https://github.com/roomkit-live/roomkit-providers?rev=0e7b489064afac320577691321a84793130269cb#0e7b489064afac320577691321a84793130269cb"
 dependencies = [
  "roomkit",
  "roomkit-core",
