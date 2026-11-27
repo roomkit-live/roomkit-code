@@ -287,7 +287,9 @@ agent can copy the exact live address returned by `list_sessions`.
 Keep both terminals open to receive new mail. Each launch gets a fresh address.
 A recipient that restarts with the same named session, Redis connection and
 `--session-group` can finish mail already accepted at its previous address.
-If that address cannot be verified, the recipient sees an interruption in its
+If Redis is unreachable at startup, accepted group mail stays pending while local
+mail continues. Relaunch with the original group and connection to resume it.
+If that address cannot be verified after joining, the recipient sees an interruption in its
 history. This also applies to mail accepted by versions that did not record
 its group. A new question always uses a current address.
 
@@ -531,7 +533,7 @@ In **/providers**, add a connection of type **Local llama.cpp**, leave the URL e
 
 To keep chatting with the current model, choose **Download in background** in the GGUF picker and select a file. Open **/downloads** or the sidebar (**F7** on wide terminals) to see the progress bar, percentage, bytes received and completion or failure. A background download continues across conversations while the application is open. Select the installed file when you want to use it.
 
-After an interruption, selecting the same file resumes the transfer when the server supports byte ranges. The application verifies each downloaded file against its SHA-256 and saves all shards in the Hugging Face Hub cache. **/model** lists installed models offline. The sidebar and footer show the model name and quantization. The saved profile retains the model repository, revision and filename for Hub selections.
+After an interruption, selecting the same file resumes the transfer when the server supports byte ranges. The application verifies each shard against its SHA-256 before publishing the model in the Hugging Face Hub cache. It checks existing blobs under the same lock as downloads and fetches a replacement if their contents differ. **/model** lists installed models offline. The sidebar and footer show the model name and quantization. The saved profile retains the model repository, revision and filename for Hub selections.
 
 A fresh project can also start with `--provider llamacpp --model /path/to/model.gguf` or `--provider llamacpp --model owner/repository:Q4_K_M`. Each local server listens on loopback. Local agents default to a 16,384-token context. If a request exceeds the window, the status names the context limit. The notice and **/diagnostics** include the requested and available tokens when both appear in the llama.cpp error message. In **/agents**, edit the local agent, select the same model as the conversation and raise **Context capacity** if the model and available memory allow, then resend the message. **/compact** reports when its estimate still fills the local window. Choose a model that supports tool calls and a context size that fits the machine.
 

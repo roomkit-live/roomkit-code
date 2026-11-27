@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Session messages accepted before a restart stay pending if the group’s Redis is unavailable. Local correspondence continues. Relaunching in the original group delivers the pending messages.
+- The executor inventory skips malformed binary worker records and still lists healthy workers.
+- Managed llama.cpp builds, servers and GPU probes use a filtered environment. Downloads verify cached GGUF blobs against the expected SHA-256 before publishing a snapshot.
+
 - Local context overflows show the request size, server limit and agent setting to change. A compaction warns when the remaining request is still estimated to fill the local window.
 
 - Run GGUF models through the managed llama.cpp provider. The model picker can search public Hugging Face repositories, download a quantization in the background with a sidebar progress bar, and select cached files offline. The sidebar and footer show the model name and quantization. CodeLALA uses a separate, versioned OVH runtime.
