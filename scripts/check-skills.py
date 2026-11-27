@@ -14,7 +14,7 @@ import termios
 import threading
 import time
 
-from pty_checks import wait_for_exit
+from pty_checks import model_fixture_env, wait_for_exit
 
 from fixture_http import LoopbackHTTPServer
 
@@ -60,7 +60,7 @@ with tempfile.TemporaryDirectory() as directory:
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 38, 130, 0, 0))
     original = termios.tcgetattr(slave)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+    env = model_fixture_env()
     process = subprocess.Popen([
         str(binary), str(project), "--state-dir", str(base / "state"),
         "--base-url", f"http://127.0.0.1:{server.server_port}/v1", "--model", "fixture-model",

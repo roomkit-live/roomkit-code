@@ -17,7 +17,7 @@ import termios
 import threading
 import time
 
-from pty_checks import wait_for_exit
+from pty_checks import model_fixture_env, wait_for_exit
 
 from fixture_http import LoopbackHTTPServer
 
@@ -73,7 +73,7 @@ def tool_results(index):
 def scenario(project, state, url):
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 120, 0, 0))
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+    env = model_fixture_env()
     process = subprocess.Popen(
         [str(binary), str(project), "--state-dir", str(state), "--base-url", url,
          "--model", "fixture", "--color", "always", "--no-animations", "--no-herdr"],

@@ -9,6 +9,13 @@ import time
 import unicodedata
 
 
+def model_fixture_env():
+    """Keep a scripted model's request sequence independent of background title generation."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+    env["ROOMKIT_NO_AUTO_TITLE"] = "true"
+    return env
+
+
 def wait_for_exit(process, master, output, timeout=10):
     """Drain terminal output until exit without extending the shutdown deadline.
 

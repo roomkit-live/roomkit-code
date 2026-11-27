@@ -214,6 +214,11 @@ impl Guard {
         self.key.as_ref().map(|key| key.seal(id, mail)).transpose()
     }
 
+    /// Check a directory query or reply without reporting a mail delivery failure.
+    pub(super) fn authentic(&self, id: &EventId, payload: &Value, seal: Option<&str>) -> bool {
+        check(self.key.as_ref(), id, payload, seal).is_ok()
+    }
+
     /// Accepts the message `id` carrying `mail` and `seal`, or records the
     /// refusal, the first of its kind, and returns it.
     pub(super) fn admit(

@@ -39,9 +39,11 @@ impl Messages {
         };
         if let Ok(net) = self.group_for(&room.id) {
             match group_contacts(net).await {
-                Ok(peers) => {
-                    sessions.extend(peers.iter().map(|p| json!({"name":p.name,"to":p.key()})))
-                }
+                Ok(peers) => sessions.extend(
+                    peers
+                        .iter()
+                        .map(|p| json!({"name":p.room,"title":p.name,"to":p.key()})),
+                ),
                 Err(error) if sessions.is_empty() => return Err(ToolError::refused(error)),
                 Err(error) => return Ok(json!({"sessions":sessions,"group_error":error})),
             }

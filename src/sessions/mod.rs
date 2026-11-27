@@ -15,6 +15,7 @@ pub(crate) mod names;
 mod rooms;
 mod settings;
 pub(crate) mod task_rooms;
+pub(crate) mod titles;
 pub(crate) use commands::*;
 
 pub(crate) use agent::{designate, designated};
@@ -37,9 +38,21 @@ pub(crate) fn title(workspace: &std::path::Path, room: &RoomId, name: Option<&st
         } else {
             id.into()
         };
-        format!("{} · {label}", workspace.display())
+        if is_generated_id(id) {
+            format!("New session · {} · {label}", workspace.display())
+        } else {
+            format!("{label} · {}", workspace.display())
+        }
     };
     fit_label(title)
+}
+
+/// IDs assigned on launch (UUID) or by an idempotent /new (40 hex digits).
+fn is_generated_id(id: &str) -> bool {
+    id.strip_prefix("session-").is_some_and(|s| {
+        uuid::Uuid::try_parse(s).is_ok()
+            || (s.len() == 40 && s.bytes().all(|c| c.is_ascii_hexdigit()))
+    })
 }
 
 /// `text` within the protocol's label size, which views ignore a longer

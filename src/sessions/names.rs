@@ -18,9 +18,15 @@ const MAX_NAME: usize = 80;
 /// The name given to `room`, if any. A store error, or a stored name this
 /// version would refuse, reads as no name: the session opens under its ID.
 pub(crate) async fn name(kit: &RoomKit<SqliteStore>, room: &RoomId) -> Option<String> {
-    let state = kit.store().get_private_state(room, KEY).await.ok()??;
-    let stored = state.get("name").and_then(serde_json::Value::as_str)?;
-    parse(stored).ok()
+    read(kit, room).await.ok().flatten()
+}
+
+pub(super) async fn read(
+    kit: &RoomKit<SqliteStore>,
+    room: &RoomId,
+) -> crate::Result<Option<String>> {
+    let state = kit.store().get_private_state(room, KEY).await?;
+    Ok(state.and_then(|s| parse(s.get("name")?.as_str()?).ok()))
 }
 
 pub(super) async fn set(
@@ -38,7 +44,7 @@ pub(super) async fn set(
 }
 
 /// The name `/rename` was given: one visible line of at most 80 characters.
-pub(super) fn parse(arguments: &str) -> Result<String, String> {
+pub(crate) fn parse(arguments: &str) -> Result<String, String> {
     let name = arguments.trim();
     if name.is_empty() {
         return Err("Use /rename <name>".into());
@@ -91,7 +97,10 @@ impl Sessions {
         {
             return Err("Send a first message before naming this conversation".into());
         }
-        set(&self.kit, &room, &name).await?;
+        self.services
+            .titles
+            .save(&self.kit, &room, &name, false)
+            .await?;
         let conversation = current.room.as_str().into();
         Ok(CommandResult::Events(vec![if room == current.room {
             Event::TitleChanged {

@@ -26,6 +26,7 @@ import termios
 import threading
 import time
 
+from pty_checks import model_fixture_env
 from fixture_http import LoopbackHTTPServer
 
 metadata = json.loads(subprocess.check_output(
@@ -96,7 +97,7 @@ class Terminal:
         self.master, self.slave = pty.openpty()
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 120, 0, 0))
         self.original = termios.tcgetattr(self.slave)
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+        env = model_fixture_env()
         project = root / "project"
         project.mkdir()
         (project / "record.txt").write_text("Record 42: ledger 2\n")

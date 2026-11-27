@@ -27,6 +27,9 @@ pub(crate) struct Cli {
     /// Disable automatic update checks (manual /update remains available).
     #[arg(long, env = "ROOMKIT_NO_UPDATE_CHECK")]
     pub no_update_check: bool,
+    /// Disable background model requests that name interactive conversations.
+    #[arg(long, env = "ROOMKIT_NO_AUTO_TITLE")]
+    pub no_auto_title: bool,
     /// Offer the remote-linux delegation target in this Redis group.
     #[arg(long, conflicts_with_all = ["serve_worker", "serve_pool", "executor_pool", "prompt"], value_parser = crate::remote::group)]
     pub remote_worker: Option<String>,

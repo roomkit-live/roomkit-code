@@ -105,13 +105,15 @@ async fn extend_network(
 }
 
 pub(super) async fn group_contacts(net: &Network) -> Result<Vec<Contact>, String> {
-    Ok(net
+    let peers = net
         .contacts()
         .await
-        .map_err(|_| "Cannot list the session group")?
+        .map_err(|_| "Cannot list the session group")?;
+    let mut names = net.titles(&peers).await;
+    Ok(peers
         .into_iter()
         .map(|(id, room)| Contact {
-            name: room.to_string(),
+            name: names.remove(&id).unwrap_or_else(|| room.to_string()),
             room,
             remote: Some(id),
         })

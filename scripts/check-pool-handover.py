@@ -14,6 +14,7 @@ import time
 from urllib.parse import urlsplit
 import uuid
 
+from pty_checks import model_fixture_env
 from executor_fixture import StreamingModel, Terminal, child, redis, start_from_composer, tool
 from executor_peer_fixture import Peer
 from session_messages_fixture import provider
@@ -185,7 +186,7 @@ def run(options):
             peer = Peer(stack, root, host, name)
             stops[name] = start_worker(stack, peer, exe, name, group, server.server_port, urlsplit(url).port)
         (root / "workspace").mkdir()
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+        env = model_fixture_env()
         env.update(HOME=str(root), XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"),
                    ROOMKIT_EXECUTOR_REDIS_URL=url, TERM="xterm-256color")
         owner = [*app(binary, root, "owner", server.server_port), "--executor-pool", group, "--session", "owner-pool"]

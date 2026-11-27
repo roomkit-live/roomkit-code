@@ -50,7 +50,9 @@ jobs:
       # The same scenarios as `make redis-check`, one step each for the log.
       - name: Check a session group's key between members
         if: runner.os == 'Linux'
-        run: python3 scripts/check-session-key.py
+        run: |
+          python3 scripts/check-session-key.py
+          python3 scripts/check-session-titles.py --network
       - name: Install minimum supported Rust
         run: rustup toolchain install 1.94.0 --profile minimal
       - run: make msrv

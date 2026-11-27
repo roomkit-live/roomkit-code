@@ -16,6 +16,7 @@ import termios
 import threading
 import time
 
+from pty_checks import model_fixture_env
 from fixture_http import LoopbackHTTPServer
 
 metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True))
@@ -209,7 +210,7 @@ if mode == "stall": time.sleep(10)
 if mode == "fail": sys.exit(1)
 ''')
         fake.chmod(0o700)
-        env = {key: value for key, value in os.environ.items() if not key.startswith(("ROOMKIT_", "HERDR_"))}
+        env = model_fixture_env()
         env.update({"HERDR_ENV": "1", "HERDR_BIN_PATH": str(fake), "HERDR_SOCKET_PATH": str(root / "herdr.sock"),
                     "HERDR_PANE_ID": "w1:p1", "XDG_DATA_HOME": str(root / "data"), "HOME": str(root / "home"),
                     "TERM": "xterm-256color", "NO_COLOR": "1", "PATH": str(binary.parent) + os.pathsep + env.get("PATH", "")})

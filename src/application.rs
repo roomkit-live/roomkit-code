@@ -91,6 +91,7 @@ impl Application {
                 .diagnostics
                 .record("application_closing", fields, None);
         };
+        self.services.titles.close().await;
         self.profiles.local_models.cancel_preparation();
         self.profiles.resources.messages.close().await;
         step("updates");
@@ -143,8 +144,7 @@ impl Application {
     }
 
     pub fn session(&self) -> LocalSession<SqliteStore> {
-        let compactions = self.profiles.resources.compactions.clone();
-        let lifecycle = crate::compaction::lifecycle(self.services.hooks.lifecycle(), compactions);
+        let lifecycle = lifecycle::for_app(self);
         LocalSession::new(self.kit.clone(), self.channel.clone(), self.view.clone())
             .with_lifecycle(lifecycle)
     }
@@ -355,6 +355,7 @@ async fn abandon(
 }
 
 mod interactive;
+mod lifecycle;
 #[cfg(test)]
 mod tests;
 pub(crate) use interactive::*;

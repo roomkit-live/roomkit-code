@@ -15,7 +15,7 @@ import termios
 import threading
 import time
 
-from pty_checks import wait_for_exit
+from pty_checks import model_fixture_env, wait_for_exit
 
 from fixture_http import LoopbackHTTPServer
 
@@ -67,7 +67,7 @@ def scenario(project, state, url):
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 120, 0, 0))
     original = termios.tcgetattr(slave)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+    env = model_fixture_env()
     # Commands get the SSH agent and the added names, never another host
     # variable such as a key.
     env.update(SSH_AUTH_SOCK="/roomkit-fixture/agent.sock", FIXTURE_API_KEY="leaked",

@@ -17,6 +17,7 @@ redis-check:
 	python3 scripts/check-pool-handover.py
 	python3 scripts/check-session-network.py
 	python3 scripts/check-session-key.py
+	python3 scripts/check-session-titles.py --network
 
 fmt:
 	cargo fmt --all
@@ -41,6 +42,7 @@ terminal-check:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_pty_checks.py'
 	cargo build --locked
 	python3 scripts/check-terminal.py
+	python3 scripts/check-session-titles.py
 	python3 scripts/check-multi-session.py
 	python3 scripts/check-permissions.py
 	python3 scripts/check-questions.py

@@ -106,6 +106,7 @@ async fn events(
     sources: &mut Sources,
 ) -> (Vec<Event>, Option<Duration>) {
     let mut events = sources.processes.borrow_and_update().clone();
+    events.extend(services.titles.event(&current.room));
     events.extend(profiles.resources.messages.events(&current.room));
     events.extend(profiles.plans.updates(current).await);
     events.extend(services.hooks.updates(current));

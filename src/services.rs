@@ -9,6 +9,7 @@ use crate::{config::Settings, profiles::Profiles, storage::Storage};
 pub(crate) struct Services {
     /// Which conversations are open, in this process and in others.
     pub sessions: Arc<crate::storage::SessionLeases>,
+    pub titles: Arc<crate::sessions::titles::Titles>,
     pub updates: Arc<crate::updates::Updates>,
     pub hooks: Arc<crate::hooks::Hooks>,
     /// The user's own `!` commands.
@@ -25,8 +26,14 @@ impl Services {
     ) -> Result<Arc<Self>, String> {
         let state = storage.database.parent().ok_or("Missing state directory")?;
         let diagnostics = &profiles.diagnostics;
+        let sidebar_changes = tokio::sync::watch::channel(()).0;
         Ok(Arc::new(Self {
             sessions: storage.sessions.clone(),
+            titles: Arc::new(crate::sessions::titles::Titles::new(
+                settings.auto_title,
+                settings.workspace.clone(),
+                sidebar_changes.clone(),
+            )),
             updates: crate::updates::Updates::new(diagnostics.clone()),
             hooks: crate::hooks::Hooks::load(
                 settings,
@@ -38,7 +45,7 @@ impl Services {
                 profiles.resources.processes.clone(),
                 diagnostics.clone(),
             ),
-            sidebar_changes: tokio::sync::watch::channel(()).0,
+            sidebar_changes,
         }))
     }
 }

@@ -22,7 +22,7 @@ import termios
 import threading
 import time
 
-from pty_checks import wait_for_exit
+from pty_checks import model_fixture_env, wait_for_exit
 
 from fixture_http import LoopbackHTTPServer
 
@@ -73,7 +73,7 @@ with tempfile.TemporaryDirectory() as directory:
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
     original = termios.tcgetattr(slave)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+    env = model_fixture_env()
     env["TERM"] = "xterm-256color"
     process = subprocess.Popen(
         [str(binary), str(project), "--state-dir", str(state),

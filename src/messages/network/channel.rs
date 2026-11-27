@@ -1,4 +1,4 @@
-//! The exported channel accepts one verb and can write only to its bound room.
+//! The mailbox serves correspondence and title lookups in its bound room.
 use super::{Kit, VERB, digest, pending, room_of};
 use crate::{
     Result,
@@ -52,13 +52,19 @@ impl Inbox {
         }
     }
     async fn accept(&self, room: &RoomId, verb: &str, arguments: Metadata) -> Result<Value> {
-        if *room != self.room || verb != VERB || !self.leases.accepts_messages(room.as_str())? {
+        if *room != self.room
+            || !matches!(verb, VERB | super::titles::VERB)
+            || !self.leases.accepts_messages(room.as_str())?
+        {
             return Err("This mailbox is unavailable".into());
         }
         let kit = self.kit.upgrade().ok_or("Session closed")?;
         let target = kit.get_room(room, Default::default()).await?;
         if target.organization_id.is_some() || !crate::messages::writable(&kit, room, None).await? {
             return Err("Session does not accept mail".into());
+        }
+        if verb == super::titles::VERB {
+            return super::titles::answer(&kit, room, &self.channel, &self.guard, arguments).await;
         }
         let Envelope { id, mail, seal } = serde_json::from_value(arguments.into())?;
         // Before anything in the mail is believed, its sender included.

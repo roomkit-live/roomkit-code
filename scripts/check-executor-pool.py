@@ -15,6 +15,7 @@ import uuid
 
 import executor_consultation_fixture as peers
 from executor_fixture import StreamingModel, Terminal, child, redis, start_from_composer, tool
+from pty_checks import model_fixture_env
 from fixture_http import LoopbackHTTPServer
 
 
@@ -373,7 +374,7 @@ def main():
     with ExitStack() as stack:
         root = Path(stack.enter_context(tempfile.TemporaryDirectory()))
         group = "pool-" + uuid.uuid4().hex
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+        env = model_fixture_env()
         env.update(ROOMKIT_EXECUTOR_REDIS_URL=stack.enter_context(redis()), HOME=str(root/"home"),
                    XDG_CONFIG_HOME=str(root/"config"), XDG_DATA_HOME=str(root/"data"),
                    ROOMKIT_NO_UPDATE_CHECK="true", TERM="xterm-256color")

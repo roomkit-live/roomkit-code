@@ -249,6 +249,7 @@ fn settings(workspace: &std::path::Path, state: &std::path::Path, base: &str) ->
         base,
         "--model",
         "fixture-model",
+        "--no-auto-title",
         "--session",
         "main",
     ])

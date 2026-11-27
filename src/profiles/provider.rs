@@ -5,6 +5,29 @@ use roomkit_providers_anthropic::{Anthropic as AnthropicAiProvider, AnthropicCon
 use roomkit_providers_openai::OpenAi as OpenAiAiProvider;
 
 impl Profiles {
+    /// The same connection and model this agent runs with in the named conversation.
+    pub(crate) async fn title_provider(
+        &self,
+        room: &str,
+        id: &str,
+    ) -> Result<(CodeProvider, u32), String> {
+        let state = self.state.lock().await;
+        let mut profile = state.running_agent(room, id).ok_or("Unknown title agent")?;
+        let connection = state
+            .providers
+            .value
+            .profiles
+            .get(&profile.provider)
+            .ok_or("Unknown title connection")?;
+        profile.reasoning_effort = None;
+        const TITLE_TOKEN_LIMIT: u32 = 512;
+        let max_tokens = profile
+            .max_output_tokens
+            .unwrap_or(TITLE_TOKEN_LIMIT)
+            .min(TITLE_TOKEN_LIMIT);
+        Ok((self.generation_provider(&profile, connection)?, max_tokens))
+    }
+
     pub(super) fn generation_provider(
         &self,
         profile: &Agent,

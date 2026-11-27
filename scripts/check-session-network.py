@@ -13,6 +13,7 @@ import uuid
 from urllib.parse import urlsplit
 
 from executor_peer_fixture import Peer
+from pty_checks import model_fixture_env
 from executor_fixture import StreamingModel, Terminal, redis, tool
 from session_messages_fixture import Sender, provider
 from session_agent_fixture import drain_terminal, exercise_agents
@@ -97,7 +98,7 @@ def run(options):
         token = "PROOF-" + uuid.uuid4().hex
         peer.run(["python3", "-c", "import sys,pathlib; pathlib.Path(sys.argv[1]).write_text(sys.stdin.read())",
                   str(peer.work / "workspace/proof.txt")], token)
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+        env = model_fixture_env()
         env.update(TERM="xterm-256color", ROOMKIT_EXECUTOR_REDIS_URL=broker)
         exercise_recovery(stack, root / "recovery", binary, env, args_for)
         remote_url = f"redis://127.0.0.1:{peer.port(urlsplit(broker).port)}"

@@ -21,6 +21,7 @@ import termios
 import threading
 import time
 
+from pty_checks import model_fixture_env
 from fixture_http import LoopbackHTTPServer
 
 ROWS, COLS = 40, 120
@@ -75,7 +76,7 @@ with tempfile.TemporaryDirectory() as directory:
     (project / "record.txt").write_text("Record 42: ledger 2\n")
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+    env = model_fixture_env()
     env["TERM"] = "xterm-256color"
     process = subprocess.Popen(
         [str(binary), str(project), "--state-dir", str(state),

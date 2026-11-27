@@ -16,6 +16,7 @@ import threading
 import time
 import unicodedata
 
+from pty_checks import model_fixture_env
 from fixture_http import LoopbackHTTPServer
 
 metadata = json.loads(subprocess.check_output(
@@ -62,7 +63,7 @@ def scenario(project, state, url):
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 120, 0, 0))
     original = termios.tcgetattr(slave)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+    env = model_fixture_env()
     env["TERM"] = "xterm-256color"
     process = subprocess.Popen(
         [str(binary), str(project), "--state-dir", str(state), "--base-url", url,

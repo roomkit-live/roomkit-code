@@ -16,6 +16,7 @@ import tempfile
 import threading
 import uuid
 
+from pty_checks import model_fixture_env
 from executor_fixture import StreamingModel, Terminal, redis
 from session_messages_fixture import provider
 
@@ -73,7 +74,7 @@ def case(binary, broker, label, sender_key, receiver_key, told, refusal):
         model.tag, model.received = "TAG_" + uuid.uuid4().hex[:12], threading.Event()
         idle = provider(stack, Idle)
         idle.called = threading.Event()
-        base = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+        base = model_fixture_env()
         base.update(TERM="xterm-256color", ROOMKIT_EXECUTOR_REDIS_URL=broker)
 
         def open_session(name, port, key):

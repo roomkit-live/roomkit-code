@@ -15,7 +15,7 @@ import threading
 import time
 import unicodedata
 
-from pty_checks import wait_for_exit
+from pty_checks import model_fixture_env, wait_for_exit
 
 from fixture_http import LoopbackHTTPServer
 
@@ -58,7 +58,7 @@ class App:
         self.master, self.slave = pty.openpty()
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", 48, 160, 0, 0))
         self.original = termios.tcgetattr(self.slave)
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+        env = model_fixture_env()
         env.update({"TERM": "xterm-256color", "HOME": str(storage / "home"), "XDG_DATA_HOME": str(storage / "data")})
         self.process = subprocess.Popen(argv, stdin=self.slave, stdout=self.slave, stderr=self.slave, start_new_session=True, env=env)
         self.output = bytearray()

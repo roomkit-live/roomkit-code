@@ -22,6 +22,7 @@ pub(crate) struct Settings {
     pub executor_pool: Option<String>,
     pub remote_worker: Option<String>,
     pub update_check: bool,
+    pub auto_title: bool,
     pub require_tool_intent: bool,
     pub herdr: bool,
     pub resume_options: Option<Vec<String>>,
@@ -99,6 +100,7 @@ impl Settings {
         )?;
         let (workspace, state_dir) = locations(cli)?;
         Ok(Self {
+            auto_title: !cli.no_auto_title && cli.prompt.is_none(),
             update_check: file.updates.check && !cli.no_update_check,
             require_tool_intent: cli
                 .require_tool_intent
@@ -414,6 +416,7 @@ fn resume_options(cli: &Cli) -> Result<Option<Vec<String>>> {
         (cli.no_terminal_status, "--no-terminal-status"),
         (cli.no_herdr, "--no-herdr"),
         (cli.no_update_check, "--no-update-check"),
+        (cli.no_auto_title, "--no-auto-title"),
         (cli.debug, "--debug"),
     ] {
         if enabled {

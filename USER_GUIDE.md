@@ -62,35 +62,8 @@ cargo run --locked -- /path/to/project --session investigation --theme light
 cargo run --locked -- /path/to/project --check-config
 ```
 
-Each normal launch opens a blank conversation, reusing an unused application
-draft when available. Use **/resume** to list earlier nonempty
-sessions for this project, filter by their name, first message, date or identifier,
-then press Enter to continue one. Escape cancels without switching. **/new**
-starts another conversation without leaving the application, or keeps the
-current draft if it is already empty. These commands
-are local navigation and never call the model; wait for an active response to
-finish before switching.
-
-**/rename NAME** names the current conversation: one visible line of at most 80
-characters. The name leads the header and the Herdr pane title, before the
-workspace path, so a narrow terminal cuts the path rather than the name. It
-labels the session in `/resume`, which keeps the first message in the
-description, and precedes the ID in the exit report. The ID stays its
-identity: `/resume ID`, `--session` and the resume command still use it. An
-empty conversation cannot be named, since it is reused as the next draft.
-Renaming works while a response runs: the header changes in place.
-
-`--session NAME` explicitly opens or creates a named session. Existing sessions,
-including the former default `main`, remain available through `/resume` or
-`--session main`. The picker hides empty drafts and shows up to 200 recent
-nonempty sessions, with timestamps in
-UTC; an older known identifier can be opened with `/resume ID`.
-
-Several instances can use the same project with different conversations. The
-picker marks conversations open in another instance; those cannot be resumed
-until that instance closes. Switching views does not close a conversation's
-engine, hooks or background processes, so ownership lasts until application
-shutdown. After a crash, the operating system releases ownership automatically.
+See [Session names and history](#session-names-and-history) for automatic titles,
+**/rename**, **/new** and **/resume**.
 
 `--check-config` validates launch options and the workspace without loading
 saved profiles, contacting a provider or creating state. `--help` lists all options. Terminal controls
@@ -264,7 +237,11 @@ roomkit-code ~/src/api --session review --session-group team
 Type `@review Which Git revision is checked out on your machine?` in `api`.
 Both terminals use their own project files, SQLite history, model and tool
 permissions. Joining a group advertises only the named starting conversation.
-Other conversations opened with `/new` or `/resume` stay local. Use `/message`
+Group members can read that conversation’s current display title, including an
+automatic one, by opening their recipient picker or listing sessions. A group
+key authenticates title queries and replies when configured. A peer that does
+not provide a title is listed by its original session ID. A rename keeps its
+mailbox address. Other conversations opened with `/new` or `/resume` stay local. Use `/message`
 to choose an exact live address when several sessions have the same name.
 
 You can also ask your agent, in ordinary chat, “Ask the review session which
@@ -319,6 +296,49 @@ cannot seal a message or a receipt. A sealed message does not expire: captured
 on the broker, it can be given again to its recipient while that session runs,
 and is taken if it was not stored the first time. The executor pool on the
 same Redis is not covered by the key.
+
+## Session names and history
+
+Each normal launch opens a blank conversation, reusing an unused application
+draft when available. Use **/resume** to list earlier nonempty
+sessions for this project, filter by their name, first message, date or identifier,
+then press Enter to continue one. Escape cancels without switching. **/new**
+starts another conversation without leaving the application, or keeps the
+current draft if it is already empty. These commands
+are local navigation and never call the model; wait for an active response to
+finish before switching.
+
+After a completed interactive turn with a topic, the active model names the
+conversation in the background, in the language of the user’s message. The
+title request contains up to 2,048 characters of that message and has no tools
+or attachments. Greetings can leave the session untitled until a later turn.
+The title leads the header and appears in **/resume** and the **@** picker.
+It stays stable as the discussion moves on. **/rename** always takes priority,
+including while the model is generating a title. Use **--no-auto-title** or
+`ROOMKIT_NO_AUTO_TITLE=true` to disable these extra model requests. Headless
+runs and delegated task rooms do not generate titles. If a request fails, Code
+records the reason in diagnostics and can try again on the next eligible turn.
+
+**/rename NAME** names the current conversation: one visible line of at most 80
+characters. The name leads the header and the Herdr pane title, before the
+workspace path, so a narrow terminal cuts the path rather than the name. It
+labels the session in `/resume`, which keeps the first message in the
+description, and precedes the ID in the exit report. The ID stays its
+identity: `/resume ID`, `--session` and the resume command still use it. An
+empty conversation cannot be named, since it is reused as the next draft.
+Renaming works while a response runs: the header changes in place.
+
+`--session NAME` explicitly opens or creates a named session. Existing sessions,
+including the former default `main`, remain available through `/resume` or
+`--session main`. The picker hides empty drafts and shows up to 200 recent
+nonempty sessions, with timestamps in
+UTC; an older known identifier can be opened with `/resume ID`.
+
+Several instances can use the same project with different conversations. The
+picker marks conversations open in another instance; those cannot be resumed
+until that instance closes. Switching views does not close a conversation's
+engine, hooks or background processes, so ownership lasts until application
+shutdown. After a crash, the operating system releases ownership automatically.
 
 ## Input history
 

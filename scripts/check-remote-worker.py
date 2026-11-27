@@ -20,7 +20,7 @@ import time
 import uuid
 
 from fixture_http import LoopbackHTTPServer
-from pty_checks import wait_for_exit
+from pty_checks import model_fixture_env, wait_for_exit
 
 
 # The terminal arms a newly drawn permission card after 500 ms.
@@ -193,7 +193,7 @@ def main():
     with ExitStack() as stack:
         root = Path(stack.enter_context(tempfile.TemporaryDirectory()))
         url = stack.enter_context(redis())
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("ROOMKIT_", "HERDR_"))}
+        env = model_fixture_env()
         env.update(ROOMKIT_EXECUTOR_REDIS_URL=url, ROOMKIT_NO_UPDATE_CHECK="true",
                    HOME=str(root / "home"), XDG_DATA_HOME=str(root / "data"),
                    XDG_CONFIG_HOME=str(root / "config"), TERM="xterm-256color")

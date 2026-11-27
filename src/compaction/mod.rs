@@ -21,13 +21,11 @@ mod store;
 pub(crate) use store::Compacted;
 mod summary;
 mod tiers;
-mod turns;
 
 pub(crate) use memory::TieredMemory;
 pub(crate) use recorded::Recorded;
 pub(crate) use runs::Compactor;
 pub(crate) use tiers::ceiling;
-pub(crate) use turns::lifecycle;
 
 use roomkit::RoomKit;
 use roomkit::model::ChannelId;

@@ -1,28 +1,30 @@
-//! The turns under way in each room, which a `/compact` asked meanwhile waits
-//! for: the view's lifecycle, told as each turn is admitted and finishes,
-//! whatever the application's own lifecycle does with them.
-
+//! Observe interactive turns for compaction and automatic conversation titles.
 use std::sync::Arc;
 
 use roomkit::model::EventContent;
 use roomkit_tui::protocol::{OperationId, Rejection};
 use roomkit_tui_engine::{LifecycleFuture, SessionConfig, SessionLifecycle, TurnOutcome};
 
-use super::Compactions;
+use super::Application;
+use crate::sessions::titles::TitleJobs;
 
-/// `inner`, telling `compactions` when a turn is admitted and finishes: the
-/// engine finishes every turn it admits, refused or interrupted ones
-/// included.
-pub(crate) fn lifecycle(
-    inner: Arc<dyn SessionLifecycle>,
-    compactions: Arc<Compactions>,
-) -> Arc<dyn SessionLifecycle> {
-    Arc::new(Watched { inner, compactions })
+pub(super) fn for_app(app: &Application) -> Arc<dyn SessionLifecycle> {
+    Arc::new(Watched {
+        inner: app.services.hooks.lifecycle(),
+        compactions: app.profiles.resources.compactions.clone(),
+        titles: TitleJobs::new(
+            app.services.titles.clone(),
+            app.kit.clone(),
+            app.profiles.clone(),
+            app.services.sessions.clone(),
+        ),
+    })
 }
 
 struct Watched {
     inner: Arc<dyn SessionLifecycle>,
-    compactions: Arc<Compactions>,
+    compactions: Arc<crate::compaction::Compactions>,
+    titles: TitleJobs,
 }
 
 impl std::fmt::Debug for Watched {
@@ -45,7 +47,11 @@ impl SessionLifecycle for Watched {
         content: &'a EventContent,
     ) -> LifecycleFuture<'a, Result<(), Rejection>> {
         self.compactions.turn_admitted(session.room.as_str());
-        self.inner.admit(session, operation, content)
+        Box::pin(async move {
+            self.inner.admit(session, operation, content).await?;
+            self.titles.admitted(session, operation, content);
+            Ok(())
+        })
     }
 
     fn admit_answer<'a>(
@@ -80,6 +86,7 @@ impl SessionLifecycle for Watched {
                 .turn_told(&session.room, &session.agent)
                 .await;
             self.compactions.turn_finished(session.room.as_str());
+            self.titles.finished(session, operation, outcome).await;
         })
     }
 }

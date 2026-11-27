@@ -157,7 +157,7 @@ impl SessionLifecycle for Lifecycle {
     }
 }
 
-pub(super) fn prompt_text(content: &roomkit::model::EventContent) -> String {
+pub(crate) fn prompt_text(content: &roomkit::model::EventContent) -> String {
     use roomkit::model::EventContent;
     match content {
         EventContent::Text(text) => text.body.clone(),

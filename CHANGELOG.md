@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Interactive conversations get a short title from their active model. The header, session list and recipient picker show it; a manual rename always wins. Group peers can read the shared title at the original address.
+
 - `/effort` shows the native levels of a loaded llama.cpp template or opens the reasoning budget. A conversation can set its own token limit and restore the agent default.
 
 - Set a per-agent llama.cpp reasoning token budget in `/agents`. Local generation diagnostics show the requested reasoning limit, output budget and finish reason.

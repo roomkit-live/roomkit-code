@@ -8,6 +8,7 @@ mod ui;
 
 use catalogue::{Catalogue, Entry};
 use lifecycle::Lifecycle;
+pub(crate) use lifecycle::prompt_text;
 pub(crate) use payload::tool_outcome;
 use payload::*;
 use roomkit::ToolCallEvent;

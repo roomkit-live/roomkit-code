@@ -4,6 +4,7 @@ mod channel;
 mod recovery;
 mod response;
 pub(in crate::messages) mod seal;
+mod titles;
 use super::{
     record::{Mail, Route},
     request::AgentRequest,
