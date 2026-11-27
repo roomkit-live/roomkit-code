@@ -24,11 +24,11 @@ roomkit-core = { version = "0.3.0", git = "https://github.com/roomkit-live/roomk
 roomkit-mcp = { version = "0.3.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "e6f92c6dba1cb158ff2cc8d734038a1100402ceb", features = ["http"] }
 roomkit-ai = { version = "0.3.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "e6f92c6dba1cb158ff2cc8d734038a1100402ceb" }
 # The model providers, which are built on the same engine revision.
-roomkit-providers-openai = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "12e8804939bd773899ea2f55823c5568bf8c643e" }
-roomkit-providers-llamacpp = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "12e8804939bd773899ea2f55823c5568bf8c643e" }
-roomkit-providers-anthropic = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "12e8804939bd773899ea2f55823c5568bf8c643e" }
-roomkit-providers-redis = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "12e8804939bd773899ea2f55823c5568bf8c643e" }
-roomkit-providers-sqlite = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "12e8804939bd773899ea2f55823c5568bf8c643e" }
+roomkit-providers-openai = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "708ff3f3f45488036b81f7b8af51755f30822667" }
+roomkit-providers-llamacpp = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "708ff3f3f45488036b81f7b8af51755f30822667" }
+roomkit-providers-anthropic = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "708ff3f3f45488036b81f7b8af51755f30822667" }
+roomkit-providers-redis = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "708ff3f3f45488036b81f7b8af51755f30822667" }
+roomkit-providers-sqlite = { version = "0.1.0-alpha.1", git = "https://github.com/roomkit-live/roomkit-providers", rev = "708ff3f3f45488036b81f7b8af51755f30822667" }
 roomkit-tui-engine = { version = "0.3.1", git = "https://github.com/roomkit-live/roomkit-tui", rev = "8f6ba8cf555ff159d1c967b04b1cc266c7163d8b" }
 roomkit-tui = { version = "0.3.1", git = "https://github.com/roomkit-live/roomkit-tui", rev = "8f6ba8cf555ff159d1c967b04b1cc266c7163d8b" }
 roomkit-tools-code = { version = "0.2.0", git = "https://github.com/roomkit-live/roomkit-tools", rev = "376714cb628802b8b04b7bbe22a40e6a0c867e2e" }
