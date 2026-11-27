@@ -5,7 +5,7 @@ mod conversation;
 mod deletion;
 mod discovery;
 mod executors;
-mod mcp;
+pub(crate) mod mcp;
 pub(crate) mod model;
 mod model_choice;
 mod provider;
@@ -67,7 +67,8 @@ pub(crate) struct Profiles {
     pub(crate) processes: Arc<crate::processes::Processes>,
     pub(crate) images: Arc<crate::images::Images>,
     skill_catalogue: tokio::sync::RwLock<skills::Catalogue>,
-    pub(crate) mcp_runtime: mcp::Runtime,
+    pub(crate) mcp_runtime: Arc<mcp::Runtime>,
+    project_memory: roomkit_tools_memory::MemoryTool,
     /// The context capacity each connection's server reported for its
     /// models in its latest listing, by connection and model.
     reported: std::sync::Mutex<std::collections::HashMap<(String, String), u64>>,
@@ -228,7 +229,10 @@ impl Profiles {
             .map_err(|e| e.to_string())?;
         let executor_inventory =
             crate::remote::pool::Inventory::for_worker(settings).map_err(|e| e.to_string())?;
+        let mcp_runtime = Arc::new(mcp::Runtime::with_memory(settings.memory.server()));
+        let project_memory = crate::project_memory::bind(settings, &mcp_runtime).await?;
         Ok(Arc::new(Self {
+            project_memory,
             pool,
             local_models: Default::default(),
             executor_inventory,
@@ -247,7 +251,7 @@ impl Profiles {
             accounts: crate::accounts::Accounts::new(&settings.state_dir.join("auth"))?,
             processes: crate::processes::Processes::new(resources.processes.clone()),
             resources,
-            mcp_runtime: mcp::Runtime::default(),
+            mcp_runtime,
             reported: std::sync::Mutex::default(),
             state: Mutex::new(State {
                 remote_worker: settings.remote_worker.is_some() || settings.executor_pool.is_some(),

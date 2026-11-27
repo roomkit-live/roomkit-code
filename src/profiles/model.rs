@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Current `agents.json` version; schema 4 files migrate through `Project::migrate`.
-pub(crate) const PROJECT_SCHEMA: u32 = 5;
+/// Current `agents.json` version; older supported files migrate through `Project::migrate`.
+pub(crate) const PROJECT_SCHEMA: u32 = 6;
 
 pub(crate) const TOOLS: &[&str] = &[
     "code_outline",
@@ -29,6 +29,7 @@ pub(crate) const TOOLS: &[&str] = &[
     "plan_list",
     "plan_update",
     "plan_delete",
+    "memory",
     "docs_list",
     "docs_search",
     "docs_read",
@@ -171,12 +172,21 @@ pub(super) struct Project {
     pub extensions: BTreeMap<String, Extension>,
 }
 impl Project {
-    /// Bring a schema 4 file to the current schema, which only adds global
-    /// agents' extensions; whether it changed.
+    /// Keep restricted inventories intact. Profiles using every previous default gain memory.
     pub(super) fn migrate(&mut self) -> Result<bool, String> {
         match self.schema {
             PROJECT_SCHEMA => Ok(false),
-            4 => {
+            4 | 5 => {
+                for agent in self.agents.values_mut() {
+                    if agent.tools.len() == TOOLS.len() - 1
+                        && TOOLS
+                            .iter()
+                            .filter(|t| **t != "memory")
+                            .all(|old| agent.tools.iter().any(|t| t == old))
+                    {
+                        agent.tools.push("memory".into());
+                    }
+                }
                 self.schema = PROJECT_SCHEMA;
                 Ok(true)
             }

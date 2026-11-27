@@ -14,7 +14,7 @@ pub(crate) use config::valid_id;
 use roomkit_tui::protocol::{Command, Request};
 use roomkit_tui_engine::CommandResult;
 pub(crate) use runtime::McpTools;
-pub(super) use runtime::Runtime;
+pub(crate) use runtime::Runtime;
 pub(super) use ui::Pending;
 
 impl Profiles {
@@ -203,7 +203,7 @@ impl Profiles {
                 .and_then(|c| c.server.as_ref())
                 .filter(|s| s.connected())
                 .ok_or("Connect the server before selecting its tools")?;
-            let available = ui::available(id, live);
+            let available = ui::available(&self.mcp_runtime, id, live);
             if let Selection::Toggle { tool, .. } = selection {
                 if !available.iter().any(|t| t.name == tool) {
                     return Err("Tool is no longer available".into());

@@ -119,6 +119,8 @@ fn a_paragraph_about_tools_comes_only_with_one_of_them() {
     for text in [
         "plan_mode_enter asks the user",
         "manage durable plans",
+        "Project memory holds durable project facts",
+        "read project-memory.md",
         "RoomKit Code's own user guide",
         "document_id experimental-executor-pool.md",
         "Web search uses Exa",
@@ -153,7 +155,7 @@ fn a_paragraph_s_tag_names_tools_an_agent_can_have() {
     let tagged: Vec<(&str, &str)> = INSTRUCTIONS.split("\n\n").filter_map(tagged).collect();
     // Only a paragraph's opening is read as its tag.
     assert_eq!(tagged.len(), INSTRUCTIONS.matches("{with ").count());
-    assert_eq!(tagged.len(), 12);
+    assert_eq!(tagged.len(), 14);
     for name in tagged.iter().flat_map(|(names, _)| names.split(' ')) {
         assert!(known.contains(&name) || name == "mcp__*", "{name}");
     }

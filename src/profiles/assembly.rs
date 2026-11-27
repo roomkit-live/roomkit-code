@@ -64,6 +64,7 @@ impl Profiles {
             )
         };
         let extensions = crate::agent::Extensions {
+            project_memory: self.project_memory.clone(),
             executor_inventory: inventory,
             skills,
             skill_roots,

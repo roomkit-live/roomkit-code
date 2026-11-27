@@ -29,6 +29,7 @@ mod permissions;
 mod plans;
 mod processes;
 mod profiles;
+mod project_memory;
 mod providers;
 mod remote;
 mod services;

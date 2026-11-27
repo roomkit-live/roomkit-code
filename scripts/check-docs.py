@@ -26,6 +26,8 @@ replies = [
     "Guide search complete.",
     ("docs_read", {"document_id": "command-hooks.md", "limit": 5, "_roomkit_intent": "I read the hooks section"}),
     "Docs fixture complete.",
+    ("docs_read", {"document_id": "project-memory.md", "limit": 20}),
+    "Memory guide read.",
 ]
 
 
@@ -126,7 +128,11 @@ try:
                     Path(os.environ["ROOMKIT_DOCS_CAPTURE"]).write_bytes(screen)
                 assert b"Allow docs_" not in screen, "Guide lookups must not ask for approval"
                 assert b'"data":' not in screen, "Tools must use their product presentations"
-                assert len(requests) == 4
+                offset = app.send("How does project memory work?\r")
+                app.wait("Memory guide read.", offset)
+                assert "256 KiB" in requests[5]["messages"][-1]["content"]
+                assert "1/32" in requests[5]["messages"][-1]["content"]
+                assert len(requests) == 6
                 # The model reads the results as lines: the first hit's quoted
                 # ID, then the page's lines numbered as read numbers them.
                 found = requests[1]["messages"][-1]["content"]

@@ -1918,6 +1918,7 @@ mod docs;
 mod exit_summary;
 mod files;
 mod global_agents;
+mod project_memory;
 
 mod processes;
 

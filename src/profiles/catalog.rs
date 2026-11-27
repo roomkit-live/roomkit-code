@@ -308,7 +308,7 @@ fn read_project_files(root: &std::path::Path) -> Result<Vec<Document<Project>>, 
         }
         let document = Document::<Project>::load(path.clone())
             .map_err(|_| format!("Cannot read {}; repair it first", path.display()))?;
-        if !matches!(document.value.schema, 4 | PROJECT_SCHEMA) {
+        if !matches!(document.value.schema, 4 | 5 | PROJECT_SCHEMA) {
             return Err(format!("{} has an unsupported version", path.display()));
         }
         documents.push(document);
