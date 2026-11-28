@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Command hooks run for the tool calls of the turns the application opens by itself: after a background process ends, in a delegated task and when its result comes back. With a `PreToolUse` hook enabled, every call of such a turn was refused, and no `PostToolUse` hook saw them.
+
 - The Herdr integration waits longer between the tries of a report that keeps failing and records it once, where a call that succeeded beside it restarted both each second. A downloaded GGUF is written to disk before it is listed as installed. A second launch that finds the project still being opened by another says so.
 
 - `list_sessions` tells the agent that the session group could not be reached, as `send_message` does, instead of listing no session. The executor inventory still lists its workers after the Redis server's clock stepped back, and a worker whose record does not read is refused a slot rather than failing the claim.

@@ -2075,6 +2075,11 @@ turn runs `TurnStart`, its tool hooks and `TurnEnd` as any turn. A turn that Ctr
 starts to answer such a message runs them too, under its own `turn_id`, with no
 `UserPromptSubmit`: no new words came with it.
 
+A turn the application opens by itself, as when a background process ends, an
+agent is handed a task or a task's result comes back, runs the tool hooks of each
+of its calls, under the engine's `turn_id`. It has no `TurnStart` or `TurnEnd`. A
+delegated task's calls name its own room as `session_id`.
+
 A session remains open when switching views or agents; those actions do not fire
 `SessionEnd`. Returning to a session in the same execution does not fire another
 `SessionStart`. Reopening it after application restart opens a new execution.

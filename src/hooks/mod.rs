@@ -5,13 +5,14 @@ mod lifecycle;
 mod payload;
 mod remote;
 mod ui;
+mod unsubmitted;
 
 use catalogue::{Catalogue, Entry};
 use lifecycle::Lifecycle;
 pub(crate) use lifecycle::prompt_text;
 pub(crate) use payload::tool_outcome;
 use payload::*;
-use roomkit::ToolCallEvent;
+use roomkit::{ToolCallEvent, model::Room};
 use roomkit_hooks::{Decision, Event as HookEvent, Report, RunStatus};
 use roomkit_tui::protocol::{OperationId, Rejection};
 use roomkit_tui_engine::{LifecycleFuture, SessionConfig, SessionLifecycle, TurnOutcome};
@@ -115,6 +116,8 @@ struct State {
     completed: BTreeSet<Key>,
     recent: VecDeque<Receipt>,
     worker_reports: BTreeMap<String, remote::Pending>,
+    /// The calls of turns no view submitted, waiting for their outcome.
+    unsubmitted: BTreeMap<unsubmitted::Call, unsubmitted::Kept>,
     panel: Option<ui::Panel>,
 }
 
@@ -160,6 +163,7 @@ impl Hooks {
                 completed: BTreeSet::new(),
                 recent: VecDeque::new(),
                 worker_reports: BTreeMap::new(),
+                unsubmitted: BTreeMap::new(),
                 panel: None,
             }),
             background: TaskTracker::new(),
@@ -257,15 +261,18 @@ impl Hooks {
                 // runs with that agent's next turn there once it has begun,
                 // even before the first turn's TurnEnd. The engine offers no
                 // way to wait for its observers of a turn, and its event
-                // names no turn.
-                let turn = hooks.tool_turn(&event);
+                // names no turn. A call of a turn no view submitted is
+                // found by its own ID instead.
                 let hooks = hooks.clone();
-                let task = turn.map(|turn| {
-                    let tracker = turn.posts.clone();
-                    tracker.spawn(async move {
-                        hooks.post_tool(&event, turn.context.clone()).await;
-                    })
-                });
+                let task = match hooks.tool_turn(&event) {
+                    Some(turn) => {
+                        let tracker = turn.posts.clone();
+                        Some(tracker.spawn(async move {
+                            hooks.post_tool(&event, turn.context.clone()).await;
+                        }))
+                    }
+                    None => hooks.after_unsubmitted_tool(event),
+                };
                 async move {
                     if let Some(task) = task {
                         let _ = task.await;
@@ -294,23 +301,14 @@ impl Hooks {
             .map(|(_, turn)| turn.clone())
     }
 
-    pub async fn before_tool(&self, event: &ToolCallEvent) -> Decision {
-        let Some(turn) = self.tool_turn(event) else {
-            // Headless callers must install the same lifecycle if configured
-            // controls are enabled. Never silently bypass their checks.
-            return if self
-                .state()
-                .catalogue
-                .selected()
-                .iter()
-                .any(|e| e.event == HookEvent::PreToolUse)
-            {
-                Decision::Deny("Configured hooks require an application turn lifecycle".into())
-            } else {
-                Decision::Continue
-            };
-        };
-        self.pre_tool(event, turn.context.clone()).await
+    /// The PreToolUse hooks of a call in `room`: under the turn a view
+    /// submitted when the call is one's, else under the engine's own. No
+    /// call passes without them.
+    pub async fn before_tool(&self, event: &ToolCallEvent, room: &Room) -> Decision {
+        match self.tool_turn(event) {
+            Some(turn) => self.pre_tool(event, turn.context.clone()).await,
+            None => self.before_unsubmitted_tool(event, room).await,
+        }
     }
 
     async fn pre_tool(&self, event: &ToolCallEvent, mut context: Context) -> Decision {

@@ -75,7 +75,7 @@ async fn decide(
     }
     let decision = match worker_turn {
         Some(id) => hooks.before_worker_tool(&event, &context.room, id).await,
-        None => hooks.before_tool(&event).await,
+        None => hooks.before_tool(&event, &context.room).await,
     };
     let review = match decision {
         roomkit_hooks::Decision::Deny(reason) => return block(reason),

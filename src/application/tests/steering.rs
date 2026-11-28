@@ -293,6 +293,63 @@ fn hold_first_answer(app: &Application, gate: watch::Receiver<bool>, held: Arc<N
     app.kit.hook(trigger, hold, options).unwrap();
 }
 
+/// A turn the application opens, as the one a background job's end gives an
+/// idle agent, runs the command hooks of its calls: a hook reviews them, and
+/// none are refused for want of a turn a view submitted.
+#[tokio::test]
+async fn a_turn_the_application_opened_runs_the_hooks_of_its_calls() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    configure(project.path(), &["PreToolUse", "PostToolUse"], "", false);
+    let calls = vec![("write", json!({"path":"note.txt", "content":"first"}))];
+    let mock = Mock::start(calls).await;
+    let settings = settings(project.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    enable_all(&app);
+    let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+    let task = tokio::spawn(app.session().run(host));
+    let Event::Snapshot(_) = event(&client).await else {
+        panic!("Expected snapshot");
+    };
+    let owner = serde_json::to_string(&(app.view.room.as_str(), app.view.agent.as_str())).unwrap();
+    let input = roomkit_tools_process::ProcessStartInput::new("true");
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let processes = &app.profiles.resources.processes;
+    processes.start(Some(&owner), input, &cancel).await.unwrap();
+    // The hook let the call through to the person's approval.
+    let permission = approval(&client).await;
+    let decide = Command::Decide {
+        permission: permission.id,
+        decision: Decision::Allow,
+    };
+    command(&client, 1, "main", decide);
+    let hooked = |name: &str| {
+        let events = records(project.path());
+        let of_the_call = events
+            .into_iter()
+            .filter(|e| e["hook_event_name"] == name && e["tool_name"] == "write");
+        of_the_call.collect::<Vec<_>>()
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while hooked("PostToolUse").is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(project.path().join("note.txt").exists());
+    let before = hooked("PreToolUse");
+    assert_eq!(before.len(), 1, "{before:?}");
+    assert_eq!(before[0]["session_id"], "main");
+    // The engine's turn, which no operation of a view names.
+    let turn = before[0]["roomkit"]["turn_id"].as_str().unwrap();
+    assert!(!turn.is_empty());
+    assert_eq!(hooked("PostToolUse")[0]["roomkit"]["turn_id"], turn);
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.close().await.unwrap();
+}
+
 #[tokio::test]
 async fn a_message_the_turn_no_longer_reads_gets_a_turn_with_its_hooks() {
     let project = tempfile::tempdir().unwrap();

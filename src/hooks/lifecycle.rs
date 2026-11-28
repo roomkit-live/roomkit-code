@@ -31,9 +31,7 @@ impl Lifecycle {
         {
             let mut state = hooks.state();
             if !state.catalogue.problems.is_empty() {
-                return Err(Rejection::refused(
-                    "Hook configuration has errors; inspect /hooks and reload after correcting it",
-                ));
+                return Err(Rejection::refused(super::unsubmitted::CONFIGURATION_ERRORS));
             }
             if state.completed.contains(&key) {
                 return Ok(None);

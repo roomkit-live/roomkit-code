@@ -235,6 +235,46 @@ async fn a_worker_takes_its_conversation_s_mode() {
     assert_eq!(written, "from the worker");
 }
 
+/// A task's agent works under the project's command hooks: its calls run
+/// them in its own room, as part of its conversation's session.
+#[tokio::test]
+async fn a_worker_s_calls_run_the_project_s_hooks() {
+    use super::hooks::{configure, enable_all, records};
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    configure(project.path(), &["PreToolUse", "PostToolUse"], "", false);
+    let (base, requests, server) = server(task_for("review")).await;
+    let settings = settings(project.path(), state.path(), &base);
+    with_a_reviewer(&settings).await;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    enable_all(&app);
+    app.policy.set("main", "yolo").unwrap();
+    turn(&app).await;
+    until_handed_back(&requests).await;
+    until_relayed(&app).await;
+    let written = std::fs::read_to_string(project.path().join("worker.txt")).unwrap();
+    assert_eq!(written, "from the worker");
+    let of_the_write = |name: &str| {
+        records(project.path())
+            .into_iter()
+            .find(|e| e["hook_event_name"] == name && e["tool_name"] == "write")
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while of_the_write("PostToolUse").is_none() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let before = of_the_write("PreToolUse").unwrap();
+    assert_eq!(before["roomkit"]["agent_id"], "review");
+    assert_ne!(before["session_id"], "main");
+    let after = of_the_write("PostToolUse").unwrap();
+    assert_eq!(after["roomkit"]["turn_id"], before["roomkit"]["turn_id"]);
+    app.close().await.unwrap();
+    server.abort();
+}
+
 /// What the gate answered a `delegate_task` call with `arguments`, which it
 /// refused: no worker ran.
 async fn refusal(arguments: Value) -> String {

@@ -42,20 +42,15 @@ impl Hooks {
     }
 
     fn worker_context(&self, room: &Room, turn: &str) -> Result<Context, String> {
-        let parent = room
-            .metadata
-            .get("parent_room_id")
-            .and_then(serde_json::Value::as_str)
-            .ok_or("Missing worker parent conversation")?;
+        if !room.metadata.contains_key("parent_room_id") {
+            return Err("Missing worker parent conversation".into());
+        }
         if !self.state().catalogue.problems.is_empty() {
             return Err("Invalid hook configuration. Inspect /hooks on the coordinator.".into());
         }
         let agent = roomkit::model::ChannelId::new(crate::names::REMOTE_AGENT)
             .map_err(|e| e.to_string())?;
-        let mut view =
-            roomkit_tui_engine::SessionConfig::new(room.id.clone(), agent, crate::names::TERMINAL);
-        view.group = Some(parent.into());
-        Ok(self.context(&self.session(&view), crate::names::REMOTE_AGENT, Some(turn)))
+        Ok(self.unsubmitted(room, &agent, Some(turn)))
     }
 
     pub(crate) async fn before_worker_tool(
