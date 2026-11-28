@@ -35,6 +35,7 @@ mod remote;
 mod services;
 mod sessions;
 mod shell;
+mod stderr;
 mod storage;
 mod sync;
 mod system_row;
@@ -55,10 +56,7 @@ async fn main() -> ExitCode {
     match launch().await {
         Ok(code) => code,
         Err(error) => {
-            // The terminal may be gone: a failed write must not turn the
-            // error into a panic.
-            use std::io::Write;
-            let _ = writeln!(std::io::stderr(), "roomkit-code: {error}");
+            stderr::say(&format!("roomkit-code: {error}"));
             ExitCode::FAILURE
         }
     }

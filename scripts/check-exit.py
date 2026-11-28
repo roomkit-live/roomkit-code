@@ -212,10 +212,10 @@ try:
         assert not any("background process" in line for line in lines), lines
         assert len(requests) == 3
 
-        # SIGTERM, SIGHUP on a live terminal, and the terminal closing under
-        # the application all close as leaving does: the agent's process is
-        # stopped, and SIGTERM still prints the report.
-        for number in (signal.SIGTERM, signal.SIGHUP, None):
+        # SIGTERM, SIGINT, SIGHUP on a live terminal, and the terminal closing
+        # under the application all close as leaving does: the agent's process
+        # is stopped, and SIGTERM and SIGINT still print the report.
+        for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, None):
             del requests[:]
             (project / "server.pid").unlink()
             app = App([str(binary), str(project), "--state-dir", str(storage), "--base-url", url, "--model", "fixture",
@@ -232,10 +232,10 @@ try:
                 continue
             lines = app.quit(number)
             assert not alive(pid), f"Signal {number} must stop the background process"
-            if number == signal.SIGTERM:
+            if number in (signal.SIGTERM, signal.SIGINT):
                 assert after(lines, "Stopped 1 background process:").split(" · ")[1] == SERVER, lines
 finally:
     server.shutdown()
     server.server_close()
     thread.join(timeout=5)
-print("PTY exit passed: Ctrl+D warns about running processes in the conversation and over a panel, resume command reopens the session, usage spans launches, background process stopped, SIGTERM, SIGHUP and a closed terminal close the same way.")
+print("PTY exit passed: Ctrl+D warns about running processes in the conversation and over a panel, resume command reopens the session, usage spans launches, background process stopped, SIGTERM, SIGINT, SIGHUP and a closed terminal close the same way.")

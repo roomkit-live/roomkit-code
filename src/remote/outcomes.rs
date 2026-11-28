@@ -112,7 +112,9 @@ pub(super) fn install(executor: &TurnExecutor) -> crate::Result<std::sync::Arc<R
                 fields.insert("receipt".into(), receipt.into());
                 fields.insert("outcome".into(), serde_json::json!(outcome));
                 if let Err(error) = host.call(OUTCOME, Some(fields)).await {
-                    eprintln!("Could not report worker tool outcome to owner: {error}");
+                    crate::stderr::say(&format!(
+                        "Could not report worker tool outcome to owner: {error}"
+                    ));
                 }
             }
         },

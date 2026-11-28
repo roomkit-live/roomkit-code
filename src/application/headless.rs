@@ -15,7 +15,7 @@ use roomkit_tui::protocol::{Snapshot, limits::MAX_TEXT_BYTES};
 use roomkit_tui::{Client, connection};
 
 use super::{Application, QUEUE, integrations::Resume};
-use crate::{Result, config::Cli, config::Settings};
+use crate::{Result, config::Cli, config::Settings, stderr::say};
 
 mod driver;
 mod progress;
@@ -113,7 +113,7 @@ pub(crate) async fn run(settings: Settings, prompt: Prompt) -> Result<ExitCode> 
             crate::exit_summary::Fate::Unknown
         };
         for line in summary.process_report(fate) {
-            eprintln!("{line}");
+            say(&line);
         }
     }
     let outcome = driven??;
@@ -176,7 +176,7 @@ async fn report(
     let summary = summarize(app, settings, outcome).await?;
     apart(outcome);
     for line in summary.conversation_report() {
-        eprintln!("{line}");
+        say(&line);
     }
     Some(summary)
 }
@@ -184,7 +184,7 @@ async fn report(
 /// A blank line, under the progress someone watched.
 fn apart(outcome: &Outcome) {
     if outcome.framed {
-        eprintln!();
+        say("");
     }
 }
 
@@ -234,7 +234,7 @@ fn drive(
 
 fn tell(lines: &[String]) {
     for line in lines {
-        eprintln!("{line}");
+        say(line);
     }
 }
 
@@ -253,7 +253,7 @@ fn write_answer(answer: &str) {
     if let Err(error) = written
         && error.kind() != std::io::ErrorKind::BrokenPipe
     {
-        eprintln!("Cannot write the answer: {error}");
+        say(&format!("Cannot write the answer: {error}"));
     }
 }
 
@@ -282,12 +282,6 @@ struct Signals {
     pending: Arc<AtomicBool>,
 }
 
-/// Writes `line` to the standard error, whatever became of it.
-fn say(line: &str) {
-    use std::io::Write;
-    let _ = writeln!(std::io::stderr(), "{line}");
-}
-
 fn listen() -> Result<Signals> {
     use tokio::signal::unix::{SignalKind, signal};
     let pending = Arc::new(AtomicBool::new(false));
@@ -302,8 +296,6 @@ fn listen() -> Result<Signals> {
             while signals.recv().await.is_some() {
                 match received.fetch_add(1, Ordering::SeqCst) {
                     0 => pending.store(true, Ordering::SeqCst),
-                    // The terminal may be gone: a failed write must not
-                    // panic here.
                     1 => say("Closing; signal once more to stop without waiting."),
                     _ => {
                         say("Stopped without waiting for the turn to close.");

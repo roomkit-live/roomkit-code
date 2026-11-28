@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ctrl+C while RoomKit Code opens or closes, and a SIGINT sent to it, close it as leaving does: the agents' processes are stopped. An unattended launch whose output and error readers left, as with `2>&1 | head`, still closes and keeps its exit status, and a worker goes on when its standard error is gone.
+
 - A message written while the agent works reaches the running turn when the conversation keeps its own model or effort, and on a worker serving several profiles. It previously waited for the turn to end.
 
 - Session messages accepted before a restart stay pending if the group's Redis is unavailable. Local correspondence continues. Relaunching in the original group delivers the pending messages.

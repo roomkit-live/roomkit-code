@@ -87,7 +87,7 @@ pub(crate) async fn advertise(
             match registry.publish(&worker).await {
                 Ok(true) => {
                     if unreachable.take().is_some() {
-                        eprintln!("Executor pool reached again: this worker is listed.");
+                        crate::stderr::say("Executor pool reached again: this worker is listed.");
                     }
                 }
                 Ok(false) => {
@@ -98,7 +98,9 @@ pub(crate) async fn advertise(
                 // stops rather than serve nobody without end.
                 Err(error) => match unreachable {
                     None => {
-                        eprintln!("{error}: this worker is not listed until it is reached again.");
+                        crate::stderr::say(&format!(
+                            "{error}: this worker is not listed until it is reached again."
+                        ));
                         unreachable = Some(tokio::time::Instant::now());
                     }
                     Some(since) if since.elapsed() >= UNREACHABLE_FOR => {

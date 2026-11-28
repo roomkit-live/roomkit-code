@@ -243,6 +243,18 @@ def closed_output(root, model):
     assert "panicked" not in err and "Session: " in err, err
 
 
+def closed_report(root, model):
+    # Standard error closed with the output, as `2>&1 | head -n 1` leaves it:
+    # the launch still closes, and ends as its turn did.
+    process = launch(root, model, "--prompt", "Write a lot.", stderr=subprocess.STDOUT)
+    process.stdout.readline()
+    process.stdout.close()
+    process.wait(timeout=60)
+    assert process.returncode == 0, process.returncode
+    logs = list((root / "storage" / "state").rglob("diagnostics.jsonl"))
+    assert any("application_stopped" in log.read_text() for log in logs), logs
+
+
 def closed_events(root, model):
     # Events written to a reader that left fail the launch, which still says
     # what it leaves running.
@@ -552,6 +564,7 @@ scenario("a GLM model gets its reasoning back", [call("list", path=".", _thought
 scenario("another model does not", [call("list", path=".", _thought="I look first."), ANSWER], reasoning_stays_home_elsewhere)
 scenario("a second launch on one session", ["Answer one.", "Answer two."], same_session)
 scenario("standard output closed early", ["\n".join(["line"] * 20_000)], closed_output)
+scenario("standard output and error closed early", ["\n".join(["line"] * 20_000)], closed_report)
 scenario("events to a reader that left", [call("process_start", command="echo $$ > server.pid; exec sleep 60"), "\n".join(["line"] * 20_000)], closed_events)
 scenario("a message too long", [ANSWER], too_long)
 scenario("SIGINT interrupts the turn", [call("shell", command="sleep 30", timeout_ms=60000), ANSWER], interrupted)

@@ -1,12 +1,13 @@
 //! The signals that end an interactive launch.
 //!
-//! The terminal reads the keyboard, so Ctrl+C never raises SIGINT here. A
-//! SIGTERM, or the SIGHUP a closing terminal sends, would end the process
-//! where it stands: the agents' processes would outlive it and nothing
-//! would be closed. The launch listens from before it opens anything, and
-//! closes on the first one as it does when the user leaves.
+//! A SIGTERM, the SIGHUP a closing terminal sends, or a SIGINT would end
+//! the process where it stands: the agents' processes would outlive it and
+//! nothing would be closed. The view reads the keyboard, so Ctrl+C raises
+//! no SIGINT while it shows; it does while the application opens and once
+//! the view returned the terminal, when a close is under way. The launch
+//! listens from before it opens anything, and closes on the first signal
+//! as it does when the user leaves.
 
-use std::io::Write;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -23,6 +24,7 @@ pub(super) enum Signal {
     /// The terminal is gone: nothing can be written to it any more, and
     /// the view that reads it may never return.
     Hangup = 2,
+    Interrupt = 3,
 }
 
 impl Signal {
@@ -31,6 +33,7 @@ impl Signal {
         match self {
             Self::Terminate => 15,
             Self::Hangup => 1,
+            Self::Interrupt => 2,
         }
     }
 
@@ -41,9 +44,9 @@ impl Signal {
 
     /// Ends the process with [`Self::exit_code`], without waiting for the
     /// runtime's threads: the view's may never end once its terminal is
-    /// gone.
+    /// gone. Nothing is flushed here: the view's thread may hold the
+    /// standard output's lock in a write that never returns.
     pub(super) fn exit(self) -> ! {
-        let _ = std::io::stdout().flush();
         std::process::exit(128 + i32::from(self.number()))
     }
 
@@ -51,6 +54,7 @@ impl Signal {
         match mark {
             1 => Some(Self::Terminate),
             2 => Some(Self::Hangup),
+            3 => Some(Self::Interrupt),
             _ => None,
         }
     }
@@ -85,9 +89,9 @@ impl Signals {
 /// The signals after which the launch exits without waiting for its close.
 const EXIT_AT: u8 = 3;
 
-/// Listens for SIGTERM and SIGHUP. The launch closes on the first one. The
-/// second changes nothing: the close is under way. The third exits at once,
-/// should the close never end.
+/// Listens for SIGTERM, SIGHUP and SIGINT. The launch closes on the first
+/// one. The second changes nothing: the close is under way. The third exits
+/// at once, should the close never end.
 pub(super) fn listen() -> Result<Signals> {
     let (first, received) = watch::channel(0);
     let first = Arc::new(first);
@@ -95,6 +99,7 @@ pub(super) fn listen() -> Result<Signals> {
     let kinds = [
         (SignalKind::terminate(), Signal::Terminate),
         (SignalKind::hangup(), Signal::Hangup),
+        (SignalKind::interrupt(), Signal::Interrupt),
     ];
     for (kind, signalled) in kinds {
         let mut signals = signal(kind)?;
@@ -109,12 +114,7 @@ pub(super) fn listen() -> Result<Signals> {
                     unset
                 });
                 if count.fetch_add(1, Ordering::SeqCst) + 1 >= EXIT_AT {
-                    // The terminal may be gone: a failed write must not
-                    // panic here.
-                    let _ = writeln!(
-                        std::io::stderr(),
-                        "Stopped without waiting for the close to end."
-                    );
+                    crate::stderr::say("Stopped without waiting for the close to end.");
                     std::process::exit(128 + i32::from(signalled.number()));
                 }
             }

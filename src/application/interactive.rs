@@ -127,7 +127,7 @@ pub(super) async fn until_left(
 pub(super) fn report(app: &Application, summary: &crate::exit_summary::Summary, stopped: bool) {
     summary.print_processes(stopped);
     if let Some(notice) = app.profiles.diagnostics.panic_notice() {
-        eprintln!("{notice}");
+        crate::stderr::say(&notice);
     }
 }
 
