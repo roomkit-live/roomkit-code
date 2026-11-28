@@ -99,6 +99,10 @@ async fn gguf_search_download_retry_select_and_offline_resume() {
     let (url, server) = hub(bad.clone(), None).await;
     let cache = tempfile::tempdir().unwrap();
     let cache_dir = cache.path().join("hub");
+    let blobs = cache_dir.join("models--example--coder/blobs");
+    std::fs::create_dir_all(&blobs).unwrap();
+    let first_blob = blobs.join(crate::digest::sha256_hex(b"one"));
+    std::fs::write(&first_blob, b"bad").unwrap();
     crate::local_models::TEST_HUB
         .scope((url.clone(), cache_dir.clone()), async {
             let workspace = tempfile::tempdir().unwrap();
@@ -130,6 +134,7 @@ async fn gguf_search_download_retry_select_and_offline_resume() {
             let mut changes = app.profiles.local_models.downloads.changes.subscribe();
             let _ = model(&app, selected).await;
             background::wait_status(&app, &mut changes, "SHA-256").await;
+            assert_eq!(std::fs::read(&first_blob).unwrap(), b"one");
             assert_eq!(
                 offered(&model(&app, "").await).1.len(),
                 3,

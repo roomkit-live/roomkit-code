@@ -180,10 +180,7 @@ impl Cache {
         let mut done = 0;
         for file in &model.files {
             let target = blobs.join(&file.sha);
-            if !target.metadata().is_ok_and(|m| m.len() == file.size) {
-                super::transfer::download(hub, file, &target, |bytes| progress(done + bytes))
-                    .await?;
-            }
+            super::transfer::download(hub, file, &target, |bytes| progress(done + bytes)).await?;
             done += file.size;
             progress(done);
         }

@@ -201,7 +201,7 @@ def run(options):
         # Release the simulated LLM only after RoomKit steered its active turn.
         deadline = time.monotonic() + 15
         while not db.execute("SELECT 1 FROM private_state WHERE key = ? AND json_extract(value, '$.id') = ? AND json_extract(value, '$.dispatch') = 'Delivered'",
-                             ("roomkit_code:session_mail_dispatch:v1", server.live_id)).fetchone():
+                             ("roomkit_code:session_mail_dispatch:local:v1", server.live_id)).fetchone():
             assert time.monotonic() < deadline, "The live question was not delivered"
             time.sleep(.05)
         server.release_review.set()

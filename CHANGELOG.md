@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Session messages accepted before a restart stay pending if the group's Redis is unavailable. Local correspondence continues. Relaunching in the original group delivers the pending messages.
+- The executor inventory skips malformed binary worker records and still lists healthy workers.
+- Managed llama.cpp builds, servers and GPU probes use a filtered environment. Downloads verify cached GGUF blobs against the expected SHA-256 before publishing a snapshot.
+
 - Try `--compact-tools` to keep a task-oriented inventory in the prompt and load specialized native tool schemas on demand through RoomKit Tool Search.
 
 - Find earlier workspace discussions through the memory tool, read the visible messages around a match, and cite the original decision without saving a note first.

@@ -1,5 +1,6 @@
 //! Interactive session messages. RoomKit owns storage, addressing and steering.
 pub(crate) mod command;
+mod cursor;
 mod delegated;
 mod delivery;
 mod worker;
@@ -171,7 +172,7 @@ impl Messages {
         self.network_unavailable
             .store(true, std::sync::atomic::Ordering::Release);
         let text = format!(
-            "Session group {group} could not be reached: this conversation runs without it. Relaunch once its Redis is reachable."
+            "Session group {group} could not be reached: this conversation runs without it. Accepted group messages will be processed when you relaunch with the group reachable."
         );
         self.tell(kit, room, "session_group_unavailable", group, text)
             .await

@@ -14,6 +14,17 @@ pub(super) async fn download(
     target: &Path,
     progress: impl Fn(u64),
 ) -> Result<(), String> {
+    match tokio::fs::metadata(target).await {
+        Ok(meta) => {
+            if meta.len() == asset.size && checksum(target).await? == asset.sha {
+                return Ok(());
+            }
+            // Existing snapshots can link to this blob even if fetching its replacement fails.
+            tokio::fs::remove_file(target).await.map_err(io)?;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(io(e)),
+    }
     let partial = target.with_extension("incomplete");
     let mut offset = match tokio::fs::metadata(&partial).await {
         Ok(meta) if meta.len() <= asset.size => meta.len(),

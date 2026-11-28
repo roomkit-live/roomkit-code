@@ -145,17 +145,19 @@ impl Row {
 /// The row of one worker's `record`. None for a record that does not read:
 /// one worker of another version, or a damaged entry, is left out rather
 /// than stop the whole group's pool.
-fn row(record: &str, age: u64, used: u16) -> Option<Row> {
+fn row(record: &[u8], age: u64, used: u16) -> Option<Row> {
     Some(Row {
         serving: false,
-        worker: serde_json::from_str(record).ok()?,
+        worker: serde_json::from_slice(record).ok()?,
         age,
         used,
     })
 }
 
+type WorkerRecord = (Vec<u8>, u64, u16);
+
 /// The rows of the `records` that read, and how many did not.
-fn listed(records: Vec<(String, u64, u16)>) -> (Vec<Row>, usize) {
+fn listed(records: Vec<WorkerRecord>) -> (Vec<Row>, usize) {
     let recorded = records.len();
     let rows: Vec<Row> = records
         .into_iter()
@@ -250,7 +252,7 @@ impl Registry {
     /// The workers' rows, and how many records did not read and are left
     /// out.
     pub async fn rows(&self) -> Result<(Vec<Row>, usize)> {
-        let rows: Vec<(String, u64, u16)> = self
+        let rows: Vec<WorkerRecord> = self
             .query(
                 redis::cmd("EVAL")
                     .arg(WORKERS)
@@ -300,21 +302,35 @@ mod tests {
     /// One record that did not read failed the whole listing: the pool
     /// stopped for the group.
     #[test]
-    fn a_record_that_does_not_read_is_left_out_of_the_listing() {
-        assert!(row("{\"name\": 3}", 1, 0).is_none());
-        assert!(row("not json", 1, 0).is_none());
+    fn a_record_that_does_not_read_is_left_out_of_the_listing() -> crate::Result<()> {
+        assert!(row(b"{\"name\": 3}", 1, 0).is_none());
+        assert!(row(b"not json", 1, 0).is_none());
         let record = serde_json::json!({
             "name": "mini", "instance": "i", "os": "macos", "host_os": null,
             "arch": "aarch64", "labels": {}, "slots": 2,
             "metrics": serde_json::to_value(Metrics::default()).unwrap_or_default(),
         });
-        // The listing counts what it left out, for the inventory to say.
-        let (rows, unread) = listed(vec![("not json".into(), 1, 0), (record.to_string(), 4, 1)]);
-        assert_eq!((rows.len(), unread), (1, 1));
-        let listed = row(&record.to_string(), 4, 1);
+        // Decode the same RESP bulk strings the registry receives from Redis.
+        let entry = |data| {
+            redis::Value::Array(vec![
+                redis::Value::BulkString(data),
+                redis::Value::Int(4),
+                redis::Value::Int(1),
+            ])
+        };
+        let reply = redis::Value::Array(vec![
+            entry(b"not json".to_vec()),
+            entry(vec![0xff]),
+            entry(record.to_string().into_bytes()),
+        ]);
+        let records = <Vec<WorkerRecord> as redis::FromRedisValue>::from_redis_value(reply)?;
+        let (rows, unread) = listed(records);
+        assert_eq!(unread, 2);
+        assert_eq!(rows.len(), 1);
         assert_eq!(
-            listed.map(|row| (row.worker.name, row.age, row.used)),
-            Some(("mini".into(), 4, 1))
+            (&*rows[0].worker.name, rows[0].age, rows[0].used),
+            ("mini", 4, 1)
         );
+        Ok(())
     }
 }

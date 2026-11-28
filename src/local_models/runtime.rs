@@ -118,6 +118,61 @@ impl Drop for BuildGroup {
     }
 }
 
+// Git fetches public sources and CMake locates the host toolchain and GPU.
+fn build_shell() -> tokio::process::Command {
+    const BUILD_ENV: &[&str] = &[
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "all_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "GIT_SSL_CAINFO",
+        "CURL_CA_BUNDLE",
+        "CC",
+        "CXX",
+        "CFLAGS",
+        "CXXFLAGS",
+        "CPPFLAGS",
+        "LDFLAGS",
+        "CMAKE_PREFIX_PATH",
+        "CMAKE_GENERATOR",
+        "CMAKE_TOOLCHAIN_FILE",
+        "PKG_CONFIG_PATH",
+        "LD_LIBRARY_PATH",
+        "DYLD_LIBRARY_PATH",
+        "DYLD_FALLBACK_LIBRARY_PATH",
+        "CUDACXX",
+        "CUDAHOSTCXX",
+        "CUDA_HOME",
+        "CUDA_PATH",
+        "CUDA_VISIBLE_DEVICES",
+        "SDKROOT",
+        "DEVELOPER_DIR",
+        "MACOSX_DEPLOYMENT_TARGET",
+        "XDG_CACHE_HOME",
+    ];
+    let mut cmd = tokio::process::Command::new("sh");
+    cmd.env_clear().envs(
+        BUILD_ENV
+            .iter()
+            .filter_map(|&name| std::env::var_os(name).map(|value| (name, value))),
+    );
+    cmd
+}
+
 async fn build(root: &Path, path: &Path, script: &str) -> Result<(), String> {
     let stage = tempfile::Builder::new()
         .prefix(".build-")
@@ -129,7 +184,7 @@ async fn build(root: &Path, path: &Path, script: &str) -> Result<(), String> {
         .tempfile_in(root)
         .map_err(|e| e.to_string())?;
     let output = log.reopen().map_err(|e| e.to_string())?;
-    let mut child = tokio::process::Command::new("sh")
+    let mut child = build_shell()
         .current_dir(stage.path())
         .args(["-c", script, "install-ovh"])
         .arg(path)
@@ -164,6 +219,19 @@ mod tests {
     #![allow(clippy::unwrap_used, reason = "fixture failures should stop the test")]
     use super::*;
     use tokio::time::{Duration, sleep, timeout};
+
+    #[tokio::test]
+    async fn ovh_build_only_inherits_selected_environment() -> crate::Result<()> {
+        let dir = tempfile::tempdir()?;
+        assert!(std::env::var_os("CARGO_MANIFEST_DIR").is_some());
+        build(
+            dir.path(),
+            &dir.path().join("server"),
+            r#"test -n "$PATH" && test -z "${CARGO_MANIFEST_DIR+x}${ROOMKIT_EXECUTOR_REDIS_URL+x}${ROOMKIT_SESSION_GROUP_KEY+x}""#,
+        )
+        .await?;
+        Ok(())
+    }
 
     #[tokio::test]
     async fn cancelled_ovh_build_stops_children_and_removes_staging() {
