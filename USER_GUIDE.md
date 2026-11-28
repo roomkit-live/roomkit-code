@@ -1309,7 +1309,8 @@ expansion reveals more symbols only when that result contains them.
 
 The sidebar's **Files** section lists the files this conversation's agents
 created, modified or deleted, newest first, followed by how many files they only
-read. Click it or use **/files** for the complete list. `write`, `edit` and
+read. Click it or use **/files** for the list, which counts what a very long one
+leaves out. `write`, `edit` and
 `patch` report their own changes. For a `shell` command, the application compares
 the project's files before and after it, honoring `.gitignore`, `.ignore` and
 global excludes even outside a Git repository; such changes are marked

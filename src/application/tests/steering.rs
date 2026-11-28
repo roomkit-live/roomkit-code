@@ -350,6 +350,50 @@ async fn a_turn_the_application_opened_runs_the_hooks_of_its_calls() {
     app.close().await.unwrap();
 }
 
+/// A call Plan refuses in such a turn has its outcome hook too: a refusal
+/// is an outcome, though no hook ran before it.
+#[tokio::test]
+async fn a_call_plan_refuses_in_a_turn_the_application_opened_has_its_outcome_hook() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    configure(project.path(), &["PostToolUseFailure"], "", true);
+    let calls = vec![("write", json!({"path":"note.txt", "content":"first"}))];
+    let mock = Mock::start(calls).await;
+    let settings = settings(project.path(), state.path(), &mock.base_url);
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    enable_all(&app);
+    app.policy.set("main", "plan").unwrap();
+    let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+    let task = tokio::spawn(app.session().run(host));
+    let Event::Snapshot(_) = event(&client).await else {
+        panic!("Expected snapshot");
+    };
+    let owner = serde_json::to_string(&(app.view.room.as_str(), app.view.agent.as_str())).unwrap();
+    let input = roomkit_tools_process::ProcessStartInput::new("true");
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let processes = &app.profiles.resources.processes;
+    processes.start(Some(&owner), input, &cancel).await.unwrap();
+    let refused = || {
+        records(project.path())
+            .into_iter()
+            .find(|e| e["hook_event_name"] == "PostToolUseFailure")
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while refused().is_none() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let refused = refused().unwrap();
+    assert_eq!(refused["tool_name"], "write");
+    assert_eq!(refused["roomkit"]["outcome"], "refused");
+    assert!(!project.path().join("note.txt").exists());
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.close().await.unwrap();
+}
+
 #[tokio::test]
 async fn a_message_the_turn_no_longer_reads_gets_a_turn_with_its_hooks() {
     let project = tempfile::tempdir().unwrap();

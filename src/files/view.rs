@@ -8,7 +8,8 @@ use roomkit_tui_engine::{CommandResult, SessionConfig};
 use super::Files;
 use super::record::{Change, Changed, RETAINED, Record};
 
-/// Most recent changes listed in the sidebar; `/files` lists them all.
+/// Most recent changes listed in the sidebar; `/files` lists as many as
+/// its panel holds.
 pub(super) const SIDEBAR_ENTRIES: usize = 8;
 
 /// The most bytes of a panel's body: the terminal shows no panel past it.

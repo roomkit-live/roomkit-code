@@ -219,11 +219,13 @@ impl Default for Project {
 }
 
 /// The channel IDs an agent cannot take: the terminal's, the person's, and
-/// the engine's own channel, which posts made without a channel come from.
-const RESERVED_IDS: [&str; 3] = [
+/// the engine's own, which posts made without a channel and the records
+/// the engine writes itself come from.
+const RESERVED_IDS: [&str; 4] = [
     crate::names::TERMINAL,
     "local-user",
     roomkit_core::model::HOST_CHANNEL_ID,
+    "system",
 ];
 
 pub(super) fn valid_id(id: &str) -> bool {
@@ -476,7 +478,8 @@ mod tests {
     /// terminal's, the person's or the engine's own.
     #[test]
     fn an_agent_cannot_take_a_channel_the_application_or_the_engine_holds() {
-        for reserved in ["terminal", "local-user", "host"] {
+        let system = roomkit::model::ChannelId::system();
+        for reserved in ["terminal", "local-user", "host", system.as_str()] {
             assert!(!super::valid_id(reserved), "{reserved}");
         }
         assert!(super::valid_id("code") && super::valid_id("hosted-review"));

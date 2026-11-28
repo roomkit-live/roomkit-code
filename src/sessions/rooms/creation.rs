@@ -164,7 +164,9 @@ pub(super) async fn unused_draft(
         {
             continue;
         }
-        if !empty(kit, &room.id).await? {
+        // One that does not read now may be another instance's: it is
+        // passed too, as its lease would have had it passed.
+        if !empty(kit, &room.id).await.unwrap_or(false) {
             continue;
         }
         let Some(claim) = leases.claim(room.id.as_str())? else {

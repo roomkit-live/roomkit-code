@@ -42,7 +42,8 @@ impl Hooks {
     }
 
     fn worker_context(&self, room: &Room, turn: &str) -> Result<Context, String> {
-        if !room.metadata.contains_key("parent_room_id") {
+        let parent = room.metadata.get("parent_room_id");
+        if parent.and_then(serde_json::Value::as_str).is_none() {
             return Err("Missing worker parent conversation".into());
         }
         if !self.state().catalogue.problems.is_empty() {

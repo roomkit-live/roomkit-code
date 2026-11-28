@@ -84,30 +84,54 @@ async fn unavailable_service_is_not_reported_as_no_update() {
 }
 
 /// An asset has no deadline of its own, only a pause it may not exceed: one
-/// that takes longer than that pause in all still comes whole.
+/// that takes longer than that pause in all still comes whole, and one that
+/// stops coming is given up.
 #[tokio::test]
 async fn an_asset_slower_in_all_than_its_idle_limit_still_comes_whole() {
     use std::time::Duration;
     let asset = || async {
         axum::body::Body::from_stream(async_stream::stream! {
             for _ in 0..6 {
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio::time::sleep(Duration::from_millis(150)).await;
                 yield Ok::<_, std::io::Error>(vec![b'x'; 16]);
             }
         })
     };
-    let router = Router::new().route(
-        "/repos/roomkit-live/roomkit-code/releases/assets/1",
-        get(asset),
-    );
+    let stalled = || async {
+        axum::body::Body::from_stream(async_stream::stream! {
+            yield Ok::<_, std::io::Error>(vec![b'x'; 16]);
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        })
+    };
+    let router = Router::new()
+        .route(
+            "/repos/roomkit-live/roomkit-code/releases/assets/1",
+            get(asset),
+        )
+        .route(
+            "/repos/roomkit-live/roomkit-code/releases/assets/2",
+            get(stalled),
+        );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    let idle = Duration::from_millis(300);
+    // 900 ms in all, by steps well within the pause allowed.
+    let idle = Duration::from_millis(750);
     let github = GitHub::with_idle(url, None, FIXTURE_KEY, idle).unwrap();
-    let data = github.small(1, 1024, "Binary").await;
+    let unhurried = Duration::from_secs(20);
+    let data = github.small(1, 1024, "Binary", unhurried).await;
+    let started = std::time::Instant::now();
+    let given_up = github.small(2, 1024, "Binary", unhurried).await;
+    let stalled_for = started.elapsed();
+    // A small file has a deadline in all too, here shorter than the pause.
+    let started = std::time::Instant::now();
+    let overdue = github.small(2, 1024, "Checksum", idle / 3).await;
     task.abort();
     assert_eq!(data.unwrap().len(), 96);
+    assert_eq!(given_up.unwrap_err().to_string(), "Binary download failed");
+    assert!(stalled_for >= idle && stalled_for < Duration::from_secs(10));
+    assert_eq!(overdue.unwrap_err().to_string(), "Checksum download failed");
+    assert!(started.elapsed() < idle);
 }
 
 /// A key made for these tests alone, whose secret half was not kept: the

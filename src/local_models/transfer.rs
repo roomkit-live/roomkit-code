@@ -79,8 +79,7 @@ async fn download(
 }
 
 /// Gives the verified file `partial` its name, `target`, once it is on
-/// disk: a file found under that name is taken as whole from then on, and
-/// never checked again.
+/// disk: a file found under that name is listed as installed from then on.
 async fn publish(partial: &Path, target: &Path) -> Result<(), String> {
     let whole = tokio::fs::File::open(partial).await.map_err(io)?;
     whole.sync_all().await.map_err(io)?;

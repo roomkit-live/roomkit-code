@@ -260,7 +260,8 @@ mod worker {
             let failing = calls.iter().filter(|call| call[1] == "report-metadata");
             failing.count()
         };
-        fixture.wait(|calls| tries(calls) >= 2).await;
+        // The third try starts once the second failure is recorded.
+        fixture.wait(|calls| tries(calls) >= 3).await;
         assert_eq!(*fixture.errors.lock().unwrap(), ["report_failed"]);
         std::fs::write(fixture.root.path().join("mode"), "ok").unwrap();
         reporter.close().await;

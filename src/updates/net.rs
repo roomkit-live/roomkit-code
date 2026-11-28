@@ -84,7 +84,8 @@ impl Release {
 /// The most bytes of a signature file read.
 const SIGNATURE_BYTES: u64 = 4096;
 
-/// How long a release's metadata may take to come.
+/// How long a release's metadata may take to come, and each of its small
+/// files: the checksum and its signature.
 const METADATA_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// How long an asset's download may stay without a byte. It has no deadline
@@ -255,33 +256,48 @@ impl GitHub {
         }
         Ok(Some(release))
     }
-    /// The asset `id`, of at most `most` bytes; `what` names it in an error.
-    async fn small(&self, id: u64, most: u64, what: &str) -> Result<Vec<u8>> {
-        let mut response = self.get(&format!("releases/assets/{id}"), true).await?;
-        let mut data = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| format!("{what} download failed"))?
-        {
-            if (data.len() + chunk.len()) as u64 > most {
-                return Err(format!("{what} file exceeds limit").into());
+    /// The asset `id`, of at most `most` bytes, within `within` in all;
+    /// `what` names it in an error.
+    async fn small(
+        &self,
+        id: u64,
+        most: u64,
+        what: &str,
+        within: std::time::Duration,
+    ) -> Result<Vec<u8>> {
+        let read = async {
+            let mut response = self.get(&format!("releases/assets/{id}"), true).await?;
+            let mut data = Vec::new();
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|_| format!("{what} download failed"))?
+            {
+                if (data.len() + chunk.len()) as u64 > most {
+                    return Err(format!("{what} file exceeds limit").into());
+                }
+                data.extend_from_slice(&chunk);
             }
-            data.extend_from_slice(&chunk);
+            Ok(data)
+        };
+        match tokio::time::timeout(within, read).await {
+            Ok(read) => read,
+            Err(_) => Err(format!("{what} download failed").into()),
         }
-        Ok(data)
     }
 
     pub async fn download(&self, release: &Release) -> Result<(tempfile::NamedTempFile, String)> {
         release.validate()?;
         let binary = release.asset(false)?;
         let checksum = release.asset(true)?;
-        let data = self.small(checksum.id, 1024, "Checksum").await?;
+        let data = self
+            .small(checksum.id, 1024, "Checksum", METADATA_WITHIN)
+            .await?;
         // The checksum is believed once the release key signed it: it then
         // vouches for the binary it names.
         let signature = release.signature()?;
         let signature = self
-            .small(signature.id, SIGNATURE_BYTES, "Signature")
+            .small(signature.id, SIGNATURE_BYTES, "Signature", METADATA_WITHIN)
             .await?;
         let signature =
             std::str::from_utf8(&signature).map_err(|_| "Invalid release signature file")?;

@@ -269,8 +269,10 @@ async fn a_worker_s_calls_run_the_project_s_hooks() {
     let before = of_the_write("PreToolUse").unwrap();
     assert_eq!(before["roomkit"]["agent_id"], "review");
     assert_ne!(before["session_id"], "main");
+    let turn = before["roomkit"]["turn_id"].as_str().unwrap();
+    assert!(!turn.is_empty());
     let after = of_the_write("PostToolUse").unwrap();
-    assert_eq!(after["roomkit"]["turn_id"], before["roomkit"]["turn_id"]);
+    assert_eq!(after["roomkit"]["turn_id"], turn);
     app.close().await.unwrap();
     server.abort();
 }

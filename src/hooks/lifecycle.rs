@@ -31,7 +31,7 @@ impl Lifecycle {
         {
             let mut state = hooks.state();
             if !state.catalogue.problems.is_empty() {
-                return Err(Rejection::refused(super::unsubmitted::CONFIGURATION_ERRORS));
+                return Err(Rejection::refused(super::CONFIGURATION_ERRORS));
             }
             if state.completed.contains(&key) {
                 return Ok(None);

@@ -70,29 +70,22 @@ async fn decide(
         return block("This tool call has no conversation to approve it in.");
     }
     policy.adopt(&context.room);
+    // A worker's call is expected as its report is asked for; any other
+    // here, before Plan can refuse it: a refusal is an outcome too.
+    if worker_turn.is_none() {
+        hooks.expect_outcome(&event, &context.room);
+    }
     if policy.plan_blocks(&event) {
         return policy.gate(channel, event).await;
     }
-    let decision = match worker_turn {
-        Some(id) => hooks.before_worker_tool(&event, &context.room, id).await,
-        None => hooks.before_tool(&event, &context.room).await,
-    };
-    let review = match decision {
-        roomkit_hooks::Decision::Deny(reason) => return block(reason),
-        roomkit_hooks::Decision::Ask(reason) => Some(reason),
-        roomkit_hooks::Decision::Continue => None,
+    let review = match hook_review(hooks, &event, context, worker_turn).await {
+        Ok(review) => review,
+        Err(refusal) => return block(refusal),
     };
     if event.name == crate::permissions::PLAN_EXIT {
         return crate::permissions::approve_exit(policy, channel, plans, event, review).await;
     }
-    if event.name == crate::permissions::PLAN_ENTER
-        && policy.delegated(crate::permissions::room_of(&event))
-    {
-        return block(crate::permissions::NO_MODE_OF_ITS_OWN);
-    }
-    if event.name == DELEGATE
-        && let Some(refusal) = delegation_refusal(gate, &event).await
-    {
+    if let Some(refusal) = standing_refusal(gate, &event).await {
         return block(refusal);
     }
     let asker = policy
@@ -104,6 +97,39 @@ async fn decide(
                 .label(event.channel_id.as_str())
         });
     policy.gate_with_review(channel, event, review, asker).await
+}
+
+/// The review the command hooks ask of the call, if any; their refusal as
+/// the error.
+async fn hook_review(
+    hooks: &Hooks,
+    event: &ToolCallEvent,
+    context: &RoomContext,
+    worker_turn: Option<&str>,
+) -> std::result::Result<Option<String>, String> {
+    let decision = match worker_turn {
+        Some(id) => hooks.before_worker_tool(event, &context.room, id).await,
+        None => hooks.before_tool(event, &context.room).await,
+    };
+    match decision {
+        roomkit_hooks::Decision::Deny(reason) => Err(reason),
+        roomkit_hooks::Decision::Ask(reason) => Ok(Some(reason)),
+        roomkit_hooks::Decision::Continue => Ok(None),
+    }
+}
+
+/// Why the call cannot run whatever the person approves, if it cannot: a
+/// mode a delegated task's agent cannot set, or a task that cannot be
+/// handed over.
+async fn standing_refusal(gate: &Gate, event: &ToolCallEvent) -> Option<String> {
+    let room = crate::permissions::room_of(event);
+    if event.name == crate::permissions::PLAN_ENTER && gate.policy.delegated(room) {
+        return Some(crate::permissions::NO_MODE_OF_ITS_OWN.into());
+    }
+    if event.name == DELEGATE {
+        return delegation_refusal(gate, event).await;
+    }
+    None
 }
 
 /// Why a `delegate_task` call cannot hand its task over, if it cannot: a

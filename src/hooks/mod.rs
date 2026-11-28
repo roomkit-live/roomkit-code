@@ -30,6 +30,11 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 type Key = (String, String, String);
 
+/// What a turn is refused, and a call outside a view's turn, while the
+/// hook configuration does not read.
+const CONFIGURATION_ERRORS: &str =
+    "Hook configuration has errors; inspect /hooks and reload after correcting it";
+
 #[derive(Clone)]
 struct Context {
     payload: Value,
@@ -266,6 +271,7 @@ impl Hooks {
                 let hooks = hooks.clone();
                 let task = match hooks.tool_turn(&event) {
                     Some(turn) => {
+                        hooks.answered_by_a_view(&event);
                         let tracker = turn.posts.clone();
                         Some(tracker.spawn(async move {
                             hooks.post_tool(&event, turn.context.clone()).await;
