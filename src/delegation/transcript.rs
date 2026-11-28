@@ -1,7 +1,7 @@
 //! A delegated task's conversation as text, for `/tasks` (HITL a0875053,
 //! option 1): what its agent was handed and said, and each tool it called
-//! with how the call stands, the latest last. No view shows a task's room
-//! yet; this lets the person follow the work.
+//! with how the call stands, the latest last: the person follows the work
+//! from the conversation, without moving into the task's room.
 
 use std::collections::HashSet;
 
@@ -23,6 +23,9 @@ const LINE_CHARS: usize = 120;
 /// terminal takes of a panel's text.
 const TEXT_BYTES: usize = 24 * 1024;
 
+/// What opens a conversation shown without its start.
+const EARLIER: &str = "(earlier lines not shown)";
+
 /// The channel a task's own message comes from.
 const SYSTEM: &str = "system";
 
@@ -36,19 +39,33 @@ pub(crate) async fn read(
     let Ok(id) = RoomId::new(room) else {
         return "The task's conversation cannot be read.\n".into();
     };
+    // One more than is shown tells whether the room holds earlier events.
     let options = GetTimelineOptions {
-        limit: EVENTS,
+        limit: EVENTS + 1,
         newest_first: true,
         organization_id: organization,
         ..Default::default()
     };
     match kit.get_timeline(&id, options).await {
-        Ok(mut events) => {
-            events.sort_by_key(|event| event.index);
-            render(&events, agent)
-        }
+        Ok(events) => latest(events, agent),
         Err(_) => "The task's conversation cannot be read.\n".into(),
     }
+}
+
+/// The [`EVENTS`] latest of `events` as [`render`] shows them, saying so
+/// when there are more: their lines may all fit, and the conversation would
+/// read as if it started there.
+fn latest(mut events: Vec<RoomEvent>, agent: &str) -> String {
+    events.sort_by_key(|event| event.index);
+    let earlier = events.len() as u64 > EVENTS;
+    if earlier {
+        events.remove(0);
+    }
+    let text = render(&events, agent);
+    if earlier && !text.starts_with(EARLIER) {
+        return format!("{EARLIER}\n{text}");
+    }
+    text
 }
 
 /// The latest lines of `events` within [`TEXT_BYTES`], oldest first: a call
@@ -71,7 +88,7 @@ fn render(events: &[RoomEvent], agent: &str) -> String {
     for line in lines.iter().rev() {
         bytes += line.len() + 1;
         if bytes > TEXT_BYTES {
-            kept.push("(earlier lines not shown)");
+            kept.push(EARLIER);
             break;
         }
         kept.push(line.as_str());
@@ -292,5 +309,26 @@ mod tests {
         assert!(text.len() <= TEXT_BYTES + 32, "{}", text.len());
         assert!(text.starts_with("(earlier lines not shown)\nReview: "));
         assert!(text.contains("Review: 199 ") && !text.contains("Review: 000 "));
+    }
+
+    /// A conversation of more events than are read says that it does not
+    /// start there, even when the lines read all fit.
+    #[test]
+    fn a_conversation_read_in_part_says_it_does_not_start_there() {
+        let short = |count: u64| -> Vec<RoomEvent> {
+            (0..count)
+                .map(|n| {
+                    let text = EventContent::Text(TextContent::new(format!("line {n:03}")));
+                    let mut event = event("agent-3", EventType::Message, text);
+                    event.index = n;
+                    event
+                })
+                .collect()
+        };
+        let whole = latest(short(EVENTS), "Review");
+        assert!(whole.starts_with("Review: line 000\n"), "{whole}");
+        let part = latest(short(EVENTS + 1), "Review");
+        assert!(part.starts_with("(earlier lines not shown)\nReview: line 001\n"));
+        assert!(part.ends_with("Review: line 200\n"));
     }
 }

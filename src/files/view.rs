@@ -11,6 +11,12 @@ use super::record::{Change, Changed, RETAINED, Record};
 /// Most recent changes listed in the sidebar; `/files` lists them all.
 pub(super) const SIDEBAR_ENTRIES: usize = 8;
 
+/// The most bytes of a panel's body: the terminal shows no panel past it.
+const BODY_BYTES: usize = 65_536;
+/// What the body keeps free under its changes for the heading of the files
+/// only read and the two lines that count what was left out.
+const BODY_RESERVE: usize = 256;
+
 impl Files {
     pub async fn sidebar(&self, room: &str) -> SidebarSection {
         let record = self.record(room).await;
@@ -20,7 +26,7 @@ impl Files {
             .iter()
             .take(SIDEBAR_ENTRIES)
             .map(|c| {
-                SidebarEntry::new(c.path.as_str())
+                SidebarEntry::new(label(&c.path))
                     .with_detail(status(c))
                     .with_tone(tone(c.change))
                     .with_action(open())
@@ -111,15 +117,43 @@ pub(super) fn body(record: &Record) -> String {
     if changes.is_empty() {
         body.push_str("  None yet\n");
     }
-    for change in changes {
-        body.push_str(&format!("  {:<16} {}\n", status(change), change.path));
-    }
+    let changes = changes
+        .iter()
+        .map(|change| format!("  {:<16} {}\n", status(change), change.path));
+    list(&mut body, changes, BODY_BYTES - BODY_RESERVE);
     let reads = record.reads();
     body.push_str(&format!("\nRead only ({})\n", reads.len()));
-    for path in reads {
-        body.push_str(&format!("  {path}\n"));
-    }
+    let reads = reads.iter().map(|path| format!("  {path}\n"));
+    list(&mut body, reads, BODY_BYTES - BODY_RESERVE / 2);
     body
+}
+
+/// Adds `lines` to `body` while it stays within `limit` bytes, then a line
+/// that counts those left out.
+fn list(body: &mut String, lines: impl ExactSizeIterator<Item = String>, limit: usize) {
+    let total = lines.len();
+    let mut shown = 0;
+    for line in lines {
+        if body.len() + line.len() > limit {
+            break;
+        }
+        body.push_str(&line);
+        shown += 1;
+    }
+    if shown < total {
+        body.push_str(&format!("  … {} more not shown\n", total - shown));
+    }
+}
+
+/// `path` within the size of a sidebar label, past which the terminal
+/// refuses the whole sidebar: its end is kept, where the file's name is.
+fn label(path: &str) -> String {
+    use roomkit_tui::protocol::limits::MAX_LABEL_BYTES;
+    if path.len() <= MAX_LABEL_BYTES {
+        return path.to_owned();
+    }
+    let kept = path.ceil_char_boundary(path.len() - (MAX_LABEL_BYTES - "…".len()));
+    format!("…{}", &path[kept..])
 }
 
 pub(super) fn status(change: &Changed) -> String {

@@ -189,6 +189,26 @@ fn shell_failures_and_partial_patches_remain_explicit_after_tool_completion() {
             .flatten()
             .any(|span| span.text == "exit 2" && span.tone == Tone::Warning)
     );
+    // A command that runs on in the background has not failed.
+    let background = call(
+        "shell",
+        json!({
+            "cwd":".","exit_code":null,"signal":null,"timed_out":false,"timeout_ms":10000,
+            "output_complete":false,"process_id":"p3",
+            "stdout":{"text":"","truncated":false,"omitted_bytes":0,"total_bytes":0},
+            "stderr":{"text":"","truncated":false,"omitted_bytes":0,"total_bytes":0}
+        }),
+    );
+    let lines = changes::Changes.render_styled(&background, false);
+    assert!(
+        lines
+            .iter()
+            .flatten()
+            .any(|span| span.text == "running in the background as p3" && span.tone == Tone::Muted),
+        "{}",
+        plain(&lines)
+    );
+    assert!(!plain(&lines).contains("exit unknown"));
     let preview = call(
         "patch",
         json!({"dry_run":true,"completed":true,"previews":[],"applied":[],"failure":null}),

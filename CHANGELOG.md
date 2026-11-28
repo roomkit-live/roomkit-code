@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A shell command that runs on in the background shows as running under its process ID, where its card read "exit unknown · incomplete output" as a failure. A changed file with a very long path, or several hundred changed files, no longer freeze the sidebar or empty the `/files` panel. In `/processes`, the page after the last one keeps the latest output instead of an empty page, and a long task's conversation in `/tasks` says when its start is not shown.
+
 - `/resume` lists and dates the sessions by their latest message; a session written in again stayed at the date it was created. A message written while the first turn works no longer names the conversation in place of the request it adds to.
 
 - A delegated task that calls `plan_mode_enter` is told that only the person changes its conversation's mode, instead of being answered that the mode is now Plan while nothing changed. Plan storage that cannot be read says which of its version, conversation, agent, count or selection is wrong. A worker launched with `--compact-tools` may call the discovery tools.

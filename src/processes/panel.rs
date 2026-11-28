@@ -121,7 +121,7 @@ impl Processes {
             "tail" => panel.offsets = None,
             "first" => panel.offsets = Some(first_page(job)),
             "previous" => panel.offsets = Some(previous_page(panel, job)),
-            "next" => panel.offsets = Some(next_page(panel, job)),
+            "next" => panel.offsets = next_page(panel, job),
             _ => return Err("Unknown process action".into()),
         }
         Ok(())
@@ -345,31 +345,36 @@ fn previous_page(panel: &Panel, job: &Job) -> (u64, u64) {
     )
 }
 
-/// The page after the shown one, from the end of the output at the latest.
-fn next_page(panel: &Panel, job: &Job) -> (u64, u64) {
+/// The page after the shown one, the last page at the latest. Once there,
+/// none: the panel follows the latest output, which is that page, rather
+/// than show an empty one past the end.
+fn next_page(panel: &Panel, job: &Job) -> Option<(u64, u64)> {
+    let (out, err) = panel.offsets?;
+    let (last_out, last_err) = last_page(job);
+    let next = (
+        out.saturating_add(PAGE).min(last_out),
+        err.saturating_add(PAGE).min(last_err),
+    );
+    (next != (last_out, last_err)).then_some(next)
+}
+
+/// The last page of each stream, which following the latest output shows.
+fn last_page(job: &Job) -> (u64, u64) {
     let status = &job.process.status;
-    let (out, err) = offsets(panel, job);
     (
-        out.saturating_add(PAGE).min(status.stdout_bytes),
-        err.saturating_add(PAGE).min(status.stderr_bytes),
+        status
+            .stdout_bytes
+            .saturating_sub(PAGE)
+            .max(status.stdout_retained_from),
+        status
+            .stderr_bytes
+            .saturating_sub(PAGE)
+            .max(status.stderr_retained_from),
     )
 }
 
 fn offsets(panel: &Panel, job: &Job) -> (u64, u64) {
-    panel.offsets.unwrap_or_else(|| {
-        (
-            job.process
-                .status
-                .stdout_bytes
-                .saturating_sub(PAGE)
-                .max(job.process.status.stdout_retained_from),
-            job.process
-                .status
-                .stderr_bytes
-                .saturating_sub(PAGE)
-                .max(job.process.status.stderr_retained_from),
-        )
-    })
+    panel.offsets.unwrap_or_else(|| last_page(job))
 }
 
 fn state(job: &Job) -> &'static str {

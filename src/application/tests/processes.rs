@@ -294,7 +294,10 @@ async fn monitor_pages_output_without_consuming_it_and_does_not_tick_when_closed
     assert!(first.body.contains("\nFIRST") && first.body.contains("more available"));
     let next = panel(&app, &action(&first, ":next")).await.unwrap();
     assert!(next.body.contains("LAST"));
-    let previous = panel(&app, &action(&next, ":previous")).await.unwrap();
+    // Past the last page there is none to show: the latest output stays.
+    let end = panel(&app, &action(&next, ":next")).await.unwrap();
+    assert!(end.body.contains("LAST"), "{}", end.body);
+    let previous = panel(&app, &action(&end, ":previous")).await.unwrap();
     assert!(previous.body.contains("\nFIRST") && previous.body.contains("Fixed output page"));
     let tail = panel(&app, &action(&previous, ":tail")).await.unwrap();
     assert!(tail.body.contains("Following latest output") && tail.body.contains("LAST"));

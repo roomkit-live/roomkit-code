@@ -97,7 +97,9 @@ pub(crate) async fn collect(
     let Ok(room) = RoomId::new(&session) else {
         return summary;
     };
-    if crate::sessions::empty(kit, &room).await.unwrap_or(true) {
+    // A conversation that cannot be read is still named, with the command
+    // that reopens it: only an untouched draft has nothing to resume.
+    if crate::sessions::empty(kit, &room).await.unwrap_or(false) {
         return summary;
     }
     summary.usage = usage(kit, &room).await.ok();

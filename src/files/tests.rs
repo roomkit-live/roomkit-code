@@ -8,7 +8,7 @@ use std::time::Duration;
 use roomkit::model::{Metadata, RoomId};
 use roomkit_ai::{AiChannelOptions, AiTool, Tool, ToolFuture};
 
-use super::record::{Record, merge};
+use super::record::{RETAINED, Record, merge};
 use super::snapshot::Digests;
 use super::view::{SIDEBAR_ENTRIES, body, status};
 use super::*;
@@ -350,4 +350,27 @@ async fn the_sidebar_lists_recent_changes_and_counts_files_only_read() {
     let body = body(&files.record("room").await);
     assert!(body.contains("Changed (10)") && body.contains("Read only (1)"));
     assert!(body.contains("too large to compare"));
+}
+
+/// A path past a label's size, or more changes than a panel's body holds,
+/// would make the terminal refuse the whole sidebar or show no panel.
+#[tokio::test]
+async fn long_paths_and_long_lists_stay_within_what_the_terminal_shows() {
+    let files = Files::new(Path::new("."));
+    let deep = format!("{}/name.rs", "répertoire".repeat(40));
+    assert!(deep.len() > 256);
+    let changes: Vec<_> = (0..RETAINED)
+        .map(|i| effect(&format!("{deep}{i}"), Change::Modified, false))
+        .collect();
+    files.observed("room", changes, None).await;
+    let SidebarContent::Entries { entries } = files.sidebar("room").await.content else {
+        panic!("Expected entries");
+    };
+    assert!(entries.iter().all(|entry| entry.label.len() <= 256));
+    let newest = format!("name.rs{}", RETAINED - 1);
+    assert!(entries[0].label.starts_with('…') && entries[0].label.ends_with(&newest));
+    let body = body(&files.record("room").await);
+    assert!(body.len() <= 65_536, "{}", body.len());
+    assert!(body.contains(&format!("Changed ({RETAINED})")));
+    assert!(body.contains("more not shown") && body.contains("Read only (0)"));
 }

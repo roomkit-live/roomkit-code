@@ -176,36 +176,7 @@ impl ToolRenderer for Changes {
                 format!("$ {}", argument(call, "command")),
                 Tone::Code,
             )]);
-            let success =
-                result.exit_code == Some(0) && !result.timed_out && result.output_complete;
-            lines.push(vec![Span::new(
-                format!(
-                    "exit {}{}{}{}",
-                    result
-                        .exit_code
-                        .map(|code| code.to_string())
-                        .unwrap_or_else(|| "unknown".into()),
-                    result
-                        .signal
-                        .map(|signal| format!(" · signal {signal}"))
-                        .unwrap_or_default(),
-                    if result.timed_out {
-                        " · timed out"
-                    } else {
-                        ""
-                    },
-                    if result.output_complete {
-                        ""
-                    } else {
-                        " · incomplete output"
-                    }
-                ),
-                if success {
-                    Tone::Success
-                } else {
-                    Tone::Warning
-                },
-            )]);
+            lines.push(vec![shell_status(&result)]);
             // Keep recovery handles in the preview before potentially long output.
             for (name, captured) in [("stdout", &result.stdout), ("stderr", &result.stderr)] {
                 if let Some(archive) = &captured.archive {
@@ -290,4 +261,42 @@ fn diff(lines: &mut Vec<Line>, diff: &DiffResult, limit: usize) {
             Tone::Muted,
         )]);
     }
+}
+
+/// How a shell command ended. One that runs on in the background as a
+/// process has not ended: it has no exit code and its output is not whole
+/// yet, which is no failure.
+fn shell_status(result: &ShellResult) -> Span {
+    if let Some(process) = &result.process_id {
+        return Span::new(
+            format!("running in the background as {process}"),
+            Tone::Muted,
+        );
+    }
+    let success = result.exit_code == Some(0) && !result.timed_out && result.output_complete;
+    let code = result
+        .exit_code
+        .map_or_else(|| "unknown".into(), |code| code.to_string());
+    let signal = result
+        .signal
+        .map(|signal| format!(" · signal {signal}"))
+        .unwrap_or_default();
+    let timed_out = if result.timed_out {
+        " · timed out"
+    } else {
+        ""
+    };
+    let incomplete = if result.output_complete {
+        ""
+    } else {
+        " · incomplete output"
+    };
+    Span::new(
+        format!("exit {code}{signal}{timed_out}{incomplete}"),
+        if success {
+            Tone::Success
+        } else {
+            Tone::Warning
+        },
+    )
 }
