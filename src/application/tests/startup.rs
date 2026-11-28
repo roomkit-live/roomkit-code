@@ -67,7 +67,7 @@ async fn a_start_that_fails_records_where_it_stopped() {
 async fn a_launch_opens_without_the_session_group_it_cannot_reach() {
     let project = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
-    let mock = Mock::start(vec![]).await;
+    let mock = Mock::start(vec![("list_sessions", json!({}))]).await;
     let mut settings = settings(project.path(), state.path(), &mock.base_url);
     settings.session = Some("alone".into());
     settings.session_group = Some("team".into());
@@ -81,6 +81,12 @@ async fn a_launch_opens_without_the_session_group_it_cannot_reach() {
     });
     assert!(told, "{:?}", opened.items);
     turn(&app).await;
+    // Its agent reads the reason too, not a group without sessions.
+    let listed = mock.requests.lock().unwrap()[1]["messages"].to_string();
+    assert!(
+        listed.contains("could not be reached when this launch"),
+        "{listed}"
+    );
     let log =
         std::fs::read_to_string(app._storage.database.with_file_name("diagnostics.jsonl")).unwrap();
     assert!(log.contains("\"session_group_unavailable\""), "{log}");

@@ -8,7 +8,10 @@ use tokio::sync::OnceCell;
 
 type Result<T> = std::result::Result<T, String>;
 // A record that does not read stops none of these scripts: `pcall` takes
-// its decoding error, and it is replaced, skipped or listed as it is.
+// its decoding error, and it is replaced, skipped, listed as it is or
+// refused a slot. Nor does a heartbeat dated after the server's clock, as
+// one written before that clock stepped back: its age is none, not a
+// negative number the whole listing would be refused for.
 const REGISTER: &str = r#"
 local now = tonumber(redis.call('TIME')[1])
 local name, sample = ARGV[1], ARGV[2]
@@ -40,7 +43,7 @@ for _,name in ipairs(redis.call('ZRANGEBYSCORE', KEYS[1], now-86400, '+inf')) do
             used = redis.call('ZCOUNT',ARGV[1]..':slots:'..w.instance,'('..now,'+inf')
         end
         local seen = tonumber(redis.call('ZSCORE',KEYS[1],name))
-        table.insert(rows,{data,now-seen,used})
+        table.insert(rows,{data,math.max(0,now-seen),used})
     end
 end
 return rows"#;
@@ -48,7 +51,8 @@ const CLAIM: &str = r#"
 local now=tonumber(redis.call('TIME')[1])
 local row=redis.call('GET', KEYS[2])
 if not row then return 0 end
-local w=cjson.decode(row)
+local read,w=pcall(cjson.decode,row)
+if not read or type(w)~='table' or type(w.metrics)~='table' then return 0 end
 if w.instance~=ARGV[2] or w.metrics.available_mib<tonumber(ARGV[4]) or
    tonumber(redis.call('ZSCORE',KEYS[1],ARGV[1]) or 0)<=now-10 then return 0 end
 redis.call('ZREMRANGEBYSCORE',KEYS[3],'-inf',now)

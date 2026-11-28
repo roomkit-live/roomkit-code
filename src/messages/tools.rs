@@ -37,18 +37,32 @@ impl Messages {
         } else {
             Vec::new()
         };
-        if let Ok(net) = self.group_for(&room.id) {
-            match group_contacts(net).await {
-                Ok(peers) => sessions.extend(
-                    peers
-                        .iter()
-                        .map(|p| json!({"name":p.room,"title":p.name,"to":p.key()})),
-                ),
-                Err(error) if sessions.is_empty() => return Err(ToolError::refused(error)),
-                Err(error) => return Ok(json!({"sessions":sessions,"group_error":error})),
-            }
+        match self.group_sessions(&room.id).await {
+            Ok(peers) => sessions.extend(peers),
+            Err(error) if sessions.is_empty() => return Err(ToolError::refused(error)),
+            Err(error) => return Ok(json!({"sessions":sessions,"group_error":error})),
         }
         Ok(json!({"sessions":sessions}))
+    }
+
+    /// The sessions of `room`'s group; none for a conversation that joined
+    /// no group. A group this launch could not reach is an error with its
+    /// reason, as `send_message` gives it: a list without sessions would
+    /// read as a group nobody is in.
+    async fn group_sessions(&self, room: &RoomId) -> Result<Vec<Value>, String> {
+        let unreachable = std::sync::atomic::Ordering::Acquire;
+        let net = match self.group_for(room) {
+            Ok(net) => net,
+            Err(ToolError::Refused(reason)) if self.network_unavailable.load(unreachable) => {
+                return Err(reason);
+            }
+            Err(_) => return Ok(Vec::new()),
+        };
+        let peers = group_contacts(net).await?;
+        Ok(peers
+            .iter()
+            .map(|p| json!({"name":p.room,"title":p.name,"to":p.key()}))
+            .collect())
     }
 
     fn group_for(&self, room: &RoomId) -> Result<&Network, ToolError> {
