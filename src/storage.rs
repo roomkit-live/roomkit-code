@@ -106,11 +106,18 @@ impl Storage {
         })
     }
 
-    pub async fn initialization_lease(&self) -> io::Result<FileLease> {
-        FileLease::exclusive_async(private_file(
-            &self.database.with_file_name("initialize.lock"),
-        )?)
-        .await
+    /// The lease an instance holds while it opens the project's store. One
+    /// still held once the wait is over is said in words: the system's own
+    /// error for it names no cause the person can act on.
+    pub async fn initialization_lease(&self) -> crate::Result<FileLease> {
+        let file = private_file(&self.database.with_file_name("initialize.lock"))?;
+        let held = FileLease::exclusive_async(file).await;
+        held.map_err(|error| match error.kind() {
+            io::ErrorKind::WouldBlock => {
+                "Another RoomKit Code instance is still opening this project; retry shortly".into()
+            }
+            _ => error.into(),
+        })
     }
 }
 

@@ -105,7 +105,10 @@ pub(crate) fn valid_resume(args: &[String]) -> bool {
 
 /// The tries of a call that keeps failing: each waits longer than the one
 /// before, and a failure is recorded when it changes, not at each try, so a
-/// socket that stays away does not fill the log a line a second.
+/// socket that stays away does not fill the log a line a second. They start
+/// over once the whole report is applied, not at each call that succeeds: a
+/// failure sends the report again from its first call, which may well
+/// succeed each time beside the one that fails.
 struct Retries {
     pause: Duration,
     failing: Option<&'static str>,
@@ -197,6 +200,7 @@ impl Reporter {
                 }
                 invalid_logged = report.session.resume.is_none();
                 let Some(action) = sent.next(&report) else {
+                    retries = Retries::default();
                     if wait(POLL, &stop).await {
                         break;
                     }
@@ -204,10 +208,7 @@ impl Reporter {
                 };
                 attempted = true;
                 match call(&endpoint, &mut sequence, action.args(&report), &stop).await {
-                    Ok(()) => {
-                        sent.applied(action, &report);
-                        retries = Retries::default();
-                    }
+                    Ok(()) => sent.applied(action, &report),
                     Err("stopped") => break,
                     Err(code) => {
                         let (first, pause) = retries.failed(code);

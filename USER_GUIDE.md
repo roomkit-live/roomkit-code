@@ -1903,8 +1903,7 @@ Connect activates them within the same 64-tool limit. New tools do not expand an
 existing selection and removed tools are unavailable. Connections survive agent and
 conversation changes and are closed on application exit.
 
-Existing stdio configurations are read automatically and upgraded on the next
-save. This version includes stdio and Streamable HTTP tool discovery and calls.
+This version includes stdio and Streamable HTTP tool discovery and calls.
 Legacy HTTP+SSE transport, MCP OAuth, prompts/resources browsing,
 subscription-based catalogue refresh and
 MCP-hosted skills are not yet exposed. Non-text tool content follows the current

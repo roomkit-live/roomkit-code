@@ -160,7 +160,7 @@ mod worker {
             let root = tempfile::tempdir().unwrap();
             std::fs::write(root.path().join("mode"), mode).unwrap();
             let program = format!(
-                "#!/usr/bin/env python3\nimport json, pathlib, sys, time\nroot = pathlib.Path({})\nwith (root / 'calls').open('a') as log:\n log.write(json.dumps(sys.argv[1:]) + '\\n')\nmode = (root / 'mode').read_text()\nif mode == 'stall': time.sleep(10)\nif mode == 'fail':\n print('PRIVATE RAW FAILURE', file=sys.stderr)\n sys.exit(1)\n",
+                "#!/usr/bin/env python3\nimport json, pathlib, sys, time\nroot = pathlib.Path({})\nwith (root / 'calls').open('a') as log:\n log.write(json.dumps(sys.argv[1:]) + '\\n')\nmode = (root / 'mode').read_text()\nif mode == 'stall': time.sleep(10)\nif mode == 'fail' or (mode == 'fail-metadata' and 'report-metadata' in sys.argv):\n print('PRIVATE RAW FAILURE', file=sys.stderr)\n sys.exit(1)\n",
                 serde_json::to_string(root.path().to_str().unwrap()).unwrap()
             );
             let path = root.path().join("fake-herdr");
@@ -247,6 +247,23 @@ mod worker {
         assert!(sequences.windows(2).all(|pair| pair[0] < pair[1]));
         tokio::time::sleep(Duration::from_millis(150)).await;
         assert_eq!(fixture.calls(), calls);
+    }
+
+    /// A call that keeps failing beside others that succeed is recorded
+    /// once: the calls that succeed between its tries do not make each of
+    /// them a first failure, with a line in the log and the shortest wait.
+    #[tokio::test]
+    async fn a_call_failing_beside_others_that_succeed_is_recorded_once() {
+        let fixture = Fixture::new("fail-metadata");
+        let reporter = fixture.start();
+        let tries = |calls: &[Vec<String>]| {
+            let failing = calls.iter().filter(|call| call[1] == "report-metadata");
+            failing.count()
+        };
+        fixture.wait(|calls| tries(calls) >= 2).await;
+        assert_eq!(*fixture.errors.lock().unwrap(), ["report_failed"]);
+        std::fs::write(fixture.root.path().join("mode"), "ok").unwrap();
+        reporter.close().await;
     }
 
     #[tokio::test]

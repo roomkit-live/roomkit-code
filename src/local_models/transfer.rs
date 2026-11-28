@@ -75,6 +75,15 @@ async fn download(
         tokio::fs::remove_file(&partial).await.map_err(io)?;
         return Err("Model SHA-256 differs from the Hub metadata".into());
     }
+    publish(&partial, target).await
+}
+
+/// Gives the verified file `partial` its name, `target`, once it is on
+/// disk: a file found under that name is taken as whole from then on, and
+/// never checked again.
+async fn publish(partial: &Path, target: &Path) -> Result<(), String> {
+    let whole = tokio::fs::File::open(partial).await.map_err(io)?;
+    whole.sync_all().await.map_err(io)?;
     tokio::fs::rename(partial, target).await.map_err(io)
 }
 
