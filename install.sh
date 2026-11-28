@@ -35,7 +35,7 @@ if "$use_gh"; then
     GH_HOST=github.com gh release download "v$version" --repo "$repo" --pattern "$asset" --pattern "$asset.sha256" ${signature:+--pattern "$signature"} --dir "$work"
 else
     for name in "$asset" "$asset.sha256" $signature; do
-        curl --proto '=https' --proto-redir '=https' -fsSL --connect-timeout 5 --max-time 180 --max-filesize 268435456 "https://github.com/$repo/releases/download/v$version/$name" -o "$work/$name" || fail 'Release download failed. Private repository: use gh auth login first.'
+        curl --proto '=https' --proto-redir '=https' -fsSL --connect-timeout 5 --speed-limit 1024 --speed-time 30 --max-filesize 268435456 "https://github.com/$repo/releases/download/v$version/$name" -o "$work/$name" || fail 'Release download failed. Private repository: use gh auth login first.'
     done
 fi
 if [ -n "$signature" ]; then

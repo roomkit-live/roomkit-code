@@ -84,6 +84,14 @@ impl Release {
 /// The most bytes of a signature file read.
 const SIGNATURE_BYTES: u64 = 4096;
 
+/// How long a release's metadata may take to come.
+const METADATA_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How long an asset's download may stay without a byte. It has no deadline
+/// of its own: its size is bounded, and a binary of a hundred megabytes
+/// must still come over a slow link.
+const IDLE: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// The public key releases are signed for, in minisign's base64. Its secret
 /// half signs each release's checksum files where the release is built, and
 /// is in no release: a binary and a checksum that only come from the same
@@ -138,6 +146,16 @@ impl GitHub {
         Self::with_source("https://api.github.com".into(), token, RELEASE_KEY)
     }
     fn with_source(base: String, token: Option<String>, key: &str) -> Result<Self> {
+        Self::with_idle(base, token, key, IDLE)
+    }
+    /// [`Self::with_source`], an asset's download allowed `idle` without a
+    /// byte.
+    fn with_idle(
+        base: String,
+        token: Option<String>,
+        key: &str,
+        idle: std::time::Duration,
+    ) -> Result<Self> {
         Ok(Self {
             key: key.to_owned(),
             base,
@@ -146,7 +164,7 @@ impl GitHub {
                 .redirect(reqwest::redirect::Policy::none())
                 .user_agent(concat!("roomkit-code/", env!("CARGO_PKG_VERSION")))
                 .connect_timeout(std::time::Duration::from_secs(5))
-                .timeout(std::time::Duration::from_secs(120))
+                .read_timeout(idle)
                 .build()?,
         })
     }
@@ -167,7 +185,7 @@ impl GitHub {
             )
             .header("X-GitHub-Api-Version", "2022-11-28");
         if !asset {
-            request = request.timeout(std::time::Duration::from_secs(10));
+            request = request.timeout(METADATA_WITHIN);
         }
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);

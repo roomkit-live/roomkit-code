@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- An update downloads over a slow connection: the binary's transfer is bounded by a 30-second pause without data, in the application and in `install.sh`, where it was cut after two or three minutes in all.
+
 - Ctrl+C while RoomKit Code opens or closes, and a SIGINT sent to it, close it as leaving does: the agents' processes are stopped. An unattended launch whose output and error readers left, as with `2>&1 | head`, still closes and keeps its exit status, and a worker goes on when its standard error is gone.
 
 - A message written while the agent works reaches the running turn when the conversation keeps its own model or effort, and on a worker serving several profiles. It previously waited for the turn to end.

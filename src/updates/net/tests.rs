@@ -83,6 +83,33 @@ async fn unavailable_service_is_not_reported_as_no_update() {
     }
 }
 
+/// An asset has no deadline of its own, only a pause it may not exceed: one
+/// that takes longer than that pause in all still comes whole.
+#[tokio::test]
+async fn an_asset_slower_in_all_than_its_idle_limit_still_comes_whole() {
+    use std::time::Duration;
+    let asset = || async {
+        axum::body::Body::from_stream(async_stream::stream! {
+            for _ in 0..6 {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                yield Ok::<_, std::io::Error>(vec![b'x'; 16]);
+            }
+        })
+    };
+    let router = Router::new().route(
+        "/repos/roomkit-live/roomkit-code/releases/assets/1",
+        get(asset),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let idle = Duration::from_millis(300);
+    let github = GitHub::with_idle(url, None, FIXTURE_KEY, idle).unwrap();
+    let data = github.small(1, 1024, "Binary").await;
+    task.abort();
+    assert_eq!(data.unwrap().len(), 96);
+}
+
 /// A key made for these tests alone, whose secret half was not kept: the
 /// fixtures below were signed once with it.
 const FIXTURE_KEY: &str = "RWQqrgpISR+AeoB/AdjguT4cwFZh8h7MmPQRPCsXrmfj7CfSag4GSA0p";

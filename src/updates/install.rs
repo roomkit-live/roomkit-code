@@ -278,7 +278,10 @@ impl Installation {
         if previous == old || self.version_at(&previous)?.version != expected {
             return Err("The previous version changed; review rollback again".into());
         }
-        pointer(&self.root(), "previous", old.strip_prefix(self.root())?)?;
-        pointer(&self.root(), "current", previous.strip_prefix(self.root())?)
+        // The version asked for is activated first: stopped between the two,
+        // the rollback happened. The other order would leave both pointers on
+        // the version being left, and the one asked for to be pruned.
+        pointer(&self.root(), "current", previous.strip_prefix(self.root())?)?;
+        pointer(&self.root(), "previous", old.strip_prefix(self.root())?)
     }
 }
