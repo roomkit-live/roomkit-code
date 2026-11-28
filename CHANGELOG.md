@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A message written while the agent works reaches the running turn when the conversation keeps its own model or effort, and on a worker serving several profiles. It previously waited for the turn to end.
+
 - Session messages accepted before a restart stay pending if the group's Redis is unavailable. Local correspondence continues. Relaunching in the original group delivers the pending messages.
 - The executor inventory skips malformed binary worker records and still lists healthy workers.
 - Managed llama.cpp builds, servers and GPU probes use a filtered environment. Downloads verify cached GGUF blobs against the expected SHA-256 before publishing a snapshot.

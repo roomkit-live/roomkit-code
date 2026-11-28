@@ -316,13 +316,15 @@ impl Channel for AgentSlot {
         true
     }
     /// The kit hands a steered message to the turn through the registered
-    /// channel: the agent holding the turn's loop reads it. An agent
-    /// replaced since the turn began has no loop for it; the message then
-    /// gets a turn of its own.
+    /// channel: the agent holding the turn's loop reads it. Every
+    /// configuration is asked: one that holds no loop of the turn still
+    /// answers, with none reached. An agent replaced since the turn began
+    /// has no loop for it; the message then gets a turn of its own.
     fn steer_turn(&self, directive: &SteeringDirective, turn_id: &str) -> Option<usize> {
         self.configurations()
-            .into_iter()
-            .find_map(|agent| agent.steer_turn(directive, turn_id))
+            .iter()
+            .filter_map(|agent| agent.steer_turn(directive, turn_id))
+            .reduce(|reached, more| reached + more)
     }
     /// The slot's own answers, and the tools a room serves its turns, as an AI
     /// channel takes them: `delegate_task`, `task_status` and `cancel_task`

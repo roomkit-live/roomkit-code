@@ -171,6 +171,53 @@ async fn a_message_written_while_a_call_waits_reaches_the_running_turn() {
     app.close().await.unwrap();
 }
 
+/// A conversation that keeps an effort of its own runs its turns on a
+/// configuration of its own: what the person writes while one works reaches
+/// that turn, as it does on the agent's own configuration.
+#[tokio::test]
+async fn a_message_reaches_a_turn_running_on_the_conversation_s_own_settings() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    // The turn writes a note, reads it, then answers.
+    let mock = Mock::start(vec![
+        ("write", json!({"path":"note.txt", "content":"first"})),
+        ("read", json!({"path":"note.txt"})),
+    ])
+    .await;
+    let settings = settings(project.path(), state.path(), &mock.base_url);
+    let mut app = Application::open(&settings, String::new()).await.unwrap();
+    super::conversation_settings::switch(&mut app, &settings, "effort", "high").await;
+    let (client, host) = connection(NonZeroUsize::new(256).unwrap());
+    let task = tokio::spawn(app.session().run(host));
+    let Event::Snapshot(_) = event(&client).await else {
+        panic!("Expected snapshot");
+    };
+
+    submit(&client, 1, "Write the note.");
+    let permission = approval(&client).await;
+    submit(&client, 2, "Mention the second ledger too.");
+    until(&client, |e| matches!(e, Event::MessageSteered { .. })).await;
+    let decide = Command::Decide {
+        permission: permission.id,
+        decision: Decision::Allow,
+    };
+    command(&client, 3, "main", decide);
+    until(&client, |e| finished(e, "operation-1")).await;
+
+    let first = mock.requests.lock().unwrap()[0].clone();
+    assert_eq!(
+        first["reasoning_effort"], "high",
+        "The turn ran on the conversation's own configuration"
+    );
+    assert!(
+        asked(&mock, 1).contains("Mention the second ledger too."),
+        "The turn read the message at its next step"
+    );
+    drop(client);
+    task.await.unwrap().unwrap();
+    app.close().await.unwrap();
+}
+
 /// A turn the application opens, as the one a background job's end gives an
 /// idle agent, takes what the person writes while it works like any turn.
 #[tokio::test]

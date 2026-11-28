@@ -20,7 +20,12 @@ async fn run(app: &Application, settings: &Settings, name: &str, arguments: &str
 }
 
 /// Runs a command that changes the view, and shows the view it gives.
-async fn switch(app: &mut Application, settings: &Settings, name: &str, arguments: &str) {
+pub(super) async fn switch(
+    app: &mut Application,
+    settings: &Settings,
+    name: &str,
+    arguments: &str,
+) {
     let CommandResult::Switch(view) = run(app, settings, name, arguments).await else {
         panic!("Expected /{name} to give a view")
     };
