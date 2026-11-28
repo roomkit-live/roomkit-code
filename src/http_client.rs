@@ -5,8 +5,8 @@
 //! rustls configuration with the ring provider and the webpki roots, as the
 //! RoomKit and tool clients are: the same trust on every host, and no system
 //! TLS library. A client built without it panics, no provider being installed.
-//! roomkit-tools enables reqwest's gzip; these clients still ask for
-//! uncompressed answers, as before.
+//! roomkit-tools enables reqwest's gzip for the whole build; these clients
+//! ask for uncompressed answers all the same.
 
 use std::sync::Arc;
 

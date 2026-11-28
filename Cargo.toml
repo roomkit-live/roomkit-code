@@ -19,7 +19,7 @@ roomkit-auth = { version = "0.1.0", git = "https://github.com/roomkit-live/roomk
 # Keep the engine source identical to the CLI and tools adapters.
 roomkit = { version = "0.3.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "e6f92c6dba1cb158ff2cc8d734038a1100402ceb" }
 # An event's plain text and the transcript's image references, which roomkit
-# no longer re-exports.
+# does not re-export.
 roomkit-core = { version = "0.3.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "e6f92c6dba1cb158ff2cc8d734038a1100402ceb" }
 roomkit-mcp = { version = "0.3.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "e6f92c6dba1cb158ff2cc8d734038a1100402ceb", features = ["http"] }
 roomkit-ai = { version = "0.3.0", git = "https://github.com/roomkit-live/roomkit-rs", rev = "e6f92c6dba1cb158ff2cc8d734038a1100402ceb" }

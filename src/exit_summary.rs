@@ -306,7 +306,7 @@ impl Summary {
 
     /// Write how to reopen the conversation and what it used to the restored
     /// terminal, before closing begins: a close that takes long, or that a
-    /// signal cuts, no longer loses them.
+    /// signal cuts, does not lose them.
     pub fn print_conversation(&self) {
         for line in self.conversation_report() {
             println!("{line}");

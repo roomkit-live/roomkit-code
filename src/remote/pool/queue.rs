@@ -217,7 +217,7 @@ impl Ticket {
                 } else if e.req.test_commit.is_some() {
                     "no online worker matches the requested placement and supports cargo_test at a commit on this profile"
                 } else {
-                    "no online worker matches OS, profile, labels or workspace"
+                    "no online worker matches the OS, profile and labels asked for"
                 }
             }
             .into();

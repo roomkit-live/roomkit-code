@@ -3,8 +3,8 @@
 //!
 //! They live here, in a module that depends on nothing, so that naming a
 //! tool or the terminal's channel does not make a module depend on the
-//! whole module that serves it: most of the application's modules used to
-//! form one cycle through these few constants.
+//! whole module that serves it: through these few constants, most of the
+//! application's modules would form one cycle.
 
 /// The channel of the application's views, the terminal's: what a row the
 /// application writes for its views alone comes from.

@@ -48,12 +48,12 @@ struct State {
 }
 
 impl State {
-    /// Keeps `line` among the last records the panel shows.
     /// Whether the panel must say records may be missing from the file.
     fn storage_failed(&self) -> bool {
         self.write_failed || self.dropped
     }
 
+    /// Keeps `line` among the last records the panel shows.
     fn remember(&mut self, line: String) {
         if self.recent.len() == 100 {
             self.recent.pop_front();
@@ -298,14 +298,14 @@ impl Diagnostics {
         self.record("application_stopped", json!({}), None);
     }
 
-    /// The log's state, with this thread marked as holding it: a panic while
-    /// it is held is counted, not recorded, rather than waiting for it.
     /// Whether records may be missing from the file, as the panel says.
     #[cfg(test)]
     pub(crate) fn storage_failed(&self) -> bool {
         self.locked().0.storage_failed()
     }
 
+    /// The log's state, with this thread marked as holding it: a panic while
+    /// it is held is counted, not recorded, rather than waiting for it.
     fn locked(&self) -> (std::sync::MutexGuard<'_, State>, panics::Recording) {
         let recording = panics::Recording::start();
         (crate::sync::lock(&self.state), recording)

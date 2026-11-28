@@ -173,7 +173,7 @@ impl Files {
             && let Some(mut stored) = self.load(room).await
         {
             // The list reads again: what happened meanwhile joins it, and it
-            // is saved from now on. One failed read no longer keeps the
+            // is saved from here on. One failed read does not keep the
             // conversation's list in memory for the rest of the process.
             if let Some(since) = held.take() {
                 stored.absorb(since);

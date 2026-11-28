@@ -30,7 +30,7 @@ pub(crate) fn write<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
 /// Runs `work`, which reads or writes files, from wherever it is called.
 /// On the multi-threaded runtime's own threads it runs in place while the
 /// tasks queued behind this one move to another thread: a slow disk, or a
-/// file's lock another instance holds, no longer stalls every task of the
+/// file's lock another instance holds, does not stall every task of the
 /// thread. Elsewhere, on a blocking thread, outside a runtime or on a
 /// single-threaded one, it just runs.
 pub(crate) fn blocking<T>(work: impl FnOnce() -> T) -> T {

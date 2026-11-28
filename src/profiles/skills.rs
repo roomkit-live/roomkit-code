@@ -333,7 +333,7 @@ impl Profiles {
             .mutates()
             .then(|| store::edit_lease(&self.state_dir))
             .transpose()?;
-        // Preserve revisions of already issued forms; a skill edit invalidates them.
+        // A skill edit invalidates the forms already issued.
         state.pending = None;
         state.pending_delete = None;
         state.reload_agents()?;
