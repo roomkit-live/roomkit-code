@@ -200,3 +200,44 @@ async fn a_conversation_is_renamed_while_a_response_runs() {
     task.await.unwrap().unwrap();
     app.close().await.unwrap();
 }
+
+/// The picker lists the sessions by their latest message, newest first: a
+/// message leaves its room's own date where it was.
+#[tokio::test]
+async fn the_picker_lists_sessions_by_their_latest_message() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mock = Mock::start(vec![]).await;
+    let mut settings = settings(project.path(), state.path(), &mock.base_url);
+    let mut app = Application::open(&settings, String::new()).await.unwrap();
+    let first = app.view.room.clone();
+    turn_operation(&app, "in-the-first").await;
+    super::conversation_settings::switch(&mut app, &settings, "new", "").await;
+    let second = app.view.room.clone();
+    turn_operation(&app, "in-the-second").await;
+    app.close().await.unwrap();
+    drop(app);
+
+    // The first conversation, opened again, is the one written in last.
+    settings.session = Some(first.to_string());
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    turn_operation(&app, "back-in-the-first").await;
+    app.close().await.unwrap();
+    drop(app);
+
+    settings.session = None;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    let CommandResult::Events(events) = invoke(&app, &settings, &app.view, "resume", "")
+        .await
+        .unwrap()
+    else {
+        panic!("Expected the session catalogue");
+    };
+    let Event::Choices { choices, .. } = &events[0] else {
+        panic!("Expected choices");
+    };
+    let listed: Vec<&str> = choices.iter().map(|choice| choice.value.as_str()).collect();
+    assert_eq!(listed, [first.as_str(), second.as_str()]);
+    app.close().await.unwrap();
+}

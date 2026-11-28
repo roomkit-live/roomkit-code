@@ -137,9 +137,11 @@ pub(super) async fn complete(
     super::super::designate(kit, room, agent).await
 }
 
-/// The newest empty draft both channels can still write to, claimed. The
-/// claim comes before the inspection: another process may own an apparently
-/// empty room or still be initializing its bindings.
+/// The newest empty draft both channels can still write to, claimed. A
+/// session that holds a message is passed without asking for its lease,
+/// which would refuse another instance opening it at that moment. An empty
+/// one is inspected again under its claim: another process may own an
+/// apparently empty room or still be initializing its bindings.
 pub(super) async fn unused_draft(
     kit: &RoomKit<SqliteStore>,
     leases: &crate::storage::SessionLeases,
@@ -160,6 +162,9 @@ pub(super) async fn unused_draft(
                 .and_then(serde_json::Value::as_bool)
                 != Some(true)
         {
+            continue;
+        }
+        if !empty(kit, &room.id).await? {
             continue;
         }
         let Some(claim) = leases.claim(room.id.as_str())? else {

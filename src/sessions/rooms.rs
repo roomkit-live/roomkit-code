@@ -202,8 +202,8 @@ impl Sessions {
         rooms
             .retain(|room| room.id != current.room && room.organization_id == current.organization);
         rooms.sort_by(|a, b| {
-            b.updated_at
-                .cmp(&a.updated_at)
+            last_used(b)
+                .cmp(&last_used(a))
                 .then_with(|| a.id.cmp(&b.id))
         });
         let mut choices = Vec::new();
@@ -272,7 +272,7 @@ impl Sessions {
         } else {
             ""
         };
-        let date = utc_minute(room.updated_at.as_unix_millis());
+        let date = utc_minute(last_used(room).as_unix_millis());
         let count = room.event_count;
         let description = format!("{first}{occupied}{date} UTC · {count} events · {id}");
         Ok(Choice::new(id.clone(), label).with_description(description))
@@ -297,6 +297,15 @@ impl Sessions {
             })
             .unwrap_or_else(|| "Conversation".into())
     }
+}
+
+/// When `room` was last used: its latest message, or its latest change
+/// when that came after, as a rename does. A message moves the room's
+/// activity and leaves its own date where it was.
+fn last_used(room: &Room) -> roomkit::model::Timestamp {
+    room.timers
+        .last_activity_at
+        .map_or(room.updated_at, |active| active.max(room.updated_at))
 }
 
 /// `YYYY-MM-DD HH:MM` in UTC for a Unix time in milliseconds, computed

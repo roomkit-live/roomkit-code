@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `/resume` lists and dates the sessions by their latest message; a session written in again stayed at the date it was created. A message written while the first turn works no longer names the conversation in place of the request it adds to.
+
 - A delegated task that calls `plan_mode_enter` is told that only the person changes its conversation's mode, instead of being answered that the mode is now Plan while nothing changed. Plan storage that cannot be read says which of its version, conversation, agent, count or selection is wrong. A worker launched with `--compact-tools` may call the discovery tools.
 
 - An update downloads over a slow connection: the binary's transfer is bounded by a 30-second pause without data, in the application and in `install.sh`, where it was cut after two or three minutes in all.

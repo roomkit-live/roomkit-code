@@ -160,6 +160,28 @@ impl Titles {
     }
 }
 
+/// What each operation under way wrote, which may name its conversation.
+#[derive(Default)]
+struct Inputs(Mutex<HashMap<(RoomId, OperationId), String>>);
+
+impl Inputs {
+    /// Keeps `text` as what `operation` wrote in `room`, unless an
+    /// operation under way there already wrote something: a message
+    /// written while a turn works adds to that turn's request and ends
+    /// first, and the conversation is named from the request's own words.
+    fn keep(&self, room: &RoomId, operation: &OperationId, text: String) {
+        let mut inputs = lock(&self.0);
+        if inputs.keys().all(|(held, _)| held != room) {
+            inputs.insert((room.clone(), operation.clone()), text);
+        }
+    }
+
+    /// What `operation` wrote in `room`, taken.
+    fn take(&self, room: &RoomId, operation: &OperationId) -> Option<String> {
+        lock(&self.0).remove(&(room.clone(), operation.clone()))
+    }
+}
+
 /// Match accepted user inputs with the outcome of their own operation. Synthetic
 /// answers and private worker conversations never supply a title prompt.
 pub(crate) struct TitleJobs {
@@ -167,7 +189,7 @@ pub(crate) struct TitleJobs {
     kit: Kit,
     profiles: Arc<Profiles>,
     leases: Arc<SessionLeases>,
-    inputs: Mutex<HashMap<(RoomId, OperationId), String>>,
+    inputs: Inputs,
 }
 
 impl TitleJobs {
@@ -182,7 +204,7 @@ impl TitleJobs {
             kit,
             profiles,
             leases,
-            inputs: Mutex::default(),
+            inputs: Inputs::default(),
         }
     }
 
@@ -195,7 +217,7 @@ impl TitleJobs {
             return;
         }
         if let Some(text) = generate::topic(content) {
-            lock(&self.inputs).insert((view.room.clone(), operation.clone()), text);
+            self.inputs.keep(&view.room, operation, text);
         }
     }
 
@@ -205,7 +227,7 @@ impl TitleJobs {
         operation: &OperationId,
         outcome: TurnOutcome,
     ) {
-        let text = lock(&self.inputs).remove(&(view.room.clone(), operation.clone()));
+        let text = self.inputs.take(&view.room, operation);
         let (Some(text), TurnOutcome::Completed) = (text, outcome) else {
             return;
         };
@@ -245,4 +267,38 @@ fn record_failure(profiles: &Profiles, room: &RoomId, reason: &str) {
         serde_json::json!({"room":room, "reason":reason}),
         None,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    #![expect(clippy::unwrap_used, reason = "test assertions")]
+    use super::*;
+
+    /// A message written while a turn works ends before that turn does: it
+    /// does not name the conversation in place of the turn's own request.
+    #[test]
+    fn a_message_written_during_a_turn_does_not_name_its_conversation() {
+        let inputs = Inputs::default();
+        let room = RoomId::new("main").unwrap();
+        let other = RoomId::new("other").unwrap();
+        let (first, second) = (OperationId::new("first"), OperationId::new("second"));
+        inputs.keep(&room, &first, "Refactor the session leases".into());
+        inputs.keep(&room, &second, "and run the tests afterwards".into());
+        inputs.keep(&other, &second, "Another conversation".into());
+        assert_eq!(inputs.take(&room, &second), None);
+        assert_eq!(
+            inputs.take(&room, &first).as_deref(),
+            Some("Refactor the session leases")
+        );
+        assert_eq!(
+            inputs.take(&other, &second).as_deref(),
+            Some("Another conversation")
+        );
+        // Once the turn ended, the next message is a request of its own.
+        inputs.keep(&room, &second, "Then document them".into());
+        assert_eq!(
+            inputs.take(&room, &second).as_deref(),
+            Some("Then document them")
+        );
+    }
 }
