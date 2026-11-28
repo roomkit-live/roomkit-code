@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-pub(super) async fn download(
+pub(super) async fn ensure_blob(
     hub: &Hub,
     asset: &Asset,
     target: &Path,
@@ -25,6 +25,15 @@ pub(super) async fn download(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(io(e)),
     }
+    download(hub, asset, target, progress).await
+}
+
+async fn download(
+    hub: &Hub,
+    asset: &Asset,
+    target: &Path,
+    progress: impl Fn(u64),
+) -> Result<(), String> {
     let partial = target.with_extension("incomplete");
     let mut offset = match tokio::fs::metadata(&partial).await {
         Ok(meta) if meta.len() <= asset.size => meta.len(),
