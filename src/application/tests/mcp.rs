@@ -338,6 +338,7 @@ async fn compact_tools_reveal_the_guide_and_keep_a_light_server_declared() {
     for name in [
         "read",
         "memory",
+        "docs_search",
         "edit",
         "shell",
         "find_tools",

@@ -19,6 +19,7 @@ pub(super) fn immediate(tool: &AiTool) -> bool {
             | "edit"
             | "write"
             | "memory"
+            | "docs_search"
             | SEND_MESSAGE
             | LIST_SESSIONS
             | LIST_EXECUTORS

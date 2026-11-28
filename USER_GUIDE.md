@@ -1193,10 +1193,11 @@ Project files never implicitly select a mode.
 
 For an experimental smaller first request, launch `roomkit-code --compact-tools`.
 The model receives a short inventory pairing purposes with the exact names of
-the tools selected for its profile. Common file operations, shell, memory and
-available session or executor communication tools are ready immediately.
-For example, when asked about the installed guide, the model can look up
-`docs_search` with RoomKit's `find_tools` and use its schema on the next call.
+the tools selected for its profile. Common file operations, shell, memory,
+guide search and available session or executor communication tools are ready
+immediately. For example, the model can search the installed guide with
+`docs_search`, then look up `docs_read` with RoomKit's `find_tools` when it
+needs to read a complete section.
 Small profiles keep all their schemas when discovery would cost more. The flag
 also applies to a worker launched with it. Tool selection and permissions still
 apply to each call.
