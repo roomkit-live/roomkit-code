@@ -22,7 +22,7 @@ fn the_prompt_states_the_shell_maximum_it_is_given() {
         "instructions": "", "tools": [],
     }))
     .unwrap();
-    let prompt = base_prompt(&profile, &[], false, facts(3_600_000));
+    let prompt = base_prompt(&profile, &[], ToolListing::Declared, facts(3_600_000));
     assert!(prompt.contains("long command (maximum 3600000)."));
     assert!(!prompt.contains("{shell_maximum}"));
 }
@@ -190,14 +190,14 @@ fn the_prompt_states_the_permission_rules_the_gate_applies() {
         "instructions": "", "tools": [],
     }))
     .unwrap();
-    let prompt = base_prompt(&profile, &[], false, facts(120_000));
+    let prompt = base_prompt(&profile, &[], ToolListing::Declared, facts(120_000));
     let engine = |name: &str| name == READ_STORED_RESULT;
     assert!(prompt.contains(&crate::permissions::summary(engine)));
     assert!(!prompt.contains("{permissions}"));
     // The engine's own tools are named too: read_stored_result for every
     // agent, the discovery tools for one whose tools are hidden.
     assert!(prompt.contains("run without approval: read_stored_result, as does"));
-    let hidden = base_prompt(&profile, &[], true, facts(120_000));
+    let hidden = base_prompt(&profile, &[], ToolListing::Names, facts(120_000));
     let discovery = "run without approval: find_tools, list_tools and read_stored_result,";
     assert!(hidden.contains(discovery), "{hidden}");
 }
@@ -271,7 +271,7 @@ fn the_tools_are_listed_only_when_some_wait_behind_the_discovery_tools() {
     let declared = base_prompt(
         &profile,
         std::slice::from_ref(&shell),
-        false,
+        ToolListing::Declared,
         facts(120_000),
     );
     assert!(
@@ -281,14 +281,22 @@ fn the_tools_are_listed_only_when_some_wait_behind_the_discovery_tools() {
     assert!(declared.contains("Only the tools you are given are available to you."));
     let mut message = shell.clone();
     message.name = crate::names::SEND_MESSAGE.into();
-    let grouped = base_prompt(&profile, &[shell, message.clone()], true, facts(120_000));
+    let grouped = base_prompt(
+        &profile,
+        &[shell, message.clone()],
+        ToolListing::ByTask,
+        facts(120_000),
+    );
     assert!(grouped.contains("Run a shell command — shell"));
     assert!(grouped.contains("call find_tools with its exact English tool name"));
     assert!(grouped.contains("Reply to an incoming session message — send_message"));
     assert!(!grouped.contains("Contact a session or reply"));
     assert!(!grouped.contains("Manage this conversation's plans"));
     message.parameters = serde_json::json!({"properties":{"to":{"type":"string"}}});
-    assert!(available(&[message], true).contains("Contact a session or reply — send_message"));
+    assert!(
+        available(&[message], ToolListing::ByTask)
+            .contains("Contact a session or reply — send_message")
+    );
 }
 
 #[test]

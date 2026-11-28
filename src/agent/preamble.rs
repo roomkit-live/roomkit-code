@@ -207,7 +207,12 @@ pub(super) fn preamble(
         served.retain(discovery::immediate);
     }
     served.extend(engine);
-    let base = base_prompt(profile, &listed, search, shell);
+    let listing = match (search, compact) {
+        (false, _) => ToolListing::Declared,
+        (true, false) => ToolListing::Names,
+        (true, true) => ToolListing::ByTask,
+    };
+    let base = base_prompt(profile, &listed, listing, shell);
     let context = skill_context(skills, skill_roots);
     let composition = measure(
         (&base, &context),
@@ -232,12 +237,24 @@ pub(super) fn preamble(
     }
 }
 
+#[derive(Clone, Copy)]
+enum ToolListing {
+    Declared,
+    Names,
+    ByTask,
+}
+
 /// The application's instructions for an agent with `tools`, stating what it
 /// is told of its shell, the agent's identity and instructions, and what it
 /// is told of its tools beside their definitions.
-fn base_prompt(profile: &Agent, tools: &[AiTool], hidden: bool, shell: ShellFacts) -> String {
-    let available = available(tools, hidden);
-    let instructions = instructions(tools, hidden, shell);
+fn base_prompt(
+    profile: &Agent,
+    tools: &[AiTool],
+    listing: ToolListing,
+    shell: ShellFacts,
+) -> String {
+    let available = available(tools, listing);
+    let instructions = instructions(tools, !matches!(listing, ToolListing::Declared), shell);
     format!(
         "{instructions}\nCurrent agent: {} (ID: {}). Answer as this selected participant. Other participants may have different tools and providers.\nAgent instructions:\n{}\n{available}\n",
         profile.label, profile.id, profile.instructions
@@ -247,12 +264,25 @@ fn base_prompt(profile: &Agent, tools: &[AiTool], hidden: bool, shell: ShellFact
 /// What the agent is told of its tools beside their definitions. Their names
 /// are listed only when some of them wait behind the discovery tools: the
 /// definitions say the rest.
-fn available(tools: &[AiTool], hidden: bool) -> String {
+fn available(tools: &[AiTool], listing: ToolListing) -> String {
     const GUIDANCE: &str = "Apply tool-specific guidance only when that tool is present.";
-    if !hidden {
-        return format!("Only the tools you are given are available to you. {GUIDANCE}");
+    match listing {
+        ToolListing::Declared => {
+            format!("Only the tools you are given are available to you. {GUIDANCE}")
+        }
+        ToolListing::ByTask => discovery::manifest(tools),
+        ToolListing::Names => {
+            let names = tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .chain(TOOL_SEARCH_INFRA_TOOL_NAMES)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "Current capability inventory (provided by the application for this run):\n{names}\nOnly tools in this inventory are available to you. {GUIDANCE}"
+            )
+        }
     }
-    discovery::manifest(tools)
 }
 
 /// The application's instructions for an agent with `tools`, and the

@@ -408,6 +408,10 @@ async fn heavy_mcp_tools_wait_behind_find_tools_while_native_tools_stay_declared
         "read\n"
     );
     let requests = mock.requests.lock().unwrap().clone();
+    let prompt = requests[0]["messages"][0]["content"].as_str().unwrap();
+    assert!(
+        prompt.contains("Current capability inventory (provided by the application for this run)")
+    );
     let first = declared(&requests[0]);
     for name in ["read", "shell", "find_tools", "list_tools"] {
         assert!(first.iter().any(|tool| tool == name), "{name}: {first:?}");
