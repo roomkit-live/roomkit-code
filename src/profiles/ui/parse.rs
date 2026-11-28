@@ -48,7 +48,8 @@ pub(super) fn parse_provider(
             variable: value(values, "variable").trim().into(),
         },
         "stored" => {
-            let entered = value(values, "key");
+            // A key copied from a console may come with a line break.
+            let entered = value(values, "key").trim();
             let key = if entered.is_empty() {
                 original
                     .and_then(|id| state.providers.value.profiles.get(id))

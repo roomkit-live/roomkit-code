@@ -119,6 +119,23 @@ fn terminal_and_herdr_integrations_are_independently_optional() {
     assert!(!settings.herdr && settings.ui.terminal_status.is_none());
 }
 
+/// An option set to nothing, as a variable set to nothing gives one, states
+/// nothing: the file's value stands.
+#[test]
+fn a_blank_option_leaves_the_file_s_value() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("config.toml");
+    let provider = "[provider]\nbase_url = 'http://localhost:9000/v1'\nmodel = 'from-file'\n";
+    std::fs::write(&path, provider).unwrap();
+    let mut cli = cli(root.path());
+    cli.config = Some(path);
+    cli.model = Some(String::new());
+    cli.base_url = Some("  ".into());
+    let loaded = Settings::load(&cli).unwrap();
+    assert_eq!(loaded.model, "from-file");
+    assert_eq!(loaded.base_url, "http://localhost:9000/v1");
+}
+
 #[test]
 fn explicit_configuration_and_cli_overrides_control_appearance_without_creating_state() {
     let root = tempfile::tempdir().unwrap();

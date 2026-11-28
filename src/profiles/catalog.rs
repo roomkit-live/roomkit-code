@@ -184,7 +184,9 @@ impl State {
         Ok(())
     }
 
-    /// Delete agent `id` where it is defined; a global one leaves every project.
+    /// Delete agent `id` where it is defined; a global one leaves every
+    /// project. A project that opened with it opens with `next`; any other
+    /// keeps the agent it opens with, whichever the view shows.
     pub(super) fn remove_agent(&mut self, id: &str, next: Option<&str>) -> Result<(), String> {
         let removed = self.delete_agent(id, next);
         self.refresh_roster();
@@ -196,7 +198,9 @@ impl State {
         let mut project = self.project.value.clone();
         project.agents.remove(id);
         project.extensions.remove(id);
-        project.selected = next.map(Into::into);
+        if project.selected.as_deref() == Some(id) {
+            project.selected = next.map(Into::into);
+        }
         self.project.save(project)?;
         if scope == Scope::Global {
             let mut global = self.global.value.clone();

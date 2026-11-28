@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Deleting an agent no longer changes the agent the project opens with unless it was that one. A launch that brings its connection to a full store is refused instead of saving one that made every later launch fail, an agent cannot take the engine's own channel ID `host`, an option or variable set to nothing leaves the configuration file's value in place, and a pasted API key or MCP timeout is read without its trailing space or line break.
+
 - A shell command that runs on in the background shows as running under its process ID, where its card read "exit unknown · incomplete output" as a failure. A changed file with a very long path, or several hundred changed files, no longer freeze the sidebar or empty the `/files` panel. In `/processes`, the page after the last one keeps the latest output instead of an empty page, and a long task's conversation in `/tasks` says when its start is not shown.
 
 - `/resume` lists and dates the sessions by their latest message; a session written in again stayed at the date it was created. A message written while the first turn works no longer names the conversation in place of the request it adds to.

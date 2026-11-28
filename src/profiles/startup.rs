@@ -118,6 +118,9 @@ fn add_first_agent(
         };
         provider.validate()?;
         provider.check_credential_transport()?;
+        // One more than the store may hold would be refused at every later
+        // launch, of every project.
+        documents.providers.value.check_room()?;
         let mut updated = documents.providers.value.clone();
         updated.profiles.insert(id.clone(), provider);
         documents.providers.save(updated)?;
@@ -198,6 +201,45 @@ mod tests {
                 .value
                 .profiles
                 .contains_key(&agent.provider)
+        );
+    }
+
+    /// A launch that brings its connection to a store already full is
+    /// refused: saved, the connection would make every later launch fail.
+    #[tokio::test]
+    async fn a_full_store_refuses_one_more_connection_from_a_launch() {
+        let state = tempfile::tempdir().unwrap();
+        let first = tempfile::tempdir().unwrap();
+        let settings_of = |workspace: &std::path::Path| {
+            settings(workspace, state.path(), "http://127.0.0.1:9/v1")
+        };
+        let settings = settings_of(first.path());
+        let storage = Storage::open(&settings.state_dir, &settings.workspace).unwrap();
+        let documents = load(&settings, &storage, Authentication::None)
+            .await
+            .unwrap();
+        let mut full = documents.providers.value.clone();
+        let imported = full.profiles.values().next().unwrap().clone();
+        for index in full.profiles.len()..super::super::model::MAX_PROVIDERS {
+            let mut copy = imported.clone();
+            copy.id = format!("copy-{index}");
+            full.profiles.insert(copy.id.clone(), copy);
+        }
+        let mut providers = documents.providers;
+        providers.save(full).unwrap();
+
+        let second = tempfile::tempdir().unwrap();
+        let settings = settings_of(second.path());
+        let storage = Storage::open(&settings.state_dir, &settings.workspace).unwrap();
+        let refused = load(&settings, &storage, Authentication::None).await;
+        assert!(refused.is_err_and(|error| error.to_string().contains("Maximum of 128")));
+        // The store still opens for the project that has its agent.
+        let settings = settings_of(first.path());
+        let storage = Storage::open(&settings.state_dir, &settings.workspace).unwrap();
+        let again = load(&settings, &storage, Authentication::None).await;
+        assert_eq!(
+            again.unwrap().providers.value.profiles.len(),
+            super::super::model::MAX_PROVIDERS
         );
     }
 

@@ -771,7 +771,8 @@ async fn submit_http(
         ("url", url),
         ("bearer_env", "PATH"),
         ("headers", "{}"),
-        ("timeout", "5"),
+        // As typed, with the space a paste leaves.
+        ("timeout", "5 "),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v.to_owned()))

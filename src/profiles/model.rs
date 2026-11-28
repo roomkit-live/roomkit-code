@@ -218,13 +218,21 @@ impl Default for Project {
     }
 }
 
+/// The channel IDs an agent cannot take: the terminal's, the person's, and
+/// the engine's own channel, which posts made without a channel come from.
+const RESERVED_IDS: [&str; 3] = [
+    crate::names::TERMINAL,
+    "local-user",
+    roomkit_core::model::HOST_CHANNEL_ID,
+];
+
 pub(super) fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 48
         && id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-        && !matches!(id, "terminal" | "local-user")
+        && !RESERVED_IDS.contains(&id)
 }
 
 fn text(value: &str, max: usize) -> bool {
@@ -464,6 +472,16 @@ pub(crate) const EFFORTS: &[&str] = &["minimal", "low", "medium", "high", "xhigh
 
 #[cfg(test)]
 mod tests {
+    /// An agent is a channel of the engine under its ID: it cannot take the
+    /// terminal's, the person's or the engine's own.
+    #[test]
+    fn an_agent_cannot_take_a_channel_the_application_or_the_engine_holds() {
+        for reserved in ["terminal", "local-user", "host"] {
+            assert!(!super::valid_id(reserved), "{reserved}");
+        }
+        assert!(super::valid_id("code") && super::valid_id("hosted-review"));
+    }
+
     #[test]
     fn existing_connections_without_a_kind_keep_the_openai_protocol() {
         let value = serde_json::json!({"id":"local", "label":"Local", "base_url":"http://localhost:8000/v1", "authentication":{"kind":"none"}, "timeout_seconds":600});

@@ -179,13 +179,14 @@ struct FirstAgent {
 }
 
 impl FirstAgent {
-    /// The options first, then `file`.
+    /// The options first, then `file`. A blank option states nothing, as
+    /// a variable set to nothing gives one: the file's value stands.
     fn read(cli: &Cli, file: Provider) -> Result<Self> {
         let provider = cli.provider.or(file.kind).unwrap_or_default();
+        let stated = |value: Option<String>| value.filter(|value| !value.trim().is_empty());
         let given = |option: &Option<String>, file: Option<String>| {
-            let value = option.clone().or(file);
-            value
-                .filter(|value| !value.trim().is_empty())
+            stated(option.clone())
+                .or_else(|| stated(file))
                 .unwrap_or_default()
         };
         let mut base_url = given(&cli.base_url, file.base_url);

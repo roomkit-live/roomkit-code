@@ -52,12 +52,13 @@ async fn a_rotated_key_reaches_an_agent_that_is_not_selected() {
         panic!("Expected switch")
     };
     app.view = *view;
-    // The key changes while another agent is the one shown.
+    // The key changes while another agent is the one shown; pasted, it
+    // comes with the line break of the console it was copied from.
     edit_profile(
         &mut app,
         "providers",
         "edit:secondary",
-        &[("key", "rotated-key")],
+        &[("key", "rotated-key\n")],
     )
     .await;
     assert_eq!(app.view.agent.as_str(), "code");

@@ -225,3 +225,38 @@ async fn an_unrecorded_agent_is_the_last_at_work_and_a_deleted_one_is_not_replac
     assert_eq!(second.requests.lock().unwrap().len(), 1);
     app.close().await.unwrap();
 }
+
+/// Deleting an agent the project does not open with leaves the project's
+/// selection as it is, whichever agent the conversation shown keeps.
+#[tokio::test]
+async fn deleting_another_agent_leaves_the_project_s_selection() {
+    let (root, state) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let first = Mock::start(vec![]).await;
+    let other = Mock::start(vec![]).await;
+    let settings = settings(root.path(), state.path(), &first.base_url);
+    let mut app = Application::open(&settings, String::new()).await.unwrap();
+    let [one, _] = two_conversations(&mut app, &settings, &other).await;
+    let spare = [
+        ("id", "spare"),
+        ("label", "Spare"),
+        ("provider", "secondary"),
+        ("model", "second-model"),
+    ];
+    edit_profile(&mut app, "agents", "add", &spare).await;
+    select(&mut app, "reviewer").await;
+    let selected = |app: &Application| {
+        let agents = app._storage.database.with_file_name("agents.json");
+        let stored: Value = serde_json::from_slice(&std::fs::read(agents).unwrap()).unwrap();
+        stored["selected"].clone()
+    };
+    assert_eq!(selected(&app), "reviewer");
+
+    // The first conversation keeps `code`: the view shows it, not the
+    // project's selection.
+    switch(&mut app, &settings, "resume", one.as_str()).await;
+    assert_eq!(app.view.agent.as_str(), "code");
+    delete(&mut app, "spare").await;
+    assert_eq!(app.view.agent.as_str(), "code");
+    assert_eq!(selected(&app), "reviewer");
+    app.close().await.unwrap();
+}

@@ -417,6 +417,7 @@ pub(super) fn save(
             }
         },
         timeout_seconds: value("timeout")
+            .trim()
             .parse()
             .map_err(|_| "Invalid connection timeout")?,
     };
