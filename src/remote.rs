@@ -220,8 +220,13 @@ async fn hung_up(signals: &mut Option<tokio::signal::unix::Signal>) {
     }
 }
 
+/// The engine's own tools that reveal a deferred tool's schema, which a
+/// worker launched with `--compact-tools` calls like any other.
+const DISCOVERY: [&str; 2] = ["find_tools", "list_tools"];
+
 pub(crate) fn permits(tool: &str, pooled: bool) -> bool {
     TOOLS.contains(&tool)
+        || DISCOVERY.contains(&tool)
         || (pooled
             && matches!(
                 tool,
@@ -290,8 +295,20 @@ fn tool_fields(event: roomkit::ToolCallEvent) -> serde_json::Map<String, serde_j
 mod tests {
     use super::*;
 
-    /// The pool's fingerprint, shown in addresses and kept in rooms, was a
-    /// digest of the URL with its password.
+    /// A worker's turn reaches the tools it selected, a deferred one through
+    /// the discovery tools; the pool's tools only when it serves a pool.
+    #[test]
+    fn a_worker_is_permitted_its_tools_and_their_discovery() {
+        for tool in ["read", "patch", "find_tools", "list_tools"] {
+            assert!(permits(tool, false), "{tool}");
+        }
+        assert!(!permits("shell", true));
+        assert!(!permits(pool::CARGO_TEST, false));
+        assert!(permits(pool::CARGO_TEST, true));
+    }
+
+    /// The pool's fingerprint, shown in addresses and kept in rooms, holds
+    /// the URL without its password.
     #[test]
     fn a_fingerprint_s_address_holds_no_credentials() -> Result<()> {
         let public = without_credentials("rediss://user:secret@pool.example:6380/2")?;

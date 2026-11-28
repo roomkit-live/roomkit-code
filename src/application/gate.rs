@@ -52,7 +52,7 @@ pub(super) fn install(kit: &RoomKit<SqliteStore>, gate: Gate) -> Result<()> {
 /// Plan refuses before any hook runs; a hook's refusal stands, and its
 /// request for review reaches the approval card. A call outside a
 /// conversation has no mode and no view to approve it. A delegated task's
-/// room takes its conversation's mode.
+/// room takes its conversation's mode, which its agent cannot set.
 async fn decide(
     gate: &Gate,
     event: ToolCallEvent,
@@ -84,6 +84,11 @@ async fn decide(
     };
     if event.name == crate::permissions::PLAN_EXIT {
         return crate::permissions::approve_exit(policy, channel, plans, event, review).await;
+    }
+    if event.name == crate::permissions::PLAN_ENTER
+        && policy.delegated(crate::permissions::room_of(&event))
+    {
+        return block(crate::permissions::NO_MODE_OF_ITS_OWN);
     }
     if event.name == DELEGATE
         && let Some(refusal) = delegation_refusal(gate, &event).await

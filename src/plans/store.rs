@@ -181,18 +181,28 @@ impl Plans {
 }
 
 fn validate(doc: &Document, scope: &PlanScope) -> Result<(), ToolError> {
-    if doc.version != 1
-        || doc.room != scope.room_id
-        || doc.agent != scope.caller_id
-        || doc.plans.len() > 64
-        || doc
-            .selected
-            .as_ref()
-            .is_some_and(|id| !doc.plans.contains_key(id))
-    {
-        return Err(unavailable(
+    let selected = doc.selected.as_ref();
+    let causes = [
+        (doc.version != 1, "its file is of another version"),
+        (
+            doc.room != scope.room_id,
+            "its file holds another conversation's plans",
+        ),
+        (
+            doc.agent != scope.caller_id,
+            "its file holds another agent's plans",
+        ),
+        (
+            doc.plans.len() > 64,
+            "its file holds more plans than a conversation keeps",
+        ),
+        (
+            selected.is_some_and(|id| !doc.plans.contains_key(id)),
             "the stored selection names a plan that is not stored",
-        ));
+        ),
+    ];
+    if let Some((_, cause)) = causes.iter().find(|(wrong, _)| *wrong) {
+        return Err(unavailable(cause));
     }
     for (id, plan) in &doc.plans {
         plan.validate()

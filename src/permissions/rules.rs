@@ -43,8 +43,8 @@ const COMMAND: Rule = Rule {
 };
 /// The engine's delegation: handing a task to another agent, following and
 /// cancelling the conversation's tasks. The worker takes the conversation's
-/// mode and is refused what needs an approval (`Policy::adopt`), so handing
-/// the task over asks none, in Plan too.
+/// mode (`Policy::adopt`) and asks the person for what needs an approval, so
+/// handing the task over asks none, in Plan too.
 const DELEGATION: Rule = Rule {
     direct: true,
     plan: true,

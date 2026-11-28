@@ -16,7 +16,7 @@ mod card;
 mod modes;
 mod rules;
 
-pub(crate) use modes::{EXIT as PLAN_EXIT, ModeTools, approve_exit};
+pub(crate) use modes::{ENTER as PLAN_ENTER, EXIT as PLAN_EXIT, ModeTools, approve_exit};
 
 /// The mode tools' names.
 pub(crate) const MODE_TOOLS: [&str; 2] = [modes::ENTER, modes::EXIT];
@@ -75,6 +75,10 @@ impl Mode {
 /// What leaving Plan mode reads in a delegated task's room: its review is the
 /// conversation's own agent's to ask.
 const DELEGATED: &str = "Leaving Plan mode needs the person's review of a plan, which a delegated task cannot ask for: it was not done. Finish what the mode allows and say in your answer what you could not do.";
+
+/// What entering Plan mode reads in a delegated task's room, whose mode is
+/// its conversation's: the tool would change nothing and say it did.
+pub(crate) const NO_MODE_OF_ITS_OWN: &str = "A delegated task works in its conversation's mode, which only the person changes: the mode is unchanged. Go on with what it allows and say in your answer what you could not do.";
 
 /// How many rooms up a delegated task's room is followed to its conversation:
 /// past it, the chain is taken for a loop and the room for one whose

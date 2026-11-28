@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A delegated task that calls `plan_mode_enter` is told that only the person changes its conversation's mode, instead of being answered that the mode is now Plan while nothing changed. Plan storage that cannot be read says which of its version, conversation, agent, count or selection is wrong. A worker launched with `--compact-tools` may call the discovery tools.
+
 - An update downloads over a slow connection: the binary's transfer is bounded by a 30-second pause without data, in the application and in `install.sh`, where it was cut after two or three minutes in all.
 
 - Ctrl+C while RoomKit Code opens or closes, and a SIGINT sent to it, close it as leaving does: the agents' processes are stopped. An unattended launch whose output and error readers left, as with `2>&1 | head`, still closes and keeps its exit status, and a worker goes on when its standard error is gone.

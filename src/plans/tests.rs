@@ -286,3 +286,38 @@ async fn corrupt_or_redirected_storage_is_reported_without_replacing_it() {
         assert_eq!(std::fs::read_dir(path).unwrap().count(), 1);
     }
 }
+
+/// A stored file that does not hold this agent's plans says in which way, so
+/// the person knows what to repair.
+#[tokio::test]
+async fn each_way_a_stored_file_is_wrong_names_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("plans");
+    let plans = Plans::new(path.clone());
+    let owner = scope("session", "code");
+    let cancel = CancellationToken::new();
+    plans.create(&owner, &input("Work"), &cancel).await.unwrap();
+    let file = std::fs::read_dir(&path)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let stored: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    for (field, value, cause) in [
+        ("version", serde_json::json!(2), "another version"),
+        ("room", serde_json::json!("other"), "another conversation's"),
+        ("agent", serde_json::json!("other"), "another agent's"),
+        ("selected", serde_json::json!("missing"), "is not stored"),
+    ] {
+        let mut wrong = stored.clone();
+        wrong[field] = value;
+        std::fs::write(&file, serde_json::to_vec(&wrong).unwrap()).unwrap();
+        let error = plans
+            .create(&owner, &input("Other"), &cancel)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(cause), "{field}: {error}");
+    }
+}

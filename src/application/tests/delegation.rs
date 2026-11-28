@@ -362,6 +362,43 @@ async fn a_task_s_agent_is_told_to_put_its_question_in_its_result() {
     server.abort();
 }
 
+/// A task's agent cannot set a mode: its room takes its conversation's,
+/// which only the person changes. It is told so, rather than that the mode
+/// changed.
+#[tokio::test]
+async fn a_task_s_agent_is_told_it_cannot_enter_plan_mode() {
+    let project = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let enter = json!({"reason": "Plan the review first"});
+    let worker = (crate::permissions::PLAN_ENTER, enter);
+    let (base, requests, server) = serving(task_for("review"), worker).await;
+    let settings = settings(project.path(), state.path(), &base);
+    with_a_reviewer(&settings).await;
+    let app = Application::open(&settings, String::new()).await.unwrap();
+    app.policy.set("main", "yolo").unwrap();
+    turn(&app).await;
+    until_handed_back(&requests).await;
+    let read: String = requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|request| request.to_string().contains(WORKER))
+        .map(|request| {
+            request["messages"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert!(read.contains("only the person changes"), "{read}");
+    assert!(!read.contains("The mode is now Plan"), "{read}");
+    assert_eq!(app.policy.state("main").selected, "yolo");
+    app.close().await.unwrap();
+    server.abort();
+}
+
 /// A model server whose workers each try to hand the task on to the other
 /// agent and answer once that is done, and whose delegating agent starts the
 /// chain: `code`, then `review`, whose call is refused.
